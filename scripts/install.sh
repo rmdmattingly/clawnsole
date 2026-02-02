@@ -30,7 +30,7 @@ ADMIN_PASS="${ADMIN_PASS:-admin}"
 GUEST_PASS="${GUEST_PASS:-guest}"
 
 read -r -p "Port to run Clawnsole on [5173]: " PORT_INPUT
-if [[ "$PORT_INPUT" =~ ^[0-9]+$ ]]; then
+if printf '%s' "$PORT_INPUT" | grep -Eq '^[0-9]+$'; then
   PORT_VALUE="$PORT_INPUT"
 else
   PORT_VALUE="5173"
