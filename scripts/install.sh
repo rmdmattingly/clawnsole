@@ -50,6 +50,12 @@ fi
 echo "Starting Clawnsole on login..."
 CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/install-launchagent.sh"
 
+# Start immediately
+CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/ensure-running.sh" || true
+
+# Install watchdog to keep it running after gateway restarts
+CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/install-watchdog.sh"
+
 read -r -p "Enable automatic updates? [y/N]: " INSTALL_UPDATES
 INSTALL_UPDATES="${INSTALL_UPDATES:-N}"
 if [[ "$INSTALL_UPDATES" =~ ^[Yy]$ ]]; then

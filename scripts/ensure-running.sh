@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PORT="${CLAWNSOLE_PORT:-5173}"
+
+if ! pgrep -f "openclaw" >/dev/null 2>&1; then
+  exit 0
+fi
+
+if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  exit 0
+fi
+
+launchctl kickstart -k gui/$(id -u)/ai.openclaw.clawnsole || true

@@ -6,11 +6,13 @@ INSTALL_DIR="${CLAWNSOLE_DIR:-$OPENCLAW_HOME/apps/clawnsole}"
 STATE_PATH="${CLAWNSOLE_STATE_PATH:-$OPENCLAW_HOME/clawnsole-install.json}"
 PLIST_AGENT="$HOME/Library/LaunchAgents/ai.openclaw.clawnsole.plist"
 PLIST_UPDATER="$HOME/Library/LaunchAgents/ai.openclaw.clawnsole-updater.plist"
+PLIST_WATCHDOG="$HOME/Library/LaunchAgents/ai.openclaw.clawnsole-watchdog.plist"
 PLIST_DAEMON="/Library/LaunchDaemons/ai.openclaw.clawnsole-caddy.plist"
 
 launchctl unload "$PLIST_AGENT" >/dev/null 2>&1 || true
 launchctl unload "$PLIST_UPDATER" >/dev/null 2>&1 || true
-rm -f "$PLIST_AGENT" "$PLIST_UPDATER"
+launchctl unload "$PLIST_WATCHDOG" >/dev/null 2>&1 || true
+rm -f "$PLIST_AGENT" "$PLIST_UPDATER" "$PLIST_WATCHDOG"
 
 if [ -f "$PLIST_DAEMON" ]; then
   sudo -v
