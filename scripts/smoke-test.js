@@ -108,11 +108,15 @@ async function run() {
   writeJson(clawnsoleJson, { adminPassword: 'admin', guestPassword: 'guest', authVersion: '1' });
 
   const mock = spawn('node', [path.join(__dirname, 'mock-gateway.js')], {
-    env: { ...process.env, MOCK_GATEWAY_PORT: String(gatewayPort) },
+    env: {
+      ...process.env,
+      MOCK_GATEWAY_PORT: String(gatewayPort),
+      MOCK_GATEWAY_HOST: '127.0.0.1'
+    },
     stdio: 'inherit'
   });
   const server = spawn('node', [path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, HOME: tmpHome, PORT: String(serverPort) },
+    env: { ...process.env, HOME: tmpHome, PORT: String(serverPort), HOST: '127.0.0.1' },
     stdio: 'inherit'
   });
 

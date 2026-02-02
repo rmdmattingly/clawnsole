@@ -6,6 +6,7 @@ const { createProxyHandlers } = require('./proxy');
 
 const root = __dirname;
 const portRaw = process.env.PORT;
+const host = process.env.HOST || undefined;
 const parsedPort = Number.parseInt(portRaw, 10);
 const port = Number.isFinite(parsedPort) ? parsedPort : 5173;
 const configPath = path.join(process.env.HOME || '', '.openclaw', 'openclaw.json');
@@ -382,6 +383,6 @@ server.on('upgrade', (req, socket, head) => {
   socket.destroy();
 });
 
-server.listen(port, () => {
+server.listen(port, host, () => {
   console.log(`Clawnsole server running on http://localhost:${port}`);
 });

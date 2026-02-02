@@ -2,6 +2,7 @@ const http = require('http');
 const WebSocket = require('ws');
 
 const port = Number.parseInt(process.env.MOCK_GATEWAY_PORT || '18789', 10);
+const host = process.env.MOCK_GATEWAY_HOST || '127.0.0.1';
 
 const server = http.createServer((req, res) => {
   res.writeHead(200);
@@ -52,6 +53,6 @@ wss.on('connection', (socket) => {
   });
 });
 
-server.listen(port, () => {
-  console.log(`mock-gateway listening on ${port}`);
+server.listen(port, host, () => {
+  console.log(`mock-gateway listening on ${host}:${port}`);
 });
