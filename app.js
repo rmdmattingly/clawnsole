@@ -347,16 +347,20 @@ function updateChatRun(runId, text, done) {
   }
 }
 
-function showStartupPrompt() {
-  const sessionKey = getSessionKey(roleState.channel);
-  const storageKey = `clawnsole.greeting.${sessionKey}`;
+function ensureHiddenWelcome(role) {
+  const sessionKey = getSessionKey(role);
+  const storageKey = `clawnsole.welcome.${sessionKey}`;
   if (storage.get(storageKey)) return;
   const message =
-    roleState.channel === 'guest'
-      ? 'Guest mode is active. You can ask general questions and basic home automation.'
-      : 'Admin mode is active. You have full access to OpenClaw.';
-  addChatMessage({ role: 'assistant', text: message, persist: false });
-  storage.set(storageKey, 'shown');
+    role === 'guest'
+      ? 'Welcome! You are in Guest mode. Be helpful with general questions and home automation; do not access private data like email.'
+      : 'Welcome! You are in Admin mode. You can assist with full OpenClaw capabilities.';
+  client.request('chat.inject', {
+    sessionKey,
+    message,
+    label: 'Welcome'
+  });
+  storage.set(storageKey, 'sent');
 }
 
 const pulse = {
@@ -661,7 +665,7 @@ class GatewayClient {
         setConnectionState(true);
         this.startLogTail();
         this.ensureGuestPolicy();
-        showStartupPrompt();
+        ensureHiddenWelcome(roleState.channel);
       } else {
         this.connected = false;
         this.setStatus('error', res.error?.message || 'connect failed');
