@@ -5,6 +5,7 @@ OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 INSTALL_DIR="${CLAWNSOLE_DIR:-$OPENCLAW_HOME/apps/clawnsole}"
 HOSTNAME="${CLAWNSOLE_LOCAL_HOSTNAME:-clawnsole}"
 STATE_PATH="${CLAWNSOLE_STATE_PATH:-$OPENCLAW_HOME/clawnsole-install.json}"
+PORT="${CLAWNSOLE_PORT:-5173}"
 
 if ! command -v brew >/dev/null 2>&1; then
   echo "Homebrew is required to install Caddy. Please install Homebrew first."
@@ -34,7 +35,7 @@ node "$INSTALL_DIR/scripts/record-state.mjs"
 
 mkdir -p "$OPENCLAW_HOME/logs"
 
-cp "$INSTALL_DIR/scripts/Caddyfile" "$INSTALL_DIR/Caddyfile"
+sed "s|__PORT__|$PORT|g" "$INSTALL_DIR/scripts/Caddyfile" > "$INSTALL_DIR/Caddyfile"
 
 sudo scutil --set LocalHostName "$HOSTNAME"
 sudo scutil --set HostName "$HOSTNAME"

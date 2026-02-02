@@ -29,6 +29,9 @@ read -r -p "Set guest password [guest]: " GUEST_PASS
 ADMIN_PASS="${ADMIN_PASS:-admin}"
 GUEST_PASS="${GUEST_PASS:-guest}"
 
+read -r -p "Port to run Clawnsole on [5173]: " PORT
+PORT="${PORT:-5173}"
+
 if command -v node >/dev/null 2>&1; then
   CLAWNSOLE_ADMIN_PASSWORD="$ADMIN_PASS" CLAWNSOLE_GUEST_PASSWORD="$GUEST_PASS" \
     node "$INSTALL_DIR/scripts/patch-config.mjs"
@@ -38,7 +41,7 @@ else
 fi
 
 echo "Starting Clawnsole on login..."
-bash "$INSTALL_DIR/scripts/install-launchagent.sh"
+CLAWNSOLE_PORT="$PORT" bash "$INSTALL_DIR/scripts/install-launchagent.sh"
 
 read -r -p "Enable automatic updates? [y/N]: " INSTALL_UPDATES
 INSTALL_UPDATES="${INSTALL_UPDATES:-N}"
@@ -55,12 +58,12 @@ if [[ "$INSTALL_UPDATES" =~ ^[Yy]$ ]]; then
 fi
 
 echo "Setting up http://clawnsole.local (requires sudo)..."
-bash "$INSTALL_DIR/scripts/install-local-domain.sh"
+CLAWNSOLE_PORT="$PORT" bash "$INSTALL_DIR/scripts/install-local-domain.sh"
 
 cat <<OUT
 
 Clawnsole installed.
 
 Open:
-  http://clawnsole.local
+  http://clawnsole.local:${PORT}
 OUT

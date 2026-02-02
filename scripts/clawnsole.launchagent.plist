@@ -11,6 +11,11 @@
     <string>-lc</string>
     <string>cd "$HOME/.openclaw/apps/clawnsole" && npm run dev</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PORT</key>
+    <string>__PORT__</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
