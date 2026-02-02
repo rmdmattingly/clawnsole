@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026-02-02.3"
+VERSION="2026-02-02.4"
 
 echo "Clawnsole uninstall ${VERSION}"
 
@@ -37,9 +37,11 @@ launchctl disable "gui/$USER_ID/ai.openclaw.clawnsole-watchdog" >/dev/null 2>&1 
 rm -f "$PLIST_AGENT" "$PLIST_UPDATER" "$PLIST_WATCHDOG"
 
 if [ -f "$PLIST_DAEMON" ]; then
-  sudo -v
+  if [ -r /dev/tty ]; then
+    sudo -v || true
+  fi
   sudo launchctl unload "$PLIST_DAEMON" >/dev/null 2>&1 || true
-  sudo rm -f "$PLIST_DAEMON"
+  sudo rm -f "$PLIST_DAEMON" || true
 fi
 
 CONFIG_PATH="$OPENCLAW_HOME/clawnsole.json"
@@ -60,15 +62,21 @@ if [ -f "$STATE_PATH" ]; then
   CADDY_INSTALLED=$(node -e "const s=require(process.argv[1]);console.log(s.caddyInstalledByScript===true)" "$STATE_PATH" 2>/dev/null || true)
 
   if [ -n "$PREV_LOCAL" ]; then
-    sudo -v
+    if [ -r /dev/tty ]; then
+      sudo -v || true
+    fi
     sudo scutil --set LocalHostName "$PREV_LOCAL" || true
   fi
   if [ -n "$PREV_HOST" ]; then
-    sudo -v
+    if [ -r /dev/tty ]; then
+      sudo -v || true
+    fi
     sudo scutil --set HostName "$PREV_HOST" || true
   fi
   if [ -n "$PREV_COMP" ]; then
-    sudo -v
+    if [ -r /dev/tty ]; then
+      sudo -v || true
+    fi
     sudo scutil --set ComputerName "$PREV_COMP" || true
   fi
 
@@ -79,7 +87,10 @@ if [ -f "$STATE_PATH" ]; then
   fi
 fi
 
-rm -rf "$INSTALL_DIR"
-rm -f "$STATE_PATH"
+if [ -d "$INSTALL_DIR" ]; then
+  rm -rf "$INSTALL_DIR" || true
+  echo "Removed $INSTALL_DIR"
+fi
+rm -f "$STATE_PATH" || true
 
 echo "Clawnsole uninstall complete."
