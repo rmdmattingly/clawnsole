@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026-02-02.7"
+VERSION="2026-02-02.8"
 
-REPO_URL="${CLAWNSOLE_REPO:-git@github.com:rmdmattingly/clawnsole.git}"
+REPO_URL="${CLAWNSOLE_REPO:-https://github.com/rmdmattingly/clawnsole.git}"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 INSTALL_DIR="${CLAWNSOLE_DIR:-$OPENCLAW_HOME/apps/clawnsole}"
 
@@ -88,6 +88,11 @@ else
   git clone "$REPO_URL" "$INSTALL_DIR"
 fi
 
+if [ ! -f "$INSTALL_DIR/server.js" ]; then
+  echo "Install directory missing server.js. Aborting."
+  exit 1
+fi
+
 if command -v node >/dev/null 2>&1; then
   if command -v npm >/dev/null 2>&1; then
     (cd "$INSTALL_DIR" && npm install --silent)
@@ -129,6 +134,12 @@ CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/install-launchagent.sh"
 
 # Start immediately
 CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/ensure-running.sh" || true
+
+if ! lsof -nP -iTCP:"$PORT_VALUE" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "Clawnsole not listening yet. Attempting a direct start..."
+  (cd "$INSTALL_DIR" && PORT="$PORT_VALUE" nohup node server.js >/tmp/clawnsole-server.out 2>&1 &)
+  sleep 1
+fi
 
 if ! lsof -nP -iTCP:"$PORT_VALUE" -sTCP:LISTEN >/dev/null 2>&1; then
   echo "Clawnsole did not start. Try running:"
