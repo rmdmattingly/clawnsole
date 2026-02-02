@@ -34,7 +34,11 @@ if ! launchctl bootstrap "gui/$USER_ID" "$PLIST_DST"; then
   echo "LaunchAgent bootstrap failed. Trying legacy load..."
   launchctl load "$PLIST_DST" >/dev/null 2>&1 || true
 fi
-launchctl enable "gui/$USER_ID/$LABEL" >/dev/null 2>&1 || true
-launchctl kickstart -k "gui/$USER_ID/$LABEL" >/dev/null 2>&1 || true
+if launchctl print "gui/$USER_ID/$LABEL" >/dev/null 2>&1; then
+  launchctl enable "gui/$USER_ID/$LABEL" >/dev/null 2>&1 || true
+  launchctl kickstart -k "gui/$USER_ID/$LABEL" >/dev/null 2>&1 || true
+else
+  echo "LaunchAgent not registered (yet). It should appear after login or a manual load."
+fi
 
 echo "LaunchAgent installed: $PLIST_DST (port $PORT)"
