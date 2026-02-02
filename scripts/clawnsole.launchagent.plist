@@ -9,7 +9,7 @@
     <string>/usr/bin/env</string>
     <string>bash</string>
     <string>-lc</string>
-    <string>cd "$HOME/src/clawnsole"; /usr/bin/env node server.js</string>
+    <string>cd "$HOME/.openclaw/apps/clawnsole"; /usr/bin/env node server.js</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
