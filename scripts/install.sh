@@ -5,6 +5,15 @@ REPO_URL="${CLAWNSOLE_REPO:-git@github.com:rmdmattingly/clawnsole.git}"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 INSTALL_DIR="${CLAWNSOLE_DIR:-$OPENCLAW_HOME/apps/clawnsole}"
 
+if [[ "${1:-}" == "--uninstall" ]]; then
+  if [ -x "$INSTALL_DIR/scripts/uninstall.sh" ]; then
+    bash "$INSTALL_DIR/scripts/uninstall.sh"
+    exit 0
+  fi
+  echo "Uninstall script not found. If Clawnsole isn't installed yet, nothing to do."
+  exit 1
+fi
+
 mkdir -p "$(dirname "$INSTALL_DIR")"
 
 if [ -d "$INSTALL_DIR/.git" ]; then

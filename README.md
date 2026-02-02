@@ -32,6 +32,12 @@ curl -fsSL https://raw.githubusercontent.com/rmdmattingly/clawnsole/main/scripts
 curl -fsSL https://raw.githubusercontent.com/rmdmattingly/clawnsole/main/scripts/uninstall.sh | bash
 ```
 
+You can also run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rmdmattingly/clawnsole/main/scripts/install.sh | bash -s -- --uninstall
+```
+
 ## Connect
 
 - WS URL: `ws://127.0.0.1:18789`
