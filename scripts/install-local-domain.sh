@@ -44,7 +44,7 @@ echo "Set local hostname to ${HOSTNAME}.local"
 
 PLIST_DST="/Library/LaunchDaemons/ai.openclaw.clawnsole-caddy.plist"
 
-sudo sed "s|\$HOME|$HOME|g" "$INSTALL_DIR/scripts/clawnsole-caddy.plist" > "$PLIST_DST"
+sed "s|\$HOME|$HOME|g" "$INSTALL_DIR/scripts/clawnsole-caddy.plist" | sudo tee "$PLIST_DST" >/dev/null
 
 sudo launchctl unload "$PLIST_DST" >/dev/null 2>&1 || true
 sudo launchctl load "$PLIST_DST"
