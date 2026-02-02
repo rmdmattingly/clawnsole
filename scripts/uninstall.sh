@@ -27,13 +27,13 @@ prompt_yes_no() {
   esac
 }
 
-UID="$(id -u)"
-launchctl bootout "gui/$UID" "$PLIST_AGENT" >/dev/null 2>&1 || true
-launchctl bootout "gui/$UID" "$PLIST_UPDATER" >/dev/null 2>&1 || true
-launchctl bootout "gui/$UID" "$PLIST_WATCHDOG" >/dev/null 2>&1 || true
-launchctl disable "gui/$UID/ai.openclaw.clawnsole" >/dev/null 2>&1 || true
-launchctl disable "gui/$UID/ai.openclaw.clawnsole-updater" >/dev/null 2>&1 || true
-launchctl disable "gui/$UID/ai.openclaw.clawnsole-watchdog" >/dev/null 2>&1 || true
+USER_ID="$(id -u)"
+launchctl bootout "gui/$USER_ID" "$PLIST_AGENT" >/dev/null 2>&1 || true
+launchctl bootout "gui/$USER_ID" "$PLIST_UPDATER" >/dev/null 2>&1 || true
+launchctl bootout "gui/$USER_ID" "$PLIST_WATCHDOG" >/dev/null 2>&1 || true
+launchctl disable "gui/$USER_ID/ai.openclaw.clawnsole" >/dev/null 2>&1 || true
+launchctl disable "gui/$USER_ID/ai.openclaw.clawnsole-updater" >/dev/null 2>&1 || true
+launchctl disable "gui/$USER_ID/ai.openclaw.clawnsole-watchdog" >/dev/null 2>&1 || true
 rm -f "$PLIST_AGENT" "$PLIST_UPDATER" "$PLIST_WATCHDOG"
 
 if [ -f "$PLIST_DAEMON" ]; then
