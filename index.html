@@ -95,9 +95,13 @@
             <input id="deviceId" type="text" />
           </label>
           <label>
-            Scopes
-            <input id="scopes" type="text" value="operator.read,operator.write" />
+            Guest Prompt
+            <textarea id="guestPrompt" rows="4" placeholder="Set the guest profile prompt..."></textarea>
           </label>
+          <div class="button-row">
+            <button id="saveGuestPromptBtn" class="primary">Save Guest Prompt</button>
+          </div>
+          <div id="guestPromptStatus" class="hint"></div>
           <div class="button-row">
             <button id="disconnectBtn">Disconnect</button>
           </div>

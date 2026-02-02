@@ -2,7 +2,9 @@ const elements = {
   wsUrl: document.getElementById('wsUrl'),
   clientId: document.getElementById('clientId'),
   deviceId: document.getElementById('deviceId'),
-  scopes: document.getElementById('scopes'),
+  guestPrompt: document.getElementById('guestPrompt'),
+  saveGuestPromptBtn: document.getElementById('saveGuestPromptBtn'),
+  guestPromptStatus: document.getElementById('guestPromptStatus'),
   disconnectBtn: document.getElementById('disconnectBtn'),
   status: document.getElementById('connectionStatus'),
   statusMeta: document.getElementById('statusMeta'),
@@ -120,12 +122,10 @@ function setRole(role) {
     elements.channelSelect.value = 'guest';
     elements.channelSelect.disabled = true;
     roleState.guestPolicyInjected = false;
-    elements.scopes.value = 'operator.read';
     elements.settingsBtn.setAttribute('disabled', 'disabled');
     elements.settingsBtn.style.opacity = '0.5';
   } else {
     elements.channelSelect.disabled = false;
-    elements.scopes.value = 'operator.read,operator.write';
     elements.settingsBtn.removeAttribute('disabled');
     elements.settingsBtn.style.opacity = '1';
   }
@@ -651,10 +651,7 @@ class GatewayClient {
       this.connectTimer = null;
     }
 
-    const scopes = elements.scopes.value
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const scopes = ['operator.read', 'operator.write'];
 
     const payload = {
       type: 'req',
@@ -781,6 +778,9 @@ elements.chatInput.addEventListener('keydown', (event) => {
 function openSettings() {
   elements.settingsModal.classList.add('open');
   elements.settingsModal.setAttribute('aria-hidden', 'false');
+  if (roleState.role === 'admin') {
+    loadGuestPrompt();
+  }
 }
 
 function closeSettings() {
@@ -788,11 +788,49 @@ function closeSettings() {
   elements.settingsModal.setAttribute('aria-hidden', 'true');
 }
 
+async function loadGuestPrompt() {
+  if (!elements.guestPrompt) return;
+  elements.guestPromptStatus.textContent = '';
+  try {
+    const res = await fetch('/config/guest-prompt', { credentials: 'include' });
+    if (!res.ok) {
+      elements.guestPromptStatus.textContent = 'Unable to load guest prompt.';
+      return;
+    }
+    const data = await res.json();
+    elements.guestPrompt.value = data.prompt || '';
+  } catch (err) {
+    elements.guestPromptStatus.textContent = 'Unable to load guest prompt.';
+  }
+}
+
+async function saveGuestPrompt() {
+  if (!elements.guestPrompt) return;
+  const prompt = elements.guestPrompt.value.trim();
+  elements.guestPromptStatus.textContent = '';
+  try {
+    const res = await fetch('/config/guest-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ prompt })
+    });
+    if (!res.ok) {
+      elements.guestPromptStatus.textContent = 'Failed to save guest prompt.';
+      return;
+    }
+    elements.guestPromptStatus.textContent = 'Guest prompt saved.';
+  } catch (err) {
+    elements.guestPromptStatus.textContent = 'Failed to save guest prompt.';
+  }
+}
+
 elements.settingsBtn.addEventListener('click', () => openSettings());
 elements.settingsCloseBtn.addEventListener('click', () => closeSettings());
 elements.settingsModal.addEventListener('click', (event) => {
   if (event.target === elements.settingsModal) closeSettings();
 });
+elements.saveGuestPromptBtn.addEventListener('click', () => saveGuestPrompt());
 
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeSettings();

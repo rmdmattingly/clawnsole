@@ -61,6 +61,23 @@ function readUiPasswords() {
   }
 }
 
+function readClawnsoleConfig() {
+  try {
+    const raw = fs.readFileSync(clawnsoleConfigPath, 'utf8');
+    return JSON.parse(raw);
+  } catch (err) {
+    return {};
+  }
+}
+
+function writeClawnsoleConfig(update) {
+  const cfg = readClawnsoleConfig();
+  const merged = { ...cfg, ...update };
+  const dir = path.dirname(clawnsoleConfigPath);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(clawnsoleConfigPath, JSON.stringify(merged, null, 2) + '\n', 'utf8');
+}
+
 function parseCookies(header) {
   if (!header) return {};
   return header.split(';').reduce((acc, part) => {
@@ -141,6 +158,42 @@ const server = http.createServer((req, res) => {
       guestWsUrl: '/guest-ws',
       port
     });
+    return;
+  }
+
+  if (req.url.startsWith('/config/guest-prompt')) {
+    const role = getRoleFromCookies(req);
+    if (role !== 'admin') {
+      sendJson(res, 403, { error: 'forbidden' });
+      return;
+    }
+    if (req.method === 'GET') {
+      const { guestPrompt } = readUiPasswords();
+      sendJson(res, 200, { prompt: guestPrompt });
+      return;
+    }
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk.toString();
+      });
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body || '{}');
+          const prompt = String(payload.prompt || '').trim();
+          if (prompt.length > 4000) {
+            sendJson(res, 400, { error: 'prompt_too_long' });
+            return;
+          }
+          writeClawnsoleConfig({ guestPrompt: prompt });
+          sendJson(res, 200, { ok: true });
+        } catch (err) {
+          sendJson(res, 400, { error: 'invalid_request' });
+        }
+      });
+      return;
+    }
+    sendJson(res, 405, { error: 'method_not_allowed' });
     return;
   }
 
