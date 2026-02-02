@@ -17,9 +17,15 @@ if [ -f "$PLIST_DAEMON" ]; then
   sudo rm -f "$PLIST_DAEMON"
 fi
 
+CONFIG_PATH="$OPENCLAW_HOME/openclaw.json"
+
 if command -v node >/dev/null 2>&1; then
-  OPENCLAW_CONFIG="$OPENCLAW_HOME/openclaw.json" CLAWNSOLE_STATE_PATH="$STATE_PATH" \
-    node "$INSTALL_DIR/scripts/uninstall.mjs" || true
+  if [ -f "$INSTALL_DIR/scripts/uninstall.mjs" ]; then
+    OPENCLAW_CONFIG="$CONFIG_PATH" CLAWNSOLE_STATE_PATH="$STATE_PATH" \
+      node "$INSTALL_DIR/scripts/uninstall.mjs" || true
+  else
+    node -e "const fs=require('fs');const p=process.argv[1];let c;try{c=JSON.parse(fs.readFileSync(p,'utf8'))}catch(e){process.exit(0)};if(c.ui&&c.ui.clawnsole){delete c.ui.clawnsole;if(Object.keys(c.ui).length===0) delete c.ui;fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n','utf8');}" "$CONFIG_PATH" || true
+  fi
 fi
 
 if [ -f "$STATE_PATH" ]; then
