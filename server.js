@@ -239,6 +239,24 @@ function handleAdminProxy(clientSocket, req) {
 
   const { token } = readToken();
   const upstream = new WebSocket(gatewayWsUrl());
+  let lastUpstreamAt = Date.now();
+  let recentCount = 0;
+  const heartbeat = setInterval(() => {
+    const idleForMs = Date.now() - lastUpstreamAt;
+    const payload = {
+      type: 'event',
+      event: 'activity',
+      payload: {
+        ts: Date.now(),
+        idleForMs,
+        recentCount
+      }
+    };
+    recentCount = 0;
+    try {
+      clientSocket.send(JSON.stringify(payload));
+    } catch {}
+  }, 2000);
 
   upstream.on('open', () => {
     clientSocket.on('message', (data) => {
@@ -260,6 +278,8 @@ function handleAdminProxy(clientSocket, req) {
   });
 
   upstream.on('message', (data) => {
+    lastUpstreamAt = Date.now();
+    recentCount += 1;
     clientSocket.send(String(data));
   });
 
@@ -270,6 +290,7 @@ function handleAdminProxy(clientSocket, req) {
     try {
       clientSocket.close();
     } catch {}
+    clearInterval(heartbeat);
   };
 
   clientSocket.on('close', closeBoth);
@@ -286,6 +307,24 @@ function handleGuestProxy(clientSocket, req) {
 
   const { token } = readToken();
   const upstream = new WebSocket(gatewayWsUrl());
+  let lastUpstreamAt = Date.now();
+  let recentCount = 0;
+  const heartbeat = setInterval(() => {
+    const idleForMs = Date.now() - lastUpstreamAt;
+    const payload = {
+      type: 'event',
+      event: 'activity',
+      payload: {
+        ts: Date.now(),
+        idleForMs,
+        recentCount
+      }
+    };
+    recentCount = 0;
+    try {
+      clientSocket.send(JSON.stringify(payload));
+    } catch {}
+  }, 2000);
 
   upstream.on('open', () => {
     clientSocket.on('message', (data) => {
@@ -324,6 +363,8 @@ function handleGuestProxy(clientSocket, req) {
     } catch {
       return;
     }
+    lastUpstreamAt = Date.now();
+    recentCount += 1;
     if (frame?.type === 'event') {
       const eventName = String(frame.event || '');
       const allowed = eventName === 'chat' || eventName.startsWith('connect.');
@@ -341,6 +382,7 @@ function handleGuestProxy(clientSocket, req) {
     try {
       clientSocket.close();
     } catch {}
+    clearInterval(heartbeat);
   };
 
   clientSocket.on('close', closeBoth);

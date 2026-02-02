@@ -533,8 +533,6 @@ class GatewayClient {
     this.challenge = null;
     this.connectTimer = null;
     this.handshakeSent = false;
-    this.logTailCursor = 0;
-    this.logTailTimer = null;
   }
 
   async connect() {
@@ -597,6 +595,14 @@ class GatewayClient {
       spawnPulse(Math.min(2, 0.5 + pulse.eventRate / 2));
 
       if (data.type === 'event') {
+        if (data.event === 'activity') {
+          const recentCount = Number(data.payload?.recentCount || 0);
+          const idleForMs = Number(data.payload?.idleForMs || 0);
+          const base = idleForMs > 6000 ? 0.4 : idleForMs > 2000 ? 0.8 : 1.2;
+          const strength = Math.min(2.4, base + recentCount / 8);
+          triggerFiring(strength, Math.min(6, 1 + Math.floor(recentCount / 6)));
+          return;
+        }
         if (data.event === 'chat') {
           const payload = data.payload || {};
           const runId = payload.runId;
@@ -628,14 +634,12 @@ class GatewayClient {
     this.connected = false;
     this.setStatus('disconnected', 'socket closed');
     setConnectionState(false);
-    this.stopLogTail();
   });
 
   this.socket.addEventListener('error', () => {
     this.connected = false;
     this.setStatus('error', 'socket error');
     setConnectionState(false);
-    this.stopLogTail();
   });
   }
 
@@ -682,7 +686,6 @@ class GatewayClient {
         this.connected = true;
         this.setStatus('connected', `protocol ${res.payload?.protocol ?? 'ok'}`);
         setConnectionState(true);
-        this.startLogTail();
         this.ensureGuestPolicy();
         ensureHiddenWelcome(roleState.channel);
       } else {
@@ -723,7 +726,6 @@ class GatewayClient {
       this.socket = null;
     }
     setConnectionState(false);
-    this.stopLogTail();
   }
 
   setStatus(state, meta) {
@@ -733,33 +735,6 @@ class GatewayClient {
     if (state === 'error') elements.status.classList.add('error');
     if (elements.statusMeta) {
       elements.statusMeta.textContent = meta;
-    }
-  }
-
-  startLogTail() {
-    if (this.logTailTimer) return;
-    this.logTailTimer = setInterval(() => {
-      if (!this.connected) return;
-      this.request('logs.tail', {
-        cursor: this.logTailCursor || 0,
-        limit: 200,
-        maxBytes: 20000
-      }).then((res) => {
-        if (!res?.ok || !res.payload) return;
-        const lines = Array.isArray(res.payload.lines) ? res.payload.lines : [];
-        this.logTailCursor = res.payload.cursor ?? this.logTailCursor;
-        if (lines.length > 0) {
-          const strength = Math.min(3, 0.6 + lines.length / 80);
-          triggerFiring(strength, Math.min(6, 1 + Math.floor(lines.length / 22)));
-        }
-      });
-    }, 2000);
-  }
-
-  stopLogTail() {
-    if (this.logTailTimer) {
-      clearInterval(this.logTailTimer);
-      this.logTailTimer = null;
     }
   }
 
