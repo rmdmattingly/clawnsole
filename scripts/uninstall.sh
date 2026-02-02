@@ -13,6 +13,7 @@ launchctl unload "$PLIST_UPDATER" >/dev/null 2>&1 || true
 rm -f "$PLIST_AGENT" "$PLIST_UPDATER"
 
 if [ -f "$PLIST_DAEMON" ]; then
+  sudo -v
   sudo launchctl unload "$PLIST_DAEMON" >/dev/null 2>&1 || true
   sudo rm -f "$PLIST_DAEMON"
 fi
@@ -35,12 +36,15 @@ if [ -f "$STATE_PATH" ]; then
   CADDY_INSTALLED=$(node -e "const s=require(process.argv[1]);console.log(s.caddyInstalledByScript===true)" "$STATE_PATH" 2>/dev/null || true)
 
   if [ -n "$PREV_LOCAL" ]; then
+    sudo -v
     sudo scutil --set LocalHostName "$PREV_LOCAL" || true
   fi
   if [ -n "$PREV_HOST" ]; then
+    sudo -v
     sudo scutil --set HostName "$PREV_HOST" || true
   fi
   if [ -n "$PREV_COMP" ]; then
+    sudo -v
     sudo scutil --set ComputerName "$PREV_COMP" || true
   fi
 
