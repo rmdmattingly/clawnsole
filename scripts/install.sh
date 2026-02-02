@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026-02-02.6"
+VERSION="2026-02-02.7"
 
 REPO_URL="${CLAWNSOLE_REPO:-git@github.com:rmdmattingly/clawnsole.git}"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
@@ -129,6 +129,14 @@ CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/install-launchagent.sh"
 
 # Start immediately
 CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/ensure-running.sh" || true
+
+if ! lsof -nP -iTCP:"$PORT_VALUE" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "Clawnsole did not start. Try running:"
+  echo "  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.openclaw.clawnsole.plist"
+  echo "  launchctl bootstrap user/$(id -u) ~/Library/LaunchAgents/ai.openclaw.clawnsole.plist"
+  echo "  node \"$INSTALL_DIR/server.js\""
+  exit 1
+fi
 
 # Install watchdog to keep it running after gateway restarts
 CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/install-watchdog.sh"

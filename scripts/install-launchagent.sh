@@ -34,11 +34,14 @@ DOMAIN_USER="user/$USER_ID"
 launchctl bootout "$DOMAIN_GUI" "$PLIST_DST" >/dev/null 2>&1 || true
 launchctl bootout "$DOMAIN_USER" "$PLIST_DST" >/dev/null 2>&1 || true
 
-if ! launchctl bootstrap "$DOMAIN_GUI" "$PLIST_DST" >/dev/null 2>&1; then
-  if ! launchctl bootstrap "$DOMAIN_USER" "$PLIST_DST" >/dev/null 2>&1; then
-    echo "LaunchAgent bootstrap failed. Trying legacy load..."
-    launchctl load "$PLIST_DST" >/dev/null 2>&1 || true
-  fi
+TARGET_DOMAIN="$DOMAIN_GUI"
+if ! launchctl print "$DOMAIN_GUI" >/dev/null 2>&1; then
+  TARGET_DOMAIN="$DOMAIN_USER"
+fi
+
+if ! launchctl bootstrap "$TARGET_DOMAIN" "$PLIST_DST" >/dev/null 2>&1; then
+  echo "LaunchAgent bootstrap failed for $TARGET_DOMAIN. Trying legacy load..."
+  launchctl load "$PLIST_DST" >/dev/null 2>&1 || true
 fi
 
 if launchctl print "$DOMAIN_GUI/$LABEL" >/dev/null 2>&1; then
