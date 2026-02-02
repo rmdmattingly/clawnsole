@@ -28,8 +28,8 @@
           <div class="role-pill" id="rolePill">guest</div>
           <div class="channel-switch" id="channelSwitch">
             <select id="channelSelect">
+              <option value="guest" selected>Guest</option>
               <option value="admin">Admin</option>
-              <option value="guest">Guest</option>
             </select>
           </div>
           <button id="settingsBtn" class="icon-btn" type="button" aria-label="Open settings">
@@ -49,6 +49,26 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <div id="loginOverlay" class="login-overlay" aria-hidden="true">
+      <div class="login-card" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+        <h2 id="loginTitle">Welcome to Clawnsole</h2>
+        <p>Choose a role and enter the password to continue.</p>
+        <label>
+          Role
+          <select id="loginRole">
+            <option value="guest" selected>Guest</option>
+            <option value="admin">Admin</option>
+          </select>
+        </label>
+        <label>
+          Password
+          <input id="loginPassword" type="password" placeholder="Enter password" />
+        </label>
+        <div id="loginError" class="login-error" role="alert"></div>
+        <button id="loginBtn" class="primary">Unlock</button>
+      </div>
     </div>
 
     <div id="settingsModal" class="modal" aria-hidden="true">

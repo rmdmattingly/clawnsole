@@ -30,19 +30,7 @@ function readUiPasswords() {
     const guestPassword = cfg?.ui?.clawnsole?.guestPassword || 'guest';
     return { adminPassword, guestPassword };
   } catch (err) {
-    return { adminPassword: 'password', guestPassword: 'guest' };
-  }
-}
-
-function decodeBasicAuth(header) {
-  if (!header || !header.startsWith('Basic ')) return null;
-  try {
-    const raw = Buffer.from(header.slice(6), 'base64').toString('utf8');
-    const idx = raw.indexOf(':');
-    if (idx === -1) return null;
-    return { user: raw.slice(0, idx), pass: raw.slice(idx + 1) };
-  } catch (err) {
-    return null;
+    return { adminPassword: 'admin', guestPassword: 'guest' };
   }
 }
 
@@ -70,45 +58,29 @@ function encodeAuthCookie(password) {
   return Buffer.from(password, 'utf8').toString('base64');
 }
 
-function requireAuth(req, res) {
+function getRoleFromCookies(req) {
   const { adminPassword, guestPassword } = readUiPasswords();
-  if (!adminPassword && !guestPassword) return true;
+  if (!adminPassword && !guestPassword) return 'admin';
   const cookie = getAuthCookie(req);
-  const roleCookie = getRoleCookie(req);
   if (cookie) {
     if (adminPassword && cookie === encodeAuthCookie(adminPassword)) {
-      req.clawnsoleRole = 'admin';
-      return true;
+      return getRoleCookie(req) === 'guest' ? 'guest' : 'admin';
     }
     if (guestPassword && cookie === encodeAuthCookie(guestPassword)) {
-      req.clawnsoleRole = 'guest';
-      return true;
+      return 'guest';
     }
   }
-  const auth = decodeBasicAuth(req.headers.authorization);
-  if (auth) {
-    if (adminPassword && auth.pass === adminPassword) {
-      res.setHeader('Set-Cookie', [
-        `clawnsole_auth=${encodeAuthCookie(adminPassword)}; Path=/; HttpOnly; SameSite=Strict`,
-        `clawnsole_role=admin; Path=/; SameSite=Strict`
-      ]);
-      req.clawnsoleRole = 'admin';
-      return true;
-    }
-    if (guestPassword && auth.pass === guestPassword) {
-      res.setHeader('Set-Cookie', [
-        `clawnsole_auth=${encodeAuthCookie(guestPassword)}; Path=/; HttpOnly; SameSite=Strict`,
-        `clawnsole_role=guest; Path=/; SameSite=Strict`
-      ]);
-      req.clawnsoleRole = 'guest';
-      return true;
-    }
+  return null;
+}
+
+function requireAuth(req, res) {
+  const role = getRoleFromCookies(req);
+  if (role) {
+    req.clawnsoleRole = role;
+    return true;
   }
-  res.writeHead(401, {
-    'WWW-Authenticate': 'Basic realm="Clawnsole", charset="UTF-8"',
-    'Content-Type': 'text/plain; charset=utf-8'
-  });
-  res.end('Unauthorized');
+  res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify({ error: 'unauthorized' }));
   return false;
 }
 
@@ -124,14 +96,79 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (!requireAuth(req, res)) {
+  if (req.url.startsWith('/auth/role')) {
+    const role = getRoleFromCookies(req);
+    if (!role) {
+      sendJson(res, 401, { error: 'unauthorized' });
+      return;
+    }
+    sendJson(res, 200, { role });
     return;
   }
 
-  if (req.url.startsWith('/auth/role')) {
-    sendJson(res, 200, {
-      role: req.clawnsoleRole || getRoleCookie(req) || 'guest'
+  if (req.url.startsWith('/auth/logout')) {
+    res.setHeader('Set-Cookie', [
+      'clawnsole_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict',
+      'clawnsole_role=; Path=/; Max-Age=0; SameSite=Strict'
+    ]);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.url.startsWith('/auth/login')) {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk.toString();
     });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const role = payload.role === 'admin' ? 'admin' : 'guest';
+        const password = String(payload.password || '');
+        const { adminPassword, guestPassword } = readUiPasswords();
+        const ok =
+          (role === 'admin' && password === adminPassword) ||
+          (role === 'guest' && password === guestPassword);
+        if (!ok) {
+          sendJson(res, 401, { error: 'invalid_credentials' });
+          return;
+        }
+        const token = encodeAuthCookie(role === 'admin' ? adminPassword : guestPassword);
+        res.setHeader('Set-Cookie', [
+          `clawnsole_auth=${token}; Path=/; HttpOnly; SameSite=Strict`,
+          `clawnsole_role=${role}; Path=/; SameSite=Strict`
+        ]);
+        sendJson(res, 200, { ok: true, role });
+      } catch (err) {
+        sendJson(res, 400, { error: 'invalid_request' });
+      }
+    });
+    return;
+  }
+
+  const urlPath = req.url === '/' ? '/index.html' : req.url;
+  const filePath = path.join(root, decodeURIComponent(urlPath));
+  if (!filePath.startsWith(root)) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
+  }
+
+  if (!urlPath.startsWith('/token')) {
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        res.writeHead(404);
+        res.end('Not found');
+        return;
+      }
+      const ext = path.extname(filePath);
+      res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'text/plain; charset=utf-8' });
+      res.end(data);
+    });
+    return;
+  }
+
+  if (!requireAuth(req, res)) {
     return;
   }
 
@@ -148,25 +185,8 @@ const server = http.createServer((req, res) => {
     }
     return;
   }
-
-  const urlPath = req.url === '/' ? '/index.html' : req.url;
-  const filePath = path.join(root, decodeURIComponent(urlPath));
-  if (!filePath.startsWith(root)) {
-    res.writeHead(403);
-    res.end('Forbidden');
-    return;
-  }
-
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
-      res.writeHead(404);
-      res.end('Not found');
-      return;
-    }
-    const ext = path.extname(filePath);
-    res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'text/plain; charset=utf-8' });
-    res.end(data);
-  });
+  res.writeHead(404);
+  res.end('Not found');
 });
 
 server.listen(port, () => {

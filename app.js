@@ -15,7 +15,12 @@ const elements = {
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   rolePill: document.getElementById('rolePill'),
-  channelSelect: document.getElementById('channelSelect')
+  channelSelect: document.getElementById('channelSelect'),
+  loginOverlay: document.getElementById('loginOverlay'),
+  loginRole: document.getElementById('loginRole'),
+  loginPassword: document.getElementById('loginPassword'),
+  loginBtn: document.getElementById('loginBtn'),
+  loginError: document.getElementById('loginError')
 };
 
 const storage = {
@@ -37,11 +42,11 @@ const roleState = {
 async function fetchRole() {
   try {
     const res = await fetch('/auth/role');
-    if (!res.ok) return 'guest';
+    if (!res.ok) return null;
     const data = await res.json();
     return data.role === 'admin' ? 'admin' : 'guest';
   } catch (err) {
-    return 'guest';
+    return null;
   }
 }
 
@@ -76,6 +81,46 @@ function setChannel(channel) {
   }
   if (channel === 'guest' && client?.connected) {
     client.ensureGuestPolicy();
+  }
+}
+
+function showLogin(message = '') {
+  elements.loginOverlay.classList.add('open');
+  elements.loginOverlay.setAttribute('aria-hidden', 'false');
+  elements.loginError.textContent = message;
+  elements.loginPassword.value = '';
+  elements.loginPassword.focus();
+}
+
+function hideLogin() {
+  elements.loginOverlay.classList.remove('open');
+  elements.loginOverlay.setAttribute('aria-hidden', 'true');
+  elements.loginError.textContent = '';
+}
+
+async function attemptLogin() {
+  const role = elements.loginRole.value === 'admin' ? 'admin' : 'guest';
+  const password = elements.loginPassword.value.trim();
+  if (!password) {
+    showLogin('Password required.');
+    return;
+  }
+  try {
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, password })
+    });
+    if (!res.ok) {
+      showLogin('Invalid password. Try again.');
+      return;
+    }
+    const data = await res.json();
+    hideLogin();
+    setRole(data.role === 'admin' ? 'admin' : 'guest');
+    client.connect();
+  } catch (err) {
+    showLogin('Login failed. Please retry.');
   }
 }
 function randomId() {
@@ -727,6 +772,10 @@ window.addEventListener('load', () => {
   elements.channelSelect.value = savedChannel;
   roleState.channel = savedChannel;
   fetchRole().then((role) => {
+    if (!role) {
+      showLogin();
+      return;
+    }
     setRole(role);
     client.connect();
   });
@@ -740,6 +789,15 @@ window.addEventListener('load', () => {
 elements.channelSelect.addEventListener('change', (event) => {
   const value = event.target.value === 'guest' ? 'guest' : 'admin';
   setChannel(value);
+});
+
+elements.loginBtn.addEventListener('click', () => attemptLogin());
+
+elements.loginPassword.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    attemptLogin();
+  }
 });
 
 setFeedCollapsed(false);
