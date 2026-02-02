@@ -5,7 +5,9 @@
   "description": "Interactive UI for OpenClaw live thinking and activity",
   "scripts": {
     "dev": "node server.js",
-    "serve": "node server.js"
+    "serve": "node server.js",
+    "test:proxy": "node scripts/proxy-self-test.js",
+    "test:smoke": "node scripts/smoke-test.js"
   },
   "dependencies": {
     "ws": "^8.18.0"

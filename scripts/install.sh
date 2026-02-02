@@ -96,6 +96,7 @@ if command -v node >/dev/null 2>&1; then
       echo "Failed to install dependencies (ws missing)."
       exit 1
     fi
+    (cd "$INSTALL_DIR" && node scripts/preflight.js)
   else
     echo "npm is required. Please install Node.js (includes npm) and re-run."
     exit 1
