@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+VERSION="2026-02-02.1"
+
 REPO_URL="${CLAWNSOLE_REPO:-git@github.com:rmdmattingly/clawnsole.git}"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 INSTALL_DIR="${CLAWNSOLE_DIR:-$OPENCLAW_HOME/apps/clawnsole}"
 
-if [[ "${1:-}" == "--uninstall" ]]; then
+echo "Clawnsole installer ${VERSION}"
+
+if [ "${1:-}" = "--uninstall" ]; then
   if [ -x "$INSTALL_DIR/scripts/uninstall.sh" ]; then
     bash "$INSTALL_DIR/scripts/uninstall.sh"
     exit 0
@@ -57,17 +61,23 @@ CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/install-watchdog.sh"
 
 read -r -p "Enable automatic updates? [y/N]: " INSTALL_UPDATES
 INSTALL_UPDATES="${INSTALL_UPDATES:-N}"
-if [[ "$INSTALL_UPDATES" =~ ^[Yy]$ ]]; then
-  read -r -p "Update interval in hours [6]: " UPDATE_HOURS
-  UPDATE_HOURS="${UPDATE_HOURS:-6}"
-  UPDATE_SECONDS=$((UPDATE_HOURS * 3600))
-  CLAWNSOLE_UPDATE_INTERVAL_SECONDS="$UPDATE_SECONDS" \
-    bash "$INSTALL_DIR/scripts/install-update-agent.sh"
-  if command -v node >/dev/null 2>&1; then
-    CLAWNSOLE_AUTO_UPDATE="true" CLAWNSOLE_UPDATE_INTERVAL_SECONDS="$UPDATE_SECONDS" \
-      node "$INSTALL_DIR/scripts/patch-config.mjs"
-  fi
-fi
+case "$INSTALL_UPDATES" in
+  [Yy]*)
+    read -r -p "Update interval in hours [6]: " UPDATE_HOURS
+    case "$UPDATE_HOURS" in
+      ''|*[!0-9]*) UPDATE_HOURS="6" ;;
+    esac
+    UPDATE_SECONDS=$((UPDATE_HOURS * 3600))
+    CLAWNSOLE_UPDATE_INTERVAL_SECONDS="$UPDATE_SECONDS" \
+      bash "$INSTALL_DIR/scripts/install-update-agent.sh"
+    if command -v node >/dev/null 2>&1; then
+      CLAWNSOLE_AUTO_UPDATE="true" CLAWNSOLE_UPDATE_INTERVAL_SECONDS="$UPDATE_SECONDS" \
+        node "$INSTALL_DIR/scripts/patch-config.mjs"
+    fi
+    ;;
+  *)
+    ;;
+esac
 
 echo "Setting up http://clawnsole.local (requires sudo)..."
 CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/install-local-domain.sh"

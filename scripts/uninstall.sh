@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+VERSION="2026-02-02.1"
+
+echo "Clawnsole uninstall ${VERSION}"
+
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 INSTALL_DIR="${CLAWNSOLE_DIR:-$OPENCLAW_HOME/apps/clawnsole}"
 STATE_PATH="${CLAWNSOLE_STATE_PATH:-$OPENCLAW_HOME/clawnsole-install.json}"
