@@ -179,6 +179,16 @@ function createProxyHandlers({
           upstream.send(
             JSON.stringify({
               type: 'req',
+              id: `guest-reset-${Date.now()}`,
+              method: 'sessions.reset',
+              params: {
+                key: guestState.sessionKey || 'agent:main:guest:default'
+              }
+            })
+          );
+          upstream.send(
+            JSON.stringify({
+              type: 'req',
               id: `guest-prompt-${Date.now()}`,
               method: 'chat.inject',
               params: {

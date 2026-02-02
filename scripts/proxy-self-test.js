@@ -126,7 +126,10 @@ async function run() {
   assert.equal(forwarded.event, 'connect.challenge');
 
   guestUpstream.emit('message', JSON.stringify({ type: 'res', id: 'connect-1', ok: true, payload: {} }));
-  const injected = JSON.parse(guestUpstream.sent[2]);
+  const reset = JSON.parse(guestUpstream.sent[2]);
+  const injected = JSON.parse(guestUpstream.sent[3]);
+  assert.equal(reset.method, 'sessions.reset');
+  assert.equal(reset.params.key, 'agent:main:guest:device-1');
   assert.equal(injected.method, 'chat.inject');
   assert.equal(injected.params.sessionKey, 'agent:main:guest:device-1');
   assert.equal(injected.params.message, 'guest prompt');
