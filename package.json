@@ -6,5 +6,8 @@
   "scripts": {
     "dev": "node server.js",
     "serve": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
   }
 }

@@ -85,6 +85,18 @@ else
   git clone "$REPO_URL" "$INSTALL_DIR"
 fi
 
+if command -v node >/dev/null 2>&1; then
+  if command -v npm >/dev/null 2>&1; then
+    (cd "$INSTALL_DIR" && npm install --silent)
+  else
+    echo "npm is required. Please install Node.js (includes npm) and re-run."
+    exit 1
+  fi
+else
+  echo "Node.js is required. Please install Node 18+ and re-run."
+  exit 1
+fi
+
 ADMIN_PASS="$(prompt_password "Admin password" "admin")"
 GUEST_PASS="$(prompt_password "Guest password" "guest")"
 
@@ -96,14 +108,9 @@ esac
 
 AUTH_VERSION="$(date +%s)"
 
-if command -v node >/dev/null 2>&1; then
-  CLAWNSOLE_ADMIN_PASSWORD="$ADMIN_PASS" CLAWNSOLE_GUEST_PASSWORD="$GUEST_PASS" \
-  CLAWNSOLE_AUTH_VERSION="$AUTH_VERSION" \
-    node "$INSTALL_DIR/scripts/patch-config.mjs"
-else
-  echo "Node.js is required. Please install Node 18+ and re-run."
-  exit 1
-fi
+CLAWNSOLE_ADMIN_PASSWORD="$ADMIN_PASS" CLAWNSOLE_GUEST_PASSWORD="$GUEST_PASS" \
+CLAWNSOLE_AUTH_VERSION="$AUTH_VERSION" \
+  node "$INSTALL_DIR/scripts/patch-config.mjs"
 
 echo "Starting Clawnsole on login..."
 CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/install-launchagent.sh"

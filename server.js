@@ -1,6 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const WebSocket = require('ws');
 
 const root = __dirname;
 const port = Number(process.env.PORT || 5173);
@@ -31,6 +32,10 @@ function readGatewayPort() {
   } catch (err) {
     return 18789;
   }
+}
+
+function gatewayWsUrl() {
+  return `ws://127.0.0.1:${readGatewayPort()}`;
 }
 
 function readUiPasswords() {
@@ -121,7 +126,8 @@ const server = http.createServer((req, res) => {
   if (req.url.startsWith('/meta')) {
     const port = readGatewayPort();
     sendJson(res, 200, {
-      wsUrl: `ws://127.0.0.1:${port}`,
+      wsUrl: gatewayWsUrl(),
+      guestWsUrl: '/guest-ws',
       port
     });
     return;
@@ -200,6 +206,10 @@ const server = http.createServer((req, res) => {
         sendJson(res, 404, { error: 'token_not_found', mode });
         return;
       }
+      if (req.clawnsoleRole === 'guest') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
       sendJson(res, 200, { token, mode });
     } catch (err) {
       sendJson(res, 500, { error: 'token_read_failed', message: String(err) });
@@ -208,6 +218,92 @@ const server = http.createServer((req, res) => {
   }
   res.writeHead(404);
   res.end('Not found');
+});
+
+const guestAllowedMethods = new Set([
+  'connect',
+  'chat.send',
+  'chat.history',
+  'chat.abort',
+  'sessions.resolve',
+  'sessions.reset'
+]);
+
+function handleGuestProxy(clientSocket, req) {
+  const role = getRoleFromCookies(req);
+  if (role !== 'guest') {
+    clientSocket.close();
+    return;
+  }
+
+  const { token } = readToken();
+  const upstream = new WebSocket(gatewayWsUrl());
+
+  upstream.on('open', () => {
+    clientSocket.on('message', (data) => {
+      let frame;
+      try {
+        frame = JSON.parse(String(data));
+      } catch {
+        return;
+      }
+      if (frame?.type !== 'req') return;
+      if (!guestAllowedMethods.has(frame.method)) {
+        clientSocket.send(
+          JSON.stringify({
+            type: 'res',
+            id: frame.id || 'unknown',
+            ok: false,
+            error: { code: 'FORBIDDEN', message: 'guest role not allowed for this method' }
+          })
+        );
+        return;
+      }
+      if (frame.method === 'connect') {
+        frame.params = frame.params || {};
+        frame.params.auth = { token };
+        frame.params.scopes = ['operator.read'];
+        frame.params.role = 'operator';
+      }
+      upstream.send(JSON.stringify(frame));
+    });
+  });
+
+  upstream.on('message', (data) => {
+    let frame;
+    try {
+      frame = JSON.parse(String(data));
+    } catch {
+      return;
+    }
+    if (frame?.type === 'event' && frame?.event !== 'chat') {
+      return;
+    }
+    clientSocket.send(JSON.stringify(frame));
+  });
+
+  const closeBoth = () => {
+    try {
+      upstream.close();
+    } catch {}
+    try {
+      clientSocket.close();
+    } catch {}
+  };
+
+  clientSocket.on('close', closeBoth);
+  upstream.on('close', closeBoth);
+  upstream.on('error', closeBoth);
+}
+
+const wss = new WebSocket.Server({ noServer: true });
+
+server.on('upgrade', (req, socket, head) => {
+  if (req.url === '/guest-ws') {
+    wss.handleUpgrade(req, socket, head, (ws) => handleGuestProxy(ws, req));
+    return;
+  }
+  socket.destroy();
 });
 
 server.listen(port, () => {

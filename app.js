@@ -41,7 +41,8 @@ const roleState = {
 
 const uiState = {
   connected: false,
-  authed: false
+  authed: false,
+  meta: {}
 };
 
 function getSessionKey(role) {
@@ -71,6 +72,16 @@ function setAuthState(authed) {
   setChatEnabled(uiState.connected && authed);
 }
 
+function resolveWsUrl(raw) {
+  if (!raw) return '';
+  if (raw.startsWith('ws://') || raw.startsWith('wss://')) return raw;
+  if (raw.startsWith('/')) {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${proto}://${window.location.host}${raw}`;
+  }
+  return raw;
+}
+
 async function fetchRole() {
   try {
     const res = await fetch('/auth/role');
@@ -89,6 +100,7 @@ async function fetchMeta() {
     const data = await res.json();
     if (data?.wsUrl) {
       elements.wsUrl.value = data.wsUrl;
+      uiState.meta = data;
       return data;
     }
     return null;
@@ -526,21 +538,27 @@ class GatewayClient {
   }
 
   async connect() {
-    const url = elements.wsUrl.value.trim();
+    const rawUrl =
+      roleState.channel === 'guest' && uiState.meta.guestWsUrl
+        ? uiState.meta.guestWsUrl
+        : elements.wsUrl.value.trim();
+    const url = resolveWsUrl(rawUrl);
     if (!url) return;
 
     if (this.socket) {
       this.disconnect();
     }
 
-    if (!cachedToken) {
-      this.setStatus('connecting', 'fetching token...');
-      await fetchToken();
-    }
-
-    if (!cachedToken) {
-      this.setStatus('error', 'missing gateway token');
-      return;
+    const usingGuestProxy = roleState.channel === 'guest' && uiState.meta.guestWsUrl;
+    if (!usingGuestProxy) {
+      if (!cachedToken) {
+        this.setStatus('connecting', 'fetching token...');
+        await fetchToken();
+      }
+      if (!cachedToken) {
+        this.setStatus('error', 'missing gateway token');
+        return;
+      }
     }
 
     this.socket = new WebSocket(url);
@@ -649,9 +667,7 @@ class GatewayClient {
         caps: [],
         commands: [],
         permissions: {},
-        auth: {
-          token: cachedToken
-        },
+        auth: cachedToken ? { token: cachedToken } : undefined,
         locale: navigator.language || 'en-US',
         userAgent: 'clawnsole/0.1.0'
       }
