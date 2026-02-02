@@ -48,16 +48,13 @@ protocol.
 
 ## Password protection (optional)
 
-To require a password (useful for LAN access), add this to your OpenClaw config:
+Passwords live in `~/.openclaw/clawnsole.json`. The installer sets these for you,
+but you can update them manually too:
 
 ```json
 {
-  "ui": {
-    "clawnsole": {
-      "adminPassword": "your-strong-password",
-      "guestPassword": "guest-password"
-    }
-  }
+  "adminPassword": "your-strong-password",
+  "guestPassword": "guest-password"
 }
 ```
 

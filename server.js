@@ -5,6 +5,7 @@ const path = require('path');
 const root = __dirname;
 const port = Number(process.env.PORT || 5173);
 const configPath = path.join(process.env.HOME || '', '.openclaw', 'openclaw.json');
+const clawnsoleConfigPath = path.join(process.env.HOME || '', '.openclaw', 'clawnsole.json');
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -34,11 +35,11 @@ function readGatewayPort() {
 
 function readUiPasswords() {
   try {
-    const raw = fs.readFileSync(configPath, 'utf8');
+    const raw = fs.readFileSync(clawnsoleConfigPath, 'utf8');
     const cfg = JSON.parse(raw);
-    const adminPassword = cfg?.ui?.clawnsole?.adminPassword || cfg?.ui?.clawnsole?.password || 'admin';
-    const guestPassword = cfg?.ui?.clawnsole?.guestPassword || 'guest';
-    const authVersion = cfg?.ui?.clawnsole?.authVersion || '';
+    const adminPassword = cfg?.adminPassword || 'admin';
+    const guestPassword = cfg?.guestPassword || 'guest';
+    const authVersion = cfg?.authVersion || '';
     return { adminPassword, guestPassword, authVersion };
   } catch (err) {
     return { adminPassword: 'admin', guestPassword: 'guest', authVersion: '' };
