@@ -2,6 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');
+const { createProxyHandlers } = require('./proxy');
 
 const root = __dirname;
 const port = Number(process.env.PORT || 5173);
@@ -221,174 +222,13 @@ const server = http.createServer((req, res) => {
   res.end('Not found');
 });
 
-const guestAllowedMethods = new Set([
-  'connect',
-  'chat.send',
-  'chat.history',
-  'chat.abort',
-  'sessions.resolve',
-  'sessions.reset'
-]);
-
-function handleAdminProxy(clientSocket, req) {
-  const role = getRoleFromCookies(req);
-  if (role !== 'admin') {
-    clientSocket.close();
-    return;
-  }
-
-  const { token } = readToken();
-  const upstream = new WebSocket(gatewayWsUrl());
-  let lastUpstreamAt = Date.now();
-  let recentCount = 0;
-  const heartbeat = setInterval(() => {
-    const idleForMs = Date.now() - lastUpstreamAt;
-    const payload = {
-      type: 'event',
-      event: 'activity',
-      payload: {
-        ts: Date.now(),
-        idleForMs,
-        recentCount
-      }
-    };
-    recentCount = 0;
-    try {
-      clientSocket.send(JSON.stringify(payload));
-    } catch {}
-  }, 2000);
-
-  upstream.on('open', () => {
-    clientSocket.on('message', (data) => {
-      let frame;
-      try {
-        frame = JSON.parse(String(data));
-      } catch {
-        return;
-      }
-      if (frame?.type !== 'req') return;
-      if (frame.method === 'connect') {
-        frame.params = frame.params || {};
-        frame.params.auth = { token };
-        frame.params.scopes = frame.params.scopes || ['operator.read', 'operator.write'];
-        frame.params.role = frame.params.role || 'operator';
-      }
-      upstream.send(JSON.stringify(frame));
-    });
-  });
-
-  upstream.on('message', (data) => {
-    lastUpstreamAt = Date.now();
-    recentCount += 1;
-    clientSocket.send(String(data));
-  });
-
-  const closeBoth = () => {
-    try {
-      upstream.close();
-    } catch {}
-    try {
-      clientSocket.close();
-    } catch {}
-    clearInterval(heartbeat);
-  };
-
-  clientSocket.on('close', closeBoth);
-  upstream.on('close', closeBoth);
-  upstream.on('error', closeBoth);
-}
-
-function handleGuestProxy(clientSocket, req) {
-  const role = getRoleFromCookies(req);
-  if (role !== 'guest') {
-    clientSocket.close();
-    return;
-  }
-
-  const { token } = readToken();
-  const upstream = new WebSocket(gatewayWsUrl());
-  let lastUpstreamAt = Date.now();
-  let recentCount = 0;
-  const heartbeat = setInterval(() => {
-    const idleForMs = Date.now() - lastUpstreamAt;
-    const payload = {
-      type: 'event',
-      event: 'activity',
-      payload: {
-        ts: Date.now(),
-        idleForMs,
-        recentCount
-      }
-    };
-    recentCount = 0;
-    try {
-      clientSocket.send(JSON.stringify(payload));
-    } catch {}
-  }, 2000);
-
-  upstream.on('open', () => {
-    clientSocket.on('message', (data) => {
-      let frame;
-      try {
-        frame = JSON.parse(String(data));
-      } catch {
-        return;
-      }
-      if (frame?.type !== 'req') return;
-      if (!guestAllowedMethods.has(frame.method)) {
-        clientSocket.send(
-          JSON.stringify({
-            type: 'res',
-            id: frame.id || 'unknown',
-            ok: false,
-            error: { code: 'FORBIDDEN', message: 'guest role not allowed for this method' }
-          })
-        );
-        return;
-      }
-      if (frame.method === 'connect') {
-        frame.params = frame.params || {};
-        frame.params.auth = { token };
-        frame.params.scopes = ['operator.read', 'operator.write'];
-        frame.params.role = 'operator';
-      }
-      upstream.send(JSON.stringify(frame));
-    });
-  });
-
-  upstream.on('message', (data) => {
-    let frame;
-    try {
-      frame = JSON.parse(String(data));
-    } catch {
-      return;
-    }
-    lastUpstreamAt = Date.now();
-    recentCount += 1;
-    if (frame?.type === 'event') {
-      const eventName = String(frame.event || '');
-      const allowed = eventName === 'chat' || eventName.startsWith('connect.');
-      if (!allowed) {
-        return;
-      }
-    }
-    clientSocket.send(JSON.stringify(frame));
-  });
-
-  const closeBoth = () => {
-    try {
-      upstream.close();
-    } catch {}
-    try {
-      clientSocket.close();
-    } catch {}
-    clearInterval(heartbeat);
-  };
-
-  clientSocket.on('close', closeBoth);
-  upstream.on('close', closeBoth);
-  upstream.on('error', closeBoth);
-}
+const { handleAdminProxy, handleGuestProxy } = createProxyHandlers({
+  WebSocket,
+  getRoleFromCookies,
+  readToken,
+  gatewayWsUrl,
+  heartbeatMs: 2000
+});
 
 const wss = new WebSocket.Server({ noServer: true });
 
