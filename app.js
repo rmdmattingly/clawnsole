@@ -44,6 +44,12 @@ const uiState = {
   authed: false
 };
 
+function getSessionKey(role) {
+  const deviceLabel = elements.deviceId.value.trim() || 'device';
+  const kind = role === 'admin' ? 'admin' : 'guest';
+  return `agent:main:${kind}:${deviceLabel}`;
+}
+
 function setChatEnabled(enabled) {
   elements.chatInput.disabled = !enabled;
   elements.chatBtn.disabled = !enabled;
@@ -102,10 +108,12 @@ function setRole(role) {
     elements.channelSelect.value = 'guest';
     elements.channelSelect.disabled = true;
     roleState.guestPolicyInjected = false;
+    elements.scopes.value = 'operator.read';
     elements.settingsBtn.setAttribute('disabled', 'disabled');
     elements.settingsBtn.style.opacity = '0.5';
   } else {
     elements.channelSelect.disabled = false;
+    elements.scopes.value = 'operator.read,operator.write';
     elements.settingsBtn.removeAttribute('disabled');
     elements.settingsBtn.style.opacity = '1';
   }
@@ -337,6 +345,18 @@ function updateChatRun(runId, text, done) {
     chatState.runs.delete(runId);
     scrollToBottom(elements.chatThread);
   }
+}
+
+function showStartupPrompt() {
+  const sessionKey = getSessionKey(roleState.channel);
+  const storageKey = `clawnsole.greeting.${sessionKey}`;
+  if (storage.get(storageKey)) return;
+  const message =
+    roleState.channel === 'guest'
+      ? 'Guest mode is active. You can ask general questions and basic home automation.'
+      : 'Admin mode is active. You have full access to OpenClaw.';
+  addChatMessage({ role: 'assistant', text: message, persist: false });
+  storage.set(storageKey, 'shown');
 }
 
 const pulse = {
@@ -641,6 +661,7 @@ class GatewayClient {
         setConnectionState(true);
         this.startLogTail();
         this.ensureGuestPolicy();
+        showStartupPrompt();
       } else {
         this.connected = false;
         this.setStatus('error', res.error?.message || 'connect failed');
@@ -724,8 +745,7 @@ class GatewayClient {
     if (roleState.channel !== 'guest') return;
     if (roleState.guestPolicyInjected) return;
     roleState.guestPolicyInjected = true;
-    const deviceLabel = elements.deviceId.value.trim() || 'device';
-    const sessionKey = `agent:main:guest:${deviceLabel}`;
+    const sessionKey = getSessionKey('guest');
     this.request('sessions.resolve', {
       key: sessionKey
     }).then((res) => {
@@ -809,11 +829,7 @@ function sendChat() {
     addFeed('event', 'chat', 'chat history cleared');
     return;
   }
-  const deviceLabel = elements.deviceId.value.trim() || 'device';
-  const sessionKey =
-    roleState.channel === 'admin'
-      ? `agent:main:admin:${deviceLabel}`
-      : `agent:main:guest:${deviceLabel}`;
+  const sessionKey = getSessionKey(roleState.channel);
   addChatMessage({ role: 'user', text: message });
   scrollState.pinned = true;
   scrollToBottom(elements.chatThread, true);
