@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026-02-02.2"
+VERSION="2026-02-02.3"
 
 REPO_URL="${CLAWNSOLE_REPO:-git@github.com:rmdmattingly/clawnsole.git}"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
@@ -21,6 +21,35 @@ prompt_value() {
   else
     printf '%s' "$reply"
   fi
+}
+
+prompt_password() {
+  local label="$1"
+  local default="$2"
+  local pass1=""
+  local pass2=""
+  while true; do
+    if [ -r /dev/tty ]; then
+      read -r -s -p "$label [$default]: " pass1 < /dev/tty || true
+      echo
+      if [ -z "$pass1" ]; then
+        pass1="$default"
+      fi
+      read -r -s -p "Confirm $label: " pass2 < /dev/tty || true
+      echo
+      if [ -z "$pass2" ]; then
+        pass2="$default"
+      fi
+      if [ "$pass1" = "$pass2" ]; then
+        printf '%s' "$pass1"
+        return 0
+      fi
+      echo "Passwords did not match. Please try again."
+    else
+      printf '%s' "$default"
+      return 0
+    fi
+  done
 }
 
 prompt_yes_no() {
@@ -56,8 +85,8 @@ else
   git clone "$REPO_URL" "$INSTALL_DIR"
 fi
 
-ADMIN_PASS="$(prompt_value "Set admin password [admin]: " "admin")"
-GUEST_PASS="$(prompt_value "Set guest password [guest]: " "guest")"
+ADMIN_PASS="$(prompt_password "Admin password" "admin")"
+GUEST_PASS="$(prompt_password "Guest password" "guest")"
 
 PORT_INPUT="$(prompt_value "Port to run Clawnsole on [5173]: " "5173")"
 case "$PORT_INPUT" in
