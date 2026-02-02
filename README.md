@@ -26,6 +26,12 @@ You can override defaults:
 curl -fsSL https://raw.githubusercontent.com/rmdmattingly/clawnsole/main/scripts/update.sh | bash
 ```
 
+## Uninstall
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rmdmattingly/clawnsole/main/scripts/uninstall.sh | bash
+```
+
 ## Connect
 
 - WS URL: `ws://127.0.0.1:18789`
