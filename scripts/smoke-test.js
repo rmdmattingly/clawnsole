@@ -29,8 +29,27 @@ async function login(baseUrl, role, password, cookieJar) {
     body: JSON.stringify({ role, password })
   });
   if (!res.ok) throw new Error(`login failed for ${role}`);
-  const setCookie = res.headers.get('set-cookie');
-  if (setCookie) cookieJar.push(setCookie.split(';')[0]);
+  const getSetCookie = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : null;
+  const rawSetCookie = getSetCookie && getSetCookie.length > 0 ? getSetCookie : null;
+  const fallback = res.headers.get('set-cookie');
+  const cookies = rawSetCookie || (fallback ? fallback.split(/,(?=\s*[^;]+=[^;]+)/) : []);
+  cookies.forEach((cookie) => {
+    const first = String(cookie).split(';')[0];
+    if (first) cookieJar.push(first);
+  });
+}
+
+async function assertRole(baseUrl, cookieHeader) {
+  const res = await fetch(`${baseUrl}/auth/role`, {
+    headers: { Cookie: cookieHeader }
+  });
+  if (!res.ok) {
+    throw new Error('auth role check failed');
+  }
+  const data = await res.json();
+  if (!data.role) {
+    throw new Error('auth role missing');
+  }
 }
 
 async function wsChat({ baseUrl, wsPath, cookieHeader }) {
@@ -42,6 +61,10 @@ async function wsChat({ baseUrl, wsPath, cookieHeader }) {
       reject(new Error('ws timeout'));
       ws.close();
     }, 8000);
+    ws.on('close', (code, reason) => {
+      clearTimeout(timer);
+      reject(new Error(`ws closed (${code}) ${reason.toString()}`));
+    });
     ws.on('open', () => {
       ws.send(
         JSON.stringify({
@@ -126,6 +149,7 @@ async function run() {
   const cookieJar = [];
   await login(`http://127.0.0.1:${serverPort}`, 'guest', 'guest', cookieJar);
   const cookieHeader = cookieJar.join('; ');
+  await assertRole(`http://127.0.0.1:${serverPort}`, cookieHeader);
   const event = await wsChat({
     baseUrl: `http://127.0.0.1:${serverPort}`,
     wsPath: '/guest-ws',
