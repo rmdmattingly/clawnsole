@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026-02-02.3"
+VERSION="2026-02-02.4"
 
 REPO_URL="${CLAWNSOLE_REPO:-git@github.com:rmdmattingly/clawnsole.git}"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
@@ -30,13 +30,15 @@ prompt_password() {
   local pass2=""
   while true; do
     if [ -r /dev/tty ]; then
-      read -r -s -p "$label [$default]: " pass1 < /dev/tty || true
-      echo
+      printf "%s" "$label [$default]: " > /dev/tty
+      read -r -s pass1 < /dev/tty || true
+      printf "\n" > /dev/tty
       if [ -z "$pass1" ]; then
         pass1="$default"
       fi
-      read -r -s -p "Confirm $label: " pass2 < /dev/tty || true
-      echo
+      printf "%s" "Confirm $label: " > /dev/tty
+      read -r -s pass2 < /dev/tty || true
+      printf "\n" > /dev/tty
       if [ -z "$pass2" ]; then
         pass2="$default"
       fi

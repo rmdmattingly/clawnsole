@@ -21,11 +21,19 @@ sed "s|\$HOME|$HOME|g" "$PLIST_SRC" | \
   sed "s|__PORT__|$PORT|g" | \
   sed "s|__PATH__|$PATH_VALUE|g" > "$PLIST_DST"
 
+if ! plutil -p "$PLIST_DST" >/dev/null 2>&1; then
+  echo "LaunchAgent plist is invalid: $PLIST_DST"
+  exit 1
+fi
+
 USER_ID="$(id -u)"
 LABEL="ai.openclaw.clawnsole"
 
 launchctl bootout "gui/$USER_ID" "$PLIST_DST" >/dev/null 2>&1 || true
-launchctl bootstrap "gui/$USER_ID" "$PLIST_DST"
+if ! launchctl bootstrap "gui/$USER_ID" "$PLIST_DST"; then
+  echo "LaunchAgent bootstrap failed. Trying legacy load..."
+  launchctl load "$PLIST_DST" >/dev/null 2>&1 || true
+fi
 launchctl enable "gui/$USER_ID/$LABEL" >/dev/null 2>&1 || true
 launchctl kickstart -k "gui/$USER_ID/$LABEL" >/dev/null 2>&1 || true
 
