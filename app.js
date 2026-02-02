@@ -584,7 +584,7 @@ class GatewayClient {
           mode: 'webchat',
           instanceId: elements.deviceId.value.trim()
         },
-        role: roleState.role,
+        role: 'operator',
         scopes,
         caps: [],
         commands: [],
