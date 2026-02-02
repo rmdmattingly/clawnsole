@@ -20,7 +20,8 @@ const elements = {
   loginRole: document.getElementById('loginRole'),
   loginPassword: document.getElementById('loginPassword'),
   loginBtn: document.getElementById('loginBtn'),
-  loginError: document.getElementById('loginError')
+  loginError: document.getElementById('loginError'),
+  logoutBtn: document.getElementById('logoutBtn')
 };
 
 const storage = {
@@ -805,6 +806,17 @@ elements.loginPassword.addEventListener('keydown', (event) => {
     event.preventDefault();
     attemptLogin();
   }
+});
+
+elements.logoutBtn.addEventListener('click', async () => {
+  try {
+    await fetch('/auth/logout', { method: 'POST' });
+  } catch (err) {
+    // ignore logout errors
+  }
+  client.disconnect();
+  setRole('guest');
+  showLogin();
 });
 
 setFeedCollapsed(false);
