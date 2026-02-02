@@ -5,7 +5,9 @@ const WebSocket = require('ws');
 const { createProxyHandlers } = require('./proxy');
 
 const root = __dirname;
-const port = Number(process.env.PORT || 5173);
+const portRaw = process.env.PORT;
+const parsedPort = Number.parseInt(portRaw, 10);
+const port = Number.isFinite(parsedPort) ? parsedPort : 5173;
 const configPath = path.join(process.env.HOME || '', '.openclaw', 'openclaw.json');
 const clawnsoleConfigPath = path.join(process.env.HOME || '', '.openclaw', 'clawnsole.json');
 const uploadRoot = path.join(process.env.HOME || '', '.openclaw', 'clawnsole-uploads');
