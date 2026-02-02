@@ -21,12 +21,12 @@ sed "s|\$HOME|$HOME|g" "$PLIST_SRC" | \
   sed "s|__PORT__|$PORT|g" | \
   sed "s|__PATH__|$PATH_VALUE|g" > "$PLIST_DST"
 
-UID="$(id -u)"
+USER_ID="$(id -u)"
 LABEL="ai.openclaw.clawnsole"
 
-launchctl bootout "gui/$UID" "$PLIST_DST" >/dev/null 2>&1 || true
-launchctl bootstrap "gui/$UID" "$PLIST_DST"
-launchctl enable "gui/$UID/$LABEL" >/dev/null 2>&1 || true
-launchctl kickstart -k "gui/$UID/$LABEL" >/dev/null 2>&1 || true
+launchctl bootout "gui/$USER_ID" "$PLIST_DST" >/dev/null 2>&1 || true
+launchctl bootstrap "gui/$USER_ID" "$PLIST_DST"
+launchctl enable "gui/$USER_ID/$LABEL" >/dev/null 2>&1 || true
+launchctl kickstart -k "gui/$USER_ID/$LABEL" >/dev/null 2>&1 || true
 
 echo "LaunchAgent installed: $PLIST_DST (port $PORT)"
