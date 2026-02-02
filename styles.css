@@ -473,6 +473,87 @@ button:hover {
   white-space: pre-wrap;
 }
 
+.chat-text a {
+  color: var(--accent-2);
+  text-decoration: none;
+}
+
+.chat-text a:hover {
+  text-decoration: underline;
+}
+
+.chat-text pre {
+  background: rgba(8, 10, 14, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 10px 12px;
+  border-radius: 12px;
+  overflow-x: auto;
+}
+
+.chat-text code {
+  background: rgba(8, 10, 14, 0.6);
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.chat-text ul,
+.chat-text ol {
+  padding-left: 20px;
+  margin: 6px 0;
+}
+
+.chat-text img {
+  max-width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: block;
+  margin-top: 8px;
+}
+
+.chat-input-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attachment-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#fileInput {
+  display: none;
+}
+
+.attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attachment-pill {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.attachment-pill button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+
 .chat-input-row {
   display: grid;
   grid-template-columns: 1fr auto;

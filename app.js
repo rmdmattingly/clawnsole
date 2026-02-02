@@ -22,6 +22,10 @@ const elements = {
   loginPassword: document.getElementById('loginPassword'),
   loginBtn: document.getElementById('loginBtn'),
   loginError: document.getElementById('loginError'),
+  fileInput: document.getElementById('fileInput'),
+  attachBtn: document.getElementById('attachBtn'),
+  attachmentList: document.getElementById('attachmentList'),
+  attachmentStatus: document.getElementById('attachmentStatus'),
   logoutBtn: document.getElementById('logoutBtn')
 };
 
@@ -47,6 +51,10 @@ const uiState = {
   meta: {}
 };
 
+const attachmentState = {
+  files: []
+};
+
 function getSessionKey(role) {
   const deviceLabel = elements.deviceId.value.trim() || 'device';
   const kind = role === 'admin' ? 'admin' : 'guest';
@@ -56,6 +64,7 @@ function getSessionKey(role) {
 function setChatEnabled(enabled) {
   elements.chatInput.disabled = !enabled;
   elements.chatBtn.disabled = !enabled;
+  elements.attachBtn.disabled = !enabled;
   elements.chatInput.placeholder = enabled
     ? 'Message OpenClaw... (Press Enter to send)'
     : 'Disconnected — sign in to continue';
@@ -186,6 +195,73 @@ async function attemptLogin() {
   } catch (err) {
     showLogin('Login failed. Please retry.');
   }
+}
+
+function renderAttachments() {
+  if (!elements.attachmentList) return;
+  elements.attachmentList.innerHTML = '';
+  attachmentState.files.forEach((file, index) => {
+    const pill = document.createElement('div');
+    pill.className = 'attachment-pill';
+    const name = document.createElement('span');
+    name.textContent = file.name;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '✕';
+    remove.addEventListener('click', () => {
+      attachmentState.files.splice(index, 1);
+      renderAttachments();
+    });
+    pill.append(name, remove);
+    elements.attachmentList.appendChild(pill);
+  });
+}
+
+async function handleFileSelection(event) {
+  const files = Array.from(event.target.files || []);
+  const maxSize = 5 * 1024 * 1024;
+  const maxCount = 4;
+  elements.attachmentStatus.textContent = '';
+  for (const file of files) {
+    if (attachmentState.files.length >= maxCount) {
+      elements.attachmentStatus.textContent = 'Attachment limit reached.';
+      break;
+    }
+    if (file.size > maxSize) {
+      elements.attachmentStatus.textContent = `File too large: ${file.name}`;
+      continue;
+    }
+    const data = await file.arrayBuffer();
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(data)));
+    attachmentState.files.push({
+      name: file.name,
+      type: file.type || 'application/octet-stream',
+      size: file.size,
+      data: base64
+    });
+  }
+  event.target.value = '';
+  renderAttachments();
+}
+
+async function uploadAttachments() {
+  if (attachmentState.files.length === 0) return [];
+  elements.attachmentStatus.textContent = 'Uploading...';
+  const res = await fetch('/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ files: attachmentState.files })
+  });
+  if (!res.ok) {
+    elements.attachmentStatus.textContent = 'Upload failed.';
+    return [];
+  }
+  const data = await res.json();
+  attachmentState.files = [];
+  renderAttachments();
+  elements.attachmentStatus.textContent = '';
+  return Array.isArray(data.files) ? data.files : [];
 }
 function randomId() {
   return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -320,7 +396,7 @@ function addChatMessage({ role, text, runId, streaming = false, persist = true }
   meta.textContent = role === 'user' ? 'You' : 'OpenClaw';
   const body = document.createElement('div');
   body.className = 'chat-text';
-  body.textContent = text || '';
+  body.innerHTML = renderMarkdown(text || '');
   bubble.appendChild(meta);
   bubble.appendChild(body);
   elements.chatThread.appendChild(bubble);
@@ -342,7 +418,7 @@ function updateChatRun(runId, text, done) {
     addChatMessage({ role: 'assistant', text, runId, streaming: !done, persist: done });
     return;
   }
-  entry.body.textContent = text;
+  entry.body.innerHTML = renderMarkdown(text || '');
   if (entry.index === null || entry.index === undefined) {
     if (done || text) {
       entry.index = chatState.history.length;
@@ -358,6 +434,36 @@ function updateChatRun(runId, text, done) {
     chatState.runs.delete(runId);
     scrollToBottom(elements.chatThread);
   }
+}
+
+function escapeHtml(value) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderMarkdown(text) {
+  if (!text) return '';
+  let html = escapeHtml(text);
+
+  html = html.replace(/```([\s\S]*?)```/g, (match, code) => {
+    return `<pre><code>${code.replace(/^\n+|\n+$/g, '')}</code></pre>`;
+  });
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" />');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  html = html.replace(/\n- (.+)/g, '<ul><li>$1</li></ul>');
+  html = html.replace(/<\/ul>\n<ul>/g, '');
+  html = html.replace(/\n\d+\. (.+)/g, '<ol><li>$1</li></ol>');
+  html = html.replace(/<\/ol>\n<ol>/g, '');
+  html = html.replace(/\n/g, '<br />');
+
+  return html;
 }
 
 function ensureHiddenWelcome(role) {
@@ -775,6 +881,14 @@ elements.chatInput.addEventListener('keydown', (event) => {
   }
 });
 
+elements.attachBtn.addEventListener('click', () => {
+  elements.fileInput.click();
+});
+
+elements.fileInput.addEventListener('change', (event) => {
+  handleFileSelection(event);
+});
+
 function openSettings() {
   elements.settingsModal.classList.add('open');
   elements.settingsModal.setAttribute('aria-hidden', 'false');
@@ -836,7 +950,7 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeSettings();
 });
 
-function sendChat() {
+async function sendChat() {
   const message = elements.chatInput.value.trim();
   if (!message) return;
   if (!uiState.connected || !uiState.authed) {
@@ -867,13 +981,24 @@ function sendChat() {
     return;
   }
   const sessionKey = getSessionKey(roleState.channel);
+  const uploaded = await uploadAttachments();
+  let attachmentText = '';
+  if (uploaded.length > 0) {
+    const lines = uploaded.map((file) => {
+      if (file.type && file.type.startsWith('image/')) {
+        return `![${file.name}](${file.url})`;
+      }
+      return `[${file.name}](${file.url})`;
+    });
+    attachmentText = `\n\nAttachments:\n- ${lines.join('\n- ')}`;
+  }
   addChatMessage({ role: 'user', text: message });
   scrollState.pinned = true;
   scrollToBottom(elements.chatThread, true);
   triggerFiring(1.6, 3);
   client.request('chat.send', {
     sessionKey,
-    message,
+    message: `${message}${attachmentText}`,
     deliver: true,
     idempotencyKey: randomId()
   });

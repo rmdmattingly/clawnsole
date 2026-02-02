@@ -46,7 +46,15 @@
           <canvas id="pulseCanvas" class="flux-canvas"></canvas>
           <div class="chat-thread" id="chatThread"></div>
           <div class="chat-input-row">
-            <textarea id="chatInput" placeholder="Message OpenClaw... (Press Enter to send)"></textarea>
+            <div class="chat-input-stack">
+              <textarea id="chatInput" placeholder="Message OpenClaw... (Press Enter to send)"></textarea>
+              <div class="attachment-row">
+                <input id="fileInput" type="file" multiple />
+                <button id="attachBtn" type="button">Attach</button>
+                <div id="attachmentStatus" class="hint"></div>
+              </div>
+              <div id="attachmentList" class="attachment-list"></div>
+            </div>
             <button id="chatBtn" class="primary">Send</button>
           </div>
         </section>

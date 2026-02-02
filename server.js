@@ -8,6 +8,7 @@ const root = __dirname;
 const port = Number(process.env.PORT || 5173);
 const configPath = path.join(process.env.HOME || '', '.openclaw', 'openclaw.json');
 const clawnsoleConfigPath = path.join(process.env.HOME || '', '.openclaw', 'clawnsole.json');
+const uploadRoot = path.join(process.env.HOME || '', '.openclaw', 'clawnsole-uploads');
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -76,6 +77,11 @@ function writeClawnsoleConfig(update) {
   const dir = path.dirname(clawnsoleConfigPath);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(clawnsoleConfigPath, JSON.stringify(merged, null, 2) + '\n', 'utf8');
+}
+
+function safeFilename(name) {
+  const cleaned = name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return cleaned || 'upload';
 }
 
 function parseCookies(header) {
@@ -197,6 +203,51 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.url.startsWith('/upload')) {
+    if (!requireAuth(req, res)) return;
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: 'method_not_allowed' });
+      return;
+    }
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk.toString();
+    });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const files = Array.isArray(payload.files) ? payload.files : [];
+        const maxSize = 5 * 1024 * 1024;
+        const stored = [];
+        fs.mkdirSync(uploadRoot, { recursive: true });
+        for (const file of files.slice(0, 4)) {
+          const name = safeFilename(String(file.name || 'upload'));
+          const type = String(file.type || 'application/octet-stream');
+          const data = String(file.data || '');
+          const buffer = Buffer.from(data, 'base64');
+          if (buffer.length > maxSize) {
+            continue;
+          }
+          const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          const dir = path.join(uploadRoot, id);
+          fs.mkdirSync(dir, { recursive: true });
+          const filePath = path.join(dir, name);
+          fs.writeFileSync(filePath, buffer);
+          stored.push({
+            name,
+            type,
+            size: buffer.length,
+            url: `/uploads/${id}/${encodeURIComponent(name)}`
+          });
+        }
+        sendJson(res, 200, { files: stored });
+      } catch (err) {
+        sendJson(res, 400, { error: 'invalid_request' });
+      }
+    });
+    return;
+  }
+
   if (req.url.startsWith('/auth/logout')) {
     res.setHeader('Set-Cookie', [
       'clawnsole_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax',
@@ -233,6 +284,28 @@ const server = http.createServer((req, res) => {
       } catch (err) {
         sendJson(res, 400, { error: 'invalid_request' });
       }
+    });
+    return;
+  }
+
+  if (req.url.startsWith('/uploads/')) {
+    if (!requireAuth(req, res)) return;
+    const uploadPath = req.url.replace('/uploads/', '');
+    const filePath = path.join(uploadRoot, uploadPath);
+    if (!filePath.startsWith(uploadRoot)) {
+      res.writeHead(403);
+      res.end('Forbidden');
+      return;
+    }
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        res.writeHead(404);
+        res.end('Not found');
+        return;
+      }
+      const ext = path.extname(filePath);
+      res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'application/octet-stream' });
+      res.end(data);
     });
     return;
   }
