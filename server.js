@@ -45,10 +45,19 @@ function readUiPasswords() {
     const cfg = JSON.parse(raw);
     const adminPassword = cfg?.adminPassword || 'admin';
     const guestPassword = cfg?.guestPassword || 'guest';
+    const guestPrompt =
+      cfg?.guestPrompt ||
+      'Guest mode: You are assisting a guest. Do not access or summarize private data (email, calendar, files). Do not assume identity; ask how you can help. You may assist with general questions and basic home automation.';
     const authVersion = cfg?.authVersion || '';
-    return { adminPassword, guestPassword, authVersion };
+    return { adminPassword, guestPassword, guestPrompt, authVersion };
   } catch (err) {
-    return { adminPassword: 'admin', guestPassword: 'guest', authVersion: '' };
+    return {
+      adminPassword: 'admin',
+      guestPassword: 'guest',
+      guestPrompt:
+        'Guest mode: You are assisting a guest. Do not access or summarize private data (email, calendar, files). Do not assume identity; ask how you can help. You may assist with general questions and basic home automation.',
+      authVersion: ''
+    };
   }
 }
 
@@ -227,7 +236,8 @@ const { handleAdminProxy, handleGuestProxy } = createProxyHandlers({
   getRoleFromCookies,
   readToken,
   gatewayWsUrl,
-  heartbeatMs: 2000
+  heartbeatMs: 2000,
+  getGuestPrompt: () => readUiPasswords().guestPrompt
 });
 
 const wss = new WebSocket.Server({ noServer: true });

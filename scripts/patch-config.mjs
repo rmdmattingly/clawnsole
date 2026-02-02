@@ -25,10 +25,15 @@ const cfg = readConfig();
 
 const adminPassword = process.env.CLAWNSOLE_ADMIN_PASSWORD || cfg.adminPassword || "admin";
 const guestPassword = process.env.CLAWNSOLE_GUEST_PASSWORD || cfg.guestPassword || "guest";
+const guestPrompt =
+  process.env.CLAWNSOLE_GUEST_PROMPT ||
+  cfg.guestPrompt ||
+  "Guest mode: You are assisting a guest. Do not access or summarize private data (email, calendar, files). Do not assume identity; ask how you can help. You may assist with general questions and basic home automation.";
 const authVersion = process.env.CLAWNSOLE_AUTH_VERSION || cfg.authVersion || "";
 
 cfg.adminPassword = adminPassword;
 cfg.guestPassword = guestPassword;
+cfg.guestPrompt = guestPrompt;
 if (authVersion) {
   cfg.authVersion = authVersion;
 }

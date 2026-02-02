@@ -68,7 +68,8 @@ async function run() {
     getRoleFromCookies,
     readToken,
     gatewayWsUrl,
-    heartbeatMs: 25
+    heartbeatMs: 25,
+    getGuestPrompt: () => 'guest prompt'
   });
 
   const guestClient = new FakeSocket();
@@ -84,12 +85,13 @@ async function run() {
       type: 'req',
       id: 'connect-1',
       method: 'connect',
-      params: { client: { id: 'test' } }
+      params: { client: { id: 'test', instanceId: 'device-1' } }
     })
   );
   const guestConnect = JSON.parse(guestUpstream.sent[0]);
   assert.equal(guestConnect.params.auth.token, tokenValue);
   assert.ok(guestConnect.params.scopes.includes('operator.write'));
+  assert.equal(guestConnect.params.role, 'operator');
 
   guestClient.emit(
     'message',
@@ -104,12 +106,30 @@ async function run() {
   assert.equal(forbidden.ok, false);
   assert.equal(forbidden.error.code, 'FORBIDDEN');
 
+  guestClient.emit(
+    'message',
+    JSON.stringify({
+      type: 'req',
+      id: 'chat-1',
+      method: 'chat.send',
+      params: { sessionKey: 'override-me', message: 'hi' }
+    })
+  );
+  const guestChat = JSON.parse(guestUpstream.sent[1]);
+  assert.equal(guestChat.params.sessionKey, 'agent:main:guest:device-1');
+
   guestUpstream.emit(
     'message',
     JSON.stringify({ type: 'event', event: 'connect.challenge', payload: { foo: 'bar' } })
   );
   const forwarded = parseLastJson(guestClient.sent);
   assert.equal(forwarded.event, 'connect.challenge');
+
+  guestUpstream.emit('message', JSON.stringify({ type: 'res', id: 'connect-1', ok: true, payload: {} }));
+  const injected = JSON.parse(guestUpstream.sent[2]);
+  assert.equal(injected.method, 'chat.inject');
+  assert.equal(injected.params.sessionKey, 'agent:main:guest:device-1');
+  assert.equal(injected.params.message, 'guest prompt');
 
   await delay(40);
   const activity = guestClient.sent.map((item) => JSON.parse(item)).find((msg) => msg.event === 'activity');
