@@ -685,6 +685,13 @@ class GatewayClient {
     if (roleState.channel !== 'guest') return;
     if (roleState.guestPolicyInjected) return;
     roleState.guestPolicyInjected = true;
+    this.request('sessions.resolve', {
+      key: 'agent:main:guest'
+    }).then((res) => {
+      if (!res?.ok) {
+        this.request('sessions.reset', { key: 'agent:main:guest' });
+      }
+    });
     this.request('chat.inject', {
       sessionKey: 'agent:main:guest',
       message:
@@ -761,7 +768,7 @@ function sendChat() {
   client.request('chat.send', {
     sessionKey,
     message,
-    deliver: false,
+    deliver: true,
     idempotencyKey: randomId()
   });
   elements.chatInput.value = '';
