@@ -28,9 +28,10 @@ function readUiPasswords() {
     const cfg = JSON.parse(raw);
     const adminPassword = cfg?.ui?.clawnsole?.adminPassword || cfg?.ui?.clawnsole?.password || 'admin';
     const guestPassword = cfg?.ui?.clawnsole?.guestPassword || 'guest';
-    return { adminPassword, guestPassword };
+    const authVersion = cfg?.ui?.clawnsole?.authVersion || '';
+    return { adminPassword, guestPassword, authVersion };
   } catch (err) {
-    return { adminPassword: 'admin', guestPassword: 'guest' };
+    return { adminPassword: 'admin', guestPassword: 'guest', authVersion: '' };
   }
 }
 
@@ -54,19 +55,19 @@ function getRoleCookie(req) {
   return cookies.clawnsole_role || '';
 }
 
-function encodeAuthCookie(password) {
-  return Buffer.from(password, 'utf8').toString('base64');
+function encodeAuthCookie(password, version) {
+  return Buffer.from(`${password}::${version || ''}`, 'utf8').toString('base64');
 }
 
 function getRoleFromCookies(req) {
-  const { adminPassword, guestPassword } = readUiPasswords();
+  const { adminPassword, guestPassword, authVersion } = readUiPasswords();
   if (!adminPassword && !guestPassword) return 'admin';
   const cookie = getAuthCookie(req);
   if (cookie) {
-    if (adminPassword && cookie === encodeAuthCookie(adminPassword)) {
+    if (adminPassword && cookie === encodeAuthCookie(adminPassword, authVersion)) {
       return getRoleCookie(req) === 'guest' ? 'guest' : 'admin';
     }
-    if (guestPassword && cookie === encodeAuthCookie(guestPassword)) {
+    if (guestPassword && cookie === encodeAuthCookie(guestPassword, authVersion)) {
       return 'guest';
     }
   }
@@ -125,7 +126,7 @@ const server = http.createServer((req, res) => {
         const payload = JSON.parse(body || '{}');
         const role = payload.role === 'admin' ? 'admin' : 'guest';
         const password = String(payload.password || '');
-        const { adminPassword, guestPassword } = readUiPasswords();
+        const { adminPassword, guestPassword, authVersion } = readUiPasswords();
         const ok =
           (role === 'admin' && password === adminPassword) ||
           (role === 'guest' && password === guestPassword);
@@ -133,7 +134,7 @@ const server = http.createServer((req, res) => {
           sendJson(res, 401, { error: 'invalid_credentials' });
           return;
         }
-        const token = encodeAuthCookie(role === 'admin' ? adminPassword : guestPassword);
+        const token = encodeAuthCookie(role === 'admin' ? adminPassword : guestPassword, authVersion);
         res.setHeader('Set-Cookie', [
           `clawnsole_auth=${token}; Path=/; HttpOnly; SameSite=Strict`,
           `clawnsole_role=${role}; Path=/; SameSite=Strict`

@@ -32,8 +32,11 @@ GUEST_PASS="${GUEST_PASS:-guest}"
 read -r -p "Port to run Clawnsole on [5173]: " PORT
 PORT="${PORT:-5173}"
 
+AUTH_VERSION="$(date +%s)"
+
 if command -v node >/dev/null 2>&1; then
   CLAWNSOLE_ADMIN_PASSWORD="$ADMIN_PASS" CLAWNSOLE_GUEST_PASSWORD="$GUEST_PASS" \
+  CLAWNSOLE_AUTH_VERSION="$AUTH_VERSION" \
     node "$INSTALL_DIR/scripts/patch-config.mjs"
 else
   echo "Node.js is required. Please install Node 18+ and re-run."

@@ -27,9 +27,13 @@ cfg.ui.clawnsole ||= {};
 
 const adminPassword = process.env.CLAWNSOLE_ADMIN_PASSWORD || cfg.ui.clawnsole.adminPassword || "admin";
 const guestPassword = process.env.CLAWNSOLE_GUEST_PASSWORD || cfg.ui.clawnsole.guestPassword || "guest";
+const authVersion = process.env.CLAWNSOLE_AUTH_VERSION || cfg.ui.clawnsole.authVersion || "";
 
 cfg.ui.clawnsole.adminPassword = adminPassword;
 cfg.ui.clawnsole.guestPassword = guestPassword;
+if (authVersion) {
+  cfg.ui.clawnsole.authVersion = authVersion;
+}
 
 if (process.env.CLAWNSOLE_AUTO_UPDATE) {
   cfg.ui.clawnsole.autoUpdate = true;
