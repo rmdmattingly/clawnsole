@@ -907,5 +907,3 @@ elements.logoutBtn.addEventListener('click', async () => {
   setRole('guest');
   showLogin();
 });
-
-setFeedCollapsed(false);
