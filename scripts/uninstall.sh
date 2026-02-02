@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026-02-02.2"
+VERSION="2026-02-02.3"
 
 echo "Clawnsole uninstall ${VERSION}"
 
