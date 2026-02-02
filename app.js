@@ -538,9 +538,12 @@ class GatewayClient {
   }
 
   async connect() {
-    const rawUrl =
-      roleState.channel === 'guest' && uiState.meta.guestWsUrl
-        ? uiState.meta.guestWsUrl
+    const usingGuestProxy = roleState.channel === 'guest' && uiState.meta.guestWsUrl;
+    const usingAdminProxy = roleState.channel === 'admin' && uiState.meta.adminWsUrl;
+    const rawUrl = usingGuestProxy
+      ? uiState.meta.guestWsUrl
+      : usingAdminProxy
+        ? uiState.meta.adminWsUrl
         : elements.wsUrl.value.trim();
     const url = resolveWsUrl(rawUrl);
     if (!url) return;
@@ -549,8 +552,8 @@ class GatewayClient {
       this.disconnect();
     }
 
-    const usingGuestProxy = roleState.channel === 'guest' && uiState.meta.guestWsUrl;
-    if (!usingGuestProxy) {
+    const usingProxy = usingGuestProxy || usingAdminProxy;
+    if (!usingProxy) {
       if (!cachedToken) {
         this.setStatus('connecting', 'fetching token...');
         await fetchToken();

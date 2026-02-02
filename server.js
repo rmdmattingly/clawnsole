@@ -127,6 +127,7 @@ const server = http.createServer((req, res) => {
     const port = readGatewayPort();
     sendJson(res, 200, {
       wsUrl: gatewayWsUrl(),
+      adminWsUrl: '/admin-ws',
       guestWsUrl: '/guest-ws',
       port
     });
@@ -229,6 +230,53 @@ const guestAllowedMethods = new Set([
   'sessions.reset'
 ]);
 
+function handleAdminProxy(clientSocket, req) {
+  const role = getRoleFromCookies(req);
+  if (role !== 'admin') {
+    clientSocket.close();
+    return;
+  }
+
+  const { token } = readToken();
+  const upstream = new WebSocket(gatewayWsUrl());
+
+  upstream.on('open', () => {
+    clientSocket.on('message', (data) => {
+      let frame;
+      try {
+        frame = JSON.parse(String(data));
+      } catch {
+        return;
+      }
+      if (frame?.type !== 'req') return;
+      if (frame.method === 'connect') {
+        frame.params = frame.params || {};
+        frame.params.auth = { token };
+        frame.params.scopes = frame.params.scopes || ['operator.read', 'operator.write'];
+        frame.params.role = frame.params.role || 'operator';
+      }
+      upstream.send(JSON.stringify(frame));
+    });
+  });
+
+  upstream.on('message', (data) => {
+    clientSocket.send(String(data));
+  });
+
+  const closeBoth = () => {
+    try {
+      upstream.close();
+    } catch {}
+    try {
+      clientSocket.close();
+    } catch {}
+  };
+
+  clientSocket.on('close', closeBoth);
+  upstream.on('close', closeBoth);
+  upstream.on('error', closeBoth);
+}
+
 function handleGuestProxy(clientSocket, req) {
   const role = getRoleFromCookies(req);
   if (role !== 'guest') {
@@ -303,6 +351,10 @@ function handleGuestProxy(clientSocket, req) {
 const wss = new WebSocket.Server({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
+  if (req.url === '/admin-ws') {
+    wss.handleUpgrade(req, socket, head, (ws) => handleAdminProxy(ws, req));
+    return;
+  }
   if (req.url === '/guest-ws') {
     wss.handleUpgrade(req, socket, head, (ws) => handleGuestProxy(ws, req));
     return;
