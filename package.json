@@ -1,0 +1,10 @@
+{
+  "name": "clawnsole",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Interactive UI for OpenClaw live thinking and activity",
+  "scripts": {
+    "dev": "node server.js",
+    "serve": "node server.js"
+  }
+}

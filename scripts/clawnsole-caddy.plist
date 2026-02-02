@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.openclaw.clawnsole-caddy</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/caddy</string>
+    <string>run</string>
+    <string>--config</string>
+    <string>$HOME/.openclaw/apps/clawnsole/Caddyfile</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>$HOME/.openclaw/logs/clawnsole.caddy.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>$HOME/.openclaw/logs/clawnsole.caddy.err.log</string>
+</dict>
+</plist>

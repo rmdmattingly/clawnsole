@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_URL="${CLAWNSOLE_REPO:-git@github.com:rmdmattingly/clawnsole.git}"
+OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
+INSTALL_DIR="${CLAWNSOLE_DIR:-$OPENCLAW_HOME/apps/clawnsole}"
+
+mkdir -p "$(dirname "$INSTALL_DIR")"
+
+if [ -d "$INSTALL_DIR/.git" ]; then
+  echo "Clawnsole already exists. Updating..."
+  git -C "$INSTALL_DIR" pull --ff-only
+else
+  echo "Cloning Clawnsole into $INSTALL_DIR"
+  git clone "$REPO_URL" "$INSTALL_DIR"
+fi
+
+read -r -p "Set admin password [admin]: " ADMIN_PASS
+read -r -p "Set guest password [guest]: " GUEST_PASS
+ADMIN_PASS="${ADMIN_PASS:-admin}"
+GUEST_PASS="${GUEST_PASS:-guest}"
+
+if command -v node >/dev/null 2>&1; then
+  CLAWNSOLE_ADMIN_PASSWORD="$ADMIN_PASS" CLAWNSOLE_GUEST_PASSWORD="$GUEST_PASS" \
+    node "$INSTALL_DIR/scripts/patch-config.mjs"
+else
+  echo "Node.js is required. Please install Node 18+ and re-run."
+  exit 1
+fi
+
+read -r -p "Install Clawnsole LaunchAgent (auto-start on login)? [Y/n]: " INSTALL_AGENT
+INSTALL_AGENT="${INSTALL_AGENT:-Y}"
+if [[ "$INSTALL_AGENT" =~ ^[Yy]$ ]]; then
+  bash "$INSTALL_DIR/scripts/install-launchagent.sh"
+fi
+
+read -r -p "Enable automatic updates? [y/N]: " INSTALL_UPDATES
+INSTALL_UPDATES="${INSTALL_UPDATES:-N}"
+if [[ "$INSTALL_UPDATES" =~ ^[Yy]$ ]]; then
+  read -r -p "Update interval in hours [6]: " UPDATE_HOURS
+  UPDATE_HOURS="${UPDATE_HOURS:-6}"
+  UPDATE_SECONDS=$((UPDATE_HOURS * 3600))
+  CLAWNSOLE_UPDATE_INTERVAL_SECONDS="$UPDATE_SECONDS" \
+    bash "$INSTALL_DIR/scripts/install-update-agent.sh"
+  if command -v node >/dev/null 2>&1; then
+    CLAWNSOLE_AUTO_UPDATE="true" CLAWNSOLE_UPDATE_INTERVAL_SECONDS="$UPDATE_SECONDS" \
+      node "$INSTALL_DIR/scripts/patch-config.mjs"
+  fi
+fi
+
+read -r -p "Expose Clawnsole at http://clawnsole.local (requires sudo)? [y/N]: " INSTALL_LOCAL
+INSTALL_LOCAL="${INSTALL_LOCAL:-N}"
+if [[ "$INSTALL_LOCAL" =~ ^[Yy]$ ]]; then
+  bash "$INSTALL_DIR/scripts/install-local-domain.sh"
+fi
+
+cat <<OUT
+
+Clawnsole installed.
+
+Run locally:
+  cd "$INSTALL_DIR"
+  npm run dev
+
+Then open http://localhost:5173
+OUT
