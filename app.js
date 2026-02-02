@@ -84,7 +84,7 @@ function resolveWsUrl(raw) {
 
 async function fetchRole() {
   try {
-    const res = await fetch('/auth/role');
+    const res = await fetch('/auth/role', { credentials: 'include' });
     if (!res.ok) return null;
     const data = await res.json();
     return data.role === 'admin' ? 'admin' : 'guest';
@@ -95,7 +95,7 @@ async function fetchRole() {
 
 async function fetchMeta() {
   try {
-    const res = await fetch('/meta');
+    const res = await fetch('/meta', { credentials: 'include' });
     if (!res.ok) return null;
     const data = await res.json();
     if (data?.wsUrl) {
@@ -172,7 +172,8 @@ async function attemptLogin() {
     const res = await fetch('/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role, password })
+      body: JSON.stringify({ role, password }),
+      credentials: 'include'
     });
     if (!res.ok) {
       showLogin('Invalid password. Try again.');

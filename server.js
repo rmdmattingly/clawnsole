@@ -116,7 +116,7 @@ const server = http.createServer((req, res) => {
   if (req.url.startsWith('/auth/role')) {
     const role = getRoleFromCookies(req);
     if (!role) {
-      sendJson(res, 401, { error: 'unauthorized' });
+      sendJson(res, 200, { role: null });
       return;
     }
     sendJson(res, 200, { role });
@@ -136,8 +136,8 @@ const server = http.createServer((req, res) => {
 
   if (req.url.startsWith('/auth/logout')) {
     res.setHeader('Set-Cookie', [
-      'clawnsole_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict',
-      'clawnsole_role=; Path=/; Max-Age=0; SameSite=Strict'
+      'clawnsole_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax',
+      'clawnsole_role=; Path=/; Max-Age=0; SameSite=Lax'
     ]);
     sendJson(res, 200, { ok: true });
     return;
@@ -163,8 +163,8 @@ const server = http.createServer((req, res) => {
         }
         const token = encodeAuthCookie(role === 'admin' ? adminPassword : guestPassword, authVersion);
         res.setHeader('Set-Cookie', [
-          `clawnsole_auth=${token}; Path=/; HttpOnly; SameSite=Strict`,
-          `clawnsole_role=${role}; Path=/; SameSite=Strict`
+          `clawnsole_auth=${token}; Path=/; HttpOnly; SameSite=Lax`,
+          `clawnsole_role=${role}; Path=/; SameSite=Lax`
         ]);
         sendJson(res, 200, { ok: true, role });
       } catch (err) {
