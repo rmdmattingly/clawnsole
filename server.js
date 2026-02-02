@@ -276,8 +276,12 @@ function handleGuestProxy(clientSocket, req) {
     } catch {
       return;
     }
-    if (frame?.type === 'event' && frame?.event !== 'chat') {
-      return;
+    if (frame?.type === 'event') {
+      const eventName = String(frame.event || '');
+      const allowed = eventName === 'chat' || eventName.startsWith('connect.');
+      if (!allowed) {
+        return;
+      }
     }
     clientSocket.send(JSON.stringify(frame));
   });
