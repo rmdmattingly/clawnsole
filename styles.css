@@ -486,3 +486,122 @@ button:hover {
   border: 1px solid rgba(255, 255, 255, 0.08);
   flex: 0 0 auto;
 }
+
+@media (max-width: 1024px) {
+  .app {
+    padding: 18px;
+  }
+
+  .chat-panel {
+    padding: 16px;
+  }
+
+  .chat-bubble {
+    max-width: 88%;
+  }
+}
+
+@media (max-width: 768px) {
+  body {
+    overflow-y: hidden;
+  }
+
+  .app {
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .chat-page {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .chat-panel {
+    border-radius: 18px;
+    padding: 14px;
+  }
+
+  .chat-thread {
+    padding: 8px 2px 12px;
+  }
+
+  .chat-input-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 12px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .chat-input-row button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .app {
+    padding: 10px;
+  }
+
+  .brand {
+    gap: 10px;
+  }
+
+  .brand.compact h1 {
+    font-size: 18px;
+  }
+
+  .status-pill {
+    font-size: 10px;
+  }
+
+  .role-pill {
+    font-size: 10px;
+  }
+
+  .icon-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .chat-text {
+    font-size: 14px;
+  }
+
+  .chat-bubble {
+    max-width: 100%;
+    padding: 10px 12px;
+  }
+
+  textarea {
+    min-height: 64px;
+  }
+}
+
+@media (max-width: 360px) {
+  .topbar-actions {
+    gap: 6px;
+  }
+
+  .channel-switch select {
+    font-size: 11px;
+    padding: 6px 8px;
+  }
+
+  .status-pill,
+  .role-pill {
+    padding: 5px 10px;
+  }
+}
