@@ -3,10 +3,16 @@ set -euo pipefail
 
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 INSTALL_DIR="${CLAWNSOLE_DIR:-$OPENCLAW_HOME/apps/clawnsole}"
-PORT="${CLAWNSOLE_PORT:-5173}"
+PORT_RAW="${CLAWNSOLE_PORT:-5173}"
 PLIST_SRC="$INSTALL_DIR/scripts/clawnsole.launchagent.plist"
 PLIST_DST="$HOME/Library/LaunchAgents/ai.openclaw.clawnsole.plist"
 PATH_VALUE="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+
+if [[ "$PORT_RAW" =~ ^[0-9]+$ ]]; then
+  PORT="$PORT_RAW"
+else
+  PORT="5173"
+fi
 
 mkdir -p "$HOME/Library/LaunchAgents"
 mkdir -p "$OPENCLAW_HOME/logs"

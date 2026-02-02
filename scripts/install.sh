@@ -29,8 +29,12 @@ read -r -p "Set guest password [guest]: " GUEST_PASS
 ADMIN_PASS="${ADMIN_PASS:-admin}"
 GUEST_PASS="${GUEST_PASS:-guest}"
 
-read -r -p "Port to run Clawnsole on [5173]: " PORT
-PORT="${PORT:-5173}"
+read -r -p "Port to run Clawnsole on [5173]: " PORT_INPUT
+if [[ "$PORT_INPUT" =~ ^[0-9]+$ ]]; then
+  PORT_VALUE="$PORT_INPUT"
+else
+  PORT_VALUE="5173"
+fi
 
 AUTH_VERSION="$(date +%s)"
 
@@ -44,7 +48,7 @@ else
 fi
 
 echo "Starting Clawnsole on login..."
-CLAWNSOLE_PORT="$PORT" bash "$INSTALL_DIR/scripts/install-launchagent.sh"
+CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/install-launchagent.sh"
 
 read -r -p "Enable automatic updates? [y/N]: " INSTALL_UPDATES
 INSTALL_UPDATES="${INSTALL_UPDATES:-N}"
@@ -61,6 +65,6 @@ if [[ "$INSTALL_UPDATES" =~ ^[Yy]$ ]]; then
 fi
 
 echo "Setting up http://clawnsole.local (requires sudo)..."
-CLAWNSOLE_PORT="$PORT" bash "$INSTALL_DIR/scripts/install-local-domain.sh"
+CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/install-local-domain.sh"
 
-printf "\nClawnsole installed.\n\nOpen:\n  http://clawnsole.local:%s\n" "$PORT"
+printf "\nClawnsole installed.\n\nOpen:\n  http://clawnsole.local:%s\n" "$PORT_VALUE"
