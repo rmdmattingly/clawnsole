@@ -64,9 +64,6 @@ cat <<OUT
 
 Clawnsole installed.
 
-Run locally:
-  cd "$INSTALL_DIR"
-  npm run dev
-
-Then open http://localhost:5173
+Open:
+  http://clawnsole.local
 OUT
