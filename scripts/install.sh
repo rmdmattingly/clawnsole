@@ -1,13 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026-02-02.1"
+VERSION="2026-02-02.2"
 
 REPO_URL="${CLAWNSOLE_REPO:-git@github.com:rmdmattingly/clawnsole.git}"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 INSTALL_DIR="${CLAWNSOLE_DIR:-$OPENCLAW_HOME/apps/clawnsole}"
 
 echo "Clawnsole installer ${VERSION}"
+
+prompt_value() {
+  local message="$1"
+  local default="$2"
+  local reply=""
+  if [ -r /dev/tty ]; then
+    read -r -p "$message" reply < /dev/tty || true
+  fi
+  if [ -z "$reply" ]; then
+    printf '%s' "$default"
+  else
+    printf '%s' "$reply"
+  fi
+}
+
+prompt_yes_no() {
+  local message="$1"
+  local default="$2"
+  local reply=""
+  if [ -r /dev/tty ]; then
+    read -r -p "$message" reply < /dev/tty || true
+  fi
+  reply="${reply:-$default}"
+  case "$reply" in
+    [Yy]*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 if [ "${1:-}" = "--uninstall" ]; then
   if [ -x "$INSTALL_DIR/scripts/uninstall.sh" ]; then
@@ -28,12 +56,10 @@ else
   git clone "$REPO_URL" "$INSTALL_DIR"
 fi
 
-read -r -p "Set admin password [admin]: " ADMIN_PASS
-read -r -p "Set guest password [guest]: " GUEST_PASS
-ADMIN_PASS="${ADMIN_PASS:-admin}"
-GUEST_PASS="${GUEST_PASS:-guest}"
+ADMIN_PASS="$(prompt_value "Set admin password [admin]: " "admin")"
+GUEST_PASS="$(prompt_value "Set guest password [guest]: " "guest")"
 
-read -r -p "Port to run Clawnsole on [5173]: " PORT_INPUT
+PORT_INPUT="$(prompt_value "Port to run Clawnsole on [5173]: " "5173")"
 case "$PORT_INPUT" in
   ''|*[!0-9]*) PORT_VALUE="5173" ;;
   *) PORT_VALUE="$PORT_INPUT" ;;
@@ -59,25 +85,19 @@ CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/ensure-running.sh" || tr
 # Install watchdog to keep it running after gateway restarts
 CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/install-watchdog.sh"
 
-read -r -p "Enable automatic updates? [y/N]: " INSTALL_UPDATES
-INSTALL_UPDATES="${INSTALL_UPDATES:-N}"
-case "$INSTALL_UPDATES" in
-  [Yy]*)
-    read -r -p "Update interval in hours [6]: " UPDATE_HOURS
-    case "$UPDATE_HOURS" in
-      ''|*[!0-9]*) UPDATE_HOURS="6" ;;
-    esac
-    UPDATE_SECONDS=$((UPDATE_HOURS * 3600))
-    CLAWNSOLE_UPDATE_INTERVAL_SECONDS="$UPDATE_SECONDS" \
-      bash "$INSTALL_DIR/scripts/install-update-agent.sh"
-    if command -v node >/dev/null 2>&1; then
-      CLAWNSOLE_AUTO_UPDATE="true" CLAWNSOLE_UPDATE_INTERVAL_SECONDS="$UPDATE_SECONDS" \
-        node "$INSTALL_DIR/scripts/patch-config.mjs"
-    fi
-    ;;
-  *)
-    ;;
-esac
+if prompt_yes_no "Enable automatic updates? [y/N]: " "N"; then
+  UPDATE_HOURS="$(prompt_value "Update interval in hours [6]: " "6")"
+  case "$UPDATE_HOURS" in
+    ''|*[!0-9]*) UPDATE_HOURS="6" ;;
+  esac
+  UPDATE_SECONDS=$((UPDATE_HOURS * 3600))
+  CLAWNSOLE_UPDATE_INTERVAL_SECONDS="$UPDATE_SECONDS" \
+    bash "$INSTALL_DIR/scripts/install-update-agent.sh"
+  if command -v node >/dev/null 2>&1; then
+    CLAWNSOLE_AUTO_UPDATE="true" CLAWNSOLE_UPDATE_INTERVAL_SECONDS="$UPDATE_SECONDS" \
+      node "$INSTALL_DIR/scripts/patch-config.mjs"
+  fi
+fi
 
 echo "Setting up http://clawnsole.local (requires sudo)..."
 CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/install-local-domain.sh"

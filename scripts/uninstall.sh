@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026-02-02.1"
+VERSION="2026-02-02.2"
 
 echo "Clawnsole uninstall ${VERSION}"
 
@@ -12,6 +12,20 @@ PLIST_AGENT="$HOME/Library/LaunchAgents/ai.openclaw.clawnsole.plist"
 PLIST_UPDATER="$HOME/Library/LaunchAgents/ai.openclaw.clawnsole-updater.plist"
 PLIST_WATCHDOG="$HOME/Library/LaunchAgents/ai.openclaw.clawnsole-watchdog.plist"
 PLIST_DAEMON="/Library/LaunchDaemons/ai.openclaw.clawnsole-caddy.plist"
+
+prompt_yes_no() {
+  local message="$1"
+  local default="$2"
+  local reply=""
+  if [ -r /dev/tty ]; then
+    read -r -p "$message" reply < /dev/tty || true
+  fi
+  reply="${reply:-$default}"
+  case "$reply" in
+    [Yy]*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 launchctl unload "$PLIST_AGENT" >/dev/null 2>&1 || true
 launchctl unload "$PLIST_UPDATER" >/dev/null 2>&1 || true
@@ -55,9 +69,7 @@ if [ -f "$STATE_PATH" ]; then
   fi
 
   if [ "$CADDY_INSTALLED" = "true" ]; then
-    read -r -p "Uninstall Caddy (installed by Clawnsole)? [y/N]: " REMOVE_CADDY
-    REMOVE_CADDY="${REMOVE_CADDY:-N}"
-    if [[ "$REMOVE_CADDY" =~ ^[Yy]$ ]]; then
+    if prompt_yes_no "Uninstall Caddy (installed by Clawnsole)? [y/N]: " "N"; then
       brew uninstall caddy || true
     fi
   fi
