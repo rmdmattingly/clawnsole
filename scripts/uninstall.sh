@@ -59,15 +59,7 @@ if [ -f "$STATE_PATH" ]; then
   fi
 fi
 
-if [ "${CLAWNSOLE_KEEP_FILES:-}" != "1" ]; then
-  rm -rf "$INSTALL_DIR"
-  rm -f "$STATE_PATH"
-else
-  read -r -p "Remove Clawnsole files at $INSTALL_DIR? [y/N]: " REMOVE_FILES
-  REMOVE_FILES="${REMOVE_FILES:-N}"
-  if [[ "$REMOVE_FILES" =~ ^[Yy]$ ]]; then
-    rm -rf "$INSTALL_DIR"
-  fi
-fi
+rm -rf "$INSTALL_DIR"
+rm -f "$STATE_PATH"
 
 echo "Clawnsole uninstall complete."
