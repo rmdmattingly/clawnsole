@@ -5,7 +5,8 @@
   "description": "Interactive UI for OpenClaw live thinking and activity",
   "scripts": {
     "dev": "node server.js",
-    "serve": "node server.js"
+    "serve": "node server.js",
+    "dev:sync": "bash scripts/dev-sync.sh"
   },
   "dependencies": {
     "ws": "^8.18.0"
