@@ -734,15 +734,17 @@ class GatewayClient {
     if (roleState.channel !== 'guest') return;
     if (roleState.guestPolicyInjected) return;
     roleState.guestPolicyInjected = true;
+    const deviceLabel = elements.deviceId.value.trim() || 'device';
+    const sessionKey = `agent:main:guest:${deviceLabel}`;
     this.request('sessions.resolve', {
-      key: 'agent:main:guest'
+      key: sessionKey
     }).then((res) => {
       if (!res?.ok) {
-        this.request('sessions.reset', { key: 'agent:main:guest' });
+        this.request('sessions.reset', { key: sessionKey });
       }
     });
     this.request('chat.inject', {
-      sessionKey: 'agent:main:guest',
+      sessionKey,
       message:
         'Guest mode: read-only. Do not access or summarize emails or private data. You may assist with general questions and basic home automation (lights, climate, scenes).',
       label: 'Guest policy'
@@ -809,7 +811,11 @@ function sendChat() {
     addFeed('event', 'chat', 'chat history cleared');
     return;
   }
-  const sessionKey = roleState.channel === 'admin' ? 'agent:main:admin' : 'agent:main:guest';
+  const deviceLabel = elements.deviceId.value.trim() || 'device';
+  const sessionKey =
+    roleState.channel === 'admin'
+      ? `agent:main:admin:${deviceLabel}`
+      : `agent:main:guest:${deviceLabel}`;
   addChatMessage({ role: 'user', text: message });
   scrollState.pinned = true;
   scrollToBottom(elements.chatThread, true);
