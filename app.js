@@ -77,6 +77,21 @@ async function fetchRole() {
   }
 }
 
+async function fetchMeta() {
+  try {
+    const res = await fetch('/meta');
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.wsUrl) {
+      elements.wsUrl.value = data.wsUrl;
+      return data;
+    }
+    return null;
+  } catch (err) {
+    return null;
+  }
+}
+
 function setRole(role) {
   roleState.role = role;
   if (elements.rolePill) {
@@ -819,7 +834,7 @@ window.addEventListener('load', () => {
     }
     setAuthState(true);
     setRole(role);
-    client.connect();
+    fetchMeta().finally(() => client.connect());
   });
   elements.chatThread.addEventListener('scroll', () => {
     scrollState.pinned = isNearBottom(elements.chatThread);

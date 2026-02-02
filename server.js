@@ -22,6 +22,16 @@ function readToken() {
   return { token, mode };
 }
 
+function readGatewayPort() {
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const cfg = JSON.parse(raw);
+    return Number(cfg?.gateway?.port || 18789);
+  } catch (err) {
+    return 18789;
+  }
+}
+
 function readUiPasswords() {
   try {
     const raw = fs.readFileSync(configPath, 'utf8');
@@ -104,6 +114,15 @@ const server = http.createServer((req, res) => {
       return;
     }
     sendJson(res, 200, { role });
+    return;
+  }
+
+  if (req.url.startsWith('/meta')) {
+    const port = readGatewayPort();
+    sendJson(res, 200, {
+      wsUrl: `ws://127.0.0.1:${port}`,
+      port
+    });
     return;
   }
 
