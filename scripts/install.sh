@@ -88,6 +88,14 @@ fi
 if command -v node >/dev/null 2>&1; then
   if command -v npm >/dev/null 2>&1; then
     (cd "$INSTALL_DIR" && npm install --silent)
+    if [ ! -f "$INSTALL_DIR/node_modules/ws/package.json" ]; then
+      echo "Dependencies incomplete. Retrying npm install..."
+      (cd "$INSTALL_DIR" && npm install)
+    fi
+    if [ ! -f "$INSTALL_DIR/node_modules/ws/package.json" ]; then
+      echo "Failed to install dependencies (ws missing)."
+      exit 1
+    fi
   else
     echo "npm is required. Please install Node.js (includes npm) and re-run."
     exit 1
