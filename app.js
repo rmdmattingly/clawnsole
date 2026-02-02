@@ -10,7 +10,6 @@ const elements = {
   chatBtn: document.getElementById('chatBtn'),
   chatThread: document.getElementById('chatThread'),
   pulseCanvas: document.getElementById('pulseCanvas'),
-  pulseMeta: document.getElementById('pulseMeta'),
   settingsBtn: document.getElementById('settingsBtn'),
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
@@ -162,7 +161,7 @@ async function attemptLogin() {
     const data = await res.json();
     hideLogin();
     setRole(data.role === 'admin' ? 'admin' : 'guest');
-    client.connect();
+    fetchMeta().finally(() => client.connect());
   } catch (err) {
     showLogin('Login failed. Please retry.');
   }
@@ -421,16 +420,7 @@ function boostPulse(amount = 1, bursts = 3) {
   }
 }
 
-function updatePulseMeta() {
-  if (!elements.pulseMeta) return;
-  if (pulse.eventRate > 2) {
-    elements.pulseMeta.textContent = 'lively';
-  } else if (pulse.eventRate > 0.3) {
-    elements.pulseMeta.textContent = 'awake';
-  } else {
-    elements.pulseMeta.textContent = 'quiet';
-  }
-}
+function updatePulseMeta() {}
 
 setInterval(() => {
   pulse.eventRate = pulse.eventCount;
@@ -792,6 +782,14 @@ window.addEventListener('keydown', (event) => {
 function sendChat() {
   const message = elements.chatInput.value.trim();
   if (!message) return;
+  if (!uiState.connected || !uiState.authed) {
+    addChatMessage({
+      role: 'assistant',
+      text: 'Not connected. Please sign in again and wait for the gateway connection.',
+      persist: false
+    });
+    return;
+  }
   if (roleState.role === 'guest') {
     const lower = message.toLowerCase();
     if (lower.includes('email') || lower.includes('gmail') || lower.includes('inbox')) {
