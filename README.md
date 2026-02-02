@@ -9,7 +9,7 @@ gateway and renders an interactive chat experience.
 curl -fsSL https://raw.githubusercontent.com/rmdmattingly/clawnsole/main/scripts/install.sh | bash
 ```
 
-The installer will prompt for admin/guest passwords and can install a
+The installer will prompt for admin/guest passwords and will install a
 LaunchAgent to auto-start Clawnsole on login.
 You can also enable automatic updates (LaunchAgent).
 It will expose a nice local URL at http://clawnsole.local (macOS + sudo required).

@@ -37,11 +37,8 @@ else
   exit 1
 fi
 
-read -r -p "Install Clawnsole LaunchAgent (auto-start on login)? [Y/n]: " INSTALL_AGENT
-INSTALL_AGENT="${INSTALL_AGENT:-Y}"
-if [[ "$INSTALL_AGENT" =~ ^[Yy]$ ]]; then
-  bash "$INSTALL_DIR/scripts/install-launchagent.sh"
-fi
+echo "Starting Clawnsole on login..."
+bash "$INSTALL_DIR/scripts/install-launchagent.sh"
 
 read -r -p "Enable automatic updates? [y/N]: " INSTALL_UPDATES
 INSTALL_UPDATES="${INSTALL_UPDATES:-N}"
