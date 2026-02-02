@@ -48,11 +48,8 @@ if [[ "$INSTALL_UPDATES" =~ ^[Yy]$ ]]; then
   fi
 fi
 
-read -r -p "Expose Clawnsole at http://clawnsole.local (requires sudo)? [y/N]: " INSTALL_LOCAL
-INSTALL_LOCAL="${INSTALL_LOCAL:-N}"
-if [[ "$INSTALL_LOCAL" =~ ^[Yy]$ ]]; then
-  bash "$INSTALL_DIR/scripts/install-local-domain.sh"
-fi
+echo "Setting up http://clawnsole.local (requires sudo)..."
+bash "$INSTALL_DIR/scripts/install-local-domain.sh"
 
 cat <<OUT
 

@@ -3,25 +3,16 @@
 A live, visual chat console for OpenClaw. It connects directly to the local
 gateway and renders an interactive chat experience.
 
-## Run (local server)
-
-```bash
-cd /Users/raysopenclaw/src/clawnsole
-npm run dev
-```
-
-Then open http://localhost:5173 in a browser.
-
 ## One-line install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rmdmattingly/clawnsole/main/scripts/install.sh | bash
 ```
 
-The installer will prompt for admin/guest passwords and optionally install a
+The installer will prompt for admin/guest passwords and can install a
 LaunchAgent to auto-start Clawnsole on login.
 You can also enable automatic updates (LaunchAgent).
-Optional: expose a nice local URL at http://clawnsole.local (macOS + sudo).
+It will expose a nice local URL at http://clawnsole.local (macOS + sudo required).
 
 You can override defaults:
 
@@ -66,3 +57,14 @@ If omitted, admin defaults to `admin` and guest defaults to `guest`.
 - Existing OpenClaw sessions keep their model. Start a new session to pick up a
   new default.
 - Clawnsole stores your token and device ID in localStorage for convenience.
+
+<details>
+<summary>Developers: run locally</summary>
+
+```bash
+cd /Users/raysopenclaw/src/clawnsole
+npm run dev
+```
+
+Then open http://localhost:5173 in a browser.
+</details>
