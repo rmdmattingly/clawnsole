@@ -60,10 +60,4 @@ fi
 echo "Setting up http://clawnsole.local (requires sudo)..."
 CLAWNSOLE_PORT="$PORT" bash "$INSTALL_DIR/scripts/install-local-domain.sh"
 
-cat <<OUT
-
-Clawnsole installed.
-
-Open:
-  http://clawnsole.local:${PORT}
-OUT
+printf "\nClawnsole installed.\n\nOpen:\n  http://clawnsole.local:%s\n" "$PORT"
