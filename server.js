@@ -349,7 +349,7 @@ function handleGuestProxy(clientSocket, req) {
       if (frame.method === 'connect') {
         frame.params = frame.params || {};
         frame.params.auth = { token };
-        frame.params.scopes = ['operator.read'];
+        frame.params.scopes = ['operator.read', 'operator.write'];
         frame.params.role = 'operator';
       }
       upstream.send(JSON.stringify(frame));
