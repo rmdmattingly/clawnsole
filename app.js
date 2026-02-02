@@ -366,7 +366,7 @@ function ensureHiddenWelcome(role) {
   if (storage.get(storageKey)) return;
   const message =
     role === 'guest'
-      ? 'Welcome! You are in Guest mode. Be helpful with general questions and home automation; do not access private data like email.'
+      ? 'Welcome! You are assisting a guest. Greet them as a guest, do not assume identity, and ask how you can help today.'
       : 'Welcome! You are in Admin mode. You can assist with full OpenClaw capabilities.';
   client.request('chat.inject', {
     sessionKey,
@@ -755,7 +755,7 @@ class GatewayClient {
     this.request('chat.inject', {
       sessionKey,
       message:
-        'Guest mode: read-only. Do not access or summarize emails or private data. You may assist with general questions and basic home automation (lights, climate, scenes).',
+        'Guest mode: read-only. Do not access or summarize emails or private data. Do not assume the guest is the admin. Ask for their name if needed. You may assist with general questions and basic home automation (lights, climate, scenes).',
       label: 'Guest policy'
     });
   }
