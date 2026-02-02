@@ -40,6 +40,32 @@ const roleState = {
   guestPolicyInjected: false
 };
 
+const uiState = {
+  connected: false,
+  authed: false
+};
+
+function setChatEnabled(enabled) {
+  elements.chatInput.disabled = !enabled;
+  elements.chatBtn.disabled = !enabled;
+  elements.chatInput.placeholder = enabled
+    ? 'Message OpenClaw... (Press Enter to send)'
+    : 'Disconnected — sign in to continue';
+}
+
+function setConnectionState(connected) {
+  uiState.connected = connected;
+  setChatEnabled(connected && uiState.authed);
+  elements.status.textContent = connected ? 'connected' : 'disconnected';
+  elements.status.classList.toggle('connected', connected);
+  elements.status.classList.toggle('error', !connected);
+}
+
+function setAuthState(authed) {
+  uiState.authed = authed;
+  setChatEnabled(uiState.connected && authed);
+}
+
 async function fetchRole() {
   try {
     const res = await fetch('/auth/role');
@@ -91,12 +117,14 @@ function showLogin(message = '') {
   elements.loginError.textContent = message;
   elements.loginPassword.value = '';
   elements.loginPassword.focus();
+  setAuthState(false);
 }
 
 function hideLogin() {
   elements.loginOverlay.classList.remove('open');
   elements.loginOverlay.setAttribute('aria-hidden', 'true');
   elements.loginError.textContent = '';
+  setAuthState(true);
 }
 
 async function attemptLogin() {
@@ -546,17 +574,19 @@ class GatewayClient {
       }
     });
 
-    this.socket.addEventListener('close', () => {
-      this.connected = false;
-      this.setStatus('disconnected', 'socket closed');
-      this.stopLogTail();
-    });
+  this.socket.addEventListener('close', () => {
+    this.connected = false;
+    this.setStatus('disconnected', 'socket closed');
+    setConnectionState(false);
+    this.stopLogTail();
+  });
 
-    this.socket.addEventListener('error', () => {
-      this.connected = false;
-      this.setStatus('error', 'socket error');
-      this.stopLogTail();
-    });
+  this.socket.addEventListener('error', () => {
+    this.connected = false;
+    this.setStatus('error', 'socket error');
+    setConnectionState(false);
+    this.stopLogTail();
+  });
   }
 
   sendConnect() {
@@ -603,11 +633,13 @@ class GatewayClient {
       if (res.ok) {
         this.connected = true;
         this.setStatus('connected', `protocol ${res.payload?.protocol ?? 'ok'}`);
+        setConnectionState(true);
         this.startLogTail();
         this.ensureGuestPolicy();
       } else {
         this.connected = false;
         this.setStatus('error', res.error?.message || 'connect failed');
+        setConnectionState(false);
         this.handshakeSent = false;
       }
     });
@@ -641,6 +673,7 @@ class GatewayClient {
       this.socket.close();
       this.socket = null;
     }
+    setConnectionState(false);
     this.stopLogTail();
   }
 
@@ -784,6 +817,7 @@ window.addEventListener('load', () => {
       showLogin();
       return;
     }
+    setAuthState(true);
     setRole(role);
     client.connect();
   });
