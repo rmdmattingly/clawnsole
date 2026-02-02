@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026-02-02.4"
+VERSION="2026-02-02.5"
 
 echo "Clawnsole uninstall ${VERSION}"
 
@@ -31,9 +31,15 @@ USER_ID="$(id -u)"
 launchctl bootout "gui/$USER_ID" "$PLIST_AGENT" >/dev/null 2>&1 || true
 launchctl bootout "gui/$USER_ID" "$PLIST_UPDATER" >/dev/null 2>&1 || true
 launchctl bootout "gui/$USER_ID" "$PLIST_WATCHDOG" >/dev/null 2>&1 || true
+launchctl bootout "user/$USER_ID" "$PLIST_AGENT" >/dev/null 2>&1 || true
+launchctl bootout "user/$USER_ID" "$PLIST_UPDATER" >/dev/null 2>&1 || true
+launchctl bootout "user/$USER_ID" "$PLIST_WATCHDOG" >/dev/null 2>&1 || true
 launchctl disable "gui/$USER_ID/ai.openclaw.clawnsole" >/dev/null 2>&1 || true
 launchctl disable "gui/$USER_ID/ai.openclaw.clawnsole-updater" >/dev/null 2>&1 || true
 launchctl disable "gui/$USER_ID/ai.openclaw.clawnsole-watchdog" >/dev/null 2>&1 || true
+launchctl disable "user/$USER_ID/ai.openclaw.clawnsole" >/dev/null 2>&1 || true
+launchctl disable "user/$USER_ID/ai.openclaw.clawnsole-updater" >/dev/null 2>&1 || true
+launchctl disable "user/$USER_ID/ai.openclaw.clawnsole-watchdog" >/dev/null 2>&1 || true
 rm -f "$PLIST_AGENT" "$PLIST_UPDATER" "$PLIST_WATCHDOG"
 
 if [ -f "$PLIST_DAEMON" ]; then

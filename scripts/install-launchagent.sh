@@ -28,15 +28,25 @@ fi
 
 USER_ID="$(id -u)"
 LABEL="ai.openclaw.clawnsole"
+DOMAIN_GUI="gui/$USER_ID"
+DOMAIN_USER="user/$USER_ID"
 
-launchctl bootout "gui/$USER_ID" "$PLIST_DST" >/dev/null 2>&1 || true
-if ! launchctl bootstrap "gui/$USER_ID" "$PLIST_DST"; then
-  echo "LaunchAgent bootstrap failed. Trying legacy load..."
-  launchctl load "$PLIST_DST" >/dev/null 2>&1 || true
+launchctl bootout "$DOMAIN_GUI" "$PLIST_DST" >/dev/null 2>&1 || true
+launchctl bootout "$DOMAIN_USER" "$PLIST_DST" >/dev/null 2>&1 || true
+
+if ! launchctl bootstrap "$DOMAIN_GUI" "$PLIST_DST" >/dev/null 2>&1; then
+  if ! launchctl bootstrap "$DOMAIN_USER" "$PLIST_DST" >/dev/null 2>&1; then
+    echo "LaunchAgent bootstrap failed. Trying legacy load..."
+    launchctl load "$PLIST_DST" >/dev/null 2>&1 || true
+  fi
 fi
-if launchctl print "gui/$USER_ID/$LABEL" >/dev/null 2>&1; then
-  launchctl enable "gui/$USER_ID/$LABEL" >/dev/null 2>&1 || true
-  launchctl kickstart -k "gui/$USER_ID/$LABEL" >/dev/null 2>&1 || true
+
+if launchctl print "$DOMAIN_GUI/$LABEL" >/dev/null 2>&1; then
+  launchctl enable "$DOMAIN_GUI/$LABEL" >/dev/null 2>&1 || true
+  launchctl kickstart -k "$DOMAIN_GUI/$LABEL" >/dev/null 2>&1 || true
+elif launchctl print "$DOMAIN_USER/$LABEL" >/dev/null 2>&1; then
+  launchctl enable "$DOMAIN_USER/$LABEL" >/dev/null 2>&1 || true
+  launchctl kickstart -k "$DOMAIN_USER/$LABEL" >/dev/null 2>&1 || true
 else
   echo "LaunchAgent not registered (yet). It should appear after login or a manual load."
 fi
