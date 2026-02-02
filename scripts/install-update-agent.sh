@@ -13,9 +13,12 @@ mkdir -p "$OPENCLAW_HOME/logs"
 sed "s|\$HOME|$HOME|g" "$PLIST_SRC" | \
   sed "s|<integer>21600</integer>|<integer>${UPDATE_INTERVAL_SECONDS}</integer>|" > "$PLIST_DST"
 
-launchctl unload "$PLIST_DST" >/dev/null 2>&1 || true
-launchctl load "$PLIST_DST"
+UID="$(id -u)"
+LABEL="ai.openclaw.clawnsole-updater"
 
-launchctl kickstart -k gui/$(id -u)/ai.openclaw.clawnsole-updater || true
+launchctl bootout "gui/$UID" "$PLIST_DST" >/dev/null 2>&1 || true
+launchctl bootstrap "gui/$UID" "$PLIST_DST"
+launchctl enable "gui/$UID/$LABEL" >/dev/null 2>&1 || true
+launchctl kickstart -k "gui/$UID/$LABEL" >/dev/null 2>&1 || true
 
 echo "Updater LaunchAgent installed: $PLIST_DST (interval ${UPDATE_INTERVAL_SECONDS}s)"
