@@ -5,6 +5,8 @@ gateway and renders an interactive chat experience.
 
 ## Demo
 
+![Clawnsole demo](assets/clawnsole-demo.gif)
+
 [Watch the demo](assets/clawnsole-demo.mov)
 
 ## One-line install
