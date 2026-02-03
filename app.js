@@ -265,17 +265,36 @@ async function handleFileSelection(event) {
       elements.attachmentStatus.textContent = `File too large: ${file.name}`;
       continue;
     }
-    const data = await file.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(data)));
-    attachmentState.files.push({
-      name: file.name,
-      type: file.type || 'application/octet-stream',
-      size: file.size,
-      data: base64
-    });
+    try {
+      const base64 = await fileToBase64(file);
+      attachmentState.files.push({
+        name: file.name,
+        type: file.type || 'application/octet-stream',
+        size: file.size,
+        data: base64
+      });
+    } catch (err) {
+      elements.attachmentStatus.textContent = `Failed to read ${file.name}`;
+      addFeed('err', 'attachment', String(err));
+    }
   }
   event.target.value = '';
   renderAttachments();
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => {
+      reject(reader.error || new Error('Failed to read file'));
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 async function uploadAttachments() {
@@ -288,7 +307,8 @@ async function uploadAttachments() {
     body: JSON.stringify({ files: attachmentState.files })
   });
   if (!res.ok) {
-    elements.attachmentStatus.textContent = 'Upload failed.';
+    elements.attachmentStatus.textContent = `Upload failed (${res.status}).`;
+    addFeed('err', 'attachment', `upload failed (${res.status})`);
     return [];
   }
   const data = await res.json();

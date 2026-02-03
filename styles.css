@@ -267,6 +267,7 @@ button {
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   min-height: 44px;
+  touch-action: manipulation;
 }
 
 button.primary {
@@ -622,7 +623,7 @@ button:hover {
   }
 
   .app {
-    padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+    padding: 8px 8px calc(10px + env(safe-area-inset-bottom));
     height: 100dvh;
     min-height: 100dvh;
   }
@@ -632,20 +633,21 @@ button:hover {
     top: 0;
     z-index: 4;
     width: 100%;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 10px 12px;
-    border-radius: 16px;
-    background: rgba(10, 12, 16, 0.92);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: 14px;
+    background: rgba(10, 12, 16, 0.88);
+    border: 1px solid rgba(255, 255, 255, 0.05);
     backdrop-filter: blur(12px);
   }
 
   .topbar-actions {
-    width: 100%;
+    width: auto;
     flex-wrap: wrap;
-    justify-content: flex-start;
+    justify-content: flex-end;
+    margin-left: auto;
   }
 
   .chat-page {
@@ -654,19 +656,19 @@ button:hover {
   }
 
   .chat-panel {
-    border-radius: 18px;
-    padding: 12px;
+    border-radius: 16px;
+    padding: 10px;
   }
 
   .chat-thread {
-    padding: 8px 2px 16px;
+    padding: 6px 2px 120px;
   }
 
   .chat-input-row {
     grid-template-columns: 1fr;
     gap: 10px;
-    padding: 12px;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    padding: 10px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
     position: sticky;
     bottom: 0;
     box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.3);
@@ -679,6 +681,20 @@ button:hover {
   textarea {
     font-size: 17px;
     line-height: 1.4;
+    min-height: 56px;
+  }
+
+  .status-meta {
+    display: none;
+  }
+
+  .brand h1 {
+    font-size: 18px;
+  }
+
+  .brand .logo {
+    width: 34px;
+    height: 34px;
   }
 }
 
@@ -735,5 +751,65 @@ button:hover {
   .status-pill,
   .role-pill {
     padding: 5px 10px;
+  }
+}
+
+@media (max-width: 540px), (hover: none) and (pointer: coarse) {
+  .topbar {
+    padding: 6px 8px;
+    gap: 4px;
+    border-radius: 12px;
+  }
+
+  .topbar-actions {
+    gap: 6px;
+  }
+
+  .status-pill,
+  .role-pill {
+    padding: 4px 8px;
+    font-size: 9px;
+    letter-spacing: 0.06em;
+  }
+
+  .icon-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+  }
+
+  .chat-panel {
+    padding: 8px;
+    border-radius: 14px;
+    background: rgba(14, 18, 24, 0.6);
+  }
+
+  .chat-thread {
+    padding: 4px 2px 96px;
+  }
+
+  .chat-input-row {
+    padding: 8px;
+    gap: 8px;
+    border-radius: 14px;
+  }
+
+  .attachment-row {
+    gap: 6px;
+  }
+
+  .attachment-row button {
+    min-height: 36px;
+    padding: 8px 10px;
+  }
+
+  .chat-input-row button {
+    min-height: 40px;
+    padding: 10px 12px;
+  }
+
+  textarea {
+    min-height: 48px;
+    font-size: 16px;
   }
 }
