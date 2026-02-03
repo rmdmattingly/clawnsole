@@ -535,6 +535,34 @@ button:hover {
   gap: 8px;
 }
 
+.command-hints {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(8, 10, 14, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.command-hints.visible {
+  display: flex;
+}
+
+.command-hint {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.command-hint code {
+  color: var(--accent);
+  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 12px;
+}
+
 .attachment-pill {
   padding: 6px 10px;
   border-radius: 999px;

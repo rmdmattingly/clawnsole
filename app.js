@@ -26,6 +26,7 @@ const elements = {
   attachBtn: document.getElementById('attachBtn'),
   attachmentList: document.getElementById('attachmentList'),
   attachmentStatus: document.getElementById('attachmentStatus'),
+  commandHints: document.getElementById('commandHints'),
   logoutBtn: document.getElementById('logoutBtn')
 };
 
@@ -54,6 +55,11 @@ const uiState = {
 const attachmentState = {
   files: []
 };
+
+const commandList = [
+  { command: '/clear', description: 'Clear chat history' },
+  { command: '/new', description: 'Start a fresh chat' }
+];
 
 function getSessionKey(role) {
   const deviceLabel = elements.deviceId.value.trim() || 'device';
@@ -220,6 +226,29 @@ function renderAttachments() {
     pill.append(name, remove);
     elements.attachmentList.appendChild(pill);
   });
+}
+
+function updateCommandHints() {
+  if (!elements.commandHints) return;
+  const value = elements.chatInput.value.trim();
+  if (!value.startsWith('/')) {
+    elements.commandHints.classList.remove('visible');
+    elements.commandHints.innerHTML = '';
+    return;
+  }
+  const matches = commandList.filter((item) => item.command.startsWith(value));
+  if (matches.length === 0) {
+    elements.commandHints.classList.remove('visible');
+    elements.commandHints.innerHTML = '';
+    return;
+  }
+  elements.commandHints.innerHTML = matches
+    .map(
+      (item) =>
+        `<div class="command-hint"><code>${item.command}</code><span>${item.description}</span></div>`
+    )
+    .join('');
+  elements.commandHints.classList.add('visible');
 }
 
 async function handleFileSelection(event) {
@@ -891,6 +920,10 @@ elements.chatInput.addEventListener('keydown', (event) => {
     event.preventDefault();
     sendChat();
   }
+});
+
+elements.chatInput.addEventListener('input', () => {
+  updateCommandHints();
 });
 
 elements.attachBtn.addEventListener('click', () => {
