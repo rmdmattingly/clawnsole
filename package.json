@@ -7,9 +7,13 @@
     "dev": "node server.js",
     "serve": "node server.js",
     "test:proxy": "node scripts/proxy-self-test.js",
-    "test:smoke": "node scripts/smoke-test.js"
+    "test:smoke": "node scripts/smoke-test.js",
+    "test:ui": "playwright test"
   },
   "dependencies": {
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
   }
 }
