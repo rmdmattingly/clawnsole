@@ -15,7 +15,8 @@ function createProxyHandlers({
   guestAllowedMethods = DEFAULT_GUEST_METHODS,
   heartbeatMs = 2000,
   getGuestPrompt,
-  getGuestAgentId
+  getGuestAgentId,
+  onGuestSessionKey
 }) {
   function handleAdminProxy(clientSocket, req) {
     const role = getRoleFromCookies(req);
@@ -145,6 +146,9 @@ function createProxyHandlers({
           const suffix = instanceId || clientId || 'guest';
           guestState.sessionKey = `agent:${guestAgentId || 'main'}:guest:${suffix}`;
           guestState.connectId = frame.id;
+          if (typeof onGuestSessionKey === 'function') {
+            onGuestSessionKey(guestState.sessionKey);
+          }
           frame.params = frame.params || {};
           frame.params.auth = { token };
           frame.params.scopes = ['operator.read', 'operator.write'];

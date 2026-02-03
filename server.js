@@ -208,6 +208,20 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.url.startsWith('/diag/guest')) {
+    const role = getRoleFromCookies(req);
+    if (role !== 'admin') {
+      sendJson(res, 403, { error: 'forbidden' });
+      return;
+    }
+    const { guestAgentId } = readUiPasswords();
+    sendJson(res, 200, {
+      guestAgentId,
+      lastGuestSessionKey
+    });
+    return;
+  }
+
   if (req.url.startsWith('/upload')) {
     if (!requireAuth(req, res)) return;
     if (req.method !== 'POST') {
@@ -362,6 +376,8 @@ const server = http.createServer((req, res) => {
   res.end('Not found');
 });
 
+let lastGuestSessionKey = null;
+
 const { handleAdminProxy, handleGuestProxy } = createProxyHandlers({
   WebSocket,
   getRoleFromCookies,
@@ -369,7 +385,10 @@ const { handleAdminProxy, handleGuestProxy } = createProxyHandlers({
   gatewayWsUrl,
   heartbeatMs: 2000,
   getGuestPrompt: () => readUiPasswords().guestPrompt,
-  getGuestAgentId: () => readUiPasswords().guestAgentId
+  getGuestAgentId: () => readUiPasswords().guestAgentId,
+  onGuestSessionKey: (key) => {
+    lastGuestSessionKey = key;
+  }
 });
 
 const wss = new WebSocket.Server({ noServer: true });
