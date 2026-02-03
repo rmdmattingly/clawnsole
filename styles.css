@@ -48,6 +48,8 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
   overflow-y: hidden;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body::before {
@@ -264,6 +266,7 @@ button {
   color: var(--text);
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+  min-height: 44px;
 }
 
 button.primary {
@@ -431,6 +434,8 @@ button:hover {
   border: none;
   position: relative;
   z-index: 1;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .chat-bubble {
@@ -460,20 +465,6 @@ button:hover {
   box-shadow: 0 0 18px rgba(255, 179, 71, 0.2);
 }
 
-.chat-text.reveal {
-  animation: textReveal 0.16s ease-out;
-}
-
-@keyframes textReveal {
-  from {
-    opacity: 0.4;
-    transform: translateY(2px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 
 .chat-meta {
   font-size: 11px;
@@ -637,9 +628,18 @@ button:hover {
   }
 
   .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    width: 100%;
     flex-direction: column;
     align-items: flex-start;
     gap: 10px;
+    padding: 10px 12px;
+    border-radius: 16px;
+    background: rgba(10, 12, 16, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(12px);
   }
 
   .topbar-actions {
@@ -655,11 +655,11 @@ button:hover {
 
   .chat-panel {
     border-radius: 18px;
-    padding: 14px;
+    padding: 12px;
   }
 
   .chat-thread {
-    padding: 8px 2px 12px;
+    padding: 8px 2px 16px;
   }
 
   .chat-input-row {
@@ -667,10 +667,18 @@ button:hover {
     gap: 10px;
     padding: 12px;
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    position: sticky;
+    bottom: 0;
+    box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.3);
   }
 
   .chat-input-row button {
     width: 100%;
+  }
+
+  textarea {
+    font-size: 17px;
+    line-height: 1.4;
   }
 }
 

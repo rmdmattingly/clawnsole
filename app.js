@@ -413,11 +413,11 @@ function restoreChatHistory() {
   scrollToBottom(elements.chatThread, true);
 }
 
-function clearChatHistory() {
+function clearChatHistory({ wipeStorage = false } = {}) {
   chatState.history = [];
   chatState.runs.clear();
   elements.chatThread.innerHTML = '';
-  if (roleState.role !== 'guest' && roleState.channel !== 'guest') {
+  if (wipeStorage && roleState.role !== 'guest' && roleState.channel !== 'guest') {
     localStorage.removeItem(`clawnsole.chat.history.${roleState.channel}`);
   }
 }
@@ -456,15 +456,51 @@ function updateChatRun(runId, text, done) {
   }
   const shouldPin = scrollState.pinned || isNearBottom(elements.chatThread);
   entry.pendingText = text || '';
-  if (!entry.flushTimer) {
-    entry.flushTimer = setTimeout(() => {
-      entry.body.innerHTML = renderMarkdown(entry.pendingText || '');
-      entry.body.classList.remove('reveal');
-      // restart animation
-      void entry.body.offsetWidth;
-      entry.body.classList.add('reveal');
-      entry.flushTimer = null;
-    }, 180);
+  if (entry.revealIndex === undefined) {
+    const currentLen = entry.body.textContent ? entry.body.textContent.length : 0;
+    entry.revealIndex = Math.min(currentLen, entry.pendingText.length);
+    entry.renderedText = entry.pendingText.slice(0, entry.revealIndex);
+  }
+  entry.targetText = entry.pendingText;
+  if (!entry.typeTimer) {
+    entry.lastTypeTick = performance.now();
+    entry.typeTimer = setInterval(() => {
+      const now = performance.now();
+      const elapsed = now - entry.lastTypeTick;
+      entry.lastTypeTick = now;
+      const target = entry.targetText || '';
+      const currentIndex = entry.revealIndex || 0;
+      if (currentIndex >= target.length) {
+        if (!entry.donePending) {
+          if (entry.stopTimer) return;
+          entry.stopTimer = setTimeout(() => {
+            clearInterval(entry.typeTimer);
+            entry.typeTimer = null;
+            entry.stopTimer = null;
+          }, 420);
+        }
+        return;
+      }
+      const charsToAdd = Math.max(1, Math.floor((elapsed * 60) / 1000));
+      entry.revealIndex = Math.min(target.length, currentIndex + charsToAdd);
+      const nextText = target.slice(0, entry.revealIndex);
+      if (nextText !== entry.renderedText) {
+        entry.renderedText = nextText;
+        entry.body.innerHTML = renderMarkdown(nextText);
+        if (scrollState.pinned || isNearBottom(elements.chatThread)) {
+          scrollState.pinned = true;
+          scrollToBottom(elements.chatThread);
+        }
+      }
+      if (entry.revealIndex >= target.length && entry.donePending) {
+        clearInterval(entry.typeTimer);
+        entry.typeTimer = null;
+      }
+    }, 36);
+  }
+  if (entry.stopTimer) {
+    clearTimeout(entry.stopTimer);
+    entry.stopTimer = null;
   }
   if (entry.index === null || entry.index === undefined) {
     if (done || text) {
@@ -477,6 +513,19 @@ function updateChatRun(runId, text, done) {
     saveChatHistory();
   }
   if (done) {
+    entry.donePending = true;
+    entry.targetText = text || '';
+    entry.revealIndex = entry.targetText.length;
+    entry.renderedText = entry.targetText;
+    entry.body.innerHTML = renderMarkdown(entry.targetText);
+    if (entry.stopTimer) {
+      clearTimeout(entry.stopTimer);
+      entry.stopTimer = null;
+    }
+    if (entry.typeTimer) {
+      clearInterval(entry.typeTimer);
+      entry.typeTimer = null;
+    }
     entry.body.parentElement?.classList.remove('streaming');
     chatState.runs.delete(runId);
     scrollState.pinned = shouldPin;
@@ -705,7 +754,7 @@ class GatewayClient {
     if (!url) return;
 
     if (this.socket) {
-      this.disconnect();
+      this.disconnect(true);
     }
 
     const usingProxy = usingGuestProxy || usingAdminProxy;
@@ -875,12 +924,14 @@ class GatewayClient {
     });
   }
 
-  disconnect() {
+  disconnect(silent = false) {
     if (this.socket) {
       this.socket.close();
       this.socket = null;
     }
-    setConnectionState(false);
+    if (!silent) {
+      setConnectionState(false);
+    }
   }
 
   setStatus(state, meta) {
@@ -1030,7 +1081,7 @@ async function sendChat() {
   }
   const command = message.toLowerCase();
   if (command === '/clear' || command === '/new') {
-    clearChatHistory();
+    clearChatHistory({ wipeStorage: true });
     elements.chatInput.value = '';
     addFeed('event', 'chat', 'chat history cleared');
     return;
