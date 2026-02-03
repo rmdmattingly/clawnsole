@@ -138,7 +138,9 @@ function setRole(role) {
     elements.settingsBtn.setAttribute('disabled', 'disabled');
     elements.settingsBtn.style.opacity = '0.5';
   } else {
-    elements.channelSelect.disabled = false;
+    roleState.channel = 'admin';
+    elements.channelSelect.value = 'admin';
+    elements.channelSelect.disabled = true;
     elements.settingsBtn.removeAttribute('disabled');
     elements.settingsBtn.style.opacity = '1';
   }
@@ -149,13 +151,8 @@ function setRole(role) {
 function setChannel(channel) {
   roleState.channel = channel;
   storage.set('clawnsole.channel', channel);
-  if (roleState.role === 'admin') {
-    clearChatHistory();
-    restoreChatHistory();
-  }
-  if (channel === 'guest' && client?.connected) {
-    client.ensureGuestPolicy();
-  }
+  clearChatHistory();
+  restoreChatHistory();
 }
 
 function showLogin(message = '') {
@@ -1031,6 +1028,11 @@ window.addEventListener('load', () => {
 
 elements.channelSelect.addEventListener('change', (event) => {
   const value = event.target.value === 'guest' ? 'guest' : 'admin';
+  if (value !== roleState.role) {
+    showLogin('Switch roles by signing in again.');
+    elements.channelSelect.value = roleState.role;
+    return;
+  }
   setChannel(value);
 });
 
