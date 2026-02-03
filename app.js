@@ -132,15 +132,19 @@ function setRole(role) {
   }
   if (role === 'guest') {
     roleState.channel = 'guest';
-    elements.channelSelect.value = 'guest';
-    elements.channelSelect.disabled = true;
+    if (elements.channelSelect) {
+      elements.channelSelect.value = 'guest';
+      elements.channelSelect.disabled = true;
+    }
     roleState.guestPolicyInjected = false;
     elements.settingsBtn.setAttribute('disabled', 'disabled');
     elements.settingsBtn.style.opacity = '0.5';
   } else {
     roleState.channel = 'admin';
-    elements.channelSelect.value = 'admin';
-    elements.channelSelect.disabled = true;
+    if (elements.channelSelect) {
+      elements.channelSelect.value = 'admin';
+      elements.channelSelect.disabled = true;
+    }
     elements.settingsBtn.removeAttribute('disabled');
     elements.settingsBtn.style.opacity = '1';
   }
@@ -1026,15 +1030,17 @@ window.addEventListener('load', () => {
   elements.chatInput.select();
 });
 
-elements.channelSelect.addEventListener('change', (event) => {
-  const value = event.target.value === 'guest' ? 'guest' : 'admin';
-  if (value !== roleState.role) {
-    showLogin('Switch roles by signing in again.');
-    elements.channelSelect.value = roleState.role;
-    return;
-  }
-  setChannel(value);
-});
+if (elements.channelSelect) {
+  elements.channelSelect.addEventListener('change', (event) => {
+    const value = event.target.value === 'guest' ? 'guest' : 'admin';
+    if (value !== roleState.role) {
+      showLogin('Switch roles by signing in again.');
+      elements.channelSelect.value = roleState.role;
+      return;
+    }
+    setChannel(value);
+  });
+}
 
 elements.loginBtn.addEventListener('click', () => attemptLogin());
 
