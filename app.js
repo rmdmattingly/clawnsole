@@ -1061,6 +1061,7 @@ async function sendChat() {
 }
 
 window.addEventListener('load', () => {
+  showLogin();
   const savedChannel = storage.get('clawnsole.channel', 'admin');
   elements.channelSelect.value = savedChannel;
   roleState.channel = savedChannel;
