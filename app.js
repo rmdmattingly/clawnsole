@@ -394,6 +394,7 @@ function clearChatHistory() {
 }
 
 function addChatMessage({ role, text, runId, streaming = false, persist = true }) {
+  const shouldPin = scrollState.pinned || isNearBottom(elements.chatThread);
   const bubble = document.createElement('div');
   bubble.className = `chat-bubble ${role}${streaming ? ' streaming' : ''}`;
   const meta = document.createElement('div');
@@ -405,6 +406,7 @@ function addChatMessage({ role, text, runId, streaming = false, persist = true }
   bubble.appendChild(meta);
   bubble.appendChild(body);
   elements.chatThread.appendChild(bubble);
+  scrollState.pinned = shouldPin;
   scrollToBottom(elements.chatThread);
   let index = null;
   if (persist) {
@@ -423,6 +425,7 @@ function updateChatRun(runId, text, done) {
     addChatMessage({ role: 'assistant', text, runId, streaming: !done, persist: done });
     return;
   }
+  const shouldPin = scrollState.pinned || isNearBottom(elements.chatThread);
   entry.body.innerHTML = renderMarkdown(text || '');
   if (entry.index === null || entry.index === undefined) {
     if (done || text) {
@@ -437,6 +440,10 @@ function updateChatRun(runId, text, done) {
   if (done) {
     entry.body.parentElement?.classList.remove('streaming');
     chatState.runs.delete(runId);
+    scrollState.pinned = shouldPin;
+    scrollToBottom(elements.chatThread);
+  } else if (shouldPin) {
+    scrollState.pinned = true;
     scrollToBottom(elements.chatThread);
   }
 }
