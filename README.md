@@ -3,6 +3,10 @@
 A live, visual chat console for OpenClaw. It connects directly to the local
 gateway and renders an interactive chat experience.
 
+## Demo
+
+[Watch the demo](assets/clawnsole-demo.mov)
+
 ## One-line install
 
 ```bash
