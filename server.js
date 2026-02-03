@@ -49,15 +49,17 @@ function readUiPasswords() {
     const cfg = JSON.parse(raw);
     const adminPassword = cfg?.adminPassword || 'admin';
     const guestPassword = cfg?.guestPassword || 'guest';
+    const guestAgentId = cfg?.guestAgentId || 'clawnsole-guest';
     const guestPrompt =
       cfg?.guestPrompt ||
       'Guest mode: You are assisting a guest. Do not access or summarize private data (email, calendar, files). Do not assume identity; ask how you can help. You may assist with general questions and basic home automation.';
     const authVersion = cfg?.authVersion || '';
-    return { adminPassword, guestPassword, guestPrompt, authVersion };
+    return { adminPassword, guestPassword, guestAgentId, guestPrompt, authVersion };
   } catch (err) {
     return {
       adminPassword: 'admin',
       guestPassword: 'guest',
+      guestAgentId: 'clawnsole-guest',
       guestPrompt:
         'Guest mode: You are assisting a guest. Do not access or summarize private data (email, calendar, files). Do not assume identity; ask how you can help. You may assist with general questions and basic home automation.',
       authVersion: ''
@@ -366,7 +368,8 @@ const { handleAdminProxy, handleGuestProxy } = createProxyHandlers({
   readToken,
   gatewayWsUrl,
   heartbeatMs: 2000,
-  getGuestPrompt: () => readUiPasswords().guestPrompt
+  getGuestPrompt: () => readUiPasswords().guestPrompt,
+  getGuestAgentId: () => readUiPasswords().guestAgentId
 });
 
 const wss = new WebSocket.Server({ noServer: true });

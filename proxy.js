@@ -14,7 +14,8 @@ function createProxyHandlers({
   gatewayWsUrl,
   guestAllowedMethods = DEFAULT_GUEST_METHODS,
   heartbeatMs = 2000,
-  getGuestPrompt
+  getGuestPrompt,
+  getGuestAgentId
 }) {
   function handleAdminProxy(clientSocket, req) {
     const role = getRoleFromCookies(req);
@@ -92,6 +93,7 @@ function createProxyHandlers({
     }
 
     const { token } = readToken();
+    const guestAgentId = typeof getGuestAgentId === 'function' ? getGuestAgentId() : 'main';
     const upstream = new WebSocket(gatewayWsUrl());
     const guestState = {
       sessionKey: null,
@@ -141,7 +143,7 @@ function createProxyHandlers({
           const instanceId = frame.params?.client?.instanceId;
           const clientId = frame.params?.client?.id;
           const suffix = instanceId || clientId || 'guest';
-          guestState.sessionKey = `agent:main:guest:${suffix}`;
+          guestState.sessionKey = `agent:${guestAgentId || 'main'}:guest:${suffix}`;
           guestState.connectId = frame.id;
           frame.params = frame.params || {};
           frame.params.auth = { token };

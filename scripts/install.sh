@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026-02-02.8"
+VERSION="2026-02-02.9"
 
 REPO_URL="${CLAWNSOLE_REPO:-https://github.com/rmdmattingly/clawnsole.git}"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
@@ -125,7 +125,20 @@ esac
 
 AUTH_VERSION="$(date +%s)"
 
+GUEST_AGENT_ID="clawnsole-guest"
+
+if command -v openclaw >/dev/null 2>&1; then
+  if ! openclaw agents list 2>/dev/null | rg -q "^- ${GUEST_AGENT_ID}\\b"; then
+    openclaw agents add "$GUEST_AGENT_ID" \
+      --workspace "$OPENCLAW_HOME/agents/${GUEST_AGENT_ID}/workspace" \
+      --agent-dir "$OPENCLAW_HOME/agents/${GUEST_AGENT_ID}/agent" \
+      --non-interactive >/dev/null 2>&1 || true
+    openclaw agents set-identity --agent "$GUEST_AGENT_ID" --name "Clawnsole Guest" >/dev/null 2>&1 || true
+  fi
+fi
+
 CLAWNSOLE_ADMIN_PASSWORD="$ADMIN_PASS" CLAWNSOLE_GUEST_PASSWORD="$GUEST_PASS" \
+CLAWNSOLE_GUEST_AGENT_ID="$GUEST_AGENT_ID" \
 CLAWNSOLE_AUTH_VERSION="$AUTH_VERSION" \
   node "$INSTALL_DIR/scripts/patch-config.mjs"
 

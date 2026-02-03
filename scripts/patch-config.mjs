@@ -25,6 +25,7 @@ const cfg = readConfig();
 
 const adminPassword = process.env.CLAWNSOLE_ADMIN_PASSWORD || cfg.adminPassword || "admin";
 const guestPassword = process.env.CLAWNSOLE_GUEST_PASSWORD || cfg.guestPassword || "guest";
+const guestAgentId = process.env.CLAWNSOLE_GUEST_AGENT_ID || cfg.guestAgentId || "clawnsole-guest";
 const guestPrompt =
   process.env.CLAWNSOLE_GUEST_PROMPT ||
   cfg.guestPrompt ||
@@ -33,6 +34,7 @@ const authVersion = process.env.CLAWNSOLE_AUTH_VERSION || cfg.authVersion || "";
 
 cfg.adminPassword = adminPassword;
 cfg.guestPassword = guestPassword;
+cfg.guestAgentId = guestAgentId;
 cfg.guestPrompt = guestPrompt;
 if (authVersion) {
   cfg.authVersion = authVersion;

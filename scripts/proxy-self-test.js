@@ -69,7 +69,8 @@ async function run() {
     readToken,
     gatewayWsUrl,
     heartbeatMs: 25,
-    getGuestPrompt: () => 'guest prompt'
+    getGuestPrompt: () => 'guest prompt',
+    getGuestAgentId: () => 'clawnsole-guest'
   });
 
   const guestClient = new FakeSocket();
@@ -116,7 +117,7 @@ async function run() {
     })
   );
   const guestChat = JSON.parse(guestUpstream.sent[1]);
-  assert.equal(guestChat.params.sessionKey, 'agent:main:guest:device-1');
+  assert.equal(guestChat.params.sessionKey, 'agent:clawnsole-guest:guest:device-1');
 
   guestUpstream.emit(
     'message',
@@ -129,9 +130,9 @@ async function run() {
   const reset = JSON.parse(guestUpstream.sent[2]);
   const injected = JSON.parse(guestUpstream.sent[3]);
   assert.equal(reset.method, 'sessions.reset');
-  assert.equal(reset.params.key, 'agent:main:guest:device-1');
+  assert.equal(reset.params.key, 'agent:clawnsole-guest:guest:device-1');
   assert.equal(injected.method, 'chat.inject');
-  assert.equal(injected.params.sessionKey, 'agent:main:guest:device-1');
+  assert.equal(injected.params.sessionKey, 'agent:clawnsole-guest:guest:device-1');
   assert.equal(injected.params.message, 'guest prompt');
 
   await delay(40);
