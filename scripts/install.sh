@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026-02-02.9"
+VERSION="2026-02-02.10"
 
 REPO_URL="${CLAWNSOLE_REPO:-https://github.com/rmdmattingly/clawnsole.git}"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
@@ -136,6 +136,10 @@ if command -v openclaw >/dev/null 2>&1; then
     openclaw agents set-identity --agent "$GUEST_AGENT_ID" --name "Clawnsole Guest" >/dev/null 2>&1 || true
   fi
 fi
+
+OPENCLAW_CONFIG="$OPENCLAW_HOME/openclaw.json" \
+CLAWNSOLE_GUEST_AGENT_ID="$GUEST_AGENT_ID" \
+  node "$INSTALL_DIR/scripts/patch-openclaw-guest.mjs" || true
 
 CLAWNSOLE_ADMIN_PASSWORD="$ADMIN_PASS" CLAWNSOLE_GUEST_PASSWORD="$GUEST_PASS" \
 CLAWNSOLE_GUEST_AGENT_ID="$GUEST_AGENT_ID" \
