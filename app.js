@@ -455,7 +455,17 @@ function updateChatRun(runId, text, done) {
     return;
   }
   const shouldPin = scrollState.pinned || isNearBottom(elements.chatThread);
-  entry.body.innerHTML = renderMarkdown(text || '');
+  entry.pendingText = text || '';
+  if (!entry.flushTimer) {
+    entry.flushTimer = setTimeout(() => {
+      entry.body.innerHTML = renderMarkdown(entry.pendingText || '');
+      entry.body.classList.remove('reveal');
+      // restart animation
+      void entry.body.offsetWidth;
+      entry.body.classList.add('reveal');
+      entry.flushTimer = null;
+    }, 180);
+  }
   if (entry.index === null || entry.index === undefined) {
     if (done || text) {
       entry.index = chatState.history.length;

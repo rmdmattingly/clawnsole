@@ -460,6 +460,21 @@ button:hover {
   box-shadow: 0 0 18px rgba(255, 179, 71, 0.2);
 }
 
+.chat-text.reveal {
+  animation: textReveal 0.16s ease-out;
+}
+
+@keyframes textReveal {
+  from {
+    opacity: 0.4;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .chat-meta {
   font-size: 11px;
   text-transform: uppercase;
