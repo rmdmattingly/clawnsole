@@ -88,7 +88,7 @@ function createProxyHandlers({
 
   function handleGuestProxy(clientSocket, req) {
     const role = getRoleFromCookies(req);
-    if (role !== 'guest') {
+    if (role !== 'guest' && role !== 'admin') {
       clientSocket.close();
       return;
     }

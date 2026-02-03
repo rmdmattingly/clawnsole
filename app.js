@@ -76,6 +76,10 @@ function setConnectionState(connected) {
   elements.status.textContent = connected ? 'connected' : 'disconnected';
   elements.status.classList.toggle('connected', connected);
   elements.status.classList.toggle('error', !connected);
+  if (!connected) {
+    setAuthState(false);
+    showLogin('Disconnected. Please sign in again.');
+  }
 }
 
 function setAuthState(authed) {
