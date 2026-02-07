@@ -1474,13 +1474,14 @@ async function paneSendChat(pane) {
     attachmentText = `\n\nAttachments:\n- ${lines.join('\n- ')}`;
   }
 
-  paneAddChatMessage(pane, { role: 'user', text: message });
+  const outbound = `${message}${attachmentText}`;
+
+  // Render attachments in the local user bubble too (otherwise the sender never sees what they attached).
+  paneAddChatMessage(pane, { role: 'user', text: outbound });
   pane.scroll.pinned = true;
   scrollToBottom(pane, true);
   triggerFiring(1.6, 3);
   paneStartThinking(pane);
-
-  const outbound = `${message}${attachmentText}`;
   if (pane.pendingSend) pane.pendingSend.sentMessage = outbound;
 
   pane.client.request('chat.send', {
