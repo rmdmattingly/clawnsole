@@ -989,6 +989,7 @@ button.send-btn .btn-icon {
 .chat-input-row {
   display: grid;
   grid-template-columns: 1fr auto;
+  align-items: end;
   gap: 12px;
   margin-top: auto;
   position: relative;
@@ -1000,6 +1001,33 @@ button.send-btn .btn-icon {
   flex: 0 0 auto;
   backdrop-filter: blur(10px) saturate(1.1);
   -webkit-backdrop-filter: blur(10px) saturate(1.1);
+}
+
+.chat-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.chat-actions button {
+  width: 44px;
+  min-width: 44px;
+}
+
+.chat-actions .attach-btn {
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  gap: 0;
+}
+
+.chat-actions .attach-btn .btn-icon {
+  width: 18px;
+  height: 18px;
 }
 
 @media (max-width: 1024px) {
@@ -1221,9 +1249,18 @@ button.send-btn .btn-icon {
     gap: 6px;
   }
 
-  .attachment-row button {
-    min-height: 36px;
-    padding: 8px 10px;
+  .chat-actions {
+    gap: 6px;
+  }
+
+  .chat-actions button {
+    width: 40px;
+    min-width: 40px;
+  }
+
+  .chat-actions .attach-btn {
+    height: 34px;
+    min-height: 34px;
   }
 
   button.send-btn {

@@ -87,36 +87,40 @@
                 <div data-pane-command-hints class="command-hints" aria-live="polite"></div>
                 <div class="attachment-row">
                   <input class="file-input" data-pane-file-input type="file" multiple />
-                  <button class="attach-btn secondary" data-pane-attach type="button" aria-label="Attach files">
-                    <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
-                      <path
-                        d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
-                    <span class="btn-label">Attach</span>
-                  </button>
                   <div class="hint" data-pane-attachment-status></div>
                 </div>
                 <div class="attachment-list" data-pane-attachment-list></div>
               </div>
-              <button class="primary send-btn" data-pane-send type="button" aria-label="Send message">
-                <span class="visually-hidden">Send</span>
-                <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    d="M12 19V6M12 6l-6 6M12 6l6 6"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-              </button>
+
+              <div class="chat-actions" aria-label="Pane actions">
+                <button class="primary send-btn" data-pane-send type="button" aria-label="Send message">
+                  <span class="visually-hidden">Send</span>
+                  <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M12 19V6M12 6l-6 6M12 6l6 6"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+
+                <button class="attach-btn secondary" data-pane-attach type="button" aria-label="Attach files">
+                  <span class="visually-hidden">Attach</span>
+                  <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
             </div>
           </section>
         </template>
