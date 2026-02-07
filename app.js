@@ -710,7 +710,7 @@ renderPulse();
 // Panes
 
 const ADMIN_PANES_KEY = 'clawnsole.admin.panes.v1';
-const ADMIN_LAYOUT_KEY = 'clawnsole.admin.layout.v1';
+// Layout is inferred from pane count; no manual layout toggle.
 const ADMIN_DEFAULT_AGENT_KEY = 'clawnsole.admin.agentId';
 
 function computeBaseDeviceLabel() {
@@ -1559,11 +1559,25 @@ function createPane({ key, role, agentId, closable = true } = {}) {
   return pane;
 }
 
+function inferPaneCols(count) {
+  if (count <= 1) return 1;
+  // Heuristic: 2-4 panes -> 2-up, 5-6 panes -> 3-up.
+  if (count <= 4) return 2;
+  return 3;
+}
+
 const paneManager = {
   panes: [],
-  maxPanes: 4,
+  maxPanes: 6,
   init(role) {
     this.destroyAll();
+
+    // Manual layout selection is deprecated; keep the control hidden if present.
+    if (globalElements.layoutSelect) {
+      globalElements.layoutSelect.hidden = true;
+      globalElements.layoutSelect.disabled = true;
+    }
+
     if (role === 'admin') {
       this.initAdmin();
       return;
@@ -1571,25 +1585,18 @@ const paneManager = {
     this.initGuest();
   },
   initGuest() {
-    if (globalElements.layoutSelect) globalElements.layoutSelect.value = '1';
-    this.applyLayout(1);
-    const pane = createPane({ key: 'guest', role: 'guest', closable: false });
-    this.panes = [pane];
-    globalElements.paneGrid.appendChild(pane.elements.root);
+    this.panes = [createPane({ key: 'guest', role: 'guest', closable: false })];
+    globalElements.paneGrid.appendChild(this.panes[0].elements.root);
     this.updatePaneLabels();
+    this.applyInferredLayout();
   },
   initAdmin() {
-    const layout = Number(storage.get(ADMIN_LAYOUT_KEY, '2')) || 2;
-    if (globalElements.layoutSelect) {
-      globalElements.layoutSelect.value = String(Math.max(1, Math.min(3, layout)));
-    }
-    this.applyLayout(layout);
-
     const panes = this.loadAdminPanes();
     this.panes = panes.map((cfg) => createPane({ key: cfg.key, role: 'admin', agentId: cfg.agentId, closable: true }));
     this.panes.forEach((pane) => globalElements.paneGrid.appendChild(pane.elements.root));
     this.updatePaneLabels();
     this.updateCloseButtons();
+    this.applyInferredLayout();
   },
   destroyAll() {
     this.panes.forEach((pane) => {
@@ -1644,6 +1651,7 @@ const paneManager = {
     globalElements.paneGrid.appendChild(pane.elements.root);
     this.updatePaneLabels();
     this.updateCloseButtons();
+    this.applyInferredLayout();
     this.persistAdminPanes();
     if (uiState.authed) {
       pane.client.connect();
@@ -1664,6 +1672,7 @@ const paneManager = {
     } catch {}
     this.updatePaneLabels();
     this.updateCloseButtons();
+    this.applyInferredLayout();
     this.persistAdminPanes();
     updateGlobalStatus();
     updateConnectionControls();
@@ -1683,10 +1692,14 @@ const paneManager = {
   },
   applyLayout(cols) {
     const clamped = Math.max(1, Math.min(3, Number(cols) || 1));
-    storage.set(ADMIN_LAYOUT_KEY, String(clamped));
     if (globalElements.paneGrid) {
       globalElements.paneGrid.style.setProperty('--pane-cols', String(clamped));
     }
+  },
+  applyInferredLayout() {
+    if (!globalElements.paneGrid) return;
+    const cols = inferPaneCols(this.panes.length);
+    this.applyLayout(cols);
   },
   connectAll() {
     this.panes.forEach((pane, index) => {
@@ -1771,9 +1784,7 @@ globalElements.addPaneBtn?.addEventListener('click', () => {
   paneManager.addPane();
 });
 
-globalElements.layoutSelect?.addEventListener('change', (event) => {
-  paneManager.applyLayout(event.target.value);
-});
+// layoutSelect deprecated; layout is inferred from pane count.
 
 window.addEventListener('online', () => {
   paneManager.connectIfNeeded();
