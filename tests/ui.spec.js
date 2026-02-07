@@ -141,7 +141,7 @@ test.afterAll(() => {
   if (gatewayProc) gatewayProc.kill('SIGTERM');
 });
 
-test('admin login persists, send/receive, upload attachment', async ({ page }) => {
+test('admin login persists, send/receive, upload attachment', async ({ page }, testInfo) => {
   test.skip(!!skipReason, skipReason);
   await page.goto(`http://127.0.0.1:${serverPort}/`);
 
@@ -178,7 +178,7 @@ test('admin login persists, send/receive, upload attachment', async ({ page }) =
   await pane.locator('[data-pane-send]').click();
   await expect(pane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: hello');
 
-  const testFile = path.join(__dirname, 'upload.txt');
+  const testFile = testInfo.outputPath('upload.txt');
   fs.writeFileSync(testFile, 'upload test');
   await pane.locator('[data-pane-file-input]').setInputFiles(testFile);
   await expect(pane.locator('[data-pane-attachment-list]')).toContainText('upload.txt');
