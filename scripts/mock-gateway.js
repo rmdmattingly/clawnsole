@@ -34,6 +34,7 @@ wss.on('connection', (socket) => {
     }
     if (frame.method === 'chat.send') {
       socket.send(JSON.stringify({ type: 'res', id, ok: true, payload: {} }));
+      const sessionKey = typeof frame.params?.sessionKey === 'string' ? frame.params.sessionKey : '';
       socket.send(
         JSON.stringify({
           type: 'event',
@@ -41,6 +42,7 @@ wss.on('connection', (socket) => {
           payload: {
             state: 'final',
             runId: `run-${Date.now()}`,
+            sessionKey,
             message: {
               content: [{ text: `mock-reply: ${frame.params?.message || ''}` }]
             }

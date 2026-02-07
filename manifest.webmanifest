@@ -1,0 +1,22 @@
+{
+  "name": "Clawnsole",
+  "short_name": "Clawnsole",
+  "description": "A live, visual chat console for OpenClaw.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0c0f14",
+  "theme_color": "#0c0f14",
+  "icons": [
+    {
+      "src": "assets/clawnsole-logo-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/clawnsole-logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
+

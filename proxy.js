@@ -7,6 +7,27 @@ const DEFAULT_GUEST_METHODS = new Set([
   'sessions.reset'
 ]);
 
+function safeClose(socket, code, reason) {
+  if (!socket) return;
+  try {
+    if (typeof code === 'number') {
+      socket.close(code, reason ? String(reason) : '');
+      return;
+    }
+    socket.close();
+  } catch {}
+}
+
+function resolveWsOrigin(wsUrl) {
+  try {
+    const parsed = new URL(wsUrl);
+    const scheme = parsed.protocol === 'wss:' ? 'https' : 'http';
+    return `${scheme}://${parsed.host}`;
+  } catch {
+    return 'http://127.0.0.1';
+  }
+}
+
 function createProxyHandlers({
   WebSocket,
   getRoleFromCookies,
@@ -21,14 +42,20 @@ function createProxyHandlers({
   function handleAdminProxy(clientSocket, req) {
     const role = getRoleFromCookies(req);
     if (role !== 'admin') {
-      clientSocket.close();
+      safeClose(clientSocket, 4401, 'unauthorized');
       return;
     }
 
     const { token } = readToken();
-    const upstream = new WebSocket(gatewayWsUrl());
+    const upstreamUrl = gatewayWsUrl();
+    const upstream = new WebSocket(upstreamUrl, { headers: { Origin: resolveWsOrigin(upstreamUrl) } });
+    const pendingFrames = [];
+    const adminState = {
+      sessionKey: null
+    };
     let lastUpstreamAt = Date.now();
     let recentCount = 0;
+    let closed = false;
     const heartbeat = setInterval(() => {
       const idleForMs = Date.now() - lastUpstreamAt;
       const payload = {
@@ -46,56 +73,104 @@ function createProxyHandlers({
       } catch {}
     }, heartbeatMs);
 
-    upstream.on('open', () => {
-      clientSocket.on('message', (data) => {
-        let frame;
-        try {
-          frame = JSON.parse(String(data));
-        } catch {
-          return;
-        }
-        if (frame?.type !== 'req') return;
-        if (frame.method === 'connect') {
-          frame.params = frame.params || {};
-          frame.params.auth = { token };
-          frame.params.scopes = frame.params.scopes || ['operator.read', 'operator.write'];
-          frame.params.role = frame.params.role || 'operator';
-        }
+    function normalizeAndSend(frame) {
+      if (!frame || frame.type !== 'req') return;
+      if (frame.method === 'chat.send' || frame.method === 'chat.history' || frame.method === 'chat.abort' || frame.method === 'chat.inject') {
+        const key = frame.params?.sessionKey;
+        if (typeof key === 'string' && key) adminState.sessionKey = key;
+      }
+      if (frame.method === 'sessions.resolve' || frame.method === 'sessions.reset') {
+        const key = frame.params?.key;
+        if (typeof key === 'string' && key) adminState.sessionKey = key;
+      }
+      if (frame.method === 'connect') {
+        const instanceId = frame.params?.client?.instanceId;
+        const clientId = frame.params?.client?.id;
+        const suffix = instanceId || clientId || 'admin';
+        adminState.sessionKey = `agent:main:admin:${suffix}`;
+        frame.params = frame.params || {};
+        frame.params.auth = { token };
+        frame.params.scopes = frame.params.scopes || ['operator.read', 'operator.write'];
+        frame.params.role = frame.params.role || 'operator';
+      }
+      try {
         upstream.send(JSON.stringify(frame));
-      });
+      } catch {}
+    }
+
+    clientSocket.on('message', (data) => {
+      let frame;
+      try {
+        frame = JSON.parse(String(data));
+      } catch {
+        return;
+      }
+      if (frame?.type !== 'req') return;
+      if (upstream.readyState !== 1) {
+        pendingFrames.push(frame);
+        return;
+      }
+      normalizeAndSend(frame);
+    });
+
+    upstream.on('open', () => {
+      while (pendingFrames.length > 0) {
+        normalizeAndSend(pendingFrames.shift());
+      }
     });
 
     upstream.on('message', (data) => {
       lastUpstreamAt = Date.now();
       recentCount += 1;
-      clientSocket.send(String(data));
+      let frame;
+      try {
+        frame = JSON.parse(String(data));
+      } catch {
+        clientSocket.send(String(data));
+        return;
+      }
+
+      if (frame?.type === 'event' && frame.event === 'chat') {
+        const sessionKey = frame.payload?.sessionKey;
+        if (!sessionKey) {
+          return;
+        }
+        if (adminState.sessionKey && sessionKey !== adminState.sessionKey) {
+          return;
+        }
+      }
+
+      clientSocket.send(JSON.stringify(frame));
     });
 
-    const closeBoth = () => {
-      try {
-        upstream.close();
-      } catch {}
-      try {
-        clientSocket.close();
-      } catch {}
+    const closeBoth = (code, reason) => {
+      if (closed) return;
+      closed = true;
+      safeClose(upstream, code, reason);
+      safeClose(clientSocket, code, reason);
       clearInterval(heartbeat);
     };
 
     clientSocket.on('close', closeBoth);
-    upstream.on('close', closeBoth);
-    upstream.on('error', closeBoth);
+    upstream.on('close', (code, reasonBuf) => closeBoth(code, reasonBuf ? reasonBuf.toString() : ''));
+    upstream.on('error', (err) => {
+      const message = err && err.code ? `${err.code} ${err.message || 'upstream error'}` : String(err || 'upstream error');
+      closeBoth(1013, message.slice(0, 180));
+    });
   }
 
   function handleGuestProxy(clientSocket, req) {
     const role = getRoleFromCookies(req);
     if (role !== 'guest') {
-      clientSocket.close();
+      safeClose(clientSocket, 4401, 'unauthorized');
       return;
     }
 
     const { token } = readToken();
     const guestAgentId = typeof getGuestAgentId === 'function' ? getGuestAgentId() : 'main';
-    const upstream = new WebSocket(gatewayWsUrl());
+    const upstreamUrl = gatewayWsUrl();
+    const upstream = new WebSocket(upstreamUrl, { headers: { Origin: resolveWsOrigin(upstreamUrl) } });
+    const pendingFrames = [];
     const guestState = {
       sessionKey: null,
       connectId: null,
@@ -103,6 +178,7 @@ function createProxyHandlers({
     };
     let lastUpstreamAt = Date.now();
     let recentCount = 0;
+    let closed = false;
     const heartbeat = setInterval(() => {
       const idleForMs = Date.now() - lastUpstreamAt;
       const payload = {
@@ -120,50 +196,66 @@ function createProxyHandlers({
       } catch {}
     }, heartbeatMs);
 
-    upstream.on('open', () => {
-      clientSocket.on('message', (data) => {
-        let frame;
-        try {
-          frame = JSON.parse(String(data));
-        } catch {
-          return;
+    function normalizeAndSend(frame) {
+      if (!frame || frame.type !== 'req') return;
+      if (frame.method === 'connect') {
+        const instanceId = frame.params?.client?.instanceId;
+        const clientId = frame.params?.client?.id;
+        const suffix = instanceId || clientId || 'guest';
+        guestState.sessionKey = `agent:${guestAgentId || 'main'}:guest:${suffix}`;
+        guestState.connectId = frame.id;
+        if (typeof onGuestSessionKey === 'function') {
+          onGuestSessionKey(guestState.sessionKey);
         }
-        if (frame?.type !== 'req') return;
-        if (!guestAllowedMethods.has(frame.method)) {
-          clientSocket.send(
-            JSON.stringify({
-              type: 'res',
-              id: frame.id || 'unknown',
-              ok: false,
-              error: { code: 'FORBIDDEN', message: 'guest role not allowed for this method' }
-            })
-          );
-          return;
-        }
-        if (frame.method === 'connect') {
-          const instanceId = frame.params?.client?.instanceId;
-          const clientId = frame.params?.client?.id;
-          const suffix = instanceId || clientId || 'guest';
-          guestState.sessionKey = `agent:${guestAgentId || 'main'}:guest:${suffix}`;
-          guestState.connectId = frame.id;
-          if (typeof onGuestSessionKey === 'function') {
-            onGuestSessionKey(guestState.sessionKey);
-          }
-          frame.params = frame.params || {};
-          frame.params.auth = { token };
-          frame.params.scopes = ['operator.read', 'operator.write'];
-          frame.params.role = 'operator';
-        }
-        if (frame.method === 'chat.send' || frame.method === 'chat.history' || frame.method === 'chat.abort') {
-          frame.params = frame.params || {};
-          frame.params.sessionKey = guestState.sessionKey || frame.params.sessionKey;
-        }
-        if (frame.method === 'sessions.resolve' || frame.method === 'sessions.reset') {
-          frame.params = frame.params || {};
-          frame.params.key = guestState.sessionKey || frame.params.key;
-        }
+        frame.params = frame.params || {};
+        frame.params.auth = { token };
+        frame.params.scopes = ['operator.read', 'operator.write'];
+        frame.params.role = 'operator';
+      }
+      if (frame.method === 'chat.send' || frame.method === 'chat.history' || frame.method === 'chat.abort') {
+        frame.params = frame.params || {};
+        frame.params.sessionKey = guestState.sessionKey || frame.params.sessionKey;
+      }
+      if (frame.method === 'sessions.resolve' || frame.method === 'sessions.reset') {
+        frame.params = frame.params || {};
+        frame.params.key = guestState.sessionKey || frame.params.key;
+      }
+      try {
         upstream.send(JSON.stringify(frame));
-      });
+      } catch {}
+    }
+
+    clientSocket.on('message', (data) => {
+      let frame;
+      try {
+        frame = JSON.parse(String(data));
+      } catch {
+        return;
+      }
+      if (frame?.type !== 'req') return;
+      if (!guestAllowedMethods.has(frame.method)) {
+        clientSocket.send(
+          JSON.stringify({
+            type: 'res',
+            id: frame.id || 'unknown',
+            ok: false,
+            error: { code: 'FORBIDDEN', message: 'guest role not allowed for this method' }
+          })
+        );
+        return;
+      }
+
+      if (upstream.readyState !== 1) {
+        pendingFrames.push(frame);
+        return;
+      }
+      normalizeAndSend(frame);
+    });
+
+    upstream.on('open', () => {
+      while (pendingFrames.length > 0) {
+        normalizeAndSend(pendingFrames.shift());
+      }
     });
 
     upstream.on('message', (data) => {
@@ -212,23 +304,34 @@ function createProxyHandlers({
         if (!allowed) {
           return;
         }
+
+        if (eventName === 'chat') {
+          const sessionKey = frame.payload?.sessionKey;
+          if (!sessionKey) {
+            return;
+          }
+          if (guestState.sessionKey && sessionKey !== guestState.sessionKey) {
+            return;
+          }
+        }
       }
       clientSocket.send(JSON.stringify(frame));
     });
 
-    const closeBoth = () => {
-      try {
-        upstream.close();
-      } catch {}
-      try {
-        clientSocket.close();
-      } catch {}
+    const closeBoth = (code, reason) => {
+      if (closed) return;
+      closed = true;
+      safeClose(upstream, code, reason);
+      safeClose(clientSocket, code, reason);
       clearInterval(heartbeat);
     };
 
     clientSocket.on('close', closeBoth);
-    upstream.on('close', closeBoth);
-    upstream.on('error', closeBoth);
+    upstream.on('close', (code, reasonBuf) => closeBoth(code, reasonBuf ? reasonBuf.toString() : ''));
+    upstream.on('error', (err) => {
+      const message = err && err.code ? `${err.code} ${err.message || 'upstream error'}` : String(err || 'upstream error');
+      closeBoth(1013, message.slice(0, 180));
+    });
   }
 
   return { handleAdminProxy, handleGuestProxy };

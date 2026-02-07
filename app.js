@@ -1,4 +1,4 @@
-const elements = {
+const globalElements = {
   wsUrl: document.getElementById('wsUrl'),
   clientId: document.getElementById('clientId'),
   deviceId: document.getElementById('deviceId'),
@@ -8,27 +8,52 @@ const elements = {
   disconnectBtn: document.getElementById('disconnectBtn'),
   status: document.getElementById('connectionStatus'),
   statusMeta: document.getElementById('statusMeta'),
-  chatInput: document.getElementById('chatInput'),
-  chatBtn: document.getElementById('chatBtn'),
-  chatThread: document.getElementById('chatThread'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   settingsBtn: document.getElementById('settingsBtn'),
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   rolePill: document.getElementById('rolePill'),
-  channelSelect: document.getElementById('channelSelect'),
   loginOverlay: document.getElementById('loginOverlay'),
   loginRole: document.getElementById('loginRole'),
   loginPassword: document.getElementById('loginPassword'),
   loginBtn: document.getElementById('loginBtn'),
   loginError: document.getElementById('loginError'),
-  fileInput: document.getElementById('fileInput'),
-  attachBtn: document.getElementById('attachBtn'),
-  attachmentList: document.getElementById('attachmentList'),
-  attachmentStatus: document.getElementById('attachmentStatus'),
-  commandHints: document.getElementById('commandHints'),
-  logoutBtn: document.getElementById('logoutBtn')
+  logoutBtn: document.getElementById('logoutBtn'),
+  paneControls: document.getElementById('paneControls'),
+  addPaneBtn: document.getElementById('addPaneBtn'),
+  layoutSelect: document.getElementById('layoutSelect'),
+  paneGrid: document.getElementById('paneGrid'),
+  paneTemplate: document.getElementById('paneTemplate')
 };
+
+function getRouteRole() {
+  try {
+    const path = window.location.pathname || '/';
+    if (path === '/admin' || path.startsWith('/admin/')) return 'admin';
+    if (path === '/guest' || path.startsWith('/guest/')) return 'guest';
+  } catch {}
+  return null;
+}
+
+const routeRole = getRouteRole();
+
+function installViewportVhVar() {
+  const setVh = () => {
+    const vv = window.visualViewport;
+    const height = vv ? vv.height : window.innerHeight;
+    const offsetTop = vv ? vv.offsetTop : 0;
+    document.documentElement.style.setProperty('--app-height', `${Math.max(1, Math.floor(height))}px`);
+    document.documentElement.style.setProperty('--app-offset-top', `${Math.max(0, Math.floor(offsetTop))}px`);
+  };
+
+  setVh();
+  window.addEventListener('resize', setVh);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', setVh);
+  }
+}
+
+installViewportVhVar();
 
 const storage = {
   get(key, fallback = '') {
@@ -37,288 +62,35 @@ const storage = {
   },
   set(key, value) {
     localStorage.setItem(key, value);
+  },
+  remove(key) {
+    localStorage.removeItem(key);
   }
 };
 
 const roleState = {
-  role: 'guest',
-  channel: 'guest',
+  role: null,
   guestPolicyInjected: false
 };
 
 const uiState = {
-  connected: false,
   authed: false,
-  meta: {}
-};
-
-const attachmentState = {
-  files: []
+  meta: {},
+  agents: []
 };
 
 const commandList = [
-  { command: '/clear', description: 'Clear chat history' },
-  { command: '/new', description: 'Start a fresh chat' }
+  { command: '/clear', description: 'Clear local chat history' },
+  { command: '/new', description: 'Reset the remote session + clear local history' }
 ];
 
-function getSessionKey(role) {
-  const deviceLabel = elements.deviceId.value.trim() || 'device';
-  const kind = role === 'admin' ? 'admin' : 'guest';
-  return `agent:main:${kind}:${deviceLabel}`;
-}
-
-function setChatEnabled(enabled) {
-  elements.chatInput.disabled = !enabled;
-  elements.chatBtn.disabled = !enabled;
-  elements.attachBtn.disabled = !enabled;
-  elements.chatInput.placeholder = enabled
-    ? 'Message OpenClaw... (Press Enter to send)'
-    : 'Disconnected — sign in to continue';
-}
-
-function setConnectionState(connected) {
-  uiState.connected = connected;
-  setChatEnabled(connected && uiState.authed);
-  elements.status.textContent = connected ? 'connected' : 'disconnected';
-  elements.status.classList.toggle('connected', connected);
-  elements.status.classList.toggle('error', !connected);
-  if (!connected) {
-    setAuthState(false);
-    showLogin('Disconnected. Please sign in again.');
-  }
-}
-
-function setAuthState(authed) {
-  uiState.authed = authed;
-  setChatEnabled(uiState.connected && authed);
-}
-
-function resolveWsUrl(raw) {
-  if (!raw) return '';
-  if (raw.startsWith('ws://') || raw.startsWith('wss://')) return raw;
-  if (raw.startsWith('/')) {
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    return `${proto}://${window.location.host}${raw}`;
-  }
-  return raw;
-}
-
-async function fetchRole() {
-  try {
-    const res = await fetch('/auth/role', { credentials: 'include' });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.role === 'admin' ? 'admin' : 'guest';
-  } catch (err) {
-    return null;
-  }
-}
-
-async function fetchMeta() {
-  try {
-    const res = await fetch('/meta', { credentials: 'include' });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data?.wsUrl) {
-      elements.wsUrl.value = data.wsUrl;
-      uiState.meta = data;
-      return data;
-    }
-    return null;
-  } catch (err) {
-    return null;
-  }
-}
-
-function setRole(role) {
-  roleState.role = role;
-  if (elements.rolePill) {
-    elements.rolePill.textContent = role;
-    elements.rolePill.classList.toggle('admin', role === 'admin');
-  }
-  if (role === 'guest') {
-    roleState.channel = 'guest';
-    if (elements.channelSelect) {
-      elements.channelSelect.value = 'guest';
-      elements.channelSelect.disabled = true;
-    }
-    roleState.guestPolicyInjected = false;
-    elements.settingsBtn.setAttribute('disabled', 'disabled');
-    elements.settingsBtn.style.opacity = '0.5';
-  } else {
-    roleState.channel = 'admin';
-    if (elements.channelSelect) {
-      elements.channelSelect.value = 'admin';
-      elements.channelSelect.disabled = true;
-    }
-    elements.settingsBtn.removeAttribute('disabled');
-    elements.settingsBtn.style.opacity = '1';
-  }
-  clearChatHistory();
-  restoreChatHistory();
-}
-
-function setChannel(channel) {
-  roleState.channel = channel;
-  storage.set('clawnsole.channel', channel);
-  clearChatHistory();
-  restoreChatHistory();
-}
-
-function showLogin(message = '') {
-  elements.loginOverlay.classList.add('open');
-  elements.loginOverlay.setAttribute('aria-hidden', 'false');
-  elements.loginError.textContent = message;
-  elements.loginPassword.value = '';
-  elements.loginPassword.focus();
-  setAuthState(false);
-}
-
-function hideLogin() {
-  elements.loginOverlay.classList.remove('open');
-  elements.loginOverlay.setAttribute('aria-hidden', 'true');
-  elements.loginError.textContent = '';
-  setAuthState(true);
-}
-
-async function attemptLogin() {
-  const role = elements.loginRole.value === 'admin' ? 'admin' : 'guest';
-  const password = elements.loginPassword.value.trim();
-  if (!password) {
-    showLogin('Password required.');
-    return;
-  }
-  try {
-    const res = await fetch('/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role, password }),
-      credentials: 'include'
-    });
-    if (!res.ok) {
-      showLogin('Invalid password. Try again.');
-      return;
-    }
-    const data = await res.json();
-    hideLogin();
-    setRole(data.role === 'admin' ? 'admin' : 'guest');
-    fetchMeta().finally(() => client.connect());
-  } catch (err) {
-    showLogin('Login failed. Please retry.');
-  }
-}
-
-function renderAttachments() {
-  if (!elements.attachmentList) return;
-  elements.attachmentList.innerHTML = '';
-  attachmentState.files.forEach((file, index) => {
-    const pill = document.createElement('div');
-    pill.className = 'attachment-pill';
-    const name = document.createElement('span');
-    name.textContent = file.name;
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.textContent = '✕';
-    remove.addEventListener('click', () => {
-      attachmentState.files.splice(index, 1);
-      renderAttachments();
-    });
-    pill.append(name, remove);
-    elements.attachmentList.appendChild(pill);
-  });
-}
-
-function updateCommandHints() {
-  if (!elements.commandHints) return;
-  const value = elements.chatInput.value.trim();
-  if (!value.startsWith('/')) {
-    elements.commandHints.classList.remove('visible');
-    elements.commandHints.innerHTML = '';
-    return;
-  }
-  const matches = commandList.filter((item) => item.command.startsWith(value));
-  if (matches.length === 0) {
-    elements.commandHints.classList.remove('visible');
-    elements.commandHints.innerHTML = '';
-    return;
-  }
-  elements.commandHints.innerHTML = matches
-    .map(
-      (item) =>
-        `<div class="command-hint"><code>${item.command}</code><span>${item.description}</span></div>`
-    )
-    .join('');
-  elements.commandHints.classList.add('visible');
-}
-
-async function handleFileSelection(event) {
-  const files = Array.from(event.target.files || []);
-  const maxSize = 5 * 1024 * 1024;
-  const maxCount = 4;
-  elements.attachmentStatus.textContent = '';
-  for (const file of files) {
-    if (attachmentState.files.length >= maxCount) {
-      elements.attachmentStatus.textContent = 'Attachment limit reached.';
-      break;
-    }
-    if (file.size > maxSize) {
-      elements.attachmentStatus.textContent = `File too large: ${file.name}`;
-      continue;
-    }
-    try {
-      const base64 = await fileToBase64(file);
-      attachmentState.files.push({
-        name: file.name,
-        type: file.type || 'application/octet-stream',
-        size: file.size,
-        data: base64
-      });
-    } catch (err) {
-      elements.attachmentStatus.textContent = `Failed to read ${file.name}`;
-      addFeed('err', 'attachment', String(err));
-    }
-  }
-  event.target.value = '';
-  renderAttachments();
-}
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : '';
-      const comma = result.indexOf(',');
-      resolve(comma >= 0 ? result.slice(comma + 1) : result);
-    };
-    reader.onerror = () => {
-      reject(reader.error || new Error('Failed to read file'));
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-async function uploadAttachments() {
-  if (attachmentState.files.length === 0) return [];
-  elements.attachmentStatus.textContent = 'Uploading...';
-  const res = await fetch('/upload', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ files: attachmentState.files })
-  });
-  if (!res.ok) {
-    elements.attachmentStatus.textContent = `Upload failed (${res.status}).`;
-    addFeed('err', 'attachment', `upload failed (${res.status})`);
-    return [];
-  }
-  const data = await res.json();
-  attachmentState.files = [];
-  renderAttachments();
-  elements.attachmentStatus.textContent = '';
-  return Array.isArray(data.files) ? data.files : [];
-}
 function randomId() {
-  return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch {}
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
 }
 
 function initDeviceId() {
@@ -329,12 +101,89 @@ function initDeviceId() {
   return id;
 }
 
-elements.deviceId.value = initDeviceId();
+function initTabId() {
+  try {
+    const existing = sessionStorage.getItem('clawnsole.tabId');
+    if (existing) return existing;
+    const id = `t${randomId().slice(0, 8)}`;
+    sessionStorage.setItem('clawnsole.tabId', id);
+    return id;
+  } catch {
+    return `t${randomId().slice(0, 8)}`;
+  }
+}
+
+let TAB_ID = initTabId();
+const PAGE_ID = `p${randomId().slice(0, 10)}`;
+const PAGE_STARTED_AT = Date.now();
+
+function ensureUniqueTabId() {
+  if (typeof BroadcastChannel === 'undefined') return;
+  let channel;
+  try {
+    channel = new BroadcastChannel('clawnsole.tabs.v1');
+  } catch {
+    return;
+  }
+
+  const onMessage = (event) => {
+    const msg = event?.data || null;
+    if (!msg || msg.type !== 'hello') return;
+    if (msg.tabId !== TAB_ID) return;
+    if (msg.pageId === PAGE_ID) return;
+
+    // Duplicated tabs can copy sessionStorage. If we detect another live page with our tabId,
+    // the newer page should generate a new tab id and reload, avoiding connection fights.
+    const otherStartedAt = Number(msg.startedAt || 0);
+    const weAreNewer = otherStartedAt && otherStartedAt < PAGE_STARTED_AT;
+    if (!weAreNewer) return;
+
+    TAB_ID = `t${randomId().slice(0, 8)}`;
+    try {
+      sessionStorage.setItem('clawnsole.tabId', TAB_ID);
+    } catch {}
+
+    try {
+      channel.removeEventListener('message', onMessage);
+      channel.close();
+    } catch {}
+
+    // Apply new session keys/client.instanceId before attempting any gateway connect.
+    window.location.reload();
+  };
+
+  channel.addEventListener('message', onMessage);
+
+  try {
+    channel.postMessage({ type: 'hello', tabId: TAB_ID, pageId: PAGE_ID, startedAt: PAGE_STARTED_AT });
+  } catch {}
+
+  window.addEventListener('beforeunload', () => {
+    try {
+      channel.removeEventListener('message', onMessage);
+      channel.close();
+    } catch {}
+  });
+}
+
+ensureUniqueTabId();
+
+globalElements.deviceId.value = initDeviceId();
 let cachedToken = '';
+let metaPromise = null;
+
+function addFeed(type, label, payload) {
+  const record = { type, label, payload };
+  if (type === 'err') {
+    console.error('[clawnsole]', record);
+  } else {
+    console.log('[clawnsole]', record);
+  }
+}
 
 async function fetchToken() {
   try {
-    const res = await fetch('/token');
+    const res = await fetch('/token', { credentials: 'include', cache: 'no-store' });
     if (!res.ok) {
       addFeed('err', 'token', `token fetch failed (${res.status})`);
       return '';
@@ -352,207 +201,328 @@ async function fetchToken() {
   }
 }
 
-function addFeed(type, label, payload) {
-  const record = { type, label, payload };
-  if (type === 'err') {
-    console.error('[clawnsole]', record);
-  } else {
-    console.log('[clawnsole]', record);
-  }
-}
-
-function extractChatText(message) {
-  if (!message) return '';
-  if (typeof message === 'string') return message;
-  if (typeof message.text === 'string') return message.text;
-  if (Array.isArray(message.content)) {
-    return message.content
-      .map((part) => (typeof part?.text === 'string' ? part.text : ''))
-      .filter(Boolean)
-      .join('');
-  }
-  return '';
-}
-
-const chatState = {
-  runs: new Map(),
-  history: []
-};
-
-const scrollState = {
-  pinned: true
-};
-
-function isNearBottom(container) {
-  const threshold = 80;
-  return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
-}
-
-function scrollToBottom(container, force = false) {
-  if (force || scrollState.pinned) {
-    container.scrollTop = container.scrollHeight;
-  }
-}
-
-function loadChatHistory() {
-  if (roleState.role === 'guest' || roleState.channel === 'guest') {
-    return [];
-  }
+async function fetchRoleState() {
   try {
-    const raw = localStorage.getItem(`clawnsole.chat.history.${roleState.channel}`);
-    if (!raw) return [];
-    const data = JSON.parse(raw);
-    return Array.isArray(data) ? data : [];
-  } catch (err) {
-    addFeed('err', 'chat', `failed to load history: ${String(err)}`);
+    const res = await fetch('/auth/role', { credentials: 'include', cache: 'no-store' });
+    if (!res.ok) return { reachable: true, role: null };
+    const data = await res.json();
+    if (data.role === 'admin') return { reachable: true, role: 'admin' };
+    if (data.role === 'guest') return { reachable: true, role: 'guest' };
+    return { reachable: true, role: null };
+  } catch {
+    return { reachable: false, role: null };
+  }
+}
+
+async function fetchRole() {
+  const { reachable, role } = await fetchRoleState();
+  if (!reachable) return null;
+  return role;
+}
+
+async function fetchMeta() {
+  try {
+    const res = await fetch('/meta', { credentials: 'include', cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.wsUrl) {
+      globalElements.wsUrl.value = data.wsUrl;
+      uiState.meta = data;
+      return data;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureMetaLoaded() {
+  if (metaPromise) return metaPromise;
+  metaPromise = fetchMeta().then(() => {});
+  return metaPromise;
+}
+
+async function fetchAgents() {
+  try {
+    const res = await fetch('/agents', { credentials: 'include', cache: 'no-store' });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const list = Array.isArray(data.agents) ? data.agents : [];
+    return list
+      .map((agent) => ({
+        id: typeof agent?.id === 'string' ? agent.id : '',
+        name: typeof agent?.name === 'string' ? agent.name : '',
+        displayName: typeof agent?.displayName === 'string' ? agent.displayName : '',
+        emoji: typeof agent?.emoji === 'string' ? agent.emoji : ''
+      }))
+      .filter((agent) => agent.id);
+  } catch {
     return [];
   }
 }
 
-function saveChatHistory() {
-  if (roleState.role === 'guest' || roleState.channel === 'guest') {
+function formatAgentLabel(agent, { includeId = true } = {}) {
+  if (!agent) return 'main';
+  const id = typeof agent.id === 'string' ? agent.id : '';
+  const name = (typeof agent.displayName === 'string' && agent.displayName.trim()) ||
+    (typeof agent.name === 'string' && agent.name.trim()) ||
+    id ||
+    'main';
+  const emoji = typeof agent.emoji === 'string' ? agent.emoji.trim() : '';
+  // Treat identity emojis as "signatures" (suffix) rather than prefixes.
+  const base = emoji ? `${name} ${emoji}` : name;
+  if (!includeId) return base;
+  if (id && id !== name) return `${base} (${id})`;
+  return base;
+}
+
+function getAgentRecord(agentId) {
+  const id = typeof agentId === 'string' && agentId.trim() ? agentId.trim() : 'main';
+  const found = uiState.agents.find((agent) => agent.id === id);
+  if (found) return found;
+  return { id, name: id, displayName: '', emoji: '' };
+}
+
+function normalizeAgentId(candidate) {
+  if (typeof candidate !== 'string') return 'main';
+  const trimmed = candidate.trim();
+  if (!trimmed) return 'main';
+  if (uiState.agents.length === 0) return trimmed;
+  const exists = uiState.agents.some((agent) => agent.id === trimmed);
+  return exists ? trimmed : 'main';
+}
+
+function resolveWsUrl(raw) {
+  if (!raw) return '';
+  if (raw.startsWith('ws://') || raw.startsWith('wss://')) return raw;
+  if (raw.startsWith('/')) {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${proto}://${window.location.host}${raw}`;
+  }
+  return raw;
+}
+
+function computeGatewayTarget(kind) {
+  const key = kind === 'guest' ? 'guestWsUrl' : 'adminWsUrl';
+  const proxyUrl = uiState.meta && uiState.meta[key] ? uiState.meta[key] : '';
+  const usingProxy = Boolean(proxyUrl);
+  const rawUrl = proxyUrl || globalElements.wsUrl.value.trim();
+  return { url: resolveWsUrl(rawUrl), usingProxy };
+}
+
+async function prepareGateway(kind) {
+  await ensureMetaLoaded();
+  const { usingProxy } = computeGatewayTarget(kind);
+  if (!usingProxy) {
+    if (!cachedToken) await fetchToken();
+    if (!cachedToken) throw new Error('missing gateway token');
+  }
+}
+
+function setStatusPill(el, state, meta = '') {
+  if (!el) return;
+  el.textContent = state;
+  el.classList.remove('connected', 'error', 'working');
+  if (state === 'connected') el.classList.add('connected');
+  if (state === 'error') el.classList.add('error');
+  if (state === 'connecting' || state === 'reconnecting' || state === 'offline') {
+    el.classList.add('working');
+  }
+  el.title = meta || '';
+}
+
+function updateGlobalStatus() {
+  const panes = paneManager.panes;
+  if (!uiState.authed) {
+    setStatusPill(globalElements.status, 'disconnected', 'sign in required');
+    if (globalElements.statusMeta) globalElements.statusMeta.textContent = 'sign in required';
+    return;
+  }
+  if (panes.length === 0) {
+    setStatusPill(globalElements.status, 'disconnected', '');
+    if (globalElements.statusMeta) globalElements.statusMeta.textContent = '';
+    return;
+  }
+
+  const connectedCount = panes.filter((pane) => pane.connected).length;
+  const total = panes.length;
+  const anyConnecting = panes.some((pane) => pane.statusState === 'connecting' || pane.statusState === 'reconnecting');
+  const anyError = panes.some((pane) => pane.statusState === 'error');
+  const firstError = panes.find((pane) => pane.statusState === 'error' && pane.statusMeta);
+
+  let state = 'disconnected';
+  if (connectedCount === total) {
+    state = 'connected';
+  } else if (connectedCount > 0 || anyConnecting) {
+    state = 'reconnecting';
+  } else if (anyError) {
+    state = 'error';
+  }
+
+  const meta =
+    connectedCount === 0 && anyError && firstError
+      ? firstError.statusMeta
+      : `panes: ${connectedCount}/${total} connected`;
+  setStatusPill(globalElements.status, state, meta);
+  if (globalElements.statusMeta) globalElements.statusMeta.textContent = meta;
+}
+
+function updateConnectionControls() {
+  if (!globalElements.disconnectBtn) return;
+  globalElements.disconnectBtn.disabled = !uiState.authed;
+  if (!uiState.authed) {
+    globalElements.disconnectBtn.textContent = 'Reconnect';
+    return;
+  }
+  const anyActive = paneManager.panes.some((pane) =>
+    pane.statusState === 'connected' || pane.statusState === 'connecting' || pane.statusState === 'reconnecting'
+  );
+  globalElements.disconnectBtn.textContent = anyActive ? 'Disconnect' : 'Reconnect';
+}
+
+function setAuthState(authed) {
+  uiState.authed = authed;
+  updateGlobalStatus();
+  updateConnectionControls();
+  paneManager.refreshChatEnabled();
+  if (globalElements.logoutBtn) {
+    globalElements.logoutBtn.disabled = !authed;
+    globalElements.logoutBtn.style.opacity = authed ? '1' : '0.5';
+  }
+}
+
+function setRole(role) {
+  roleState.role = role;
+  if (globalElements.rolePill) {
+    globalElements.rolePill.textContent = role;
+    globalElements.rolePill.classList.toggle('admin', role === 'admin');
+  }
+  if (role === 'guest') {
+    roleState.guestPolicyInjected = false;
+    globalElements.settingsBtn?.setAttribute('disabled', 'disabled');
+    if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
+  } else {
+    globalElements.settingsBtn?.removeAttribute('disabled');
+    if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '1';
+  }
+
+  if (globalElements.paneControls) {
+    globalElements.paneControls.hidden = role !== 'admin';
+  }
+}
+
+function showLogin(message = '') {
+  globalElements.loginOverlay.classList.add('open');
+  globalElements.loginOverlay.setAttribute('aria-hidden', 'false');
+  globalElements.loginError.textContent = message;
+  globalElements.loginPassword.value = '';
+
+  if (routeRole === 'admin' || routeRole === 'guest') {
+    globalElements.loginRole.value = routeRole;
+    globalElements.loginRole.disabled = true;
+  } else {
+    globalElements.loginRole.disabled = false;
+    const savedRole = storage.get('clawnsole.auth.role', '');
+    if (savedRole === 'admin' || savedRole === 'guest') {
+      globalElements.loginRole.value = savedRole;
+    }
+  }
+
+  setAuthState(false);
+  if (globalElements.rolePill) {
+    globalElements.rolePill.textContent = 'signed out';
+    globalElements.rolePill.classList.remove('admin');
+  }
+  globalElements.settingsBtn?.setAttribute('disabled', 'disabled');
+  if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
+
+  const isTouch = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  if (!isTouch) {
+    globalElements.loginPassword.focus();
+  }
+}
+
+function hideLogin() {
+  globalElements.loginOverlay.classList.remove('open');
+  globalElements.loginOverlay.setAttribute('aria-hidden', 'true');
+  globalElements.loginError.textContent = '';
+  setAuthState(true);
+}
+
+async function attemptLogin() {
+  const role = globalElements.loginRole.value === 'admin' ? 'admin' : 'guest';
+  const password = globalElements.loginPassword.value.trim();
+  if (!password) {
+    showLogin('Password required.');
     return;
   }
   try {
-    localStorage.setItem(
-      `clawnsole.chat.history.${roleState.channel}`,
-      JSON.stringify(chatState.history)
-    );
-  } catch (err) {
-    addFeed('err', 'chat', `failed to save history: ${String(err)}`);
-  }
-}
-
-function restoreChatHistory() {
-  chatState.history = loadChatHistory();
-  elements.chatThread.innerHTML = '';
-  chatState.runs.clear();
-  chatState.history.forEach((entry) => {
-    addChatMessage({ role: entry.role, text: entry.text, persist: false });
-  });
-  scrollToBottom(elements.chatThread, true);
-}
-
-function clearChatHistory({ wipeStorage = false } = {}) {
-  chatState.history = [];
-  chatState.runs.clear();
-  elements.chatThread.innerHTML = '';
-  if (wipeStorage && roleState.role !== 'guest' && roleState.channel !== 'guest') {
-    localStorage.removeItem(`clawnsole.chat.history.${roleState.channel}`);
-  }
-}
-
-function addChatMessage({ role, text, runId, streaming = false, persist = true }) {
-  const shouldPin = scrollState.pinned || isNearBottom(elements.chatThread);
-  const bubble = document.createElement('div');
-  bubble.className = `chat-bubble ${role}${streaming ? ' streaming' : ''}`;
-  const meta = document.createElement('div');
-  meta.className = 'chat-meta';
-  meta.textContent = role === 'user' ? 'You' : 'OpenClaw';
-  const body = document.createElement('div');
-  body.className = 'chat-text';
-  body.innerHTML = renderMarkdown(text || '');
-  bubble.appendChild(meta);
-  bubble.appendChild(body);
-  elements.chatThread.appendChild(bubble);
-  scrollState.pinned = shouldPin;
-  scrollToBottom(elements.chatThread);
-  let index = null;
-  if (persist) {
-    index = chatState.history.length;
-    chatState.history.push({ role, text, ts: Date.now() });
-    saveChatHistory();
-  }
-  if (runId) {
-    chatState.runs.set(runId, { body, index });
-  }
-}
-
-function updateChatRun(runId, text, done) {
-  const entry = chatState.runs.get(runId);
-  if (!entry) {
-    addChatMessage({ role: 'assistant', text, runId, streaming: !done, persist: done });
-    return;
-  }
-  const shouldPin = scrollState.pinned || isNearBottom(elements.chatThread);
-  entry.pendingText = text || '';
-  if (entry.revealIndex === undefined) {
-    const currentLen = entry.body.textContent ? entry.body.textContent.length : 0;
-    entry.revealIndex = Math.min(currentLen, entry.pendingText.length);
-    entry.renderedText = entry.pendingText.slice(0, entry.revealIndex);
-  }
-  entry.targetText = entry.pendingText;
-  if (!entry.typeTimer) {
-    entry.lastTypeTick = performance.now();
-    entry.typeTimer = setInterval(() => {
-      const now = performance.now();
-      const elapsed = now - entry.lastTypeTick;
-      entry.lastTypeTick = now;
-      const target = entry.targetText || '';
-      const currentIndex = entry.revealIndex || 0;
-      if (currentIndex >= target.length) {
-        if (!entry.donePending) {
-          if (entry.stopTimer) return;
-          entry.stopTimer = setTimeout(() => {
-            clearInterval(entry.typeTimer);
-            entry.typeTimer = null;
-            entry.stopTimer = null;
-          }, 420);
-        }
-        return;
-      }
-      const charsToAdd = Math.max(1, Math.floor((elapsed * 60) / 1000));
-      entry.revealIndex = Math.min(target.length, currentIndex + charsToAdd);
-      const nextText = target.slice(0, entry.revealIndex);
-      if (nextText !== entry.renderedText) {
-        entry.renderedText = nextText;
-        entry.body.innerHTML = renderMarkdown(nextText);
-        if (scrollState.pinned || isNearBottom(elements.chatThread)) {
-          scrollState.pinned = true;
-          scrollToBottom(elements.chatThread);
-        }
-      }
-      if (entry.revealIndex >= target.length && entry.donePending) {
-        clearInterval(entry.typeTimer);
-        entry.typeTimer = null;
-      }
-    }, 36);
-  }
-  if (entry.stopTimer) {
-    clearTimeout(entry.stopTimer);
-    entry.stopTimer = null;
-  }
-  if (entry.index === null || entry.index === undefined) {
-    if (done || text) {
-      entry.index = chatState.history.length;
-      chatState.history.push({ role: 'assistant', text, ts: Date.now() });
-      saveChatHistory();
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, password }),
+      credentials: 'include'
+    });
+    if (!res.ok) {
+      showLogin('Invalid password. Try again.');
+      return;
     }
-  } else {
-    chatState.history[entry.index] = { role: 'assistant', text, ts: Date.now() };
-    saveChatHistory();
+    const data = await res.json();
+    const nextRole = data.role === 'admin' ? 'admin' : 'guest';
+    storage.set('clawnsole.auth.role', nextRole);
+    window.location.replace(nextRole === 'admin' ? '/admin' : '/guest');
+  } catch {
+    showLogin('Login failed. Please retry.');
   }
-  if (done) {
-    entry.donePending = true;
-    entry.targetText = text || '';
-    entry.revealIndex = entry.targetText.length;
-    entry.renderedText = entry.targetText;
-    entry.body.innerHTML = renderMarkdown(entry.targetText);
-    if (entry.stopTimer) {
-      clearTimeout(entry.stopTimer);
-      entry.stopTimer = null;
+}
+
+function openSettings() {
+  globalElements.settingsModal.classList.add('open');
+  globalElements.settingsModal.setAttribute('aria-hidden', 'false');
+  if (roleState.role === 'admin') {
+    loadGuestPrompt();
+  }
+}
+
+function closeSettings() {
+  globalElements.settingsModal.classList.remove('open');
+  globalElements.settingsModal.setAttribute('aria-hidden', 'true');
+}
+
+async function loadGuestPrompt() {
+  if (!globalElements.guestPrompt) return;
+  globalElements.guestPromptStatus.textContent = '';
+  try {
+    const res = await fetch('/config/guest-prompt', { credentials: 'include' });
+    if (!res.ok) {
+      globalElements.guestPromptStatus.textContent = 'Unable to load guest prompt.';
+      return;
     }
-    if (entry.typeTimer) {
-      clearInterval(entry.typeTimer);
-      entry.typeTimer = null;
+    const data = await res.json();
+    globalElements.guestPrompt.value = data.prompt || '';
+  } catch {
+    globalElements.guestPromptStatus.textContent = 'Unable to load guest prompt.';
+  }
+}
+
+async function saveGuestPrompt() {
+  if (!globalElements.guestPrompt) return;
+  const prompt = globalElements.guestPrompt.value.trim();
+  globalElements.guestPromptStatus.textContent = '';
+  try {
+    const res = await fetch('/config/guest-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ prompt })
+    });
+    if (!res.ok) {
+      globalElements.guestPromptStatus.textContent = 'Failed to save guest prompt.';
+      return;
     }
-    entry.body.parentElement?.classList.remove('streaming');
-    chatState.runs.delete(runId);
-    scrollState.pinned = shouldPin;
-    scrollToBottom(elements.chatThread);
-  } else if (shouldPin) {
-    scrollState.pinned = true;
-    scrollToBottom(elements.chatThread);
+    globalElements.guestPromptStatus.textContent = 'Guest prompt saved.';
+  } catch {
+    globalElements.guestPromptStatus.textContent = 'Failed to save guest prompt.';
   }
 }
 
@@ -586,24 +556,21 @@ function renderMarkdown(text) {
   return html;
 }
 
-function ensureHiddenWelcome(role) {
-  const sessionKey = getSessionKey(role);
-  const storageKey = `clawnsole.welcome.${sessionKey}`;
-  if (storage.get(storageKey)) return;
-  const message =
-    role === 'guest'
-      ? 'Welcome! You are assisting a guest. Greet them as a guest, do not assume identity, and ask how you can help today.'
-      : 'Welcome! You are in Admin mode. You can assist with full OpenClaw capabilities.';
-  client.request('chat.inject', {
-    sessionKey,
-    message,
-    label: 'Welcome'
-  });
-  storage.set(storageKey, 'sent');
+function extractChatText(message) {
+  if (!message) return '';
+  if (typeof message === 'string') return message;
+  if (typeof message.text === 'string') return message.text;
+  if (Array.isArray(message.content)) {
+    return message.content
+      .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+      .filter(Boolean)
+      .join('');
+  }
+  return '';
 }
 
 const pulse = {
-  ctx: elements.pulseCanvas.getContext('2d'),
+  ctx: globalElements.pulseCanvas.getContext('2d'),
   width: 0,
   height: 0,
   pulses: [],
@@ -640,8 +607,8 @@ function triggerFiring(strength = 1, bursts = 3) {
 function initFluxNodes() {
   const count = Math.max(48, Math.min(120, Math.floor(pulse.width / 14)));
   pulse.nodes = Array.from({ length: count }, () => ({
-    x: Math.random() * elements.pulseCanvas.clientWidth,
-    y: Math.random() * elements.pulseCanvas.clientHeight,
+    x: Math.random() * globalElements.pulseCanvas.clientWidth,
+    y: Math.random() * globalElements.pulseCanvas.clientHeight,
     vx: (Math.random() - 0.5) * 0.35,
     vy: (Math.random() - 0.5) * 0.35,
     glow: Math.random() * 0.6 + 0.2
@@ -649,13 +616,12 @@ function initFluxNodes() {
 }
 
 function resizeCanvas() {
-  const rect = elements.pulseCanvas.getBoundingClientRect();
+  const rect = globalElements.pulseCanvas.getBoundingClientRect();
   const scale = window.devicePixelRatio || 1;
-  elements.pulseCanvas.width = rect.width * scale;
-  elements.pulseCanvas.height = rect.height * scale;
-  pulse.width = elements.pulseCanvas.width;
-  pulse.height = elements.pulseCanvas.height;
-  // Reset transform before applying scale to avoid compounding.
+  globalElements.pulseCanvas.width = rect.width * scale;
+  globalElements.pulseCanvas.height = rect.height * scale;
+  pulse.width = globalElements.pulseCanvas.width;
+  pulse.height = globalElements.pulseCanvas.height;
   pulse.ctx.setTransform(1, 0, 0, 1, 0, 0);
   pulse.ctx.scale(scale, scale);
   initFluxNodes();
@@ -665,8 +631,8 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
 function spawnPulse(strength = 1) {
-  const x = Math.random() * elements.pulseCanvas.clientWidth;
-  const y = Math.random() * elements.pulseCanvas.clientHeight;
+  const x = Math.random() * globalElements.pulseCanvas.clientWidth;
+  const y = Math.random() * globalElements.pulseCanvas.clientHeight;
   pulse.pulses.push({
     x,
     y,
@@ -677,33 +643,18 @@ function spawnPulse(strength = 1) {
   });
 }
 
-function boostPulse(amount = 1, bursts = 3) {
-  for (let i = 0; i < bursts; i += 1) {
-    spawnPulse(amount);
-  }
-}
-
-function updatePulseMeta() {}
-
-setInterval(() => {
-  pulse.eventRate = pulse.eventCount;
-  pulse.eventCount = 0;
-  updatePulseMeta();
-}, 1000);
-
 function renderPulse() {
   const ctx = pulse.ctx;
   ctx.clearRect(0, 0, pulse.width, pulse.height);
-  ctx.fillStyle = 'rgba(12, 15, 20, 0.45)';
+  ctx.fillStyle = 'rgba(12, 15, 20, 0.24)';
   ctx.fillRect(0, 0, pulse.width, pulse.height);
 
-  // Neural lattice background.
   const maxDist = 140;
   pulse.nodes.forEach((node) => {
     node.x += node.vx;
     node.y += node.vy;
-    if (node.x < 0 || node.x > elements.pulseCanvas.clientWidth) node.vx *= -1;
-    if (node.y < 0 || node.y > elements.pulseCanvas.clientHeight) node.vy *= -1;
+    if (node.x < 0 || node.x > globalElements.pulseCanvas.clientWidth) node.vx *= -1;
+    if (node.y < 0 || node.y > globalElements.pulseCanvas.clientHeight) node.vy *= -1;
   });
 
   for (let i = 0; i < pulse.nodes.length; i += 1) {
@@ -714,7 +665,7 @@ function renderPulse() {
       const dy = a.y - b.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < maxDist) {
-        const alpha = (1 - dist / maxDist) * 0.18;
+        const alpha = (1 - dist / maxDist) * 0.26;
         ctx.strokeStyle = `rgba(127, 209, 185, ${alpha})`;
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -752,362 +703,552 @@ function renderPulse() {
 
 renderPulse();
 
-class GatewayClient {
-  constructor() {
-    this.socket = null;
-    this.pending = new Map();
-    this.connected = false;
-    this.challenge = null;
-    this.connectTimer = null;
-    this.handshakeSent = false;
+// Panes
+
+const ADMIN_PANES_KEY = 'clawnsole.admin.panes.v1';
+const ADMIN_LAYOUT_KEY = 'clawnsole.admin.layout.v1';
+const ADMIN_DEFAULT_AGENT_KEY = 'clawnsole.admin.agentId';
+
+function computeBaseDeviceLabel() {
+  const base = globalElements.deviceId.value.trim() || 'device';
+  return TAB_ID ? `${base}-${TAB_ID}` : base;
+}
+
+function computeSessionKey({ role, agentId, paneKey }) {
+  const baseDeviceLabel = computeBaseDeviceLabel();
+  if (role === 'guest') {
+    const guestAgent = uiState.meta.guestAgentId || 'clawnsole-guest';
+    return `agent:${guestAgent}:guest:${baseDeviceLabel}`;
   }
+  const resolvedAgent = normalizeAgentId(agentId || 'main');
+  const deviceLabel = paneKey ? `${baseDeviceLabel}-${paneKey}` : baseDeviceLabel;
+  return `agent:${resolvedAgent}:admin:${deviceLabel}`;
+}
 
-  async connect() {
-    const usingGuestProxy = roleState.channel === 'guest' && uiState.meta.guestWsUrl;
-    const usingAdminProxy = roleState.channel === 'admin' && uiState.meta.adminWsUrl;
-    const rawUrl = usingGuestProxy
-      ? uiState.meta.guestWsUrl
-      : usingAdminProxy
-        ? uiState.meta.adminWsUrl
-        : elements.wsUrl.value.trim();
-    const url = resolveWsUrl(rawUrl);
-    if (!url) return;
+function computeChatKey({ role, agentId }) {
+  if (role === 'guest') {
+    const guestAgent = uiState.meta.guestAgentId || 'clawnsole-guest';
+    return `agent:${guestAgent}:guest`;
+  }
+  const resolvedAgent = normalizeAgentId(agentId || 'main');
+  return `agent:${resolvedAgent}:admin`;
+}
 
-    if (this.socket) {
-      this.disconnect(true);
+function computeLegacySessionKey({ role, agentId }) {
+  const baseDeviceLabel = globalElements.deviceId.value.trim() || 'device';
+  if (role === 'guest') {
+    const guestAgent = uiState.meta.guestAgentId || 'clawnsole-guest';
+    return `agent:${guestAgent}:guest:${baseDeviceLabel}`;
+  }
+  const resolvedAgent = normalizeAgentId(agentId || 'main');
+  return `agent:${resolvedAgent}:admin:${baseDeviceLabel}`;
+}
+
+function computeConnectClient({ role, paneKey }) {
+  const baseDeviceLabel = computeBaseDeviceLabel();
+  const baseClientId = globalElements.clientId.value.trim() || 'webchat-ui';
+  if (role === 'admin') {
+    const suffix = paneKey ? `-${paneKey}` : '';
+    return {
+      // OpenClaw validates client.id against a schema; keep it stable.
+      id: baseClientId,
+      version: '0.1.0',
+      platform: 'web',
+      mode: 'webchat',
+      instanceId: `${baseDeviceLabel}${suffix}`
+    };
+  }
+  return {
+    id: baseClientId,
+    version: '0.1.0',
+    platform: 'web',
+    mode: 'webchat',
+    instanceId: baseDeviceLabel
+  };
+}
+
+function paneAssistantLabel(pane) {
+  const id =
+    pane.role === 'guest'
+      ? uiState.meta.guestAgentId || 'clawnsole-guest'
+      : pane.agentId || 'main';
+  const record = getAgentRecord(id);
+  return formatAgentLabel(record, { includeId: false });
+}
+
+function isNearBottom(container) {
+  const threshold = 80;
+  return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+}
+
+function scrollToBottom(pane, force = false) {
+  const container = pane.elements.thread;
+  if (!container) return;
+  if (force || pane.scroll.pinned) {
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+function paneStartThinking(pane) {
+  if (pane.thinking.active) return;
+  pane.thinking.active = true;
+  const label = escapeHtml(paneAssistantLabel(pane));
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble assistant thinking';
+  bubble.innerHTML =
+    `<div class="chat-meta">${label}</div><div class="chat-text"><span class="thinking-text">Thinking</span><span class="thinking-dots">...</span></div>`;
+  pane.elements.thread.appendChild(bubble);
+  pane.thinking.bubble = bubble;
+  pane.scroll.pinned = true;
+  scrollToBottom(pane, true);
+
+  let dotCount = 0;
+  pane.thinking.dotsTimer = setInterval(() => {
+    if (!pane.thinking.bubble) return;
+    dotCount = (dotCount + 1) % 4;
+    const dots = pane.thinking.bubble.querySelector('.thinking-dots');
+    if (dots) {
+      dots.textContent = '.'.repeat(dotCount || 1);
+    }
+  }, 450);
+
+  pane.thinking.timer = setInterval(() => {
+    triggerFiring(1.4, 2);
+  }, 900);
+}
+
+function paneStopThinking(pane) {
+  pane.thinking.active = false;
+  if (pane.thinking.timer) {
+    clearInterval(pane.thinking.timer);
+    pane.thinking.timer = null;
+  }
+  if (pane.thinking.dotsTimer) {
+    clearInterval(pane.thinking.dotsTimer);
+    pane.thinking.dotsTimer = null;
+  }
+  if (pane.thinking.bubble) {
+    pane.thinking.bubble.remove();
+    pane.thinking.bubble = null;
+  }
+}
+
+function paneLoadChatHistory(pane) {
+  try {
+    const stableKey = pane.chatKey();
+    const stableStorageKey = `clawnsole.chat.history.${stableKey}`;
+    const rawStable = localStorage.getItem(stableStorageKey);
+    if (rawStable) {
+      const data = JSON.parse(rawStable);
+      return Array.isArray(data) ? data : [];
     }
 
-    const usingProxy = usingGuestProxy || usingAdminProxy;
-    if (!usingProxy) {
-      if (!cachedToken) {
-        this.setStatus('connecting', 'fetching token...');
-        await fetchToken();
-      }
-      if (!cachedToken) {
-        this.setStatus('error', 'missing gateway token');
-        return;
+    // Migrate older per-session histories (we used to include device/pane/tab suffixes in the key).
+    const candidateKeys = [
+      `clawnsole.chat.history.${pane.sessionKey()}`,
+      `clawnsole.chat.history.${pane.legacySessionKey()}`
+    ];
+    let best = null;
+    for (const storageKey of candidateKeys) {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) continue;
+      const data = JSON.parse(raw);
+      if (!Array.isArray(data)) continue;
+      if (!best || data.length > best.length) {
+        best = data;
       }
     }
+    if (best) {
+      localStorage.setItem(stableStorageKey, JSON.stringify(best));
+      return best;
+    }
 
-    this.socket = new WebSocket(url);
-    this.socket.addEventListener('open', () => {
-      this.handshakeSent = false;
-      this.setStatus('connecting', 'waiting for challenge...');
-      this.connectTimer = setTimeout(() => this.sendConnect(), 400);
-    });
+    return [];
+  } catch (err) {
+    addFeed('err', 'chat', `failed to load history: ${String(err)}`);
+    return [];
+  }
+}
 
-    this.socket.addEventListener('message', (event) => {
-      let data;
+function paneSaveChatHistory(pane) {
+  try {
+    const key = pane.chatKey();
+    localStorage.setItem(`clawnsole.chat.history.${key}`, JSON.stringify(pane.chat.history));
+  } catch (err) {
+    addFeed('err', 'chat', `failed to save history: ${String(err)}`);
+  }
+}
+
+function paneRestoreChatHistory(pane) {
+  pane.chat.runs.forEach((run) => {
+    if (run.typeTimer) clearInterval(run.typeTimer);
+    if (run.stopTimer) clearTimeout(run.stopTimer);
+  });
+  pane.chat.history = paneLoadChatHistory(pane);
+  pane.elements.thread.innerHTML = '';
+  pane.chat.runs.clear();
+  pane.chat.history.forEach((entry) => {
+    paneAddChatMessage(pane, { role: entry.role, text: entry.text, persist: false });
+  });
+  scrollToBottom(pane, true);
+}
+
+function paneClearChatHistory(pane, { wipeStorage = false } = {}) {
+  pane.chat.runs.forEach((run) => {
+    if (run.typeTimer) clearInterval(run.typeTimer);
+    if (run.stopTimer) clearTimeout(run.stopTimer);
+  });
+  pane.chat.history = [];
+  pane.chat.runs.clear();
+  pane.elements.thread.innerHTML = '';
+  paneStopThinking(pane);
+  if (wipeStorage) {
+    const keys = new Set([pane.chatKey(), pane.sessionKey(), pane.legacySessionKey()]);
+    keys.forEach((key) => {
       try {
-        data = JSON.parse(event.data);
-      } catch (err) {
-        addFeed('err', 'parse', String(err));
-        return;
-      }
+        localStorage.removeItem(`clawnsole.chat.history.${key}`);
+      } catch {}
+    });
+  }
+}
 
-      if (data.type === 'event' && data.event === 'connect.challenge') {
-        this.challenge = data.payload;
-        this.sendConnect();
-        return;
-      }
+function paneAddChatMessage(pane, { role, text, runId, streaming = false, persist = true }) {
+  const shouldPin = pane.scroll.pinned || isNearBottom(pane.elements.thread);
+  const bubble = document.createElement('div');
+  bubble.className = `chat-bubble ${role}${streaming ? ' streaming' : ''}`;
+  const meta = document.createElement('div');
+  meta.className = 'chat-meta';
+  meta.textContent = role === 'user' ? 'You' : paneAssistantLabel(pane);
+  const body = document.createElement('div');
+  body.className = 'chat-text';
+  body.innerHTML = renderMarkdown(text || '');
+  bubble.appendChild(meta);
+  bubble.appendChild(body);
+  pane.elements.thread.appendChild(bubble);
+  pane.scroll.pinned = shouldPin;
+  scrollToBottom(pane);
+  if (pane.elements.scrollDownBtn) {
+    pane.elements.scrollDownBtn.classList.toggle('visible', !pane.scroll.pinned);
+  }
 
-      if (data.type === 'res' && data.id && this.pending.has(data.id)) {
-        const resolver = this.pending.get(data.id);
-        this.pending.delete(data.id);
-        resolver(data);
-      }
+  let index = null;
+  if (persist) {
+    index = pane.chat.history.length;
+    pane.chat.history.push({ role, text, ts: Date.now() });
+    paneSaveChatHistory(pane);
+  }
+  if (runId) {
+    pane.chat.runs.set(runId, { body, index });
+  }
+}
 
-      pulse.eventCount += 1;
-      pulse.lastEvent = data.event || data.method || data.type || 'event';
-      spawnPulse(Math.min(2, 0.5 + pulse.eventRate / 2));
-
-      if (data.type === 'event') {
-        if (data.event === 'activity') {
-          const recentCount = Number(data.payload?.recentCount || 0);
-          const idleForMs = Number(data.payload?.idleForMs || 0);
-          const base = idleForMs > 6000 ? 0.4 : idleForMs > 2000 ? 0.8 : 1.2;
-          const strength = Math.min(2.4, base + recentCount / 8);
-          triggerFiring(strength, Math.min(6, 1 + Math.floor(recentCount / 6)));
-          return;
+function paneUpdateChatRun(pane, runId, text, done) {
+  const entry = pane.chat.runs.get(runId);
+  if (!entry) {
+    paneAddChatMessage(pane, { role: 'assistant', text, runId, streaming: !done, persist: done });
+    return;
+  }
+  const shouldPin = pane.scroll.pinned || isNearBottom(pane.elements.thread);
+  entry.pendingText = text || '';
+  if (entry.revealIndex === undefined) {
+    const currentLen = entry.body.textContent ? entry.body.textContent.length : 0;
+    entry.revealIndex = Math.min(currentLen, entry.pendingText.length);
+    entry.renderedText = entry.pendingText.slice(0, entry.revealIndex);
+  }
+  entry.targetText = entry.pendingText;
+  if (!entry.typeTimer) {
+    entry.lastTypeTick = performance.now();
+    entry.typeTimer = setInterval(() => {
+      const now = performance.now();
+      const elapsed = now - entry.lastTypeTick;
+      entry.lastTypeTick = now;
+      const target = entry.targetText || '';
+      const currentIndex = entry.revealIndex || 0;
+      if (currentIndex >= target.length) {
+        if (!entry.donePending) {
+          if (entry.stopTimer) return;
+          entry.stopTimer = setTimeout(() => {
+            clearInterval(entry.typeTimer);
+            entry.typeTimer = null;
+            entry.stopTimer = null;
+          }, 420);
         }
-        if (data.event === 'chat') {
-          const payload = data.payload || {};
-          const runId = payload.runId;
-          const text = extractChatText(payload.message);
-          if (payload.state === 'delta') {
-            updateChatRun(runId, text, false);
-            triggerFiring(2, 4);
-          } else if (payload.state === 'final') {
-            updateChatRun(runId, text, true);
-            triggerFiring(1.2, 2);
-          } else if (payload.state === 'error') {
-            updateChatRun(runId, payload.errorMessage || 'Chat error', true);
-            triggerFiring(0.8, 1);
-          }
-        } else if (data.event === 'agent') {
-          const stream = data.payload?.stream;
-          if (stream === 'assistant' && typeof data.payload?.data?.text === 'string') {
-            triggerFiring(1.2, 2);
-          } else if (stream === 'tool') {
-            triggerFiring(1.4, 2);
-          } else if (stream === 'lifecycle') {
-            triggerFiring(0.9, 1);
-          }
-        }
-      }
-    });
-
-  this.socket.addEventListener('close', () => {
-    this.connected = false;
-    this.setStatus('disconnected', 'socket closed');
-    setConnectionState(false);
-  });
-
-  this.socket.addEventListener('error', () => {
-    this.connected = false;
-    this.setStatus('error', 'socket error');
-    setConnectionState(false);
-  });
-  }
-
-  sendConnect() {
-    if (!this.socket || this.connected || this.handshakeSent) return;
-    if (this.connectTimer) {
-      clearTimeout(this.connectTimer);
-      this.connectTimer = null;
-    }
-
-    const scopes = ['operator.read', 'operator.write'];
-
-    const payload = {
-      type: 'req',
-      id: randomId(),
-      method: 'connect',
-      params: {
-        minProtocol: 3,
-        maxProtocol: 3,
-        client: {
-          id: elements.clientId.value.trim() || 'webchat-ui',
-          version: '0.1.0',
-          platform: 'web',
-          mode: 'webchat',
-          instanceId: elements.deviceId.value.trim()
-        },
-        role: 'operator',
-        scopes,
-        caps: [],
-        commands: [],
-        permissions: {},
-        auth: cachedToken ? { token: cachedToken } : undefined,
-        locale: navigator.language || 'en-US',
-        userAgent: 'clawnsole/0.1.0'
-      }
-    };
-
-    this.handshakeSent = true;
-    this.requestRaw(payload).then((res) => {
-      if (res.ok) {
-        this.connected = true;
-        this.setStatus('connected', `protocol ${res.payload?.protocol ?? 'ok'}`);
-        setConnectionState(true);
-        this.ensureGuestPolicy();
-        ensureHiddenWelcome(roleState.channel);
-      } else {
-        this.connected = false;
-        this.setStatus('error', res.error?.message || 'connect failed');
-        setConnectionState(false);
-        this.handshakeSent = false;
-      }
-    });
-  }
-
-  request(method, params = {}) {
-    const payload = {
-      type: 'req',
-      id: randomId(),
-      method,
-      params
-    };
-    return this.requestRaw(payload);
-  }
-
-  requestRaw(payload) {
-    return new Promise((resolve, reject) => {
-      if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-        reject(new Error('socket not open'));
         return;
       }
-      this.pending.set(payload.id, (res) => resolve(res));
-      this.socket.send(JSON.stringify(payload));
-    }).catch((err) => {
-      addFeed('err', 'request', String(err));
-    });
-  }
-
-  disconnect(silent = false) {
-    if (this.socket) {
-      this.socket.close();
-      this.socket = null;
-    }
-    if (!silent) {
-      setConnectionState(false);
-    }
-  }
-
-  setStatus(state, meta) {
-    elements.status.textContent = state;
-    elements.status.classList.remove('connected', 'error');
-    if (state === 'connected') elements.status.classList.add('connected');
-    if (state === 'error') elements.status.classList.add('error');
-    if (elements.statusMeta) {
-      elements.statusMeta.textContent = meta;
-    }
-  }
-
-  ensureGuestPolicy() {
-    if (!this.connected) return;
-    if (roleState.channel !== 'guest') return;
-    if (roleState.guestPolicyInjected) return;
-    roleState.guestPolicyInjected = true;
-    const sessionKey = getSessionKey('guest');
-    this.request('sessions.resolve', {
-      key: sessionKey
-    }).then((res) => {
-      if (!res?.ok) {
-        this.request('sessions.reset', { key: sessionKey });
+      const charsToAdd = Math.max(1, Math.floor((elapsed * 60) / 1000));
+      entry.revealIndex = Math.min(target.length, currentIndex + charsToAdd);
+      const nextText = target.slice(0, entry.revealIndex);
+      if (nextText !== entry.renderedText) {
+        entry.renderedText = nextText;
+        entry.body.innerHTML = renderMarkdown(nextText);
+        if (pane.scroll.pinned || isNearBottom(pane.elements.thread)) {
+          pane.scroll.pinned = true;
+          scrollToBottom(pane);
+        }
       }
-    });
-    this.request('chat.inject', {
-      sessionKey,
-      message:
-        'Guest mode: read-only. Do not access or summarize emails or private data. Do not assume the guest is the admin. Ask for their name if needed. You may assist with general questions and basic home automation (lights, climate, scenes).',
-      label: 'Guest policy'
-    });
+      if (entry.revealIndex >= target.length && entry.donePending) {
+        clearInterval(entry.typeTimer);
+        entry.typeTimer = null;
+      }
+    }, 36);
   }
-}
-
-const client = new GatewayClient();
-
-// UI actions
-
-elements.disconnectBtn.addEventListener('click', () => client.disconnect());
-
-elements.chatBtn.addEventListener('click', () => {
-  sendChat();
-});
-
-elements.chatInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault();
-    sendChat();
+  if (entry.stopTimer) {
+    clearTimeout(entry.stopTimer);
+    entry.stopTimer = null;
   }
-});
-
-elements.chatInput.addEventListener('input', () => {
-  updateCommandHints();
-});
-
-elements.attachBtn.addEventListener('click', () => {
-  elements.fileInput.click();
-});
-
-elements.fileInput.addEventListener('change', (event) => {
-  handleFileSelection(event);
-});
-
-function openSettings() {
-  elements.settingsModal.classList.add('open');
-  elements.settingsModal.setAttribute('aria-hidden', 'false');
-  if (roleState.role === 'admin') {
-    loadGuestPrompt();
-  }
-}
-
-function closeSettings() {
-  elements.settingsModal.classList.remove('open');
-  elements.settingsModal.setAttribute('aria-hidden', 'true');
-}
-
-async function loadGuestPrompt() {
-  if (!elements.guestPrompt) return;
-  elements.guestPromptStatus.textContent = '';
-  try {
-    const res = await fetch('/config/guest-prompt', { credentials: 'include' });
-    if (!res.ok) {
-      elements.guestPromptStatus.textContent = 'Unable to load guest prompt.';
-      return;
+  if (entry.index === null || entry.index === undefined) {
+    if (done || text) {
+      entry.index = pane.chat.history.length;
+      pane.chat.history.push({ role: 'assistant', text, ts: Date.now() });
+      paneSaveChatHistory(pane);
     }
-    const data = await res.json();
-    elements.guestPrompt.value = data.prompt || '';
-  } catch (err) {
-    elements.guestPromptStatus.textContent = 'Unable to load guest prompt.';
+  } else {
+    pane.chat.history[entry.index] = { role: 'assistant', text, ts: Date.now() };
+    paneSaveChatHistory(pane);
   }
-}
-
-async function saveGuestPrompt() {
-  if (!elements.guestPrompt) return;
-  const prompt = elements.guestPrompt.value.trim();
-  elements.guestPromptStatus.textContent = '';
-  try {
-    const res = await fetch('/config/guest-prompt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ prompt })
-    });
-    if (!res.ok) {
-      elements.guestPromptStatus.textContent = 'Failed to save guest prompt.';
-      return;
+  if (done) {
+    entry.donePending = true;
+    entry.targetText = text || '';
+    entry.revealIndex = entry.targetText.length;
+    entry.renderedText = entry.targetText;
+    entry.body.innerHTML = renderMarkdown(entry.targetText);
+    if (entry.stopTimer) {
+      clearTimeout(entry.stopTimer);
+      entry.stopTimer = null;
     }
-    elements.guestPromptStatus.textContent = 'Guest prompt saved.';
-  } catch (err) {
-    elements.guestPromptStatus.textContent = 'Failed to save guest prompt.';
+    if (entry.typeTimer) {
+      clearInterval(entry.typeTimer);
+      entry.typeTimer = null;
+    }
+    entry.body.parentElement?.classList.remove('streaming');
+    pane.chat.runs.delete(runId);
+    pane.scroll.pinned = shouldPin;
+    scrollToBottom(pane);
+  } else if (shouldPin) {
+    pane.scroll.pinned = true;
+    scrollToBottom(pane);
   }
 }
 
-elements.settingsBtn.addEventListener('click', () => openSettings());
-elements.settingsCloseBtn.addEventListener('click', () => closeSettings());
-elements.settingsModal.addEventListener('click', (event) => {
-  if (event.target === elements.settingsModal) closeSettings();
-});
-elements.saveGuestPromptBtn.addEventListener('click', () => saveGuestPrompt());
+function paneRenderAttachments(pane) {
+  const list = pane.elements.attachmentList;
+  if (!list) return;
+  list.innerHTML = '';
+  pane.attachments.files.forEach((file, index) => {
+    const pill = document.createElement('div');
+    pill.className = 'attachment-pill';
+    const name = document.createElement('span');
+    name.textContent = file.name;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '✕';
+    remove.addEventListener('click', () => {
+      pane.attachments.files.splice(index, 1);
+      paneRenderAttachments(pane);
+    });
+    pill.append(name, remove);
+    list.appendChild(pill);
+  });
+}
 
-window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') closeSettings();
-});
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
 
-async function sendChat() {
-  const message = elements.chatInput.value.trim();
+async function paneHandleFileSelection(pane, event) {
+  const files = Array.from(event.target.files || []);
+  const maxSize = 5 * 1024 * 1024;
+  const maxCount = 4;
+  pane.elements.attachmentStatus.textContent = '';
+  for (const file of files) {
+    if (pane.attachments.files.length >= maxCount) {
+      pane.elements.attachmentStatus.textContent = 'Attachment limit reached.';
+      break;
+    }
+    if (file.size > maxSize) {
+      pane.elements.attachmentStatus.textContent = `File too large: ${file.name}`;
+      continue;
+    }
+    try {
+      const base64 = await fileToBase64(file);
+      pane.attachments.files.push({
+        name: file.name,
+        type: file.type || 'application/octet-stream',
+        size: file.size,
+        data: base64
+      });
+    } catch (err) {
+      pane.elements.attachmentStatus.textContent = `Failed to read ${file.name}`;
+      addFeed('err', 'attachment', String(err));
+    }
+  }
+  event.target.value = '';
+  paneRenderAttachments(pane);
+}
+
+async function paneUploadAttachments(pane) {
+  if (pane.attachments.files.length === 0) return [];
+  pane.elements.attachmentStatus.textContent = 'Uploading...';
+  const res = await fetch('/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ files: pane.attachments.files })
+  });
+  if (!res.ok) {
+    pane.elements.attachmentStatus.textContent = `Upload failed (${res.status}).`;
+    addFeed('err', 'attachment', `upload failed (${res.status})`);
+    return [];
+  }
+  const data = await res.json();
+  pane.attachments.files = [];
+  paneRenderAttachments(pane);
+  pane.elements.attachmentStatus.textContent = '';
+  return Array.isArray(data.files) ? data.files : [];
+}
+
+function paneUpdateCommandHints(pane) {
+  const hints = pane.elements.commandHints;
+  if (!hints) return;
+  const value = pane.elements.input.value.trim();
+  if (!value.startsWith('/')) {
+    hints.classList.remove('visible');
+    hints.innerHTML = '';
+    return;
+  }
+  const matches = commandList.filter((item) => item.command.startsWith(value.toLowerCase()));
+  if (matches.length === 0) {
+    hints.classList.remove('visible');
+    hints.innerHTML = '';
+    return;
+  }
+  hints.innerHTML = matches
+    .map(
+      (item) =>
+        `<div class="command-hint"><code>${item.command}</code><span>${item.description}</span></div>`
+    )
+    .join('');
+  hints.classList.add('visible');
+}
+
+function paneSetChatEnabled(pane, enabled) {
+  pane.elements.input.disabled = !enabled;
+  pane.elements.sendBtn.disabled = !enabled;
+  pane.elements.attachBtn.disabled = !enabled;
+
+  if (enabled) {
+    pane.elements.input.placeholder = `Message ${paneAssistantLabel(pane)}... (Press Enter to send)`;
+    return;
+  }
+  if (!uiState.authed) {
+    pane.elements.input.placeholder = 'Sign in to continue';
+    return;
+  }
+  if (!pane.connected) {
+    pane.elements.input.placeholder = 'Reconnecting...';
+    return;
+  }
+  pane.elements.input.placeholder = 'Connecting...';
+}
+
+function paneEnsureHiddenWelcome(pane) {
+  const sessionKey = pane.sessionKey();
+  const storageKey = `clawnsole.welcome.${sessionKey}`;
+  if (storage.get(storageKey)) return;
+  const message =
+    pane.role === 'guest'
+      ? 'Welcome! You are assisting a guest. Greet them as a guest, do not assume identity, and ask how you can help today.'
+      : 'Welcome! You are in Admin mode. You can assist with full OpenClaw capabilities.';
+  if (pane.role === 'guest') {
+    paneAddChatMessage(pane, { role: 'assistant', text: message, persist: false });
+    storage.set(storageKey, 'sent');
+    return;
+  }
+  pane.client.request('chat.inject', { sessionKey, message, label: 'Welcome' });
+  storage.set(storageKey, 'sent');
+}
+
+function paneEnsureGuestPolicy(pane) {
+  if (pane.role !== 'guest') return;
+  if (!pane.connected) return;
+  if (roleState.guestPolicyInjected) return;
+  roleState.guestPolicyInjected = true;
+
+  // When connected through the guest proxy, the server injects the guest policy.
+  if (uiState.meta.guestWsUrl) return;
+
+  const sessionKey = pane.sessionKey();
+  pane.client.request('sessions.resolve', { key: sessionKey }).then((res) => {
+    if (!res?.ok) {
+      pane.client.request('sessions.reset', { key: sessionKey });
+    }
+  });
+  pane.client.request('chat.inject', {
+    sessionKey,
+    message:
+      'Guest mode: read-only. Do not access or summarize emails or private data. Do not assume the guest is the admin. Ask for their name if needed. You may assist with general questions and basic home automation (lights, climate, scenes).',
+    label: 'Guest policy'
+  });
+}
+
+async function paneSendChat(pane) {
+  const message = pane.elements.input.value.trim();
   if (!message) return;
-  if (!uiState.connected || !uiState.authed) {
-    addChatMessage({
+
+  if (!pane.connected || !uiState.authed) {
+    paneAddChatMessage(pane, {
       role: 'assistant',
-      text: 'Not connected. Please sign in again and wait for the gateway connection.',
+      text: uiState.authed
+        ? 'Not connected yet. Reconnecting to the gateway...'
+        : 'Not signed in. Please sign in to continue.',
       persist: false
     });
     return;
   }
-  if (roleState.role === 'guest') {
+
+  if (pane.role === 'guest') {
     const lower = message.toLowerCase();
     if (lower.includes('email') || lower.includes('gmail') || lower.includes('inbox')) {
-      addChatMessage({
+      paneAddChatMessage(pane, {
         role: 'assistant',
         text: 'Guest mode is read-only and cannot access emails. Try a home automation request instead.',
         persist: false
       });
-      elements.chatInput.value = '';
+      pane.elements.input.value = '';
+      paneUpdateCommandHints(pane);
       return;
     }
   }
+
   const command = message.toLowerCase();
-  if (command === '/clear' || command === '/new') {
-    clearChatHistory({ wipeStorage: true });
-    elements.chatInput.value = '';
-    addFeed('event', 'chat', 'chat history cleared');
+  if (command === '/clear') {
+    paneClearChatHistory(pane, { wipeStorage: true });
+    pane.elements.input.value = '';
+    paneUpdateCommandHints(pane);
+    addFeed('event', 'chat', `cleared local history (${pane.sessionKey()})`);
     return;
   }
-  const sessionKey = getSessionKey(roleState.channel);
-  const uploaded = await uploadAttachments();
+  if (command === '/new') {
+    const key = pane.sessionKey();
+    paneClearChatHistory(pane, { wipeStorage: true });
+    pane.elements.input.value = '';
+    paneUpdateCommandHints(pane);
+    pane.client.request('sessions.reset', { key });
+    addFeed('event', 'chat', `reset session (${key})`);
+    return;
+  }
+
+  const sessionKey = pane.sessionKey();
+  const uploaded = await paneUploadAttachments(pane);
   let attachmentText = '';
   if (uploaded.length > 0) {
     const lines = uploaded.map((file) => {
@@ -1118,68 +1259,552 @@ async function sendChat() {
     });
     attachmentText = `\n\nAttachments:\n- ${lines.join('\n- ')}`;
   }
-  addChatMessage({ role: 'user', text: message });
-  scrollState.pinned = true;
-  scrollToBottom(elements.chatThread, true);
+
+  paneAddChatMessage(pane, { role: 'user', text: message });
+  pane.scroll.pinned = true;
+  scrollToBottom(pane, true);
   triggerFiring(1.6, 3);
-  client.request('chat.send', {
+  paneStartThinking(pane);
+
+  pane.client.request('chat.send', {
     sessionKey,
     message: `${message}${attachmentText}`,
     deliver: true,
     idempotencyKey: randomId()
   });
-  elements.chatInput.value = '';
+
+  pane.elements.input.value = '';
+  paneUpdateCommandHints(pane);
 }
 
-window.addEventListener('load', () => {
-  showLogin();
-  const savedChannel = storage.get('clawnsole.channel', 'admin');
-  elements.channelSelect.value = savedChannel;
-  roleState.channel = savedChannel;
-  fetchRole().then((role) => {
-    if (!role) {
-      showLogin();
+function handleGatewayFrame(pane, data) {
+  pulse.eventCount += 1;
+  pulse.lastEvent = data?.event || data?.method || data?.type || 'event';
+  spawnPulse(Math.min(2, 0.5 + pulse.eventRate / 2));
+
+  if (data?.type !== 'event') return;
+
+  if (data.event === 'activity') {
+    const recentCount = Number(data.payload?.recentCount || 0);
+    const idleForMs = Number(data.payload?.idleForMs || 0);
+    const base = idleForMs > 6000 ? 0.4 : idleForMs > 2000 ? 0.8 : 1.2;
+    const strength = Math.min(2.4, base + recentCount / 8);
+    triggerFiring(strength, Math.min(6, 1 + Math.floor(recentCount / 6)));
+    return;
+  }
+
+  if (data.event === 'chat') {
+    const payload = data.payload || {};
+    const expectedSessionKey = pane.sessionKey();
+    const frameSessionKey = typeof payload.sessionKey === 'string' ? payload.sessionKey : '';
+    if (!frameSessionKey || (expectedSessionKey && frameSessionKey !== expectedSessionKey)) {
       return;
     }
-    setAuthState(true);
-    setRole(role);
-    fetchMeta().finally(() => client.connect());
+    const runId = payload.runId;
+    const text = extractChatText(payload.message);
+    if (payload.state === 'delta') {
+      paneStopThinking(pane);
+      paneUpdateChatRun(pane, runId, text, false);
+      triggerFiring(2, 4);
+    } else if (payload.state === 'final') {
+      paneStopThinking(pane);
+      paneUpdateChatRun(pane, runId, text, true);
+      triggerFiring(1.2, 2);
+    } else if (payload.state === 'error') {
+      paneStopThinking(pane);
+      paneUpdateChatRun(pane, runId, payload.errorMessage || 'Chat error', true);
+      triggerFiring(0.8, 1);
+    }
+  }
+}
+
+function buildClientForPane(pane) {
+  return new window.Clawnsole.GatewayClient({
+    prepare: async () => {
+      await prepareGateway(pane.role);
+    },
+    getUrl: () => computeGatewayTarget(pane.role).url,
+    buildConnectParams: () => {
+      const scopes = ['operator.read', 'operator.write'];
+      const { usingProxy } = computeGatewayTarget(pane.role);
+      return {
+        minProtocol: 3,
+        maxProtocol: 3,
+        client: computeConnectClient({ role: pane.role, paneKey: pane.key }),
+        role: 'operator',
+        scopes,
+        caps: [],
+        commands: [],
+        permissions: {},
+        auth: !usingProxy && cachedToken ? { token: cachedToken } : undefined,
+        locale: navigator.language || 'en-US',
+        userAgent: 'clawnsole/0.1.0'
+      };
+    },
+    keepAlive: () => ({ method: 'sessions.resolve', params: { key: pane.sessionKey() } }),
+    onStatus: (state, meta) => {
+      pane.statusState = state;
+      pane.statusMeta = meta || '';
+      setStatusPill(pane.elements.status, state, meta || '');
+      updateGlobalStatus();
+      updateConnectionControls();
+      paneSetChatEnabled(pane, uiState.authed && pane.connected);
+    },
+    onFrame: (data) => handleGatewayFrame(pane, data),
+    onConnected: () => {
+      pane.connected = true;
+      paneSetChatEnabled(pane, uiState.authed);
+      updateGlobalStatus();
+      updateConnectionControls();
+      paneEnsureGuestPolicy(pane);
+      paneEnsureHiddenWelcome(pane);
+      pane.client.request('sessions.resolve', { key: pane.sessionKey() });
+    },
+    onDisconnected: () => {
+      paneStopThinking(pane);
+      pane.connected = false;
+      paneSetChatEnabled(pane, false);
+      updateGlobalStatus();
+      updateConnectionControls();
+    },
+    isAuthed: () => uiState.authed,
+    checkAuth: async () => {
+      const state = await fetchRoleState();
+      return { reachable: state.reachable, authed: Boolean(state.role) };
+    },
+    onAuthExpired: () => {
+      roleState.role = null;
+      paneManager.disconnectAll({ silent: true });
+      showLogin('Session expired. Please sign in again.');
+    }
   });
-  elements.chatThread.addEventListener('scroll', () => {
-    scrollState.pinned = isNearBottom(elements.chatThread);
+}
+
+function paneSetAgent(pane, nextAgentId) {
+  if (pane.role !== 'admin') return;
+  const next = normalizeAgentId(nextAgentId);
+  if (next === pane.agentId) return;
+  pane.agentId = next;
+  storage.set(ADMIN_DEFAULT_AGENT_KEY, next);
+  pane.elements.agentSelect.value = next;
+
+  pane.attachments.files = [];
+  paneRenderAttachments(pane);
+  paneStopThinking(pane);
+  paneClearChatHistory(pane, { wipeStorage: false });
+  paneRestoreChatHistory(pane);
+  paneSetChatEnabled(pane, Boolean(uiState.authed && pane.connected));
+
+  paneManager.persistAdminPanes();
+  if (pane.connected) {
+    pane.client.request('sessions.resolve', { key: pane.sessionKey() });
+  }
+}
+
+function renderAgentOptions(selectEl, agentId) {
+  if (!selectEl) return;
+  selectEl.innerHTML = '';
+  const agents =
+    uiState.agents.length > 0
+      ? uiState.agents
+      : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
+  agents.forEach((agent) => {
+    const opt = document.createElement('option');
+    opt.value = agent.id;
+    opt.textContent = formatAgentLabel(agent, { includeId: true });
+    selectEl.appendChild(opt);
   });
-  elements.chatInput.focus();
-  elements.chatInput.select();
+  selectEl.value = normalizeAgentId(agentId || 'main');
+}
+
+function createPane({ key, role, agentId, closable = true } = {}) {
+  const template = globalElements.paneTemplate;
+  const root = template.content.firstElementChild.cloneNode(true);
+  const elements = {
+    root,
+    name: root.querySelector('[data-pane-name]'),
+    agentSelect: root.querySelector('[data-pane-agent-select]'),
+    agentWrap: root.querySelector('.pane-agent'),
+    status: root.querySelector('[data-pane-status]'),
+    closeBtn: root.querySelector('[data-pane-close]'),
+    thread: root.querySelector('[data-pane-thread]'),
+    scrollDownBtn: root.querySelector('[data-pane-scroll-down]'),
+    input: root.querySelector('[data-pane-input]'),
+    commandHints: root.querySelector('[data-pane-command-hints]'),
+    fileInput: root.querySelector('[data-pane-file-input]'),
+    attachBtn: root.querySelector('[data-pane-attach]'),
+    attachmentStatus: root.querySelector('[data-pane-attachment-status]'),
+    attachmentList: root.querySelector('[data-pane-attachment-list]'),
+    sendBtn: root.querySelector('[data-pane-send]')
+  };
+
+	  const pane = {
+	    key,
+	    role,
+	    agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
+	    connected: false,
+	    statusState: 'disconnected',
+	    statusMeta: '',
+	    elements,
+	    chat: { runs: new Map(), history: [] },
+	    scroll: { pinned: true },
+	    thinking: { active: false, timer: null, dotsTimer: null, bubble: null },
+	    attachments: { files: [] },
+	    chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
+	    legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
+	    sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
+	    client: null
+	  };
+
+  if (elements.closeBtn) {
+    elements.closeBtn.hidden = !closable;
+    elements.closeBtn.addEventListener('click', () => {
+      paneManager.removePane(pane.key);
+    });
+  }
+
+  if (pane.role === 'admin') {
+    renderAgentOptions(elements.agentSelect, pane.agentId);
+    elements.agentSelect.addEventListener('change', (event) => {
+      paneSetAgent(pane, String(event.target.value || '').trim());
+    });
+  } else {
+    if (elements.agentWrap) elements.agentWrap.hidden = true;
+    if (elements.closeBtn) elements.closeBtn.hidden = true;
+  }
+
+  elements.sendBtn.addEventListener('click', () => {
+    paneSendChat(pane);
+  });
+
+  elements.input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      paneSendChat(pane);
+    }
+  });
+
+  elements.input.addEventListener('input', () => {
+    paneUpdateCommandHints(pane);
+  });
+
+  elements.attachBtn.addEventListener('click', () => {
+    elements.fileInput.click();
+  });
+
+  elements.fileInput.addEventListener('change', (event) => {
+    paneHandleFileSelection(pane, event);
+  });
+
+  elements.thread.addEventListener('scroll', () => {
+    pane.scroll.pinned = isNearBottom(elements.thread);
+    if (elements.scrollDownBtn) {
+      elements.scrollDownBtn.classList.toggle('visible', !pane.scroll.pinned);
+    }
+  });
+
+  if (elements.scrollDownBtn) {
+    elements.scrollDownBtn.addEventListener('click', () => {
+      pane.scroll.pinned = true;
+      scrollToBottom(pane, true);
+      elements.scrollDownBtn.classList.remove('visible');
+    });
+  }
+
+  paneRestoreChatHistory(pane);
+
+  // Ensure initial disabled state before auth/connection comes up.
+  paneSetChatEnabled(pane, false);
+
+  pane.client = buildClientForPane(pane);
+  setStatusPill(elements.status, 'disconnected', '');
+  return pane;
+}
+
+const paneManager = {
+  panes: [],
+  maxPanes: 4,
+  init(role) {
+    this.destroyAll();
+    if (role === 'admin') {
+      this.initAdmin();
+      return;
+    }
+    this.initGuest();
+  },
+  initGuest() {
+    if (globalElements.layoutSelect) globalElements.layoutSelect.value = '1';
+    this.applyLayout(1);
+    const pane = createPane({ key: 'guest', role: 'guest', closable: false });
+    this.panes = [pane];
+    globalElements.paneGrid.appendChild(pane.elements.root);
+    this.updatePaneLabels();
+  },
+  initAdmin() {
+    const layout = Number(storage.get(ADMIN_LAYOUT_KEY, '2')) || 2;
+    if (globalElements.layoutSelect) {
+      globalElements.layoutSelect.value = String(Math.max(1, Math.min(3, layout)));
+    }
+    this.applyLayout(layout);
+
+    const panes = this.loadAdminPanes();
+    this.panes = panes.map((cfg) => createPane({ key: cfg.key, role: 'admin', agentId: cfg.agentId, closable: true }));
+    this.panes.forEach((pane) => globalElements.paneGrid.appendChild(pane.elements.root));
+    this.updatePaneLabels();
+    this.updateCloseButtons();
+  },
+  destroyAll() {
+    this.panes.forEach((pane) => {
+      try {
+        pane.client?.disconnect(true);
+      } catch {}
+      paneStopThinking(pane);
+      try {
+        pane.elements.root.remove();
+      } catch {}
+    });
+    this.panes = [];
+  },
+  loadAdminPanes() {
+    const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
+    const defaultAgent = normalizeAgentId(storedDefault || 'main');
+    try {
+      const raw = storage.get(ADMIN_PANES_KEY, '');
+      if (!raw) throw new Error('empty');
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) throw new Error('not array');
+      const list = parsed
+        .map((item) => ({
+          key: typeof item?.key === 'string' && item.key ? item.key : '',
+          agentId: normalizeAgentId(typeof item?.agentId === 'string' ? item.agentId : defaultAgent)
+        }))
+        .filter((item) => item.key);
+      if (list.length > 0) {
+        return list.slice(0, this.maxPanes);
+      }
+    } catch {}
+
+    const secondary =
+      uiState.agents.find((agent) => agent.id && agent.id !== defaultAgent)?.id || defaultAgent || 'main';
+    const paneA = { key: `p${randomId().slice(0, 8)}`, agentId: defaultAgent };
+    const paneB = { key: `p${randomId().slice(0, 8)}`, agentId: normalizeAgentId(secondary) };
+    const list = [paneA, paneB].slice(0, this.maxPanes);
+    storage.set(ADMIN_PANES_KEY, JSON.stringify(list));
+    return list;
+  },
+  persistAdminPanes() {
+    if (roleState.role !== 'admin') return;
+    const payload = this.panes.map((pane) => ({ key: pane.key, agentId: pane.agentId || 'main' }));
+    storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
+  },
+  addPane() {
+    if (roleState.role !== 'admin') return;
+    if (this.panes.length >= this.maxPanes) return;
+    const agentId = normalizeAgentId(storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
+    const pane = createPane({ key: `p${randomId().slice(0, 8)}`, role: 'admin', agentId, closable: true });
+    this.panes.push(pane);
+    globalElements.paneGrid.appendChild(pane.elements.root);
+    this.updatePaneLabels();
+    this.updateCloseButtons();
+    this.persistAdminPanes();
+    if (uiState.authed) {
+      pane.client.connect();
+    }
+  },
+  removePane(key) {
+    if (roleState.role !== 'admin') return;
+    if (this.panes.length <= 1) return;
+    const idx = this.panes.findIndex((pane) => pane.key === key);
+    if (idx < 0) return;
+    const [pane] = this.panes.splice(idx, 1);
+    try {
+      pane.client?.disconnect(true);
+    } catch {}
+    paneStopThinking(pane);
+    try {
+      pane.elements.root.remove();
+    } catch {}
+    this.updatePaneLabels();
+    this.updateCloseButtons();
+    this.persistAdminPanes();
+    updateGlobalStatus();
+    updateConnectionControls();
+  },
+  updatePaneLabels() {
+    this.panes.forEach((pane, index) => {
+      const letter = String.fromCharCode(65 + (index % 26));
+      if (pane.elements.name) pane.elements.name.textContent = letter;
+    });
+  },
+  updateCloseButtons() {
+    const allowClose = roleState.role === 'admin' && this.panes.length > 1;
+    this.panes.forEach((pane) => {
+      if (!pane.elements.closeBtn) return;
+      pane.elements.closeBtn.hidden = !(allowClose && pane.role === 'admin');
+    });
+  },
+  applyLayout(cols) {
+    const clamped = Math.max(1, Math.min(3, Number(cols) || 1));
+    storage.set(ADMIN_LAYOUT_KEY, String(clamped));
+    if (globalElements.paneGrid) {
+      globalElements.paneGrid.style.setProperty('--pane-cols', String(clamped));
+    }
+  },
+  connectAll() {
+    this.panes.forEach((pane, index) => {
+      setTimeout(() => pane.client.connect(), index * 120);
+    });
+  },
+  connectIfNeeded() {
+    if (!uiState.authed) return;
+    this.panes.forEach((pane) => {
+      if (pane.client.manualDisconnect) return;
+      if (pane.connected) return;
+      pane.client.connect({ isRetry: true });
+    });
+  },
+  disconnectAll({ silent = false } = {}) {
+    this.panes.forEach((pane) => pane.client.disconnect(silent));
+  },
+  refreshChatEnabled() {
+    this.panes.forEach((pane) => {
+      paneSetChatEnabled(pane, uiState.authed && pane.connected);
+    });
+  }
+};
+
+// Global event wiring
+
+globalElements.settingsBtn?.addEventListener('click', () => openSettings());
+globalElements.settingsCloseBtn?.addEventListener('click', () => closeSettings());
+globalElements.settingsModal?.addEventListener('click', (event) => {
+  if (event.target === globalElements.settingsModal) closeSettings();
+});
+globalElements.saveGuestPromptBtn?.addEventListener('click', () => saveGuestPrompt());
+
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeSettings();
 });
 
-if (elements.channelSelect) {
-  elements.channelSelect.addEventListener('change', (event) => {
-    const value = event.target.value === 'guest' ? 'guest' : 'admin';
-    if (value !== roleState.role) {
-      showLogin('Switch roles by signing in again.');
-      elements.channelSelect.value = roleState.role;
-      return;
-    }
-    setChannel(value);
+globalElements.disconnectBtn?.addEventListener('click', () => {
+  const anyActive = paneManager.panes.some((pane) =>
+    pane.statusState === 'connected' || pane.statusState === 'connecting' || pane.statusState === 'reconnecting'
+  );
+  if (anyActive) {
+    paneManager.disconnectAll();
+    return;
+  }
+  paneManager.panes.forEach((pane) => {
+    pane.client.manualDisconnect = false;
   });
-}
+  paneManager.connectAll();
+});
 
-elements.loginBtn.addEventListener('click', () => attemptLogin());
+globalElements.status?.addEventListener('click', () => {
+  if (!uiState.authed) {
+    showLogin('Please sign in to continue.');
+    return;
+  }
+  paneManager.panes.forEach((pane) => {
+    if (pane.client.manualDisconnect) pane.client.manualDisconnect = false;
+  });
+  paneManager.connectIfNeeded();
+});
 
-elements.loginPassword.addEventListener('keydown', (event) => {
+globalElements.loginBtn?.addEventListener('click', () => attemptLogin());
+globalElements.loginPassword?.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
     attemptLogin();
   }
 });
 
-elements.logoutBtn.addEventListener('click', async () => {
+globalElements.logoutBtn?.addEventListener('click', async () => {
   try {
     await fetch('/auth/logout', { method: 'POST' });
-  } catch (err) {
-    // ignore logout errors
-  }
-  client.disconnect();
-  setRole('guest');
-  showLogin();
+  } catch {}
+  storage.set('clawnsole.auth.role', '');
+  paneManager.disconnectAll({ silent: true });
+  roleState.role = null;
+  window.location.replace('/');
+});
+
+globalElements.addPaneBtn?.addEventListener('click', () => {
+  paneManager.addPane();
+});
+
+globalElements.layoutSelect?.addEventListener('change', (event) => {
+  paneManager.applyLayout(event.target.value);
+});
+
+window.addEventListener('online', () => {
+  paneManager.connectIfNeeded();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  paneManager.connectIfNeeded();
+});
+
+window.addEventListener('load', () => {
+  const loginGuard = setTimeout(() => {
+    if (!uiState.authed) {
+      roleState.role = null;
+      showLogin('Please sign in to continue.');
+    }
+  }, 800);
+
+  fetchRole()
+    .then(async (role) => {
+      clearTimeout(loginGuard);
+      if (!role) {
+        roleState.role = null;
+        showLogin();
+        return;
+      }
+
+      if (!routeRole) {
+        window.location.replace(role === 'admin' ? '/admin' : '/guest');
+        return;
+      }
+
+      if (role !== routeRole) {
+        roleState.role = null;
+        showLogin(`Signed in as ${role}. Sign in as ${routeRole} to continue.`);
+        return;
+      }
+
+      hideLogin();
+      setRole(role);
+
+      if (role === 'admin') {
+        uiState.agents = await fetchAgents();
+        if (uiState.agents.length === 0) {
+          uiState.agents = [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
+        }
+      }
+
+      paneManager.init(role);
+
+      // Update agent options now that we have a definitive list.
+      if (role === 'admin') {
+        paneManager.panes.forEach((pane) => {
+          renderAgentOptions(pane.elements.agentSelect, pane.agentId);
+        });
+      }
+
+      setAuthState(true);
+      paneManager.connectAll();
+
+      const isTouch = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+      if (!isTouch) {
+        const firstPane = paneManager.panes[0];
+        firstPane?.elements.input?.focus();
+      }
+    })
+    .catch(() => {
+      clearTimeout(loginGuard);
+      roleState.role = null;
+      showLogin('Please sign in to continue.');
+    });
 });

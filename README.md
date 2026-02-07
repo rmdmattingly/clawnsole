@@ -83,3 +83,21 @@ npm run dev
 
 Then open http://localhost:5173 in a browser.
 </details>
+
+## QA vs Prod (local)
+
+If you want a stable Prod instance while iterating in QA, run them on different
+ports and set `CLAWNSOLE_INSTANCE` so their auth cookies do not collide.
+
+```bash
+# Prod (stable)
+CLAWNSOLE_INSTANCE=prod PORT=5173 npm run dev
+
+# QA (fast iteration)
+CLAWNSOLE_INSTANCE=qa PORT=5174 npm run dev
+```
+
+Connect:
+
+- Prod: `http://localhost:5173/admin` (or `/guest`)
+- QA: `http://localhost:5174/admin` (or `/guest`)
