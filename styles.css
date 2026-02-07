@@ -188,18 +188,7 @@ body::before {
   font-size: 12px;
 }
 
-.pane-controls #addPaneBtn {
-  border: none;
-  background: transparent;
-  box-shadow: none;
-}
-
-.pane-controls #addPaneBtn:hover {
-  transform: none;
-  box-shadow: none;
-  background: rgba(255, 255, 255, 0.06);
-}
-
+/* addPaneBtn uses default .icon-btn styling */
 .pane-controls .icon-btn {
   width: 36px;
   height: 36px;
