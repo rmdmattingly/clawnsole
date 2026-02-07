@@ -449,9 +449,11 @@ select {
 }
 
 textarea {
-  /* Align with stacked send+attach buttons (44px + 36px + gap). */
-  min-height: 88px;
   resize: none;
+}
+
+.chat-input-row textarea[data-pane-input] {
+  min-height: var(--actions-height);
 }
 
 button {
@@ -985,9 +987,14 @@ button.send-btn .btn-icon {
 }
 
 .chat-input-row {
+  --send-btn-size: 44px;
+  --attach-btn-size: 36px;
+  --action-gap: 8px;
+  --actions-height: calc(var(--send-btn-size) + var(--attach-btn-size) + var(--action-gap));
+
   display: grid;
   grid-template-columns: 1fr auto;
-  align-items: end;
+  align-items: stretch;
   gap: 12px;
   margin-top: auto;
   position: relative;
@@ -1004,18 +1011,24 @@ button.send-btn .btn-icon {
 .chat-actions {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--action-gap);
   align-items: stretch;
+  height: var(--actions-height);
 }
 
 .chat-actions button {
-  width: 44px;
-  min-width: 44px;
+  width: var(--send-btn-size);
+  min-width: var(--send-btn-size);
+}
+
+.chat-actions .send-btn {
+  height: var(--send-btn-size);
+  min-height: var(--send-btn-size);
 }
 
 .chat-actions .attach-btn {
-  height: 36px;
-  min-height: 36px;
+  height: var(--attach-btn-size);
+  min-height: var(--attach-btn-size);
   padding: 0;
   border-radius: 999px;
   display: grid;
@@ -1247,18 +1260,15 @@ button.send-btn .btn-icon {
     gap: 6px;
   }
 
-  .chat-actions {
-    gap: 6px;
+  .chat-input-row {
+    --send-btn-size: 40px;
+    --attach-btn-size: 34px;
+    --action-gap: 6px;
   }
 
   .chat-actions button {
-    width: 40px;
-    min-width: 40px;
-  }
-
-  .chat-actions .attach-btn {
-    height: 34px;
-    min-height: 34px;
+    width: var(--send-btn-size);
+    min-width: var(--send-btn-size);
   }
 
   button.send-btn {
