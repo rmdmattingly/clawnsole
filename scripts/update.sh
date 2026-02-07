@@ -3,22 +3,88 @@ set -euo pipefail
 
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 INSTALL_DIR="${CLAWNSOLE_DIR:-$OPENCLAW_HOME/apps/clawnsole}"
+STATE_PATH="${CLAWNSOLE_STATE_PATH:-$OPENCLAW_HOME/clawnsole-install.json}"
+HOSTNAME="${CLAWNSOLE_LOCAL_HOSTNAME:-clawnsole}"
 
 if [ ! -d "$INSTALL_DIR/.git" ]; then
   echo "Clawnsole not found at $INSTALL_DIR"
   exit 1
 fi
 
-echo "Updating Clawnsole..."
-git -C "$INSTALL_DIR" pull --ff-only
+cd "$INSTALL_DIR"
 
-if [ -f "$HOME/Library/LaunchAgents/ai.openclaw.clawnsole.plist" ]; then
-  launchctl unload "$HOME/Library/LaunchAgents/ai.openclaw.clawnsole.plist" >/dev/null 2>&1 || true
-  launchctl load "$HOME/Library/LaunchAgents/ai.openclaw.clawnsole.plist"
-  launchctl kickstart -k gui/$(id -u)/ai.openclaw.clawnsole || true
-  echo "LaunchAgent restarted"
+echo "Updating Clawnsole (git pull + npm ci)..."
+git pull --ff-only
+npm ci --silent || npm ci
+
+# Determine blue/green ports.
+STATE_JSON="$(CLAWNSOLE_STATE_PATH="$STATE_PATH" node "$INSTALL_DIR/scripts/bluegreen-state.mjs" get 2>/dev/null || echo '{}')"
+ACTIVE_PORT="$(node -e "const s=${STATE_JSON}; process.stdout.write(String((s&&s.activePort)||5173));")"
+PORT_A="$(node -e "const s=${STATE_JSON}; process.stdout.write(String((s&&s.ports&&s.ports[0])||5173));")"
+PORT_B="$(node -e "const s=${STATE_JSON}; process.stdout.write(String((s&&s.ports&&s.ports[1])||5175));")"
+
+if [ "$ACTIVE_PORT" = "$PORT_A" ]; then
+  NEXT_PORT="$PORT_B"
 else
-  echo "LaunchAgent not found; run npm run dev manually if needed"
+  NEXT_PORT="$PORT_A"
 fi
 
-echo "Update complete."
+echo "Active port: $ACTIVE_PORT"
+echo "Staging next version on: $NEXT_PORT"
+
+# Start next instance (staging) directly. This avoids touching the primary port until cutover.
+LOG_OUT="$OPENCLAW_HOME/logs/clawnsole.$NEXT_PORT.out.log"
+LOG_ERR="$OPENCLAW_HOME/logs/clawnsole.$NEXT_PORT.err.log"
+PID_FILE="$OPENCLAW_HOME/clawnsole.$NEXT_PORT.pid"
+mkdir -p "$OPENCLAW_HOME/logs"
+
+# If something is already listening on NEXT_PORT, try to stop it.
+if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$NEXT_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "Port $NEXT_PORT already in use; attempting to stop existing listener..."
+  EXISTING_PID="$(lsof -nP -iTCP:"$NEXT_PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)"
+  if [ -n "$EXISTING_PID" ]; then
+    kill "$EXISTING_PID" >/dev/null 2>&1 || true
+    sleep 0.3
+  fi
+fi
+
+# Launch staging instance
+( PORT="$NEXT_PORT" CLAWNSOLE_INSTANCE="prod" nohup node server.js >"$LOG_OUT" 2>"$LOG_ERR" & echo $! >"$PID_FILE" )
+
+# Health check
+echo "Waiting for /meta on 127.0.0.1:$NEXT_PORT..."
+OK="false"
+for i in {1..30}; do
+  if curl -fsS "http://127.0.0.1:$NEXT_PORT/meta" >/dev/null 2>&1; then
+    OK="true"
+    break
+  fi
+  sleep 0.2
+done
+
+if [ "$OK" != "true" ]; then
+  echo "Staging instance failed to become healthy on port $NEXT_PORT"
+  echo "Logs: $LOG_ERR"
+  exit 1
+fi
+
+# Flip Caddy upstream by rewriting the Caddyfile and restarting the daemon.
+if [ -f "$INSTALL_DIR/scripts/Caddyfile" ]; then
+  sed "s|__PORT__|$NEXT_PORT|g" "$INSTALL_DIR/scripts/Caddyfile" > "$INSTALL_DIR/Caddyfile"
+  echo "Switching Caddy reverse proxy to $HOSTNAME.local -> 127.0.0.1:$NEXT_PORT"
+  sudo launchctl kickstart -k system/ai.openclaw.clawnsole-caddy >/dev/null 2>&1 || true
+fi
+
+# Mark active port in state.
+CLAWNSOLE_STATE_PATH="$STATE_PATH" CLAWNSOLE_ACTIVE_PORT="$NEXT_PORT" node "$INSTALL_DIR/scripts/bluegreen-state.mjs" set-active "$NEXT_PORT" >/dev/null || true
+
+# Stop old active port listener (best-effort).
+if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$ACTIVE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  OLD_PID="$(lsof -nP -iTCP:"$ACTIVE_PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)"
+  if [ -n "$OLD_PID" ]; then
+    echo "Stopping old instance on port $ACTIVE_PORT (pid $OLD_PID)"
+    kill "$OLD_PID" >/dev/null 2>&1 || true
+  fi
+fi
+
+echo "Update complete. Active port is now $NEXT_PORT (via Caddy)."

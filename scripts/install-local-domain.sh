@@ -6,6 +6,15 @@ INSTALL_DIR="${CLAWNSOLE_DIR:-$OPENCLAW_HOME/apps/clawnsole}"
 HOSTNAME="${CLAWNSOLE_LOCAL_HOSTNAME:-clawnsole}"
 STATE_PATH="${CLAWNSOLE_STATE_PATH:-$OPENCLAW_HOME/clawnsole-install.json}"
 PORT="${CLAWNSOLE_PORT:-5173}"
+ALT_PORT="${CLAWNSOLE_ALT_PORT:-}"
+if [ -z "$ALT_PORT" ]; then
+  # Default to PORT+2 to avoid collisions with the QA port 5174.
+  if [[ "$PORT" =~ ^[0-9]+$ ]]; then
+    ALT_PORT=$((PORT + 2))
+  else
+    ALT_PORT="5175"
+  fi
+fi
 
 if ! command -v brew >/dev/null 2>&1; then
   echo "Homebrew is required to install Caddy. Please install Homebrew first."
@@ -33,8 +42,16 @@ CLAWNSOLE_INSTALLED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 CLAWNSOLE_STATE_PATH="$STATE_PATH" \
 node "$INSTALL_DIR/scripts/record-state.mjs"
 
+# Initialize blue/green ports state used by the updater.
+CLAWNSOLE_STATE_PATH="$STATE_PATH" \
+CLAWNSOLE_PORT_A="$PORT" \
+CLAWNSOLE_PORT_B="$ALT_PORT" \
+CLAWNSOLE_ACTIVE_PORT="$PORT" \
+node "$INSTALL_DIR/scripts/bluegreen-state.mjs" init "$PORT" "$ALT_PORT" "$PORT" >/dev/null
+
 mkdir -p "$OPENCLAW_HOME/logs"
 
+# Caddy proxies to the active port (blue/green swap handled in update.sh)
 sed "s|__PORT__|$PORT|g" "$INSTALL_DIR/scripts/Caddyfile" > "$INSTALL_DIR/Caddyfile"
 
 sudo scutil --set LocalHostName "$HOSTNAME"
