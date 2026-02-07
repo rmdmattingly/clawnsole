@@ -690,7 +690,23 @@ function paneScheduleCatchUp(pane, { attempts = 3, delayMs = 1500 } = {}) {
 
     pane.catchUp.attemptsLeft -= 1;
     if (pane.catchUp.attemptsLeft <= 0) {
-      // If we never saw an assistant message, keep the thinking indicator as-is.
+      // Auto-recover: if we never saw an assistant message after reconnect, resend last user message once.
+      // Uses the same idempotencyKey so the gateway can dedupe.
+      if (pane.pendingSend && !pane.pendingSend.resent) {
+        const pending = pane.pendingSend;
+        if (pending.sessionKey && pending.sentMessage && pending.idempotencyKey) {
+          pending.resent = true;
+          // Ensure we show the user that we're still working.
+          if (!pane.thinking.active) paneStartThinking(pane);
+          pane.client.request('chat.send', {
+            sessionKey: pending.sessionKey,
+            message: pending.sentMessage,
+            deliver: true,
+            idempotencyKey: pending.idempotencyKey
+          });
+        }
+      }
+
       pane.catchUp.active = false;
       return;
     }
@@ -1412,8 +1428,18 @@ async function paneSendChat(pane) {
   }
 
   const sessionKey = pane.sessionKey();
+  const idempotencyKey = randomId();
   // Mark that we're expecting an assistant response for catch-up after reconnect.
-  pane.pendingSend = { ts: Date.now(), lastUser: message };
+  // We keep enough info to optionally auto-resend (using the SAME idempotencyKey).
+  pane.pendingSend = {
+    ts: Date.now(),
+    lastUser: message,
+    sessionKey,
+    idempotencyKey,
+    sentMessage: null,
+    resent: false
+  };
+
   const uploaded = await paneUploadAttachments(pane);
   let attachmentText = '';
   if (uploaded.length > 0) {
@@ -1432,11 +1458,14 @@ async function paneSendChat(pane) {
   triggerFiring(1.6, 3);
   paneStartThinking(pane);
 
+  const outbound = `${message}${attachmentText}`;
+  if (pane.pendingSend) pane.pendingSend.sentMessage = outbound;
+
   pane.client.request('chat.send', {
     sessionKey,
-    message: `${message}${attachmentText}`,
+    message: outbound,
     deliver: true,
-    idempotencyKey: randomId()
+    idempotencyKey
   });
 
   pane.elements.input.value = '';
