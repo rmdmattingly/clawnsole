@@ -1178,24 +1178,25 @@ function paneUpdateCommandHints(pane) {
   hints.classList.add('visible');
 }
 
-function paneSetChatEnabled(pane, enabled) {
-  pane.elements.input.disabled = !enabled;
-  pane.elements.sendBtn.disabled = !enabled;
-  pane.elements.attachBtn.disabled = !enabled;
+function paneSetChatEnabled(pane) {
+  // Allow typing whenever we're signed in, even if the socket is reconnecting.
+  // Sending/attaching still require an active connection.
+  const canType = Boolean(uiState.authed);
+  const canSend = Boolean(uiState.authed && pane.connected);
 
-  if (enabled) {
-    pane.elements.input.placeholder = `Message ${paneAssistantLabel(pane)}... (Press Enter to send)`;
-    return;
-  }
+  pane.elements.input.disabled = !canType;
+  pane.elements.sendBtn.disabled = !canSend;
+  pane.elements.attachBtn.disabled = !canSend;
+
   if (!uiState.authed) {
     pane.elements.input.placeholder = 'Sign in to continue';
     return;
   }
   if (!pane.connected) {
-    pane.elements.input.placeholder = 'Reconnecting...';
+    pane.elements.input.placeholder = 'Reconnecting... (Drafting enabled)';
     return;
   }
-  pane.elements.input.placeholder = 'Connecting...';
+  pane.elements.input.placeholder = `Message ${paneAssistantLabel(pane)}... (Press Enter to send)`;
 }
 
 function paneEnsureHiddenWelcome(pane) {
@@ -1242,14 +1243,8 @@ async function paneSendChat(pane) {
   const message = pane.elements.input.value.trim();
   if (!message) return;
 
+  // During reconnect blips we allow drafting, but block sending.
   if (!pane.connected || !uiState.authed) {
-    paneAddChatMessage(pane, {
-      role: 'assistant',
-      text: uiState.authed
-        ? 'Not connected yet. Reconnecting to the gateway...'
-        : 'Not signed in. Please sign in to continue.',
-      persist: false
-    });
     return;
   }
 
@@ -1386,12 +1381,12 @@ function buildClientForPane(pane) {
       setStatusPill(pane.elements.status, state, meta || '');
       updateGlobalStatus();
       updateConnectionControls();
-      paneSetChatEnabled(pane, uiState.authed && pane.connected);
+      paneSetChatEnabled(pane);
     },
     onFrame: (data) => handleGatewayFrame(pane, data),
     onConnected: () => {
       pane.connected = true;
-      paneSetChatEnabled(pane, uiState.authed);
+      paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();
       paneEnsureGuestPolicy(pane);
@@ -1401,7 +1396,7 @@ function buildClientForPane(pane) {
     onDisconnected: () => {
       paneStopThinking(pane);
       pane.connected = false;
-      paneSetChatEnabled(pane, false);
+      paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();
     },
@@ -1431,7 +1426,7 @@ function paneSetAgent(pane, nextAgentId) {
   paneStopThinking(pane);
   paneClearChatHistory(pane, { wipeStorage: false });
   paneRestoreChatHistory(pane);
-  paneSetChatEnabled(pane, Boolean(uiState.authed && pane.connected));
+  paneSetChatEnabled(pane);
 
   paneManager.persistAdminPanes();
   if (pane.connected) {
@@ -1512,12 +1507,14 @@ function createPane({ key, role, agentId, closable = true } = {}) {
   }
 
   elements.sendBtn.addEventListener('click', () => {
+    if (elements.sendBtn.disabled) return;
     paneSendChat(pane);
   });
 
   elements.input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
+      if (elements.sendBtn.disabled) return;
       paneSendChat(pane);
     }
   });
@@ -1552,7 +1549,7 @@ function createPane({ key, role, agentId, closable = true } = {}) {
   paneRestoreChatHistory(pane);
 
   // Ensure initial disabled state before auth/connection comes up.
-  paneSetChatEnabled(pane, false);
+  paneSetChatEnabled(pane);
 
   pane.client = buildClientForPane(pane);
   setStatusPill(elements.status, 'disconnected', '');
@@ -1719,7 +1716,7 @@ const paneManager = {
   },
   refreshChatEnabled() {
     this.panes.forEach((pane) => {
-      paneSetChatEnabled(pane, uiState.authed && pane.connected);
+      paneSetChatEnabled(pane);
     });
   }
 };
