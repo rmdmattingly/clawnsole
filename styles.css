@@ -177,10 +177,6 @@ body::before {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(9, 12, 16, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .pane-controls select {
@@ -190,6 +186,18 @@ body::before {
   border: 1px solid rgba(255, 255, 255, 0.12);
   min-height: 32px;
   font-size: 12px;
+}
+
+.pane-controls #addPaneBtn {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.pane-controls #addPaneBtn:hover {
+  transform: none;
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .pane-controls .icon-btn {
@@ -452,7 +460,8 @@ select {
 }
 
 textarea {
-  min-height: 80px;
+  /* Align with stacked send+attach buttons (44px + 36px + gap). */
+  min-height: 88px;
   resize: none;
 }
 
