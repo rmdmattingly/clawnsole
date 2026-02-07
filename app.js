@@ -573,6 +573,134 @@ function extractChatText(message) {
   return '';
 }
 
+function normalizeHistoryEntries(payload) {
+  // Support multiple possible gateway shapes.
+  // Expected output: [{ role: 'user'|'assistant'|'system', text: string }]
+  if (!payload) return [];
+
+  const candidates =
+    payload.messages ||
+    payload.history ||
+    payload.items ||
+    payload.entries ||
+    payload.chat ||
+    payload;
+
+  if (!Array.isArray(candidates)) return [];
+
+  return candidates
+    .map((item) => {
+      const roleRaw =
+        item?.role ||
+        item?.author ||
+        item?.speaker ||
+        item?.type ||
+        (item?.isAssistant ? 'assistant' : item?.isUser ? 'user' : null);
+      const role = String(roleRaw || '').toLowerCase();
+      const normalizedRole = role.includes('assistant') ? 'assistant' : role.includes('user') ? 'user' : role || 'assistant';
+      const text = extractChatText(item?.message ?? item?.content ?? item?.text ?? item);
+      return { role: normalizedRole, text: String(text || '') };
+    })
+    .filter((entry) => entry.text);
+}
+
+function paneGetLastLocalText(pane, role) {
+  for (let i = pane.chat.history.length - 1; i >= 0; i -= 1) {
+    const entry = pane.chat.history[i];
+    if (!entry) continue;
+    if (role && entry.role !== role) continue;
+    if (typeof entry.text === 'string' && entry.text.trim()) return entry.text;
+  }
+  return '';
+}
+
+async function paneFetchRemoteHistory(pane) {
+  try {
+    const res = await pane.client.request('chat.history', { sessionKey: pane.sessionKey() });
+    if (!res?.ok) return [];
+    return normalizeHistoryEntries(res.payload);
+  } catch {
+    return [];
+  }
+}
+
+function paneApplyRemoteCatchUp(pane, remoteEntries) {
+  if (!Array.isArray(remoteEntries) || remoteEntries.length === 0) return { applied: false, foundAssistant: false };
+
+  const lastUser = paneGetLastLocalText(pane, 'user');
+  const lastAssistant = paneGetLastLocalText(pane, 'assistant');
+
+  // Find where the last local user message appears remotely, then take assistant messages after it.
+  let startIdx = -1;
+  if (lastUser) {
+    for (let i = remoteEntries.length - 1; i >= 0; i -= 1) {
+      const entry = remoteEntries[i];
+      if (entry.role === 'user' && entry.text.trim() === lastUser.trim()) {
+        startIdx = i;
+        break;
+      }
+    }
+  }
+
+  const tail = startIdx >= 0 ? remoteEntries.slice(startIdx + 1) : remoteEntries;
+  const assistantTail = tail.filter((e) => e.role === 'assistant' && e.text.trim());
+  const foundAssistant = assistantTail.length > 0;
+
+  let applied = false;
+  assistantTail.forEach((entry) => {
+    if (lastAssistant && entry.text.trim() === lastAssistant.trim()) return;
+    // Avoid duplicating if we already have this exact text at the end.
+    const currentLastAssistant = paneGetLastLocalText(pane, 'assistant');
+    if (currentLastAssistant && currentLastAssistant.trim() === entry.text.trim()) return;
+    paneAddChatMessage(pane, { role: 'assistant', text: entry.text, persist: true });
+    applied = true;
+  });
+
+  if (applied) {
+    paneStopThinking(pane);
+    pane.pendingSend = null;
+  }
+
+  return { applied, foundAssistant };
+}
+
+function paneScheduleCatchUp(pane, { attempts = 3, delayMs = 1500 } = {}) {
+  if (!pane.pendingSend && !pane.thinking.active) return;
+  if (pane.catchUp?.active) return;
+
+  pane.catchUp = {
+    active: true,
+    attemptsLeft: Math.max(1, attempts),
+    timer: null
+  };
+
+  const tick = async () => {
+    if (!pane.connected || !uiState.authed) {
+      pane.catchUp.active = false;
+      return;
+    }
+
+    const remote = await paneFetchRemoteHistory(pane);
+    const result = paneApplyRemoteCatchUp(pane, remote);
+
+    if (result.applied) {
+      pane.catchUp.active = false;
+      return;
+    }
+
+    pane.catchUp.attemptsLeft -= 1;
+    if (pane.catchUp.attemptsLeft <= 0) {
+      // If we never saw an assistant message, keep the thinking indicator as-is.
+      pane.catchUp.active = false;
+      return;
+    }
+
+    pane.catchUp.timer = setTimeout(tick, delayMs);
+  };
+
+  pane.catchUp.timer = setTimeout(tick, 200);
+}
+
 const pulse = {
   ctx: globalElements.pulseCanvas.getContext('2d'),
   width: 0,
@@ -1281,6 +1409,8 @@ async function paneSendChat(pane) {
   }
 
   const sessionKey = pane.sessionKey();
+  // Mark that we're expecting an assistant response for catch-up after reconnect.
+  pane.pendingSend = { ts: Date.now(), lastUser: message };
   const uploaded = await paneUploadAttachments(pane);
   let attachmentText = '';
   if (uploaded.length > 0) {
@@ -1342,10 +1472,12 @@ function handleGatewayFrame(pane, data) {
     } else if (payload.state === 'final') {
       paneStopThinking(pane);
       paneUpdateChatRun(pane, runId, text, true);
+      pane.pendingSend = null;
       triggerFiring(1.2, 2);
     } else if (payload.state === 'error') {
       paneStopThinking(pane);
       paneUpdateChatRun(pane, runId, payload.errorMessage || 'Chat error', true);
+      pane.pendingSend = null;
       triggerFiring(0.8, 1);
     }
   }
@@ -1392,6 +1524,9 @@ function buildClientForPane(pane) {
       paneEnsureGuestPolicy(pane);
       paneEnsureHiddenWelcome(pane);
       pane.client.request('sessions.resolve', { key: pane.sessionKey() });
+
+      // If we disconnected mid-stream, pull remote history to catch up.
+      paneScheduleCatchUp(pane);
     },
     onDisconnected: () => {
       paneStopThinking(pane);
@@ -1483,6 +1618,8 @@ function createPane({ key, role, agentId, closable = true } = {}) {
 	    scroll: { pinned: true },
 	    thinking: { active: false, timer: null, dotsTimer: null, bubble: null },
 	    attachments: { files: [] },
+	    pendingSend: null,
+	    catchUp: { active: false, attemptsLeft: 0, timer: null },
 	    chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
 	    legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
 	    sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
