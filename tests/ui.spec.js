@@ -163,7 +163,7 @@ test('admin login persists, send/receive, upload attachment', async ({ page }) =
   await page.selectOption('#loginRole', 'admin');
   await page.fill('#loginPassword', 'admin');
   await page.click('#loginBtn');
-  await page.waitForURL(/\\/admin\\/?$/, { timeout: 10000 });
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   await page.waitForSelector('.pane-status.connected', { timeout: 10000 });
 
@@ -185,7 +185,7 @@ test('admin login persists, send/receive, upload attachment', async ({ page }) =
 
   await pane.locator('[data-pane-input]').fill('with file');
   await pane.locator('[data-pane-send]').click();
-  await expect(pane.locator('.chat-bubble.user')).toContainText('with file');
+  await expect(pane.locator('.chat-bubble.user').last()).toContainText('with file');
 
   await page.reload();
   await expect(page.locator('#loginOverlay')).not.toHaveClass(/open/);
