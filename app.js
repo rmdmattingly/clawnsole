@@ -1695,8 +1695,10 @@ function createPane({ key, role, agentId, closable = true } = {}) {
 
 function inferPaneCols(count) {
   if (count <= 1) return 1;
-  // Heuristic: 2-4 panes -> 2-up, 5-6 panes -> 3-up.
-  if (count <= 4) return 2;
+  if (count === 2) return 2;
+  if (count === 3) return 3;
+  if (count === 4) return 2;
+  // 5-6 panes: pack into 3 columns.
   return 3;
 }
 
