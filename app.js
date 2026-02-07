@@ -566,7 +566,29 @@ function extractChatText(message) {
   if (typeof message.text === 'string') return message.text;
   if (Array.isArray(message.content)) {
     return message.content
-      .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+      .map((part) => {
+        if (!part) return '';
+        if (typeof part.text === 'string') return part.text;
+
+        // Common structured content shapes (OpenAI-style, etc.)
+        const type = typeof part.type === 'string' ? part.type : '';
+        if (type === 'image_url' && typeof part.image_url?.url === 'string') {
+          return `\n\n![](${part.image_url.url})\n\n`;
+        }
+        if (type === 'image' && typeof part.url === 'string') {
+          return `\n\n![](${part.url})\n\n`;
+        }
+        if ((type === 'file' || type === 'attachment') && typeof part.url === 'string') {
+          const name = typeof part.name === 'string' ? part.name : 'attachment';
+          return `\n\n[${name}](${part.url})\n\n`;
+        }
+
+        // Fallback: if a part has a url, at least render a link.
+        if (typeof part.url === 'string') {
+          return `\n\n${part.url}\n\n`;
+        }
+        return '';
+      })
       .filter(Boolean)
       .join('');
   }
