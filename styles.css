@@ -358,7 +358,7 @@ body::before {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background: rgba(20, 26, 34, 0.38);
+  background: rgba(20, 26, 34, 0.22);
   border: 1px solid var(--panel-border);
   border-radius: 22px;
   padding: 18px;
@@ -381,7 +381,7 @@ body::before {
   gap: 12px;
   padding: 8px 10px;
   border-radius: 16px;
-  background: rgba(9, 12, 16, 0.32);
+  background: rgba(9, 12, 16, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.08);
   position: relative;
   z-index: 2;
@@ -836,7 +836,7 @@ button.send-btn .btn-icon {
 
 .chat-bubble.assistant {
   align-self: flex-start;
-  background: rgba(20, 24, 32, 0.38);
+  background: rgba(20, 24, 32, 0.22);
   border: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(8px) saturate(1.1);
   -webkit-backdrop-filter: blur(8px) saturate(1.1);
@@ -995,7 +995,7 @@ button.send-btn .btn-icon {
   z-index: 1;
   padding: 12px;
   border-radius: 16px;
-  background: rgba(8, 10, 14, 0.38);
+  background: rgba(8, 10, 14, 0.22);
   border: 1px solid rgba(255, 255, 255, 0.08);
   flex: 0 0 auto;
   backdrop-filter: blur(10px) saturate(1.1);
