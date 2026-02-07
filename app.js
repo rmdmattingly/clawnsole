@@ -84,6 +84,10 @@ const commandList = [
   { command: '/new', description: 'Reset the remote session + clear local history' }
 ];
 
+// Local retention cap (per agent + role). Prevents localStorage from growing unbounded.
+// Note: this is a message count cap (not tokens/bytes).
+const MAX_CHAT_HISTORY = 400;
+
 function randomId() {
   try {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -870,8 +874,27 @@ function paneLoadChatHistory(pane) {
   }
 }
 
+function paneEnforceHistoryCap(pane) {
+  if (!Number.isFinite(MAX_CHAT_HISTORY) || MAX_CHAT_HISTORY <= 0) return;
+  const overflow = pane.chat.history.length - MAX_CHAT_HISTORY;
+  if (overflow <= 0) return;
+
+  pane.chat.history.splice(0, overflow);
+
+  // Adjust any in-flight streaming indices so updates don't target the wrong entry.
+  for (const run of pane.chat.runs.values()) {
+    if (typeof run.index !== 'number') continue;
+    run.index -= overflow;
+    if (run.index < 0) {
+      // The referenced message was evicted.
+      run.index = null;
+    }
+  }
+}
+
 function paneSaveChatHistory(pane) {
   try {
+    paneEnforceHistoryCap(pane);
     const key = pane.chatKey();
     localStorage.setItem(`clawnsole.chat.history.${key}`, JSON.stringify(pane.chat.history));
   } catch (err) {
@@ -947,6 +970,8 @@ function paneAddChatMessage(pane, { role, text, runId, streaming = false, persis
     index = pane.chat.history.length;
     pane.chat.history.push({ role, text, ts: Date.now() });
     paneSaveChatHistory(pane);
+    // Recompute index in case the cap evicted older messages.
+    index = pane.chat.history.length - 1;
   }
   if (runId) {
     pane.chat.runs.set(runId, { body, index });
@@ -1012,6 +1037,8 @@ function paneUpdateChatRun(pane, runId, text, done) {
       entry.index = pane.chat.history.length;
       pane.chat.history.push({ role: 'assistant', text, ts: Date.now() });
       paneSaveChatHistory(pane);
+      // Recompute index in case the cap evicted older messages.
+      entry.index = pane.chat.history.length - 1;
     }
   } else {
     pane.chat.history[entry.index] = { role: 'assistant', text, ts: Date.now() };
