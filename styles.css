@@ -369,6 +369,7 @@ body::before {
 
 .chat-panel.pane {
   padding: 14px;
+  padding-bottom: 10px;
 }
 
 .pane-header {
