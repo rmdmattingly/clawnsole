@@ -927,6 +927,7 @@ function paneStartThinking(pane) {
   const label = escapeHtml(paneAssistantLabel(pane));
   const bubble = document.createElement('div');
   bubble.className = 'chat-bubble assistant thinking';
+  bubble.dataset.chatRole = 'assistant';
   bubble.innerHTML =
     `<div class="chat-meta">${label}</div><div class="chat-text"><span class="thinking-text">Thinking</span><span class="thinking-dots">...</span></div>`;
   pane.elements.thread.appendChild(bubble);
@@ -1078,6 +1079,8 @@ function paneAddChatMessage(pane, { role, text, runId, streaming = false, persis
   const shouldPin = pane.scroll.pinned || isNearBottom(pane.elements.thread);
   const bubble = document.createElement('div');
   bubble.className = `chat-bubble ${role}${streaming ? ' streaming' : ''}`;
+  bubble.dataset.chatRole = role;
+  if (runId) bubble.dataset.runId = String(runId);
   const meta = document.createElement('div');
   meta.className = 'chat-meta';
   meta.textContent = role === 'user' ? 'You' : paneAssistantLabel(pane);
@@ -1511,6 +1514,10 @@ function buildClientForPane(pane) {
       pane.statusState = state;
       pane.statusMeta = meta || '';
       setStatusPill(pane.elements.status, state, meta || '');
+      if (pane.elements.root) {
+        pane.elements.root.dataset.connected = pane.connected ? 'true' : 'false';
+        pane.elements.root.dataset.wsState = String(state || '');
+      }
       updateGlobalStatus();
       updateConnectionControls();
       paneSetChatEnabled(pane);
@@ -1518,6 +1525,7 @@ function buildClientForPane(pane) {
     onFrame: (data) => handleGatewayFrame(pane, data),
     onConnected: () => {
       pane.connected = true;
+      if (pane.elements.root) pane.elements.root.dataset.connected = 'true';
       paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();
@@ -1531,6 +1539,7 @@ function buildClientForPane(pane) {
     onDisconnected: () => {
       paneStopThinking(pane);
       pane.connected = false;
+      if (pane.elements.root) pane.elements.root.dataset.connected = 'false';
       paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();

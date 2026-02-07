@@ -165,7 +165,7 @@ test('admin login persists, send/receive, upload attachment', async ({ page }) =
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.waitForSelector('.pane-status.connected', { timeout: 10000 });
+  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 10000 });
 
   const paneFontSize = await page.evaluate(() => {
     const el = document.querySelector('[data-pane] [data-pane-input]');
@@ -176,7 +176,7 @@ test('admin login persists, send/receive, upload attachment', async ({ page }) =
   const pane = page.locator('[data-pane]').first();
   await pane.locator('[data-pane-input]').fill('hello');
   await pane.locator('[data-pane-send]').click();
-  await expect(pane.locator('.chat-bubble.assistant')).toContainText('mock-reply: hello');
+  await expect(pane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: hello');
 
   const testFile = path.join(__dirname, 'upload.txt');
   fs.writeFileSync(testFile, 'upload test');
@@ -185,7 +185,7 @@ test('admin login persists, send/receive, upload attachment', async ({ page }) =
 
   await pane.locator('[data-pane-input]').fill('with file');
   await pane.locator('[data-pane-send]').click();
-  await expect(pane.locator('.chat-bubble.user').last()).toContainText('with file');
+  await expect(pane.locator('[data-chat-role="user"]').last()).toContainText('with file');
 
   await page.reload();
   await expect(page.locator('#loginOverlay')).not.toHaveClass(/open/);
