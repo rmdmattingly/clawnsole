@@ -890,7 +890,18 @@ function paneRestoreChatHistory(pane) {
   pane.chat.history.forEach((entry) => {
     paneAddChatMessage(pane, { role: entry.role, text: entry.text, persist: false });
   });
+
+  // When a pane is restored during startup, it may not be attached to the DOM yet,
+  // so scrollHeight can be wrong (0) and we end up stuck at the top after refresh.
+  // Do an immediate scroll + a couple deferred passes after layout.
+  pane.scroll.pinned = true;
   scrollToBottom(pane, true);
+  requestAnimationFrame(() => {
+    scrollToBottom(pane, true);
+    requestAnimationFrame(() => {
+      scrollToBottom(pane, true);
+    });
+  });
 }
 
 function paneClearChatHistory(pane, { wipeStorage = false } = {}) {
