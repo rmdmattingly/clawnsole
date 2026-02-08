@@ -16,7 +16,6 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps
-      - run: npm run test:proxy
-      - run: npm run test:smoke
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
       - run: npm run test:ui
