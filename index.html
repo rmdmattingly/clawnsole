@@ -63,9 +63,22 @@
             <div class="pane-header">
               <div class="pane-header-left">
                 <div class="pane-name" data-pane-name>Pane</div>
-                <div class="pane-agent">
-                  <span class="agent-label">Agent</span>
-                  <select data-pane-agent-select aria-label="Select agent"></select>
+                <div class="pane-controls-row">
+                  <div class="pane-mode" data-pane-mode-wrap>
+                    <span class="agent-label">Mode</span>
+                    <select data-pane-mode-select aria-label="Select pane mode">
+                      <option value="chat" selected>Chat</option>
+                      <option value="queue">Queue</option>
+                    </select>
+                  </div>
+                  <div class="pane-agent" data-pane-agent-wrap>
+                    <span class="agent-label">Agent</span>
+                    <select data-pane-agent-select aria-label="Select agent"></select>
+                  </div>
+                  <div class="pane-queue" data-pane-queue-wrap hidden>
+                    <span class="agent-label">Queue</span>
+                    <select data-pane-queue-select aria-label="Select work queue"></select>
+                  </div>
                 </div>
               </div>
               <div class="pane-header-right">
@@ -80,6 +93,22 @@
             <button class="scroll-down" data-pane-scroll-down type="button" aria-label="Scroll to bottom">
               ↓
             </button>
+
+            <div class="queue-panel" data-pane-queue-panel hidden>
+              <div class="queue-actions">
+                <button class="secondary" data-pane-queue-refresh type="button">Refresh</button>
+                <button class="secondary" data-pane-queue-create type="button">New queue</button>
+              </div>
+              <div class="queue-new-item">
+                <textarea data-pane-queue-input placeholder="Add a work item prompt..."></textarea>
+                <div class="queue-item-actions">
+                  <button class="primary" data-pane-queue-add type="button">Add item</button>
+                  <button class="secondary" data-pane-queue-claim type="button">Claim next</button>
+                </div>
+                <div class="hint" data-pane-queue-status></div>
+              </div>
+              <div class="queue-items" data-pane-queue-items aria-label="Work queue items"></div>
+            </div>
 
             <div class="chat-input-row">
               <div class="chat-input-stack">

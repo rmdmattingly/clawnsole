@@ -76,7 +76,8 @@ const roleState = {
 const uiState = {
   authed: false,
   meta: {},
-  agents: []
+  agents: [],
+  workQueues: []
 };
 
 const commandList = [
@@ -265,6 +266,101 @@ async function fetchAgents() {
   }
 }
 
+async function fetchWorkQueues() {
+  try {
+    const res = await fetch('/work-queues', { credentials: 'include', cache: 'no-store' });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const list = Array.isArray(data.queues) ? data.queues : [];
+    return list
+      .map((q) => ({
+        id: typeof q?.id === 'string' ? q.id : '',
+        name: typeof q?.name === 'string' ? q.name : '',
+        assignedAgents: Array.isArray(q?.assignedAgents) ? q.assignedAgents : [],
+        counts: q?.counts && typeof q.counts === 'object' ? q.counts : {}
+      }))
+      .filter((q) => q.id);
+  } catch {
+    return [];
+  }
+}
+
+async function fetchWorkQueue(queueId) {
+  try {
+    const res = await fetch('/work-queues/' + encodeURIComponent(queueId), { credentials: 'include', cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.queue || null;
+  } catch {
+    return null;
+  }
+}
+
+async function createWorkQueue({ name, assignedAgents = [] }) {
+  try {
+    const res = await fetch('/work-queues', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, assignedAgents })
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.queue || null;
+  } catch {
+    return null;
+  }
+}
+
+async function addWorkQueueItem(queueId, prompt) {
+  try {
+    const res = await fetch('/work-queues/' + encodeURIComponent(queueId) + '/items', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt })
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.item || null;
+  } catch {
+    return null;
+  }
+}
+
+async function claimWorkQueueNext(queueId, agentId, leaseMs) {
+  try {
+    const res = await fetch('/work-queues/' + encodeURIComponent(queueId) + '/claim', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId, leaseMs })
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.item || null;
+  } catch {
+    return null;
+  }
+}
+
+async function setWorkQueueItemState(queueId, itemId, state) {
+  try {
+    const res = await fetch('/work-queues/' + encodeURIComponent(queueId) + '/items/' + encodeURIComponent(itemId), {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state })
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.item || null;
+  } catch {
+    return null;
+  }
+}
+
+
 function formatAgentLabel(agent, { includeId = true } = {}) {
   if (!agent) return 'main';
   const id = typeof agent.id === 'string' ? agent.id : '';
@@ -348,14 +444,17 @@ function updateGlobalStatus() {
     return;
   }
 
-  const connectedCount = panes.filter((pane) => pane.connected).length;
-  const total = panes.length;
-  const anyConnecting = panes.some((pane) => pane.statusState === 'connecting' || pane.statusState === 'reconnecting');
-  const anyError = panes.some((pane) => pane.statusState === 'error');
-  const firstError = panes.find((pane) => pane.statusState === 'error' && pane.statusMeta);
+  const wsPanes = panes.filter((pane) => pane.mode !== 'queue');
+  const connectedCount = wsPanes.filter((pane) => pane.connected).length;
+  const total = wsPanes.length;
+  const anyConnecting = wsPanes.some((pane) => pane.statusState === 'connecting' || pane.statusState === 'reconnecting');
+  const anyError = wsPanes.some((pane) => pane.statusState === 'error');
+  const firstError = wsPanes.find((pane) => pane.statusState === 'error' && pane.statusMeta);
 
   let state = 'disconnected';
-  if (connectedCount === total) {
+  if (total === 0) {
+    state = 'connected';
+  } else if (connectedCount === total) {
     state = 'connected';
   } else if (connectedCount > 0 || anyConnecting) {
     state = 'reconnecting';
@@ -366,7 +465,9 @@ function updateGlobalStatus() {
   const meta =
     connectedCount === 0 && anyError && firstError
       ? firstError.statusMeta
-      : `panes: ${connectedCount}/${total} connected`;
+      : total === 0
+        ? 'no chat panes'
+        : `panes: ${connectedCount}/${total} connected`;
   setStatusPill(globalElements.status, state, meta);
   if (globalElements.statusMeta) globalElements.statusMeta.textContent = meta;
 }
@@ -883,7 +984,7 @@ renderPulse();
 
 // Panes
 
-const ADMIN_PANES_KEY = 'clawnsole.admin.panes.v1';
+const ADMIN_PANES_KEY = 'clawnsole.admin.panes.v2';
 // Layout is inferred from pane count; no manual layout toggle.
 const ADMIN_DEFAULT_AGENT_KEY = 'clawnsole.admin.agentId';
 
@@ -1356,6 +1457,13 @@ function paneUpdateCommandHints(pane) {
 }
 
 function paneSetChatEnabled(pane) {
+  if (pane.mode === 'queue') {
+    if (pane.elements.input) pane.elements.input.disabled = true;
+    if (pane.elements.sendBtn) pane.elements.sendBtn.disabled = true;
+    if (pane.elements.attachBtn) pane.elements.attachBtn.disabled = true;
+    return;
+  }
+
   // Allow typing whenever we're signed in, even if the socket is reconnecting.
   // Sending/attaching still require an active connection.
   const canType = Boolean(uiState.authed);
@@ -1644,9 +1752,18 @@ function buildClientForPane(pane) {
 
 function paneSetAgent(pane, nextAgentId) {
   if (pane.role !== 'admin') return;
+  if (pane.mode !== 'chat') {
+    // If we're in queue mode, remember the choice for when we switch back.
+    pane.chatAgentId = normalizeAgentId(nextAgentId);
+    pane.elements.agentSelect.value = pane.chatAgentId;
+    paneManager.persistAdminPanes();
+    return;
+  }
+
   const next = normalizeAgentId(nextAgentId);
   if (next === pane.agentId) return;
   pane.agentId = next;
+  pane.chatAgentId = next;
   storage.set(ADMIN_DEFAULT_AGENT_KEY, next);
   pane.elements.agentSelect.value = next;
 
@@ -1661,6 +1778,274 @@ function paneSetAgent(pane, nextAgentId) {
   if (pane.connected) {
     pane.client.request('sessions.resolve', { key: pane.sessionKey() });
   }
+}
+
+function paneApplyMode(pane) {
+  const isQueue = pane.mode === 'queue';
+  if (pane.elements.modeSelect) pane.elements.modeSelect.value = pane.mode;
+
+  // Toggle header controls
+  if (pane.elements.agentWrap) pane.elements.agentWrap.hidden = isQueue;
+  if (pane.elements.queueWrap) pane.elements.queueWrap.hidden = !isQueue;
+
+  // Toggle main body
+  if (pane.elements.thread) pane.elements.thread.hidden = isQueue;
+  if (pane.elements.scrollDownBtn) pane.elements.scrollDownBtn.hidden = isQueue;
+  const inputRow = pane.elements.input?.closest('.chat-input-row');
+  if (inputRow) inputRow.hidden = isQueue;
+  if (pane.elements.queuePanel) pane.elements.queuePanel.hidden = !isQueue;
+
+  // Status + enablement
+  setStatusPill(pane.elements.status, isQueue ? 'queue' : pane.statusState || 'disconnected', pane.statusMeta || '');
+  paneSetChatEnabled(pane);
+
+  if (isQueue) {
+    paneQueueClearStatus(pane);
+    paneRefreshWorkQueues(pane);
+  }
+}
+
+function paneSetMode(pane, rawMode) {
+  if (pane.role !== 'admin') return;
+  const next = rawMode === 'queue' ? 'queue' : 'chat';
+  if (next === pane.mode) return;
+
+  // Tear down any active gateway connection when leaving chat.
+  if (pane.mode === 'chat' && pane.client) {
+    try {
+      pane.client.disconnect(true);
+    } catch {}
+  }
+
+  pane.mode = next;
+
+  if (next === 'chat') {
+    pane.agentId = pane.chatAgentId || normalizeAgentId(storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
+    pane.client = buildClientForPane(pane);
+    pane.connected = false;
+    pane.statusState = 'disconnected';
+    pane.statusMeta = '';
+    setStatusPill(pane.elements.status, 'disconnected', '');
+    // Restore chat UI + history.
+    paneRestoreChatHistory(pane);
+    if (uiState.authed) {
+      setTimeout(() => pane.client?.connect(), 0);
+    }
+  } else {
+    // Queue mode (no gateway client)
+    pane.chatAgentId = pane.agentId || pane.chatAgentId;
+    pane.agentId = null;
+    pane.connected = false;
+    pane.client = null;
+    pane.statusState = 'queue';
+    pane.statusMeta = '';
+    setStatusPill(pane.elements.status, 'queue', '');
+  }
+
+  paneApplyMode(pane);
+  paneManager.persistAdminPanes();
+  updateGlobalStatus();
+  updateConnectionControls();
+}
+
+function paneQueueSetStatus(pane, text, isError = false) {
+  if (!pane.elements.queueStatus) return;
+  pane.elements.queueStatus.textContent = text || '';
+  pane.elements.queueStatus.style.color = isError ? 'var(--warning)' : '';
+}
+
+function paneQueueClearStatus(pane) {
+  paneQueueSetStatus(pane, '', false);
+}
+
+function renderWorkQueueOptions(selectEl, queues, selectedId) {
+  if (!selectEl) return;
+  selectEl.innerHTML = '';
+  const list = Array.isArray(queues) ? queues : [];
+  if (list.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'No queues';
+    selectEl.appendChild(opt);
+    selectEl.value = '';
+    selectEl.disabled = true;
+    return;
+  }
+  selectEl.disabled = false;
+  list.forEach((q) => {
+    const opt = document.createElement('option');
+    opt.value = q.id;
+    const counts = q.counts || {};
+    const badge = typeof counts.pending === 'number' ? ` (${counts.pending} pending)` : '';
+    opt.textContent = `${q.name || q.id}${badge}`;
+    selectEl.appendChild(opt);
+  });
+  selectEl.value = selectedId && list.some((q) => q.id === selectedId) ? selectedId : list[0].id;
+}
+
+function renderWorkQueueItems(pane, queue) {
+  if (!pane.elements.queueItems) return;
+  pane.elements.queueItems.innerHTML = '';
+  const items = Array.isArray(queue?.items) ? queue.items : [];
+  if (!queue || items.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'hint';
+    empty.textContent = queue ? 'No items yet.' : 'Select a queue to view items.';
+    pane.elements.queueItems.appendChild(empty);
+    return;
+  }
+
+  items
+    .slice()
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+    .forEach((item) => {
+      const el = document.createElement('div');
+      el.className = 'queue-item';
+
+      const top = document.createElement('div');
+      top.className = 'queue-item-top';
+
+      const left = document.createElement('div');
+      left.className = 'queue-item-meta';
+      const state = String(item.state || 'pending');
+      const who = item.claimedBy ? ` · ${item.claimedBy}` : '';
+      left.textContent = `${state}${who}`;
+
+      const right = document.createElement('div');
+      right.className = 'queue-item-meta';
+      right.textContent = item.id || '';
+
+      top.appendChild(left);
+      top.appendChild(right);
+
+      const prompt = document.createElement('div');
+      prompt.className = 'queue-item-prompt';
+      prompt.textContent = String(item.prompt || '');
+
+      const buttons = document.createElement('div');
+      buttons.className = 'queue-item-buttons';
+
+      const addStateBtn = (label, nextState, kind = 'secondary') => {
+        const btn = document.createElement('button');
+        btn.className = kind;
+        btn.type = 'button';
+        btn.textContent = label;
+        btn.addEventListener('click', async () => {
+          if (!pane.queue.selectedId) return;
+          btn.disabled = true;
+          const updated = await setWorkQueueItemState(pane.queue.selectedId, item.id, nextState);
+          btn.disabled = false;
+          if (!updated) {
+            paneQueueSetStatus(pane, 'Failed to update item state.', true);
+            return;
+          }
+          await paneRefreshSelectedWorkQueue(pane);
+        });
+        buttons.appendChild(btn);
+      };
+
+      addStateBtn('Pending', 'pending');
+      addStateBtn('In progress', 'in_progress');
+      addStateBtn('Done', 'done', 'primary');
+      addStateBtn('Failed', 'failed');
+      addStateBtn('Canceled', 'canceled');
+
+      el.appendChild(top);
+      el.appendChild(prompt);
+      el.appendChild(buttons);
+      pane.elements.queueItems.appendChild(el);
+    });
+}
+
+async function paneRefreshWorkQueues(pane) {
+  if (pane.mode !== 'queue') return;
+  paneQueueClearStatus(pane);
+  const list = await fetchWorkQueues();
+  pane.queue.queues = list;
+  uiState.workQueues = list;
+
+  // Select
+  const selected = pane.queue.selectedId || pane.queueId || '';
+  renderWorkQueueOptions(pane.elements.queueSelect, list, selected);
+  pane.queue.selectedId = pane.elements.queueSelect?.value || '';
+  pane.queueId = pane.queue.selectedId;
+
+  await paneRefreshSelectedWorkQueue(pane);
+}
+
+async function paneRefreshSelectedWorkQueue(pane) {
+  if (pane.mode !== 'queue') return;
+  if (!pane.queue.selectedId) {
+    pane.queue.data = null;
+    renderWorkQueueItems(pane, null);
+    paneManager.persistAdminPanes();
+    return;
+  }
+  const q = await fetchWorkQueue(pane.queue.selectedId);
+  pane.queue.data = q;
+  renderWorkQueueItems(pane, q);
+  paneManager.persistAdminPanes();
+}
+
+function paneSetQueue(pane, queueId) {
+  if (pane.mode !== 'queue') return;
+  const id = String(queueId || '').trim();
+  pane.queue.selectedId = id;
+  pane.queueId = id;
+  paneRefreshSelectedWorkQueue(pane);
+}
+
+async function paneCreateWorkQueuePrompt(pane) {
+  if (pane.mode !== 'queue') return;
+  const name = window.prompt('New queue name:');
+  if (!name || !String(name).trim()) return;
+  paneQueueSetStatus(pane, 'Creating queue...');
+  const queue = await createWorkQueue({ name: String(name).trim(), assignedAgents: [] });
+  if (!queue) {
+    paneQueueSetStatus(pane, 'Failed to create queue.', true);
+    return;
+  }
+  paneQueueSetStatus(pane, 'Queue created.');
+  await paneRefreshWorkQueues(pane);
+  paneSetQueue(pane, queue.id);
+}
+
+async function paneAddWorkQueueItemFromInput(pane) {
+  if (pane.mode !== 'queue') return;
+  const prompt = String(pane.elements.queueInput?.value || '').trim();
+  if (!pane.queue.selectedId) {
+    paneQueueSetStatus(pane, 'Select a queue first.', true);
+    return;
+  }
+  if (!prompt) return;
+  paneQueueSetStatus(pane, 'Adding item...');
+  const item = await addWorkQueueItem(pane.queue.selectedId, prompt);
+  if (!item) {
+    paneQueueSetStatus(pane, 'Failed to add item.', true);
+    return;
+  }
+  if (pane.elements.queueInput) pane.elements.queueInput.value = '';
+  paneQueueSetStatus(pane, 'Item added.');
+  await paneRefreshSelectedWorkQueue(pane);
+  await paneRefreshWorkQueues(pane);
+}
+
+async function paneClaimWorkQueueNextPrompt(pane) {
+  if (pane.mode !== 'queue') return;
+  if (!pane.queue.selectedId) {
+    paneQueueSetStatus(pane, 'Select a queue first.', true);
+    return;
+  }
+  const agentId = window.prompt('Claim as agent id (optional):', pane.chatAgentId || '');
+  paneQueueSetStatus(pane, 'Claiming next item...');
+  const item = await claimWorkQueueNext(pane.queue.selectedId, String(agentId || '').trim(), 10 * 60 * 1000);
+  if (!item) {
+    paneQueueSetStatus(pane, 'No pending items to claim (or claim failed).');
+  } else {
+    paneQueueSetStatus(pane, `Claimed ${item.id}.`);
+  }
+  await paneRefreshSelectedWorkQueue(pane);
+  await paneRefreshWorkQueues(pane);
 }
 
 function renderAgentOptions(selectEl, agentId) {
@@ -1679,14 +2064,18 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, agentId, closable = true } = {}) {
+function createPane({ key, role, agentId, mode = 'chat', queueId = '', closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
     root,
     name: root.querySelector('[data-pane-name]'),
+    modeSelect: root.querySelector('[data-pane-mode-select]'),
+    modeWrap: root.querySelector('[data-pane-mode-wrap]'),
     agentSelect: root.querySelector('[data-pane-agent-select]'),
-    agentWrap: root.querySelector('.pane-agent'),
+    agentWrap: root.querySelector('[data-pane-agent-wrap]'),
+    queueSelect: root.querySelector('[data-pane-queue-select]'),
+    queueWrap: root.querySelector('[data-pane-queue-wrap]'),
     status: root.querySelector('[data-pane-status]'),
     closeBtn: root.querySelector('[data-pane-close]'),
     thread: root.querySelector('[data-pane-thread]'),
@@ -1697,18 +2086,32 @@ function createPane({ key, role, agentId, closable = true } = {}) {
     attachBtn: root.querySelector('[data-pane-attach]'),
     attachmentStatus: root.querySelector('[data-pane-attachment-status]'),
     attachmentList: root.querySelector('[data-pane-attachment-list]'),
-    sendBtn: root.querySelector('[data-pane-send]')
+    sendBtn: root.querySelector('[data-pane-send]'),
+    queuePanel: root.querySelector('[data-pane-queue-panel]'),
+    queueRefreshBtn: root.querySelector('[data-pane-queue-refresh]'),
+    queueCreateBtn: root.querySelector('[data-pane-queue-create]'),
+    queueInput: root.querySelector('[data-pane-queue-input]'),
+    queueAddBtn: root.querySelector('[data-pane-queue-add]'),
+    queueClaimBtn: root.querySelector('[data-pane-queue-claim]'),
+    queueStatus: root.querySelector('[data-pane-queue-status]'),
+    queueItems: root.querySelector('[data-pane-queue-items]')
   };
+
+  const initialChatAgentId = role === 'admin' ? normalizeAgentId(agentId || 'main') : null;
 
 	  const pane = {
 	    key,
 	    role,
-	    agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
+	    mode: mode === 'queue' ? 'queue' : 'chat',
+	    queueId: mode === 'queue' ? String(queueId || '').trim() : '',
+	    chatAgentId: initialChatAgentId,
+	    agentId: role === 'admin' && mode !== 'queue' ? initialChatAgentId : null,
 	    connected: false,
 	    statusState: 'disconnected',
 	    statusMeta: '',
 	    elements,
 	    chat: { runs: new Map(), history: [] },
+	    queue: { queues: [], selectedId: pane.queueId || '', data: null },
 	    scroll: { pinned: true },
 	    thinking: { active: false, timer: null, dotsTimer: null, bubble: null },
 	    attachments: { files: [] },
@@ -1730,12 +2133,32 @@ function createPane({ key, role, agentId, closable = true } = {}) {
   }
 
   if (pane.role === 'admin') {
-    renderAgentOptions(elements.agentSelect, pane.agentId);
+    if (elements.modeSelect) {
+      elements.modeSelect.value = pane.mode;
+      elements.modeSelect.addEventListener('change', (event) => {
+        paneSetMode(pane, String(event.target.value || '').trim());
+      });
+    }
+
+    renderAgentOptions(elements.agentSelect, pane.agentId || pane.chatAgentId);
     elements.agentSelect.addEventListener('change', (event) => {
       paneSetAgent(pane, String(event.target.value || '').trim());
     });
+
+    if (elements.queueSelect) {
+      elements.queueSelect.addEventListener('change', (event) => {
+        paneSetQueue(pane, String(event.target.value || '').trim());
+      });
+    }
+
+    elements.queueRefreshBtn?.addEventListener('click', () => paneRefreshWorkQueues(pane));
+    elements.queueCreateBtn?.addEventListener('click', () => paneCreateWorkQueuePrompt(pane));
+    elements.queueAddBtn?.addEventListener('click', () => paneAddWorkQueueItemFromInput(pane));
+    elements.queueClaimBtn?.addEventListener('click', () => paneClaimWorkQueueNextPrompt(pane));
   } else {
+    if (elements.modeWrap) elements.modeWrap.hidden = true;
     if (elements.agentWrap) elements.agentWrap.hidden = true;
+    if (elements.queueWrap) elements.queueWrap.hidden = true;
     if (elements.closeBtn) elements.closeBtn.hidden = true;
   }
 
@@ -1784,8 +2207,10 @@ function createPane({ key, role, agentId, closable = true } = {}) {
   // Ensure initial disabled state before auth/connection comes up.
   paneSetChatEnabled(pane);
 
-  pane.client = buildClientForPane(pane);
-  setStatusPill(elements.status, 'disconnected', '');
+  pane.client = pane.mode === 'chat' ? buildClientForPane(pane) : null;
+  setStatusPill(elements.status, pane.mode === 'queue' ? 'queue' : 'disconnected', '');
+
+  paneApplyMode(pane);
   return pane;
 }
 
@@ -1824,7 +2249,16 @@ const paneManager = {
   },
   initAdmin() {
     const panes = this.loadAdminPanes();
-    this.panes = panes.map((cfg) => createPane({ key: cfg.key, role: 'admin', agentId: cfg.agentId, closable: true }));
+    this.panes = panes.map((cfg) =>
+      createPane({
+        key: cfg.key,
+        role: 'admin',
+        agentId: cfg.agentId,
+        mode: cfg.mode,
+        queueId: cfg.queueId,
+        closable: true
+      })
+    );
     this.panes.forEach((pane) => globalElements.paneGrid.appendChild(pane.elements.root));
     this.updatePaneLabels();
     this.updateCloseButtons();
@@ -1851,41 +2285,49 @@ const paneManager = {
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) throw new Error('not array');
       const list = parsed
-        .map((item) => ({
-          key: typeof item?.key === 'string' && item.key ? item.key : '',
-          agentId: normalizeAgentId(typeof item?.agentId === 'string' ? item.agentId : defaultAgent)
-        }))
-        .filter((item) => item.key);
+        .map((item) => {
+          const key = typeof item?.key === 'string' && item.key ? item.key : '';
+          if (!key) return null;
+          const mode = item?.mode === 'queue' ? 'queue' : 'chat';
+          const agentId = normalizeAgentId(typeof item?.agentId === 'string' ? item.agentId : defaultAgent);
+          const queueId = typeof item?.queueId === 'string' ? item.queueId : '';
+          return { key, mode, agentId, queueId };
+        })
+        .filter(Boolean);
       if (list.length > 0) {
         return list.slice(0, this.maxPanes);
       }
     } catch {}
 
-    const secondary =
-      uiState.agents.find((agent) => agent.id && agent.id !== defaultAgent)?.id || defaultAgent || 'main';
-    const paneA = { key: `p${randomId().slice(0, 8)}`, agentId: defaultAgent };
-    const paneB = { key: `p${randomId().slice(0, 8)}`, agentId: normalizeAgentId(secondary) };
+    const secondary = uiState.agents.find((agent) => agent.id && agent.id !== defaultAgent)?.id || defaultAgent || 'main';
+    const paneA = { key: `p${randomId().slice(0, 8)}`, mode: 'chat', agentId: defaultAgent, queueId: '' };
+    const paneB = { key: `p${randomId().slice(0, 8)}`, mode: 'chat', agentId: normalizeAgentId(secondary), queueId: '' };
     const list = [paneA, paneB].slice(0, this.maxPanes);
     storage.set(ADMIN_PANES_KEY, JSON.stringify(list));
     return list;
   },
   persistAdminPanes() {
     if (roleState.role !== 'admin') return;
-    const payload = this.panes.map((pane) => ({ key: pane.key, agentId: pane.agentId || 'main' }));
+    const payload = this.panes.map((pane) => ({
+      key: pane.key,
+      mode: pane.mode || 'chat',
+      agentId: pane.chatAgentId || pane.agentId || 'main',
+      queueId: pane.queueId || ''
+    }));
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
   addPane() {
     if (roleState.role !== 'admin') return;
     if (this.panes.length >= this.maxPanes) return;
     const agentId = normalizeAgentId(storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
-    const pane = createPane({ key: `p${randomId().slice(0, 8)}`, role: 'admin', agentId, closable: true });
+    const pane = createPane({ key: `p${randomId().slice(0, 8)}`, role: 'admin', agentId, mode: 'chat', closable: true });
     this.panes.push(pane);
     globalElements.paneGrid.appendChild(pane.elements.root);
     this.updatePaneLabels();
     this.updateCloseButtons();
     this.applyInferredLayout();
     this.persistAdminPanes();
-    if (uiState.authed) {
+    if (uiState.authed && pane.client) {
       pane.client.connect();
     }
   },
@@ -1935,19 +2377,21 @@ const paneManager = {
   },
   connectAll() {
     this.panes.forEach((pane, index) => {
+      if (!pane.client) return;
       setTimeout(() => pane.client.connect(), index * 120);
     });
   },
   connectIfNeeded() {
     if (!uiState.authed) return;
     this.panes.forEach((pane) => {
+      if (!pane.client) return;
       if (pane.client.manualDisconnect) return;
       if (pane.connected) return;
       pane.client.connect({ isRetry: true });
     });
   },
   disconnectAll({ silent = false } = {}) {
-    this.panes.forEach((pane) => pane.client.disconnect(silent));
+    this.panes.forEach((pane) => pane.client?.disconnect(silent));
   },
   refreshChatEnabled() {
     this.panes.forEach((pane) => {
@@ -2070,7 +2514,8 @@ window.addEventListener('load', () => {
       // Update agent options now that we have a definitive list.
       if (role === 'admin') {
         paneManager.panes.forEach((pane) => {
-          renderAgentOptions(pane.elements.agentSelect, pane.agentId);
+          renderAgentOptions(pane.elements.agentSelect, pane.chatAgentId || pane.agentId);
+          paneApplyMode(pane);
         });
       }
 

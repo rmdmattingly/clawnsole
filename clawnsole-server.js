@@ -196,6 +196,126 @@ function createClawnsoleServer(options = {}) {
     res.end(JSON.stringify(body));
   }
 
+  // Work Queues (admin-only)
+
+  const workQueuesPath =
+    options.workQueuesPath ?? process.env.CLAWNSOLE_WORK_QUEUES_PATH ?? path.join(openclawHome, 'clawnsole-work-queues.json');
+
+  function randomId() {
+    return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  function readWorkQueuesFile() {
+    try {
+      const raw = fs.readFileSync(workQueuesPath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch {}
+    return { queues: [] };
+  }
+
+  function writeWorkQueuesFile(payload) {
+    const dir = path.dirname(workQueuesPath);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(workQueuesPath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+  }
+
+  const workQueueState = (() => {
+    const loaded = readWorkQueuesFile();
+    const queues = Array.isArray(loaded.queues) ? loaded.queues : [];
+    return {
+      queues: queues
+        .map((q) => {
+          const id = typeof q?.id === 'string' ? q.id : '';
+          if (!id) return null;
+          const name = typeof q?.name === 'string' ? q.name : id;
+          const assignedAgents = Array.isArray(q?.assignedAgents)
+            ? q.assignedAgents.map((a) => String(a || '').trim()).filter(Boolean)
+            : [];
+          const items = Array.isArray(q?.items) ? q.items : [];
+          return {
+            id,
+            name,
+            createdAt: typeof q?.createdAt === 'number' ? q.createdAt : Date.now(),
+            updatedAt: typeof q?.updatedAt === 'number' ? q.updatedAt : Date.now(),
+            assignedAgents,
+            items: items
+              .map((item) => {
+                const itemId = typeof item?.id === 'string' ? item.id : '';
+                if (!itemId) return null;
+                return {
+                  id: itemId,
+                  prompt: String(item?.prompt || ''),
+                  state: typeof item?.state === 'string' ? item.state : 'pending',
+                  createdAt: typeof item?.createdAt === 'number' ? item.createdAt : Date.now(),
+                  updatedAt: typeof item?.updatedAt === 'number' ? item.updatedAt : Date.now(),
+                  claimedBy: typeof item?.claimedBy === 'string' ? item.claimedBy : '',
+                  claimedAt: typeof item?.claimedAt === 'number' ? item.claimedAt : null,
+                  leaseExpiresAt: typeof item?.leaseExpiresAt === 'number' ? item.leaseExpiresAt : null,
+                  doneAt: typeof item?.doneAt === 'number' ? item.doneAt : null
+                };
+              })
+              .filter(Boolean)
+          };
+        })
+        .filter(Boolean)
+    };
+  })();
+
+  let workQueuesDirtyTimer = null;
+  function scheduleWorkQueuesPersist() {
+    if (workQueuesDirtyTimer) return;
+    workQueuesDirtyTimer = setTimeout(() => {
+      workQueuesDirtyTimer = null;
+      try {
+        writeWorkQueuesFile({ queues: workQueueState.queues });
+      } catch {}
+    }, 250);
+  }
+
+  // simple per-queue mutex for atomic claim semantics
+  const workQueueLocks = new Map();
+  async function withQueueLock(queueId, fn) {
+    const prev = workQueueLocks.get(queueId) || Promise.resolve();
+    let release;
+    const next = new Promise((resolve) => (release = resolve));
+    workQueueLocks.set(queueId, prev.then(() => next));
+    try {
+      await prev;
+      return await fn();
+    } finally {
+      release();
+      // cleanup if no waiters
+      if (workQueueLocks.get(queueId) === next) {
+        workQueueLocks.delete(queueId);
+      }
+    }
+  }
+
+  function findQueue(queueId) {
+    return workQueueState.queues.find((q) => q.id === queueId) || null;
+  }
+
+  function queueSummary(queue) {
+    const items = Array.isArray(queue?.items) ? queue.items : [];
+    const counts = { pending: 0, active: 0, done: 0, failed: 0 };
+    items.forEach((item) => {
+      const s = item.state || 'pending';
+      if (s === 'pending') counts.pending += 1;
+      else if (s === 'claimed' || s === 'in_progress') counts.active += 1;
+      else if (s === 'done') counts.done += 1;
+      else if (s === 'failed') counts.failed += 1;
+    });
+    return {
+      id: queue.id,
+      name: queue.name,
+      createdAt: queue.createdAt,
+      updatedAt: queue.updatedAt,
+      assignedAgents: queue.assignedAgents || [],
+      counts
+    };
+  }
+
   let lastGuestSessionKey = null;
 
   const { handleAdminProxy, handleGuestProxy } = createProxyHandlers({
@@ -356,6 +476,210 @@ function createClawnsoleServer(options = {}) {
         guestAgentId,
         lastGuestSessionKey
       });
+      return;
+    }
+
+    if (req.url.startsWith('/work-queues')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+
+      let parsed;
+      try {
+        parsed = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+      } catch {
+        sendJson(res, 400, { error: 'invalid_url' });
+        return;
+      }
+
+      const pathParts = parsed.pathname.split('/').filter(Boolean); // [work-queues, ...]
+      const queueId = pathParts.length >= 2 ? pathParts[1] : '';
+      const tail = pathParts.length >= 3 ? pathParts[2] : '';
+
+      if (req.method === 'GET' && (pathParts.length === 1 || pathParts.length === 0)) {
+        const queues = workQueueState.queues.map(queueSummary);
+        sendJson(res, 200, { queues });
+        return;
+      }
+
+      if (req.method === 'POST' && (pathParts.length === 1 || pathParts.length === 0)) {
+        let body = '';
+        req.on('data', (chunk) => (body += chunk.toString()));
+        req.on('end', () => {
+          try {
+            const payload = JSON.parse(body || '{}');
+            const name = String(payload.name || '').trim();
+            if (!name) {
+              sendJson(res, 400, { error: 'name_required' });
+              return;
+            }
+            const id = `q_${randomId()}`;
+            const now = Date.now();
+            const assignedAgents = Array.isArray(payload.assignedAgents)
+              ? payload.assignedAgents.map((a) => String(a || '').trim()).filter(Boolean)
+              : [];
+            const queue = { id, name, createdAt: now, updatedAt: now, assignedAgents, items: [] };
+            workQueueState.queues.push(queue);
+            scheduleWorkQueuesPersist();
+            sendJson(res, 200, { queue: queueSummary(queue) });
+          } catch {
+            sendJson(res, 400, { error: 'invalid_request' });
+          }
+        });
+        return;
+      }
+
+      if (!queueId) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+
+      if (req.method === 'GET' && pathParts.length === 2) {
+        const queue = findQueue(queueId);
+        if (!queue) {
+          sendJson(res, 404, { error: 'not_found' });
+          return;
+        }
+        sendJson(res, 200, { queue });
+        return;
+      }
+
+      if (pathParts.length === 4 && pathParts[2] === 'items') {
+        const itemId = pathParts[3];
+        const queue = findQueue(queueId);
+        if (!queue) {
+          sendJson(res, 404, { error: 'not_found' });
+          return;
+        }
+        let body = '';
+        req.on('data', (chunk) => (body += chunk.toString()));
+        req.on('end', () => {
+          try {
+            const payload = JSON.parse(body || '{}');
+            const state = typeof payload.state === 'string' ? payload.state : '';
+            const allow = new Set(['pending', 'claimed', 'in_progress', 'done', 'failed', 'canceled']);
+            if (!allow.has(state)) {
+              sendJson(res, 400, { error: 'invalid_state' });
+              return;
+            }
+            const item = queue.items.find((it) => it.id === itemId);
+            if (!item) {
+              sendJson(res, 404, { error: 'item_not_found' });
+              return;
+            }
+            const now = Date.now();
+            item.state = state;
+            item.updatedAt = now;
+            if (state === 'done' || state === 'failed' || state === 'canceled') {
+              item.doneAt = now;
+              item.leaseExpiresAt = null;
+            }
+            queue.updatedAt = now;
+            scheduleWorkQueuesPersist();
+            sendJson(res, 200, { item });
+          } catch {
+            sendJson(res, 400, { error: 'invalid_request' });
+          }
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && pathParts.length === 3 && tail === 'items') {
+        const queue = findQueue(queueId);
+        if (!queue) {
+          sendJson(res, 404, { error: 'not_found' });
+          return;
+        }
+        let body = '';
+        req.on('data', (chunk) => (body += chunk.toString()));
+        req.on('end', () => {
+          try {
+            const payload = JSON.parse(body || '{}');
+            const prompt = String(payload.prompt || '').trim();
+            if (!prompt) {
+              sendJson(res, 400, { error: 'prompt_required' });
+              return;
+            }
+            if (prompt.length > 10000) {
+              sendJson(res, 400, { error: 'prompt_too_long' });
+              return;
+            }
+            const now = Date.now();
+            const item = {
+              id: `w_${randomId()}`,
+              prompt,
+              state: 'pending',
+              createdAt: now,
+              updatedAt: now,
+              claimedBy: '',
+              claimedAt: null,
+              leaseExpiresAt: null,
+              doneAt: null
+            };
+            queue.items.push(item);
+            queue.updatedAt = now;
+            scheduleWorkQueuesPersist();
+            sendJson(res, 200, { item });
+          } catch {
+            sendJson(res, 400, { error: 'invalid_request' });
+          }
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && tail === 'claim') {
+        const queue = findQueue(queueId);
+        if (!queue) {
+          sendJson(res, 404, { error: 'not_found' });
+          return;
+        }
+        let body = '';
+        req.on('data', (chunk) => (body += chunk.toString()));
+        req.on('end', async () => {
+          try {
+            const payload = JSON.parse(body || '{}');
+            const agentId = String(payload.agentId || '').trim();
+            const leaseMsRaw = Number(payload.leaseMs || 10 * 60 * 1000);
+            const leaseMs = Number.isFinite(leaseMsRaw) ? Math.max(30_000, Math.min(leaseMsRaw, 60 * 60 * 1000)) : 10 * 60 * 1000;
+
+            const claimed = await withQueueLock(queueId, async () => {
+              const now = Date.now();
+              // expire old leases
+              queue.items.forEach((item) => {
+                if ((item.state === 'claimed' || item.state === 'in_progress') && item.leaseExpiresAt && item.leaseExpiresAt < now) {
+                  item.state = 'pending';
+                  item.claimedBy = '';
+                  item.claimedAt = null;
+                  item.leaseExpiresAt = null;
+                  item.updatedAt = now;
+                }
+              });
+
+              const next = queue.items.find((item) => item.state === 'pending');
+              if (!next) return null;
+              next.state = 'claimed';
+              next.claimedBy = agentId || '';
+              next.claimedAt = now;
+              next.leaseExpiresAt = now + leaseMs;
+              next.updatedAt = now;
+              queue.updatedAt = now;
+              scheduleWorkQueuesPersist();
+              return next;
+            });
+
+            sendJson(res, 200, { item: claimed });
+          } catch (err) {
+            sendJson(res, 400, { error: 'invalid_request' });
+          }
+        });
+        return;
+      }
+
+
+
+      sendJson(res, 404, { error: 'not_found' });
       return;
     }
 

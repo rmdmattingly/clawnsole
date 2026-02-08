@@ -393,6 +393,76 @@ test('GET /admin and /guest serve the kiosk shell (index.html)', async () => {
   assert.match(guest.body.toString('utf8'), /<title>Clawnsole<\/title>/);
 });
 
+test('work queues: create queue, add item, claim, and update state', async () => {
+  const { homeDir, openclawDir } = makeTempHome();
+  writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', guestPassword: 'guest', authVersion: 'v1' });
+
+  const workQueuesPath = path.join(openclawDir, 'clawnsole-work-queues.test.json');
+  const { handleRequest } = createClawnsoleServer({ homeDir, workQueuesPath });
+
+  const login = await invoke(handleRequest, {
+    url: '/auth/login',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ role: 'admin', password: 'admin' })
+  });
+  assert.equal(login.statusCode, 200);
+  const cookie = parseCookiesFromSetCookie(login.headers['set-cookie']);
+
+  const list0 = await invoke(handleRequest, { url: '/work-queues', headers: { cookie } });
+  assert.equal(list0.statusCode, 200);
+  assert.deepEqual(JSON.parse(list0.body.toString('utf8')).queues, []);
+
+  const created = await invoke(handleRequest, {
+    url: '/work-queues',
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Inbox', assignedAgents: ['main'] })
+  });
+  assert.equal(created.statusCode, 200);
+  const createdQueue = JSON.parse(created.body.toString('utf8')).queue;
+  assert.ok(createdQueue.id);
+  assert.equal(createdQueue.name, 'Inbox');
+
+  const added = await invoke(handleRequest, {
+    url: `/work-queues/${createdQueue.id}/items`,
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt: 'Do the thing' })
+  });
+  assert.equal(added.statusCode, 200);
+  const item = JSON.parse(added.body.toString('utf8')).item;
+  assert.equal(item.state, 'pending');
+
+  const claim = await invoke(handleRequest, {
+    url: `/work-queues/${createdQueue.id}/claim`,
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ agentId: 'main', leaseMs: 60000 })
+  });
+  assert.equal(claim.statusCode, 200);
+  const claimed = JSON.parse(claim.body.toString('utf8')).item;
+  assert.equal(claimed.id, item.id);
+  assert.equal(claimed.state, 'claimed');
+  assert.equal(claimed.claimedBy, 'main');
+
+  const done = await invoke(handleRequest, {
+    url: `/work-queues/${createdQueue.id}/items/${item.id}`,
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ state: 'done' })
+  });
+  assert.equal(done.statusCode, 200);
+  const doneItem = JSON.parse(done.body.toString('utf8')).item;
+  assert.equal(doneItem.state, 'done');
+  assert.ok(typeof doneItem.doneAt === 'number');
+
+  // Ensure persistence file got written (persist is debounced).
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.ok(fs.existsSync(workQueuesPath));
+});
+
 test('GET /agents is admin-only and returns agent ids', async () => {
   const { homeDir, openclawDir } = makeTempHome();
   const opsWorkspace = path.join(homeDir, 'ops-workspace');
