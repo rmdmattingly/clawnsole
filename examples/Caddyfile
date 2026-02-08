@@ -1,0 +1,14 @@
+# Example Caddyfile for production HTTPS.
+#
+# Replace clawnsole.example.com with your hostname and adjust the upstream port.
+
+clawnsole.example.com {
+  encode zstd gzip
+
+  # Clawnsole is HTTP-only; terminate TLS here.
+  reverse_proxy 127.0.0.1:5173
+}
+
+http://clawnsole.example.com {
+  redir https://{host}{uri} permanent
+}

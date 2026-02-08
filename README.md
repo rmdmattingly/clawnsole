@@ -54,6 +54,15 @@ curl -fsSL https://raw.githubusercontent.com/rmdmattingly/clawnsole/main/scripts
 The UI sends a `connect` request on the first frame, as required by the gateway
 protocol.
 
+## HTTPS / TLS
+
+Clawnsole's Node server (`server.js`) serves **HTTP only**.
+
+If you need `https://` access, terminate TLS in front of Clawnsole using a
+standard reverse proxy (recommended: **Caddy**).
+
+See: [`docs/HTTPS.md`](docs/HTTPS.md)
+
 ## Password protection (optional)
 
 Passwords live in `~/.openclaw/clawnsole.json`. The installer sets these for you,
