@@ -2,8 +2,21 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const WebSocket = require('ws');
+const http = require('http');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function getFreePort(host = '127.0.0.1') {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer();
+    server.listen(0, host, () => {
+      const addr = server.address();
+      const port = addr && typeof addr === 'object' ? addr.port : null;
+      server.close(() => resolve(port));
+    });
+    server.on('error', reject);
+  });
+}
 
 function writeJson(filePath, data) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -122,8 +135,8 @@ async function run() {
   const openclawPath = path.join(tmpHome, '.openclaw');
   const openclawJson = path.join(openclawPath, 'openclaw.json');
   const clawnsoleJson = path.join(openclawPath, 'clawnsole.json');
-  const gatewayPort = 18999;
-  const serverPort = 18888;
+  const gatewayPort = await getFreePort();
+  const serverPort = await getFreePort();
 
   writeJson(openclawJson, {
     gateway: { port: gatewayPort, auth: { mode: 'token', token: 'smoke-token' } }

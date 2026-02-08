@@ -32,6 +32,8 @@ You can override defaults:
 curl -fsSL https://raw.githubusercontent.com/rmdmattingly/clawnsole/main/scripts/update.sh | bash
 ```
 
+**Deploy hardening:** the updater now does a *staging health check* **and** a *login-flow verification* on the new (blue/green) instance **before** cutting Caddy over. If login breaks, the update aborts and leaves the previous version serving traffic.
+
 ## Uninstall
 
 ```bash

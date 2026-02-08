@@ -65,6 +65,18 @@ fi
 # Launch staging instance
 ( PORT="$NEXT_PORT" CLAWNSOLE_INSTANCE="prod" nohup node server.js >"$LOG_OUT" 2>"$LOG_ERR" & echo $! >"$PID_FILE" )
 
+cleanup_staging() {
+  if [ -f "$PID_FILE" ]; then
+    local pid
+    pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [ -n "$pid" ]; then
+      kill "$pid" >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
+trap 'echo "Update failed; stopping staging instance on port $NEXT_PORT"; cleanup_staging' ERR
+
 # Health check
 echo "Waiting for /meta on 127.0.0.1:$NEXT_PORT..."
 OK="false"
@@ -80,6 +92,15 @@ if [ "$OK" != "true" ]; then
   echo "Staging instance failed to become healthy on port $NEXT_PORT"
   echo "Logs: $LOG_ERR"
   exit 1
+fi
+
+# Guardrail: verify login/token behavior on the staging instance BEFORE cutover.
+# This catches the class of regressions where /auth/login or cookie parsing breaks.
+if command -v node >/dev/null 2>&1; then
+  echo "Verifying login flow on staging instance (port $NEXT_PORT)..."
+  node "$INSTALL_DIR/scripts/verify-login.js" --base-url "http://127.0.0.1:$NEXT_PORT" --role admin
+else
+  echo "Warning: node not found; skipping verify-login guardrail"
 fi
 
 # Flip Caddy upstream by rewriting the Caddyfile and restarting the daemon.
@@ -100,5 +121,7 @@ if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$ACTIVE_PORT" -sTCP:LISTEN
     kill "$OLD_PID" >/dev/null 2>&1 || true
   fi
 fi
+
+trap - ERR
 
 echo "Update complete. Active port is now $NEXT_PORT (via Caddy)."
