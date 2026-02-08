@@ -7,7 +7,8 @@ module.exports = defineConfig({
     timeout: 10000
   },
   use: {
-    baseURL: 'http://127.0.0.1:18888',
+    // Local tests default to the smoke-test port; deploy tests should pass BASE_URL env.
+    baseURL: process.env.BASE_URL || process.env.CLAWNSOLE_BASE_URL || 'http://127.0.0.1:18888',
     trace: 'retain-on-failure'
   }
 });

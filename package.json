@@ -13,7 +13,8 @@
     "test:unit": "node --test tests/unit/*.test.js",
     "test:proxy": "node scripts/proxy-self-test.js",
     "test:smoke": "node scripts/smoke-test.js",
-    "test:ui": "playwright test"
+    "test:ui": "playwright test",
+    "test:deploy": "playwright test tests/deploy.e2e.spec.js"
   },
   "dependencies": {
     "ws": "^8.18.0"

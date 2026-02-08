@@ -62,6 +62,25 @@ If you touched UI login behavior, also run:
 npm run test:ui
 ```
 
+## Deploy promotion policy (QA -> Prod)
+
+**Policy:** Never promote a QA deploy to Prod unless the deploy E2E test passes against the QA URL.
+
+Run:
+
+```bash
+BASE_URL=https://<qa-host> \
+ADMIN_PASSWORD=<admin-password> \
+npm run test:deploy
+```
+
+This test:
+- logs in as admin
+- verifies it stays logged in (no silent bounce)
+- connects to the gateway via the proxy
+- sends a prompt
+- confirms an assistant response arrives
+
 ## CI expectations
 
 CI runs, in order:
