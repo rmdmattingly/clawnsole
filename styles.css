@@ -374,8 +374,9 @@ body::before {
   --action-gap: 8px;
   --actions-height: calc(var(--send-btn-size) + var(--attach-btn-size) + var(--action-gap));
 
+  gap: 10px;
   padding: 14px;
-  padding-bottom: 10px;
+  padding-bottom: 6px;
 }
 
 .pane-header {
@@ -1003,7 +1004,7 @@ button.send-btn .btn-icon {
   margin-top: auto;
   position: relative;
   z-index: 1;
-  padding: 12px;
+  padding: 10px;
   border-radius: 16px;
   background: rgba(8, 10, 14, 0.22);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1122,6 +1123,7 @@ button.send-btn .btn-icon {
     --send-btn-size: 40px;
     --attach-btn-size: 34px;
     --action-gap: 6px;
+    padding-bottom: 4px;
   }
 
   .scroll-down {
