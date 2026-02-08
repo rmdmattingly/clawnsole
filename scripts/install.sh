@@ -186,4 +186,4 @@ fi
 echo "Setting up http://clawnsole.local (requires sudo)..."
 CLAWNSOLE_PORT="$PORT_VALUE" bash "$INSTALL_DIR/scripts/install-local-domain.sh"
 
-printf "\nClawnsole installed.\n\nOpen:\n  http://clawnsole.local:%s\n" "$PORT_VALUE"
+printf "\nClawnsole installed.\n\nOpen:\n  http://clawnsole.local\n\n(Internal app ports: %s and %s; Caddy proxies clawnsole.local to the active one.)\n" "$PORT_VALUE" "$((PORT_VALUE + 2))"

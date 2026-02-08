@@ -18,10 +18,24 @@ git pull --ff-only
 npm ci --silent || npm ci
 
 # Determine blue/green ports.
+# Prefer reading from ~/.openclaw/clawnsole-install.json, but initialize defaults if missing.
 STATE_JSON="$(CLAWNSOLE_STATE_PATH="$STATE_PATH" node "$INSTALL_DIR/scripts/bluegreen-state.mjs" get 2>/dev/null || echo '{}')"
-ACTIVE_PORT="$(node -e "const s=${STATE_JSON}; process.stdout.write(String((s&&s.activePort)||5173));")"
-PORT_A="$(node -e "const s=${STATE_JSON}; process.stdout.write(String((s&&s.ports&&s.ports[0])||5173));")"
-PORT_B="$(node -e "const s=${STATE_JSON}; process.stdout.write(String((s&&s.ports&&s.ports[1])||5175));")"
+ACTIVE_PORT="$(node -e 'let s={}; try{s=JSON.parse(process.argv[1])}catch{}; process.stdout.write(String((s&&s.activePort)||5173));' "$STATE_JSON")"
+PORT_A="$(node -e 'let s={}; try{s=JSON.parse(process.argv[1])}catch{}; process.stdout.write(String((s&&s.ports&&s.ports[0])||5173));' "$STATE_JSON")"
+PORT_B="$(node -e 'let s={}; try{s=JSON.parse(process.argv[1])}catch{}; process.stdout.write(String((s&&s.ports&&s.ports[1])||5175));' "$STATE_JSON")"
+
+if [ -z "$PORT_A" ] || [ -z "$PORT_B" ]; then
+  PORT_A="5173"
+  PORT_B="5175"
+fi
+
+if [ -z "$ACTIVE_PORT" ]; then
+  ACTIVE_PORT="$PORT_A"
+fi
+
+# Ensure the state file is initialized for next time.
+CLAWNSOLE_STATE_PATH="$STATE_PATH" CLAWNSOLE_PORT_A="$PORT_A" CLAWNSOLE_PORT_B="$PORT_B" CLAWNSOLE_ACTIVE_PORT="$ACTIVE_PORT" \
+  node "$INSTALL_DIR/scripts/bluegreen-state.mjs" init "$PORT_A" "$PORT_B" "$ACTIVE_PORT" >/dev/null 2>&1 || true
 
 if [ "$ACTIVE_PORT" = "$PORT_A" ]; then
   NEXT_PORT="$PORT_B"
