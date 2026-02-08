@@ -16,6 +16,9 @@
     "test:ui": "playwright test",
     "test:deploy": "playwright test tests/deploy.e2e.spec.js"
   },
+  "bin": {
+    "clawnsole": "bin/clawnsole.js"
+  },
   "dependencies": {
     "ws": "^8.18.0"
   },
