@@ -8,10 +8,13 @@ const http = require('node:http');
 const { createClawnsoleServer } = require('../../clawnsole-server');
 const { enqueueItem } = require('../../lib/workqueue');
 
-function mkTempHome() {
+function mkTempEnv() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawnsole-wq-api-'));
-  process.env.HOME = dir;
-  return dir;
+  // IMPORTANT: do not mutate HOME in tests. Playwright and other tooling use HOME for caches.
+  // Instead, point Clawnsole/OpenClaw state at an isolated OPENCLAW_HOME.
+  const openclawHome = path.join(dir, '.openclaw');
+  process.env.OPENCLAW_HOME = openclawHome;
+  return { dir, openclawHome };
 }
 
 function httpGetJson(url, headers = {}) {
@@ -32,9 +35,9 @@ function httpGetJson(url, headers = {}) {
   });
 }
 
-function startServer() {
+function startServer({ openclawHome } = {}) {
   return new Promise((resolve) => {
-    const { server } = createClawnsoleServer({ portRaw: 0 });
+    const { server } = createClawnsoleServer({ portRaw: 0, openclawHome });
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address();
       const port = addr && typeof addr === 'object' ? addr.port : null;
@@ -44,10 +47,10 @@ function startServer() {
 }
 
 test('workqueue API: requires auth', async () => {
-  mkTempHome();
+  const { openclawHome } = mkTempEnv();
   enqueueItem(null, { queue: 'dev-team', title: 't', instructions: 'do', priority: 1 });
 
-  const { server, port } = await startServer();
+  const { server, port } = await startServer({ openclawHome });
   try {
     const res = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/items?queue=dev-team`);
     assert.equal(res.status, 401);
@@ -58,16 +61,15 @@ test('workqueue API: requires auth', async () => {
 });
 
 test('workqueue API: lists items for admin cookie', async () => {
-  const home = mkTempHome();
+  const { openclawHome } = mkTempEnv();
   // Create minimal clawnsole config.
-  const cfgDir = path.join(home, '.openclaw');
-  fs.mkdirSync(cfgDir, { recursive: true });
-  fs.writeFileSync(path.join(cfgDir, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
 
   enqueueItem(null, { queue: 'dev-team', title: 't1', instructions: 'do1', priority: 1 });
   enqueueItem(null, { queue: 'dev-team', title: 't2', instructions: 'do2', priority: 2 });
 
-  const { server, port } = await startServer();
+  const { server, port } = await startServer({ openclawHome });
   try {
     const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
     const res = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/items?queue=dev-team`, {
@@ -83,10 +85,9 @@ test('workqueue API: lists items for admin cookie', async () => {
 });
 
 test('workqueue API: summary returns counts + active list', async () => {
-  const home = mkTempHome();
-  const cfgDir = path.join(home, '.openclaw');
-  fs.mkdirSync(cfgDir, { recursive: true });
-  fs.writeFileSync(path.join(cfgDir, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
 
   const a = enqueueItem(null, { queue: 'dev-team', title: 't1', instructions: 'do1', priority: 1 });
   const b = enqueueItem(null, { queue: 'dev-team', title: 't2', instructions: 'do2', priority: 2 });
