@@ -35,8 +35,9 @@
             <div class="status-meta" id="statusMeta"></div>
           </div>
           <div id="paneControls" class="pane-controls" hidden>
-            <button id="addPaneBtn" class="icon-btn" type="button" aria-label="Add pane">
-              +
+            <button id="addChatPaneBtn" class="icon-btn" type="button" aria-label="Add chat pane">+
+            </button>
+            <button id="addQueuePaneBtn" class="icon-btn" type="button" aria-label="Add work queue pane">≡
             </button>
             <select id="layoutSelect" aria-label="Pane layout">
               <option value="1">1-up</option>
@@ -64,13 +65,6 @@
               <div class="pane-header-left">
                 <div class="pane-name" data-pane-name>Pane</div>
                 <div class="pane-controls-row">
-                  <div class="pane-mode" data-pane-mode-wrap>
-                    <span class="agent-label">Mode</span>
-                    <select data-pane-mode-select aria-label="Select pane mode">
-                      <option value="chat" selected>Chat</option>
-                      <option value="queue">Queue</option>
-                    </select>
-                  </div>
                   <div class="pane-agent" data-pane-agent-wrap>
                     <span class="agent-label">Agent</span>
                     <select data-pane-agent-select aria-label="Select agent"></select>
