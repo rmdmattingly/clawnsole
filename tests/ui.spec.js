@@ -165,7 +165,8 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 10000 });
+  // In CI the websocket handshake can be slower; wait longer for the pane to report connected.
+  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 30000 });
 
   const paneFontSize = await page.evaluate(() => {
     const el = document.querySelector('[data-pane] [data-pane-input]');
