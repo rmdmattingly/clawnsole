@@ -26,6 +26,9 @@ function createClawnsoleServer(options = {}) {
   const authCookieName = `clawnsole_auth${cookieSuffix}`;
   const roleCookieName = `clawnsole_role${cookieSuffix}`;
 
+  const cookieDomainRaw = options.cookieDomain ?? process.env.CLAWNSOLE_COOKIE_DOMAIN ?? '';
+  const cookieDomain = typeof cookieDomainRaw === 'string' ? cookieDomainRaw.trim() : '';
+
   const WebSocketImpl = options.WebSocketImpl || WebSocket;
 
   const mimeTypes = {
@@ -729,9 +732,15 @@ function createClawnsoleServer(options = {}) {
     }
 
     if (req.url.startsWith('/auth/logout')) {
+      const isSecure =
+        Boolean(req.socket?.encrypted) ||
+        String(req.headers['x-forwarded-proto'] || '').toLowerCase() === 'https';
+      const domainAttr = cookieDomain ? `; Domain=${cookieDomain}` : '';
+      const secureAttr = isSecure ? '; Secure' : '';
+
       res.setHeader('Set-Cookie', [
-        `${authCookieName}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`,
-        `${roleCookieName}=; Path=/; Max-Age=0; SameSite=Lax`
+        `${authCookieName}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${domainAttr}${secureAttr}`,
+        `${roleCookieName}=; Path=/; Max-Age=0; SameSite=Lax${domainAttr}${secureAttr}`
       ]);
       sendJson(res, 200, { ok: true });
       return;
@@ -756,9 +765,15 @@ function createClawnsoleServer(options = {}) {
             return;
           }
           const token = encodeAuthCookie(role === 'admin' ? adminPassword : guestPassword, authVersion);
+          const isSecure =
+            Boolean(req.socket?.encrypted) ||
+            String(req.headers['x-forwarded-proto'] || '').toLowerCase() === 'https';
+          const domainAttr = cookieDomain ? `; Domain=${cookieDomain}` : '';
+          const secureAttr = isSecure ? '; Secure' : '';
+
           res.setHeader('Set-Cookie', [
-            `${authCookieName}=${token}; Path=/; HttpOnly; SameSite=Lax`,
-            `${roleCookieName}=${role}; Path=/; SameSite=Lax`
+            `${authCookieName}=${token}; Path=/; HttpOnly; SameSite=Lax${domainAttr}${secureAttr}`,
+            `${roleCookieName}=${role}; Path=/; SameSite=Lax${domainAttr}${secureAttr}`
           ]);
           sendJson(res, 200, { ok: true, role });
         } catch (err) {
