@@ -359,6 +359,92 @@ function createClawnsoleServer(options = {}) {
       return;
     }
 
+    // Admin-only workqueue API (for viewing from other devices).
+    // NOTE: This is intentionally read-focused for MVP; mutation endpoints can be added later.
+    if (req.url === '/api/workqueue/items' || req.url.startsWith('/api/workqueue/items?')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      try {
+        const { loadState } = require('./lib/workqueue');
+        const url = new URL(req.url, 'http://localhost');
+        const queue = (url.searchParams.get('queue') || '').trim();
+        const statusRaw = (url.searchParams.get('status') || '').trim();
+        const status = statusRaw
+          ? statusRaw
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : [];
+
+        const state = loadState(null);
+        const items = state.items
+          .filter((it) => {
+            if (queue && it.queue !== queue) return false;
+            if (status.length && !status.includes(it.status)) return false;
+            return true;
+          })
+          .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+
+        sendJson(res, 200, { ok: true, items });
+      } catch (err) {
+        sendJson(res, 500, { error: 'workqueue_error' });
+      }
+      return;
+    }
+
+    if (req.url === '/api/workqueue/queues' || req.url.startsWith('/api/workqueue/queues?')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      try {
+        const { loadState } = require('./lib/workqueue');
+        const state = loadState(null);
+        const queues = Object.keys(state.queues || {}).sort();
+        sendJson(res, 200, { ok: true, queues });
+      } catch (err) {
+        sendJson(res, 500, { error: 'workqueue_error' });
+      }
+      return;
+    }
+
+    if (req.url.startsWith('/api/workqueue/item/')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      try {
+        const { loadState } = require('./lib/workqueue');
+        const id = decodeURIComponent(req.url.slice('/api/workqueue/item/'.length)).replace(/\?.*$/, '');
+        const state = loadState(null);
+        const item = state.items.find((it) => it.id === id) || null;
+        sendJson(res, 200, { ok: true, item });
+      } catch (err) {
+        sendJson(res, 500, { error: 'workqueue_error' });
+      }
+      return;
+    }
+
     if (req.url === '/upload' || req.url === '/upload/' || req.url.startsWith('/upload?')) {
       if (!requireAuth(req, res)) return;
       if (req.method !== 'POST') {
