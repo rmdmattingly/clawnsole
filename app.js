@@ -712,9 +712,9 @@ function paneScheduleCatchUp(pane, { attempts = 3, delayMs = 1500 } = {}) {
 
     pane.catchUp.attemptsLeft -= 1;
     if (pane.catchUp.attemptsLeft <= 0) {
-      // Auto-recover: if we never saw an assistant message after reconnect, resend last user message once.
+      // Auto-recover: if we never saw an assistant message after reconnect, resend the in-flight message once.
       // Uses the same idempotencyKey so the gateway can dedupe.
-      if (pane.pendingSend && !pane.pendingSend.resent) {
+      if (pane.pendingSend && pane.inFlight && !pane.pendingSend.resent) {
         const pending = pane.pendingSend;
         if (pending.sessionKey && pending.sentMessage && pending.idempotencyKey) {
           pending.resent = true;
@@ -1408,14 +1408,49 @@ function paneEnsureGuestPolicy(pane) {
   });
 }
 
+function paneEnqueueOutbound(pane, { message, sessionKey, idempotencyKey }) {
+  pane.outbox.push({ message, sessionKey, idempotencyKey, ts: Date.now() });
+}
+
+function panePumpOutbox(pane) {
+  if (!pane.connected || !uiState.authed) return;
+  if (pane.inFlight) return;
+  const next = pane.outbox.shift();
+  if (!next) return;
+
+  pane.inFlight = next;
+
+  // pendingSend is the recovery mechanism for in-flight sends.
+  pane.pendingSend = {
+    ts: Date.now(),
+    lastUser: next.message,
+    sessionKey: next.sessionKey,
+    idempotencyKey: next.idempotencyKey,
+    sentMessage: next.message,
+    resent: false
+  };
+
+  if (!pane.thinking.active) paneStartThinking(pane);
+
+  pane.client.request('chat.send', {
+    sessionKey: next.sessionKey,
+    message: next.message,
+    deliver: true,
+    idempotencyKey: next.idempotencyKey
+  });
+}
+
 async function paneSendChat(pane) {
-  const message = pane.elements.input.value.trim();
-  if (!message) return;
+  const raw = pane.elements.input.value.trim();
+  if (!raw) return;
 
   // During reconnect blips we allow drafting, but block sending.
+  // (But we still allow enqueue once connected; for now keep behavior simple.)
   if (!pane.connected || !uiState.authed) {
     return;
   }
+
+  const message = raw;
 
   if (pane.role === 'guest') {
     const lower = message.toLowerCase();
@@ -1451,16 +1486,6 @@ async function paneSendChat(pane) {
 
   const sessionKey = pane.sessionKey();
   const idempotencyKey = randomId();
-  // Mark that we're expecting an assistant response for catch-up after reconnect.
-  // We keep enough info to optionally auto-resend (using the SAME idempotencyKey).
-  pane.pendingSend = {
-    ts: Date.now(),
-    lastUser: message,
-    sessionKey,
-    idempotencyKey,
-    sentMessage: null,
-    resent: false
-  };
 
   const uploaded = await paneUploadAttachments(pane);
   let attachmentText = '';
@@ -1481,15 +1506,8 @@ async function paneSendChat(pane) {
   pane.scroll.pinned = true;
   scrollToBottom(pane, true);
   triggerFiring(1.6, 3);
-  paneStartThinking(pane);
-  if (pane.pendingSend) pane.pendingSend.sentMessage = outbound;
-
-  pane.client.request('chat.send', {
-    sessionKey,
-    message: outbound,
-    deliver: true,
-    idempotencyKey
-  });
+  paneEnqueueOutbound(pane, { message: outbound, sessionKey, idempotencyKey });
+  panePumpOutbox(pane);
 
   pane.elements.input.value = '';
   paneUpdateCommandHints(pane);
@@ -1528,11 +1546,15 @@ function handleGatewayFrame(pane, data) {
       paneStopThinking(pane);
       paneUpdateChatRun(pane, runId, text, true);
       pane.pendingSend = null;
+      pane.inFlight = null;
+      panePumpOutbox(pane);
       triggerFiring(1.2, 2);
     } else if (payload.state === 'error') {
       paneStopThinking(pane);
       paneUpdateChatRun(pane, runId, payload.errorMessage || 'Chat error', true);
       pane.pendingSend = null;
+      pane.inFlight = null;
+      panePumpOutbox(pane);
       triggerFiring(0.8, 1);
     }
   }
@@ -1587,6 +1609,9 @@ function buildClientForPane(pane) {
 
       // If we disconnected mid-stream, pull remote history to catch up.
       paneScheduleCatchUp(pane);
+
+      // Resume sending queued messages.
+      panePumpOutbox(pane);
     },
     onDisconnected: () => {
       paneStopThinking(pane);
@@ -1681,6 +1706,8 @@ function createPane({ key, role, agentId, closable = true } = {}) {
 	    attachments: { files: [] },
 	    pendingSend: null,
 	    catchUp: { active: false, attemptsLeft: 0, timer: null },
+	    outbox: [],
+	    inFlight: null,
 	    chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
 	    legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
 	    sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
