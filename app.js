@@ -2098,20 +2098,22 @@ function createPane({ key, role, agentId, mode = 'chat', queueId = '', closable 
   };
 
   const initialChatAgentId = role === 'admin' ? normalizeAgentId(agentId || 'main') : null;
+  const initialMode = mode === 'queue' ? 'queue' : 'chat';
+  const initialQueueId = initialMode === 'queue' ? String(queueId || '').trim() : '';
 
 	  const pane = {
 	    key,
 	    role,
-	    mode: mode === 'queue' ? 'queue' : 'chat',
-	    queueId: mode === 'queue' ? String(queueId || '').trim() : '',
+	    mode: initialMode,
+	    queueId: initialQueueId,
 	    chatAgentId: initialChatAgentId,
-	    agentId: role === 'admin' && mode !== 'queue' ? initialChatAgentId : null,
+	    agentId: role === 'admin' && initialMode !== 'queue' ? initialChatAgentId : null,
 	    connected: false,
 	    statusState: 'disconnected',
 	    statusMeta: '',
 	    elements,
 	    chat: { runs: new Map(), history: [] },
-	    queue: { queues: [], selectedId: pane.queueId || '', data: null },
+	    queue: { queues: [], selectedId: initialQueueId, data: null },
 	    scroll: { pinned: true },
 	    thinking: { active: false, timer: null, dotsTimer: null, bubble: null },
 	    attachments: { files: [] },
