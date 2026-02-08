@@ -81,3 +81,32 @@ test('workqueue API: lists items for admin cookie', async () => {
     server.close();
   }
 });
+
+test('workqueue API: summary returns counts + active list', async () => {
+  const home = mkTempHome();
+  const cfgDir = path.join(home, '.openclaw');
+  fs.mkdirSync(cfgDir, { recursive: true });
+  fs.writeFileSync(path.join(cfgDir, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  const a = enqueueItem(null, { queue: 'dev-team', title: 't1', instructions: 'do1', priority: 1 });
+  const b = enqueueItem(null, { queue: 'dev-team', title: 't2', instructions: 'do2', priority: 2 });
+
+  // Claim one item to make it active.
+  const { claimNext } = require('../../lib/workqueue');
+  claimNext(null, { agentId: 'agent-1', queues: ['dev-team'], leaseMs: 60_000 });
+
+  const { server, port } = await startServer();
+  try {
+    const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+    const res = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/summary?queue=dev-team`, {
+      Cookie: `clawnsole_auth=${cookie}; clawnsole_role=admin`
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json?.ok, true);
+    assert.ok(res.json?.counts);
+    assert.ok(Array.isArray(res.json?.active));
+    assert.ok(res.json.active.length >= 1);
+  } finally {
+    server.close();
+  }
+});

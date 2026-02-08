@@ -422,6 +422,53 @@ function createClawnsoleServer(options = {}) {
       return;
     }
 
+    if (req.url === '/api/workqueue/summary' || req.url.startsWith('/api/workqueue/summary?')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      try {
+        const { loadState } = require('./lib/workqueue');
+        const url = new URL(req.url, 'http://localhost');
+        const queue = (url.searchParams.get('queue') || '').trim();
+        const state = loadState(null);
+        const items = state.items.filter((it) => (queue ? it.queue === queue : true));
+
+        const counts = items.reduce((acc, it) => {
+          const key = it.status || 'unknown';
+          acc[key] = (acc[key] || 0) + 1;
+          return acc;
+        }, {});
+
+        const active = items
+          .filter((it) => it.status === 'claimed' || it.status === 'in_progress')
+          .sort((a, b) => (b.priority || 0) - (a.priority || 0))
+          .map((it) => ({
+            id: it.id,
+            queue: it.queue,
+            title: it.title,
+            status: it.status,
+            priority: it.priority,
+            claimedBy: it.claimedBy,
+            claimedAt: it.claimedAt,
+            leaseUntil: it.leaseUntil,
+            attempts: it.attempts,
+            updatedAt: it.updatedAt
+          }));
+
+        sendJson(res, 200, { ok: true, queue: queue || null, counts, active });
+      } catch (err) {
+        sendJson(res, 500, { error: 'workqueue_error' });
+      }
+      return;
+    }
+
     if (req.url.startsWith('/api/workqueue/item/')) {
       if (!requireAuth(req, res)) return;
       if (req.clawnsoleRole !== 'admin') {
