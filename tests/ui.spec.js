@@ -191,3 +191,49 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   await expect(page.locator('#loginOverlay')).not.toHaveClass(/open/);
   await expect(page.locator('#rolePill')).toContainText('admin');
 });
+
+test('work queues UI: create queue, add item, claim next, update state', async ({ page }) => {
+  test.skip(!!skipReason, skipReason);
+  await page.goto(`http://127.0.0.1:${serverPort}/admin`);
+
+  // Login
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const pane = page.locator('[data-pane]').first();
+
+  // Switch to Queue mode
+  await pane.locator('[data-pane-mode-select]').selectOption('queue');
+
+  // Create queue via prompt
+  page.once('dialog', async (dialog) => {
+    expect(dialog.type()).toBe('prompt');
+    await dialog.accept('Test Queue');
+  });
+  await pane.locator('[data-pane-queue-create]').click();
+
+  // Queue should appear in selector
+  await expect(pane.locator('[data-pane-queue-select]')).toContainText('Test Queue');
+
+  // Add item
+  await pane.locator('[data-pane-queue-input]').fill('Do the thing');
+  await pane.locator('[data-pane-queue-add]').click();
+  await expect(pane.locator('[data-pane-queue-items]')).toContainText('Do the thing');
+  await expect(pane.locator('[data-pane-queue-items]')).toContainText('pending');
+
+  // Claim next (prompt for agent id)
+  page.once('dialog', async (dialog) => {
+    expect(dialog.type()).toBe('prompt');
+    await dialog.accept('main');
+  });
+  await pane.locator('[data-pane-queue-claim]').click();
+  await expect(pane.locator('[data-pane-queue-items]')).toContainText('claimed');
+
+  // Update state buttons should work
+  await pane.getByRole('button', { name: 'In progress' }).first().click();
+  await expect(pane.locator('[data-pane-queue-items]')).toContainText('in_progress');
+
+  await pane.getByRole('button', { name: 'Done' }).first().click();
+  await expect(pane.locator('[data-pane-queue-items]')).toContainText('done');
+});
