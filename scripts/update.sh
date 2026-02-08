@@ -6,6 +6,16 @@ INSTALL_DIR="${CLAWNSOLE_DIR:-$OPENCLAW_HOME/apps/clawnsole}"
 STATE_PATH="${CLAWNSOLE_STATE_PATH:-$OPENCLAW_HOME/clawnsole-install.json}"
 HOSTNAME="${CLAWNSOLE_LOCAL_HOSTNAME:-clawnsole}"
 
+# Deploy target selection:
+# - Default to QA to avoid accidental production cutovers.
+# - To deploy to prod you must explicitly set CLAWNSOLE_INSTANCE=prod and confirm.
+CLAWNSOLE_INSTANCE="${CLAWNSOLE_INSTANCE:-qa}"
+if [ "$CLAWNSOLE_INSTANCE" = "prod" ] && [ "${CLAWNSOLE_CONFIRM_PROD:-}" != "YES" ]; then
+  echo "Refusing to deploy to prod without explicit confirmation." >&2
+  echo "Re-run with: CLAWNSOLE_INSTANCE=prod CLAWNSOLE_CONFIRM_PROD=YES $0" >&2
+  exit 2
+fi
+
 if [ ! -d "$INSTALL_DIR/.git" ]; then
   echo "Clawnsole not found at $INSTALL_DIR"
   exit 1
@@ -47,9 +57,9 @@ echo "Active port: $ACTIVE_PORT"
 echo "Staging next version on: $NEXT_PORT"
 
 # Start next instance (staging) directly. This avoids touching the primary port until cutover.
-LOG_OUT="$OPENCLAW_HOME/logs/clawnsole.$NEXT_PORT.out.log"
-LOG_ERR="$OPENCLAW_HOME/logs/clawnsole.$NEXT_PORT.err.log"
-PID_FILE="$OPENCLAW_HOME/clawnsole.$NEXT_PORT.pid"
+LOG_OUT="$OPENCLAW_HOME/logs/clawnsole.$CLAWNSOLE_INSTANCE.$NEXT_PORT.out.log"
+LOG_ERR="$OPENCLAW_HOME/logs/clawnsole.$CLAWNSOLE_INSTANCE.$NEXT_PORT.err.log"
+PID_FILE="$OPENCLAW_HOME/clawnsole.$CLAWNSOLE_INSTANCE.$NEXT_PORT.pid"
 mkdir -p "$OPENCLAW_HOME/logs"
 
 # If something is already listening on NEXT_PORT, try to stop it.
@@ -63,7 +73,7 @@ if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$NEXT_PORT" -sTCP:LISTEN >
 fi
 
 # Launch staging instance
-( PORT="$NEXT_PORT" CLAWNSOLE_INSTANCE="prod" nohup node server.js >"$LOG_OUT" 2>"$LOG_ERR" & echo $! >"$PID_FILE" )
+( PORT="$NEXT_PORT" CLAWNSOLE_INSTANCE="$CLAWNSOLE_INSTANCE" nohup node server.js >"$LOG_OUT" 2>"$LOG_ERR" & echo $! >"$PID_FILE" )
 
 # Health check
 echo "Waiting for /meta on 127.0.0.1:$NEXT_PORT..."

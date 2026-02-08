@@ -101,3 +101,15 @@ Connect:
 
 - Prod: `http://localhost:5173/admin` (or `/guest`)
 - QA: `http://localhost:5174/admin` (or `/guest`)
+
+### Safer updates (QA-first)
+
+`scripts/update.sh` now defaults to updating **QA** to reduce accidental prod cutovers.
+
+```bash
+# update QA (default)
+./scripts/update.sh
+
+# update prod (requires explicit confirmation)
+CLAWNSOLE_INSTANCE=prod CLAWNSOLE_CONFIRM_PROD=YES ./scripts/update.sh
+```
