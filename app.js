@@ -551,6 +551,14 @@ function renderMarkdown(text) {
   html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
   html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" />');
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+  // Auto-link bare http(s) URLs (keep simple; text is already HTML-escaped).
+  // Avoid matching inside existing href/src attributes by only targeting plain text contexts.
+  html = html.replace(
+    /(^|[\s(\[])(https?:\/\/[^\s<)\]]+)/g,
+    (match, prefix, url) => `${prefix}<a href="${url}" target="_blank" rel="noopener">${url}</a>`
+  );
+
   html = html.replace(/\n- (.+)/g, '<ul><li>$1</li></ul>');
   html = html.replace(/<\/ul>\n<ul>/g, '');
   html = html.replace(/\n\d+\. (.+)/g, '<ol><li>$1</li></ol>');
