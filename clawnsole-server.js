@@ -558,12 +558,38 @@ function createClawnsoleServer(options = {}) {
           const payload = JSON.parse(body || '{}');
           const agentId = String(payload.agentId || '').trim();
           const leaseMs = payload.leaseMs;
-          const queue = String(payload.queue || '').trim();
-          const queues = queue ? [queue] : null;
 
-          const { claimNext } = require('./lib/workqueue');
-          const item = claimNext(null, { agentId, queues, leaseMs });
-          sendJson(res, 200, { ok: true, item });
+          // Backcompat: UI posts {queue}; API callers may post {queues:[]}
+          const requestedQueues = Array.isArray(payload.queues)
+            ? payload.queues.map((q) => String(q).trim()).filter(Boolean)
+            : [];
+          const legacyQueue = String(payload.queue || '').trim();
+          if (!requestedQueues.length && legacyQueue) requestedQueues.push(legacyQueue);
+
+          if (!agentId) {
+            sendJson(res, 400, { ok: false, error: 'invalid_request' });
+            return;
+          }
+
+          const { claimNext, resolveClaimQueues } = require('./lib/workqueue');
+          const defaultQueues = String(process.env.CLAWNSOLE_DEFAULT_QUEUES ?? 'dev-team')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+
+          const resolved = resolveClaimQueues(null, {
+            agentId,
+            requestedQueues,
+            defaultQueues
+          });
+
+          if (!resolved.queues.length) {
+            sendJson(res, 200, { ok: true, item: null, reason: resolved.reason || 'NO_QUEUES' });
+            return;
+          }
+
+          const item = claimNext(null, { agentId, queues: resolved.queues, leaseMs });
+          sendJson(res, 200, { ok: true, item, queues: resolved.queues, queuesSource: resolved.source });
         } catch (err) {
           sendJson(res, 400, { ok: false, error: 'invalid_request' });
         }
@@ -760,21 +786,84 @@ function createClawnsoleServer(options = {}) {
         try {
           const payload = JSON.parse(body || '{}');
           const agentId = String(payload.agentId || '').trim();
-          const queues = Array.isArray(payload.queues)
+          const requestedQueues = Array.isArray(payload.queues)
             ? payload.queues.map((q) => String(q).trim()).filter(Boolean)
             : [];
           const leaseMs = payload.leaseMs;
-          if (!agentId || !queues.length) {
+          if (!agentId) {
             sendJson(res, 400, { error: 'invalid_request' });
             return;
           }
-          const { claimNext } = require('./lib/workqueue');
-          const item = claimNext(null, { agentId, queues, leaseMs });
-          sendJson(res, 200, { ok: true, item });
+
+          const { claimNext, resolveClaimQueues } = require('./lib/workqueue');
+          const defaultQueues = String(process.env.CLAWNSOLE_DEFAULT_QUEUES ?? 'dev-team')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+
+          const resolved = resolveClaimQueues(null, {
+            agentId,
+            requestedQueues,
+            defaultQueues
+          });
+
+          if (!resolved.queues.length) {
+            sendJson(res, 200, { ok: true, item: null, reason: resolved.reason || 'NO_QUEUES' });
+            return;
+          }
+
+          const item = claimNext(null, { agentId, queues: resolved.queues, leaseMs });
+          sendJson(res, 200, { ok: true, item, queues: resolved.queues, queuesSource: resolved.source });
         } catch {
           sendJson(res, 400, { error: 'invalid_request' });
         }
       });
+      return;
+    }
+
+    if (req.url === '/api/workqueue/assignments') {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+
+      if (req.method === 'GET') {
+        try {
+          const { listAssignments } = require('./lib/workqueue');
+          const assignments = listAssignments(null);
+          sendJson(res, 200, { ok: true, assignments });
+        } catch {
+          sendJson(res, 500, { error: 'workqueue_error' });
+        }
+        return;
+      }
+
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', (chunk) => (body += chunk.toString()));
+        req.on('end', () => {
+          try {
+            const payload = JSON.parse(body || '{}');
+            const agentId = String(payload.agentId || '').trim();
+            const queues = Array.isArray(payload.queues)
+              ? payload.queues.map((q) => String(q).trim()).filter(Boolean)
+              : [];
+            if (!agentId || !queues.length) {
+              sendJson(res, 400, { error: 'invalid_request' });
+              return;
+            }
+            const { setAssignments } = require('./lib/workqueue');
+            const result = setAssignments(null, { agentId, queues });
+            sendJson(res, 200, { ok: true, agentId: result.agentId, queues: result.queues });
+          } catch {
+            sendJson(res, 400, { error: 'invalid_request' });
+          }
+        });
+        return;
+      }
+
+      sendJson(res, 405, { error: 'method_not_allowed' });
       return;
     }
 
