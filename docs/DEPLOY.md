@@ -11,6 +11,54 @@ Clawnsole runs two instances on one host:
 - The app code is in a git checkout under `~/src/dev/clawnsole` (or another workspace folder).
 - Deployed instances can be started directly from a checkout during development.
 
+## Run QA as a managed service (recommended)
+
+The QA instance is a validation environment and should be resilient to terminal logout / accidental SIGTERM.
+On macOS, run it under a LaunchAgent supervisor.
+
+### Install / start (QA)
+From a git checkout (ex: `~/src/dev/clawnsole`):
+
+```bash
+cd ~/src/dev/clawnsole
+./scripts/install-qa-launchagent.sh
+```
+
+This creates a LaunchAgent:
+- Label: `ai.openclaw.clawnsole-qa`
+- Port: `5174`
+- Env: `CLAWNSOLE_INSTANCE=qa`
+
+### Stop (QA)
+```bash
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/ai.openclaw.clawnsole-qa.plist \
+  || launchctl bootout user/$(id -u) ~/Library/LaunchAgents/ai.openclaw.clawnsole-qa.plist
+```
+
+### Status (QA)
+```bash
+launchctl print gui/$(id -u)/ai.openclaw.clawnsole-qa \
+  || launchctl print user/$(id -u)/ai.openclaw.clawnsole-qa
+```
+
+### Restart (QA) — safe for deploys
+This restarts **only QA (5174)** and will not touch Prod (5173):
+
+```bash
+launchctl kickstart -k gui/$(id -u)/ai.openclaw.clawnsole-qa \
+  || launchctl kickstart -k user/$(id -u)/ai.openclaw.clawnsole-qa
+```
+
+### Logs (QA)
+```bash
+tail -n 200 -f ~/.openclaw/logs/clawnsole.qa.out.log ~/.openclaw/logs/clawnsole.qa.err.log
+```
+
+### Health check (QA)
+```bash
+curl -fsS http://127.0.0.1:5174/meta
+```
+
 ## Deploy procedure (manual, deterministic)
 
 ### 1) Update code
