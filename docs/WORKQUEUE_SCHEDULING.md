@@ -40,3 +40,81 @@ Add a crontab entry (hourly):
 Create a LaunchAgent that runs every hour and calls the same command.
 
 This repo doesn't ship a LaunchAgent template yet; if we standardize one, we should add it to `scripts/`.
+
+---
+
+## Unattended operation (workers)
+
+Enqueue jobs are only half the story: you also need **workers** to claim and transition items.
+
+Recommended pattern:
+- run workers under a dedicated OS user (least privilege)
+- each worker process uses a stable `--agent` id
+- workers should renew their lease periodically while in progress
+
+### Safety notes
+
+- **Use a dedicated queue for automation** (e.g. `ops`, `demo-*`) to avoid interfering with human workflows.
+- **Prefer idempotent enqueue** (`--dedupeKey`) so cron/systemd retries don't spam duplicates.
+- **Don’t run as root** unless you absolutely must.
+- Treat `instructions` as potentially sensitive; they may contain internal links/tokens.
+
+### Example: one-shot worker pass (cron)
+
+This pattern runs a “worker pass” every minute. Your worker script should:
+1) `claim-next`
+2) if no item, exit 0
+3) if item, do work and `progress`/`done`/`fail`
+
+```cron
+* * * * * /bin/bash -lc 'cd /path/to/your/worker && node worker-pass.mjs >> /var/log/workqueue-worker.log 2>&1'
+```
+
+### Example: long-running worker (systemd)
+
+A long-running worker is usually simpler and lower-latency than cron.
+
+`/etc/systemd/system/clawnsole-workqueue-worker.service`
+
+```ini
+[Unit]
+Description=Clawnsole workqueue worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=clawnsole
+WorkingDirectory=/path/to/your/worker
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /path/to/your/worker/worker-loop.mjs
+Restart=always
+RestartSec=2
+
+# Hardening (tune to your needs)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+---
+
+## Demo: 2 workers concurrently
+
+A runnable demo lives here:
+
+```bash
+node examples/workqueue/two-workers-demo.mjs
+```
+
+What it does:
+- creates a temporary HOME directory so it **does not touch your real** `~/.openclaw/clawnsole/work-queues.json`
+- seeds a unique `demo-two-workers-<timestamp>` queue with 3 items
+- starts two worker processes
+- asserts they claim different items
+- transitions one to `done` and one to `failed`
+- prints the final queue state
