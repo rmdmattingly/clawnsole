@@ -110,6 +110,14 @@ async function run() {
   const activity = adminClient.sent.map((raw) => JSON.parse(raw)).find((msg) => msg.type === 'event' && msg.event === 'activity');
   assert.ok(activity);
 
+  // Cleanup: close sockets so proxy heartbeat interval is cleared.
+  try {
+    adminClient.close();
+  } catch {}
+  try {
+    upstream.close();
+  } catch {}
+
   clearTimeout(hardTimeout);
   console.log('proxy-self-test: ok');
   // The proxy sets up background timers (e.g. heartbeats). Ensure the
