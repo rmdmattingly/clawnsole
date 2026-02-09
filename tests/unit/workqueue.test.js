@@ -86,3 +86,31 @@ test('workqueue: claimed-by-other enforced for terminal transitions (done/failed
   const done = transitionItem(root, { itemId: claimed.id, agentId: 'agent-1', status: 'done', result: { ok: true } });
   assert.equal(done.status, 'done');
 });
+
+test('workqueue: enqueue supports dedupeKey idempotency', () => {
+  const root = tempRoot();
+
+  const first = enqueueItem(root, {
+    queue: 'dev',
+    title: 'Review open PRs',
+    instructions: 'review',
+    priority: 0,
+    dedupeKey: 'hourly-pr-review:2026-02-08T21'
+  });
+
+  const second = enqueueItem(root, {
+    queue: 'dev',
+    title: 'Review open PRs (duplicate)',
+    instructions: 'review',
+    priority: 0,
+    dedupeKey: 'hourly-pr-review:2026-02-08T21'
+  });
+
+  assert.equal(second.id, first.id);
+  assert.equal(second.queue, first.queue);
+  assert.equal(second.dedupeKey, first.dedupeKey);
+  assert.equal(second._deduped, true);
+
+  const state = loadState(root);
+  assert.equal(state.items.length, 1);
+});
