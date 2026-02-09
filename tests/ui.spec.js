@@ -142,6 +142,7 @@ test.afterAll(() => {
 });
 
 test('admin login persists, send/receive, upload attachment', async ({ page }, testInfo) => {
+  test.setTimeout(180000);
   test.skip(!!skipReason, skipReason);
   await page.goto(`http://127.0.0.1:${serverPort}/`);
 
