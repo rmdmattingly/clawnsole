@@ -1,3 +1,14 @@
-clawnsole.local {
+# Clawnsole itself is plain HTTP.
+# This Caddyfile terminates TLS and proxies to the active Clawnsole port.
+
+# HTTPS (local/internal cert). To trust the local CA on macOS:
+#   sudo /opt/homebrew/bin/caddy trust
+https://clawnsole.local {
+  tls internal
   reverse_proxy 127.0.0.1:__PORT__
+}
+
+# Redirect HTTP -> HTTPS
+http://clawnsole.local {
+  redir https://{host}{uri} permanent
 }
