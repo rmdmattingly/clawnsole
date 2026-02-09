@@ -282,19 +282,12 @@ function createClawnsoleServer(options = {}) {
     });
   }
 
-  let lastGuestSessionKey = null;
-
-  const { handleAdminProxy, handleGuestProxy } = createProxyHandlers({
+  const { handleAdminProxy } = createProxyHandlers({
     WebSocket: WebSocketImpl,
     getRoleFromCookies,
     readToken,
     gatewayWsUrl,
-    heartbeatMs: 2000,
-    getGuestPrompt: () => readUiPasswords().guestPrompt,
-    getGuestAgentId: () => readUiPasswords().guestAgentId,
-    onGuestSessionKey: (key) => {
-      lastGuestSessionKey = key;
-    }
+    heartbeatMs: 2000
   });
 
   const wss = new WebSocketImpl.Server({ noServer: true });
@@ -318,7 +311,6 @@ function createClawnsoleServer(options = {}) {
 
     if (req.url.startsWith('/meta')) {
       const wsUrl = gatewayWsUrl();
-      const { guestAgentId } = readUiPasswords();
       let gatewayPort = readGatewayPort();
       try {
         const parsed = new URL(wsUrl);
@@ -332,8 +324,6 @@ function createClawnsoleServer(options = {}) {
       sendJson(res, 200, {
         wsUrl,
         adminWsUrl: '/admin-ws',
-        guestWsUrl: '/guest-ws',
-        guestAgentId,
         port: gatewayPort
       });
       return;
@@ -972,9 +962,15 @@ function createClawnsoleServer(options = {}) {
       });
       return;
     }
+    if (req.url === "/guest" || req.url === "/guest/") {
+      res.writeHead(302, { Location: "/admin" });
+      res.end();
+      return;
+    }
+
 
     const urlPath =
-      req.url === '/' || req.url === '/admin' || req.url === '/admin/' || req.url === '/guest' || req.url === '/guest/'
+      req.url === '/' || req.url === '/admin' || req.url === '/admin/'
         ? '/index.html'
         : req.url;
     const filePath = path.join(root, decodeURIComponent(urlPath));
@@ -1028,10 +1024,6 @@ function createClawnsoleServer(options = {}) {
   server.on('upgrade', (req, socket, head) => {
     if (req.url === '/admin-ws') {
       wss.handleUpgrade(req, socket, head, (ws) => handleAdminProxy(ws, req));
-      return;
-    }
-    if (req.url === '/guest-ws') {
-      wss.handleUpgrade(req, socket, head, (ws) => handleGuestProxy(ws, req));
       return;
     }
     socket.destroy();
