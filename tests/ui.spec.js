@@ -178,7 +178,7 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
 
   // iOS Safari will auto-zoom focused inputs when font-size < 16px.
   const fontSizes = await page.evaluate(() => {
-    const selectors = ['#loginPassword', '#loginRole', '#wsUrl', '#clientId', '#deviceId', '#guestPrompt'];
+    const selectors = ['#loginPassword', '#wsUrl', '#clientId', '#deviceId'];
     return selectors.reduce((acc, sel) => {
       const el = document.querySelector(sel);
       if (!el) return acc;
@@ -191,7 +191,6 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
     expect(Math.round(size)).toBeGreaterThanOrEqual(16);
   }
 
-  await page.selectOption('#loginRole', 'admin');
   await page.fill('#loginPassword', 'admin');
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });

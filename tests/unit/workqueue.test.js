@@ -6,6 +6,16 @@ const path = require('node:path');
 
 const { enqueueItem, claimNext, loadState, saveState, transitionItem } = require('../../lib/workqueue');
 
+function withFakeNow(ms, fn) {
+  const realNow = Date.now;
+  Date.now = () => ms;
+  try {
+    return fn();
+  } finally {
+    Date.now = realNow;
+  }
+}
+
 function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'clawnsole-wq-'));
 }
@@ -65,51 +75,93 @@ test('workqueue: priority ordering tie-breaker is FIFO by createdAt', () => {
   assert.equal(claimed.id, first.id);
 });
 
-test('workqueue: lease expiry reaps claimed items back to ready', () => {
+test('workqueue: priority tie-breaker is deterministic when createdAt is equal', () => {
   const root = tempRoot();
 
-  const item = enqueueItem(root, { queue: 'dev', title: 'a', instructions: 'x', priority: 0 });
+  const a = enqueueItem(root, { queue: 'dev', title: 'a', instructions: 'a', priority: 5 });
+  const b = enqueueItem(root, { queue: 'dev', title: 'b', instructions: 'b', priority: 5 });
 
-  // Claim with a short lease, then force-expire by editing state.
-  const claimed = claimNext(root, { agentId: 'agent-1', queues: ['dev'], leaseMs: 1 });
-  assert.ok(claimed);
-  assert.equal(claimed.id, item.id);
-
+  // Force equal createdAt so the final tie-breaker is exercised.
   const state = loadState(root);
-  const it = state.items.find((x) => x.id === item.id);
-  assert.ok(it);
-  it.leaseUntil = Date.now() - 1; // expired
+  const ia = state.items.find((x) => x.id === a.id);
+  const ib = state.items.find((x) => x.id === b.id);
+  assert.ok(ia);
+  assert.ok(ib);
+  ia.createdAt = '2026-01-01T00:00:00.000Z';
+  ib.createdAt = '2026-01-01T00:00:00.000Z';
   saveState(root, state);
 
-  // Next claim should reap the expired lease and allow a new agent to claim.
-  const reclaimed = claimNext(root, { agentId: 'agent-2', queues: ['dev'], leaseMs: 60_000 });
-  assert.ok(reclaimed);
-  assert.equal(reclaimed.id, item.id);
-  assert.equal(reclaimed.claimedBy, 'agent-2');
+  const claimed = claimNext(root, { agentId: 'agent-1', queues: ['dev'], leaseMs: 60_000 });
+  assert.ok(claimed);
+
+  const expected = String(a.id).localeCompare(String(b.id)) <= 0 ? a.id : b.id;
+  assert.equal(claimed.id, expected);
+});
+
+test('workqueue: claim-next considers all requested queues when ordering', () => {
+  const root = tempRoot();
+
+  const low = enqueueItem(root, { queue: 'a', title: 'low', instructions: 'l', priority: 1 });
+  const high = enqueueItem(root, { queue: 'b', title: 'high', instructions: 'h', priority: 10 });
+
+  const claimed = claimNext(root, { agentId: 'agent-1', queues: ['a', 'b'], leaseMs: 60_000 });
+  assert.ok(claimed);
+  assert.equal(claimed.id, high.id);
+
+  const claimed2 = claimNext(root, { agentId: 'agent-2', queues: ['a', 'b'], leaseMs: 60_000 });
+  assert.ok(claimed2);
+  assert.equal(claimed2.id, low.id);
+});
+
+test('workqueue: lease expiry reaps claimed items back to ready', () => {
+  withFakeNow(1_700_000_000_000, () => {
+    const root = tempRoot();
+
+    const item = enqueueItem(root, { queue: 'dev', title: 'a', instructions: 'x', priority: 0 });
+
+    // Claim with a short lease, then force-expire by editing state.
+    const claimed = claimNext(root, { agentId: 'agent-1', queues: ['dev'], leaseMs: 1 });
+    assert.ok(claimed);
+    assert.equal(claimed.id, item.id);
+
+    const state = loadState(root);
+    const it = state.items.find((x) => x.id === item.id);
+    assert.ok(it);
+    it.leaseUntil = 1_700_000_000_000 - 1; // expired relative to fake now
+    saveState(root, state);
+
+    // Next claim should reap the expired lease and allow a new agent to claim.
+    const reclaimed = claimNext(root, { agentId: 'agent-2', queues: ['dev'], leaseMs: 60_000 });
+    assert.ok(reclaimed);
+    assert.equal(reclaimed.id, item.id);
+    assert.equal(reclaimed.claimedBy, 'agent-2');
+  });
 });
 
 test('workqueue: lease expiry reaps in_progress items back to ready', () => {
-  const root = tempRoot();
+  withFakeNow(1_700_000_000_000, () => {
+    const root = tempRoot();
 
-  const item = enqueueItem(root, { queue: 'dev', title: 'a', instructions: 'x', priority: 0 });
-  const claimed = claimNext(root, { agentId: 'agent-1', queues: ['dev'], leaseMs: 60_000 });
-  assert.ok(claimed);
-  assert.equal(claimed.id, item.id);
+    const item = enqueueItem(root, { queue: 'dev', title: 'a', instructions: 'x', priority: 0 });
+    const claimed = claimNext(root, { agentId: 'agent-1', queues: ['dev'], leaseMs: 60_000 });
+    assert.ok(claimed);
+    assert.equal(claimed.id, item.id);
 
-  // Move to in_progress and then force-expire by editing state.
-  transitionItem(root, { itemId: item.id, agentId: 'agent-1', status: 'in_progress', note: 'working' });
+    // Move to in_progress and then force-expire by editing state.
+    transitionItem(root, { itemId: item.id, agentId: 'agent-1', status: 'in_progress', note: 'working' });
 
-  const state = loadState(root);
-  const it = state.items.find((x) => x.id === item.id);
-  assert.ok(it);
-  assert.equal(it.status, 'in_progress');
-  it.leaseUntil = Date.now() - 1; // expired
-  saveState(root, state);
+    const state = loadState(root);
+    const it = state.items.find((x) => x.id === item.id);
+    assert.ok(it);
+    assert.equal(it.status, 'in_progress');
+    it.leaseUntil = 1_700_000_000_000 - 1; // expired relative to fake now
+    saveState(root, state);
 
-  const reclaimed = claimNext(root, { agentId: 'agent-2', queues: ['dev'], leaseMs: 60_000 });
-  assert.ok(reclaimed);
-  assert.equal(reclaimed.id, item.id);
-  assert.equal(reclaimed.claimedBy, 'agent-2');
+    const reclaimed = claimNext(root, { agentId: 'agent-2', queues: ['dev'], leaseMs: 60_000 });
+    assert.ok(reclaimed);
+    assert.equal(reclaimed.id, item.id);
+    assert.equal(reclaimed.claimedBy, 'agent-2');
+  });
 });
 
 test('workqueue: claimed-by-other enforced for terminal transitions (done/failed)', () => {

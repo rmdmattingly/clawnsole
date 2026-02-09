@@ -95,6 +95,10 @@ If omitted, admin defaults to `admin` and guest defaults to `guest`.
 
 ## Workqueue: agent→queue assignments + claim-next defaults
 
+See also:
+- `docs/OPENCLAW_WORKQUEUE_WORKER_SKILL.md` (worker loop / OpenClaw agent pattern)
+- `docs/WORKQUEUE_SCHEDULING.md`
+
 Clawnsole's workqueue supports assigning agents to queues, and letting `claim-next`
 resolve queues automatically when you omit them.
 

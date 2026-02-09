@@ -139,14 +139,7 @@
             <p class="login-subtitle">Live console for OpenClaw.</p>
           </div>
         </div>
-        <p class="login-copy">Choose a role and enter the password to continue.</p>
-        <label>
-          Role
-          <select id="loginRole">
-            <option value="guest" selected>Guest</option>
-            <option value="admin">Admin</option>
-          </select>
-        </label>
+        <p class="login-copy">Enter the admin password to continue.</p>
         <label>
           Password
           <input id="loginPassword" type="password" placeholder="Enter password" />
@@ -270,15 +263,6 @@
             Device ID
             <input id="deviceId" type="text" />
           </label>
-          <label>
-            Guest Prompt
-            <textarea id="guestPrompt" rows="4" placeholder="Set the guest profile prompt..."></textarea>
-          </label>
-          <div class="button-row">
-            <button id="saveGuestPromptBtn" class="primary">Save Guest Prompt</button>
-          </div>
-          <div id="guestPromptStatus" class="hint"></div>
-
           <hr style="margin: 14px 0; opacity: 0.25;" />
           <h3 style="margin: 0 0 8px;">Recurring Agent Prompts</h3>
           <div class="hint" style="margin-bottom: 8px;">
@@ -306,7 +290,6 @@
           </div>
           <div id="recurringPromptStatus" class="hint"></div>
           <div id="recurringPromptList" class="hint" style="margin-top: 10px;"></div>
-
           <div class="button-row">
             <button id="disconnectBtn">Disconnect</button>
           </div>
