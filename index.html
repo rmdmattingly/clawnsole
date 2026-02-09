@@ -167,6 +167,18 @@
               Status
               <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters"></div>
             </div>
+            <label class="wq-field">
+              Auto-refresh
+              <div class="wq-autorefresh">
+                <label class="wq-toggle"><input id="wqAutoRefreshEnabled" type="checkbox" /> <span>On</span></label>
+                <select id="wqAutoRefreshInterval" aria-label="Auto-refresh interval">
+                  <option value="5000">5s</option>
+                  <option value="15000" selected>15s</option>
+                  <option value="30000">30s</option>
+                  <option value="60000">60s</option>
+                </select>
+              </div>
+            </label>
             <button id="wqRefreshBtn" class="secondary" type="button">Refresh</button>
           </div>
 
