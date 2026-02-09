@@ -704,6 +704,124 @@ function renderWorkqueueInspect(item) {
   `;
 }
 
+// --- Minimal Workqueue Pane (Issue #22c) ---
+// Standalone renderer that can be mounted into any container.
+// Acceptance: renderWorkqueuePane(rootEl, { queue }) exists and can be called via a debug hook.
+
+async function fetchWorkqueueSummary(queue = '') {
+  const params = new URLSearchParams();
+  if (queue) params.set('queue', queue);
+  const url = `/api/workqueue/summary${params.toString() ? `?${params.toString()}` : ''}`;
+  const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.ok) throw new Error(data?.error || String(res.status));
+  return data;
+}
+
+async function fetchWorkqueueItems({ queue = '', statuses = [] } = {}) {
+  const params = new URLSearchParams();
+  if (queue) params.set('queue', queue);
+  if (Array.isArray(statuses) && statuses.length) params.set('status', statuses.join(','));
+  const url = `/api/workqueue/items${params.toString() ? `?${params.toString()}` : ''}`;
+  const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.ok) throw new Error(data?.error || String(res.status));
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+function renderWorkqueueCounts(rootEl, counts) {
+  const statuses = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
+  const list = document.createElement('dl');
+  list.className = 'wq-counts';
+  for (const s of statuses) {
+    const dt = document.createElement('dt');
+    dt.textContent = s;
+    const dd = document.createElement('dd');
+    dd.textContent = String(counts?.[s] || 0);
+    list.appendChild(dt);
+    list.appendChild(dd);
+  }
+  rootEl.appendChild(list);
+}
+
+function renderWorkqueueSimpleList(rootEl, items, { emptyText }) {
+  const ul = document.createElement('ul');
+  ul.className = 'wq-simple-list';
+
+  if (!items.length) {
+    const li = document.createElement('li');
+    li.className = 'hint';
+    li.textContent = emptyText || 'No items.';
+    ul.appendChild(li);
+    rootEl.appendChild(ul);
+    return;
+  }
+
+  for (const it of items) {
+    const li = document.createElement('li');
+    const lease = it.leaseUntil ? new Date(Number(it.leaseUntil)).toISOString() : '';
+    li.innerHTML = `<div><strong>${escapeHtml(String(it.title || ''))}</strong></div>
+<div class="meta">${escapeHtml(String(it.status || ''))}${it.claimedBy ? ` • ${escapeHtml(String(it.claimedBy))}` : ''}${lease ? ` • lease ${escapeHtml(lease)}` : ''}</div>`;
+    ul.appendChild(li);
+  }
+  rootEl.appendChild(ul);
+}
+
+async function renderWorkqueuePane(rootEl, { queue = '' } = {}) {
+  if (!rootEl) return;
+  const q = String(queue || '').trim();
+
+  rootEl.innerHTML = '';
+  rootEl.setAttribute('role', 'region');
+  rootEl.setAttribute('aria-label', `Workqueue${q ? `: ${q}` : ''}`);
+
+  const title = document.createElement('h2');
+  title.textContent = `Workqueue${q ? `: ${q}` : ''}`;
+  rootEl.appendChild(title);
+
+  const statusLine = document.createElement('div');
+  statusLine.className = 'wq-statusline';
+  statusLine.textContent = 'Loading…';
+  rootEl.appendChild(statusLine);
+
+  try {
+    const [summary, readyPending] = await Promise.all([
+      fetchWorkqueueSummary(q),
+      fetchWorkqueueItems({ queue: q, statuses: ['ready', 'pending'] })
+    ]);
+
+    statusLine.textContent = 'Loaded.';
+
+    const countsSection = document.createElement('section');
+    countsSection.innerHTML = '<h3>Counts</h3>';
+    renderWorkqueueCounts(countsSection, summary.counts || {});
+    rootEl.appendChild(countsSection);
+
+    const activeSection = document.createElement('section');
+    activeSection.innerHTML = '<h3>Active (claimed / in_progress)</h3>';
+    renderWorkqueueSimpleList(activeSection, Array.isArray(summary.active) ? summary.active : [], { emptyText: 'No active items.' });
+    rootEl.appendChild(activeSection);
+
+    const readySection = document.createElement('section');
+    readySection.innerHTML = '<h3>Ready / Pending</h3>';
+    const sorted = readyPending
+      .slice()
+      .sort((a, b) => (b.priority || 0) - (a.priority || 0) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+    renderWorkqueueSimpleList(readySection, sorted, { emptyText: 'No ready/pending items.' });
+    rootEl.appendChild(readySection);
+
+    // Make scrollable without requiring pane-manager changes.
+    rootEl.style.overflow = 'auto';
+  } catch (err) {
+    statusLine.textContent = `Failed to load: ${String(err)}`;
+  }
+}
+
+// Temporary debug hook:
+// In DevTools: window.__debug.renderWorkqueuePane(document.querySelector('#someRoot'), { queue: 'dev-team' })
+window.__debug = window.__debug || {};
+window.__debug.renderWorkqueuePane = renderWorkqueuePane;
+
 
 async function fetchAndRenderWorkqueueItemsForPane(pane) {
   if (!pane || pane.kind !== 'workqueue') return;
