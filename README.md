@@ -22,7 +22,7 @@ It will expose a nice local URL at https://clawnsole.local (macOS + sudo require
 (HTTP redirects to HTTPS; HTTPS uses a local/internal Caddy certificate.)
 
 ### HTTPS
-If you’re trying to access a QA/hosted Clawnsole instance over **https** and see `ERR_SSL_PROTOCOL_ERROR`, you likely need TLS termination in front of the app (Caddy/nginx). See: [`docs/HTTPS.md`](./docs/HTTPS.md)
+If you’re trying to access a QA/hosted Clawnsole instance over **https** and see `ERR_SSL_PROTOCOL_ERROR`, you likely need TLS termination in front of the app (Caddy/nginx). See: [`docs/HTTPS.md`](./docs/https-tls.md)
 
 You can override defaults:
 
