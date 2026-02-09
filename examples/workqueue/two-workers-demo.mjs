@@ -11,6 +11,9 @@
 import { spawn } from 'node:child_process';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const execFileP = promisify(execFile);
 
@@ -39,9 +42,10 @@ function cwdRoot() {
   return new URL('../../', import.meta.url).pathname;
 }
 
-async function clawnsole(args) {
+async function clawnsole(args, { env } = {}) {
   const { stdout } = await execFileP('node', ['bin/clawnsole.js', 'workqueue', ...args], {
     cwd: cwdRoot(),
+    env: env || process.env,
     maxBuffer: 10 * 1024 * 1024
   });
   return JSON.parse(stdout);
@@ -62,11 +66,11 @@ function lineReader(stream, onLine) {
   });
 }
 
-function spawnWorkerOnce({ agent, queues, mode }) {
+function spawnWorkerOnce({ agent, queues, mode, env }) {
   const child = spawn(
     'node',
     ['examples/workqueue/worker-once.mjs', '--agent', agent, '--queues', queues, '--mode', mode],
-    { cwd: cwdRoot(), stdio: ['ignore', 'pipe', 'pipe'] }
+    { cwd: cwdRoot(), env: env || process.env, stdio: ['ignore', 'pipe', 'pipe'] }
   );
 
   const events = [];
@@ -101,31 +105,38 @@ async function main() {
   const agentB = String(args.agentB || 'demo-worker-b');
   const seedCount = args.seed !== undefined ? Number(args.seed) : 3;
 
+  // Use an isolated HOME so the demo doesn't touch your real ~/.openclaw/clawnsole/work-queues.json.
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'clawnsole-two-workers-demo-'));
+  const env = { ...process.env, HOME: tempHome };
+
   // Seed 2-3 dummy items.
   const seededIds = [];
   for (let i = 1; i <= seedCount; i++) {
-    const res = await clawnsole([
-      'enqueue',
-      '--queue',
-      queue,
-      '--title',
-      `demo item ${i}`,
-      '--instructions',
-      `demo instructions ${i}`,
-      '--priority',
-      '0',
-      '--dedupeKey',
-      `demo:${Date.now()}:${i}`
-    ]);
+    const res = await clawnsole(
+      [
+        'enqueue',
+        '--queue',
+        queue,
+        '--title',
+        `demo item ${i}`,
+        '--instructions',
+        `demo instructions ${i}`,
+        '--priority',
+        '0',
+        '--dedupeKey',
+        `demo:${Date.now()}:${i}`
+      ],
+      { env }
+    );
     seededIds.push(res.item.id);
   }
 
-  process.stdout.write(`Seeded queue=${queue} items=${seededIds.join(', ')}\n`);
+  process.stdout.write(`Seeded queue=${queue} items=${seededIds.join(', ')} (HOME=${tempHome})\n`);
 
   // Start two workers concurrently.
   const queuesCsv = queue;
-  const w1 = spawnWorkerOnce({ agent: agentA, queues: queuesCsv, mode: 'done' });
-  const w2 = spawnWorkerOnce({ agent: agentB, queues: queuesCsv, mode: 'fail' });
+  const w1 = spawnWorkerOnce({ agent: agentA, queues: queuesCsv, mode: 'done', env });
+  const w2 = spawnWorkerOnce({ agent: agentB, queues: queuesCsv, mode: 'fail', env });
 
   const [r1, r2] = await Promise.all([w1.done, w2.done]);
 
@@ -144,7 +155,7 @@ async function main() {
   process.stdout.write(`OK: distinct claims: ${agentA}=>${c1.itemId} ${agentB}=>${c2.itemId}\n`);
 
   // Print final queue state.
-  const listed = await clawnsole(['list', '--queue', queue]);
+  const listed = await clawnsole(['list', '--queue', queue], { env });
   const items = listed.items;
 
   const byId = new Map(items.map((it) => [it.id, it]));

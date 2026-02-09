@@ -112,8 +112,9 @@ node examples/workqueue/two-workers-demo.mjs
 ```
 
 What it does:
+- creates a temporary HOME directory so it **does not touch your real** `~/.openclaw/clawnsole/work-queues.json`
 - seeds a unique `demo-two-workers-<timestamp>` queue with 3 items
 - starts two worker processes
-- asserts they claimed different items
+- asserts they claim different items
 - transitions one to `done` and one to `failed`
 - prints the final queue state

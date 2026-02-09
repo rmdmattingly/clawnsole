@@ -38,6 +38,7 @@ function sleep(ms) {
 async function clawnsole(args) {
   const { stdout } = await execFileP('node', ['bin/clawnsole.js', 'workqueue', ...args], {
     cwd: new URL('../../', import.meta.url).pathname,
+    env: process.env,
     maxBuffer: 10 * 1024 * 1024
   });
   return JSON.parse(stdout);
