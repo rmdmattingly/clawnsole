@@ -1,4 +1,8 @@
 const assert = require('assert/strict');
+
+// Self-test runs against a fake ws:// gateway URL.
+process.env.CLAWNSOLE_ALLOW_INSECURE_TRANSPORT = '1';
+
 const { EventEmitter } = require('events');
 const { createProxyHandlers } = require('../proxy');
 

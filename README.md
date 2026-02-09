@@ -52,11 +52,25 @@ curl -fsSL https://raw.githubusercontent.com/rmdmattingly/clawnsole/main/scripts
 
 ## Connect
 
-- WS URL: `ws://127.0.0.1:18789`
+- WS URL (local dev): `ws://127.0.0.1:18789`
 - Token: auto-fetched from `~/.openclaw/openclaw.json` via `/token`
+
+Notes:
+- `ws://` is only intended for localhost development.
+- For remote access, use TLS (`https://` + `wss://`) via a reverse proxy. See [`docs/HTTPS.md`](docs/HTTPS.md).
+- The proxy refuses non-localhost `ws://` by default (set `CLAWNSOLE_ALLOW_INSECURE_TRANSPORT=1` for dev-only).
 
 The UI sends a `connect` request on the first frame, as required by the gateway
 protocol.
+
+## HTTPS / TLS
+
+Clawnsole's Node server (`server.js`) serves **HTTP only**.
+
+If you need `https://` access, terminate TLS in front of Clawnsole using a
+standard reverse proxy (recommended: **Caddy**).
+
+See: [`docs/HTTPS.md`](docs/HTTPS.md)
 
 ## Password protection (optional)
 

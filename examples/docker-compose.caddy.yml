@@ -1,0 +1,20 @@
+# Example: run Caddy as TLS terminator in front of an existing Clawnsole server.
+#
+# This assumes Clawnsole itself is running on the host at 127.0.0.1:5173.
+# If you run Clawnsole in Docker too, change the upstream to the service name.
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -7,6 +7,35 @@ const DEFAULT_GUEST_METHODS = new Set([
   'sessions.reset'
 ]);
 
+function isLocalhostHost(hostname) {
+  const host = String(hostname || '').trim().toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+function assertSecureWsUrl(wsUrl, { allowInsecure = false } = {}) {
+  const raw = String(wsUrl || '').trim();
+  if (!raw) return;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    // If it’s not a valid URL, leave validation to downstream.
+    return;
+  }
+
+  if (parsed.protocol === 'wss:') return;
+  if (parsed.protocol !== 'ws:') return;
+  if (allowInsecure) return;
+  if (isLocalhostHost(parsed.hostname)) return;
+
+  const e = new Error(
+    `Refusing insecure WebSocket upstream (ws://) for non-localhost host: ${parsed.host}. ` +
+      `Use wss:// (TLS) or set CLAWNSOLE_ALLOW_INSECURE_TRANSPORT=1 for dev-only use.`
+  );
+  e.code = 'INSECURE_TRANSPORT';
+  throw e;
+}
+
 function safeClose(socket, code, reason) {
   if (!socket) return;
   try {
@@ -48,6 +77,7 @@ function createProxyHandlers({
 
     const { token } = readToken();
     const upstreamUrl = gatewayWsUrl();
+    assertSecureWsUrl(upstreamUrl, { allowInsecure: process.env.CLAWNSOLE_ALLOW_INSECURE_TRANSPORT === '1' });
     const upstream = new WebSocket(upstreamUrl, { headers: { Origin: resolveWsOrigin(upstreamUrl) } });
     const pendingFrames = [];
     const adminState = {
@@ -169,6 +199,7 @@ function createProxyHandlers({
     const { token } = readToken();
     const guestAgentId = typeof getGuestAgentId === 'function' ? getGuestAgentId() : 'main';
     const upstreamUrl = gatewayWsUrl();
+    assertSecureWsUrl(upstreamUrl, { allowInsecure: process.env.CLAWNSOLE_ALLOW_INSECURE_TRANSPORT === '1' });
     const upstream = new WebSocket(upstreamUrl, { headers: { Origin: resolveWsOrigin(upstreamUrl) } });
     const pendingFrames = [];
     const guestState = {
