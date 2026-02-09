@@ -5,9 +5,9 @@
 // Intended for update.sh (blue/green cutover guardrail).
 //
 // Usage:
-//   node scripts/verify-login.js --base-url http://127.0.0.1:5173 --role admin
+//   node scripts/verify-login.js --base-url http://127.0.0.1:5173
 //
-// Reads passwords/authVersion from $HOME/.openclaw/clawnsole.json by default.
+// Reads admin password/authVersion from $HOME/.openclaw/clawnsole.json by default.
 
 const fs = require('fs');
 const path = require('path');
@@ -20,11 +20,9 @@ function argValue(name) {
 
 function parseArgs() {
   const baseUrl = argValue('--base-url') || 'http://127.0.0.1:5173';
-  const roleRaw = (argValue('--role') || 'admin').toLowerCase();
-  const role = roleRaw === 'guest' ? 'guest' : 'admin';
   const openclawHome = process.env.OPENCLAW_HOME || path.join(process.env.HOME || '', '.openclaw');
   const cfgPath = process.env.CLAWNSOLE_CONFIG || path.join(openclawHome, 'clawnsole.json');
-  return { baseUrl, role, cfgPath };
+  return { baseUrl, cfgPath };
 }
 
 function readPasswords(cfgPath) {
@@ -32,11 +30,10 @@ function readPasswords(cfgPath) {
     const raw = fs.readFileSync(cfgPath, 'utf8');
     const cfg = JSON.parse(raw);
     return {
-      adminPassword: cfg?.adminPassword || 'admin',
-      guestPassword: cfg?.guestPassword || 'guest'
+      adminPassword: cfg?.adminPassword || 'admin'
     };
   } catch {
-    return { adminPassword: 'admin', guestPassword: 'guest' };
+    return { adminPassword: 'admin' };
   }
 }
 
@@ -55,11 +52,11 @@ function cookiesFromResponse(res) {
     .filter(Boolean);
 }
 
-async function login(baseUrl, role, password) {
+async function login(baseUrl, password) {
   const res = await fetch(`${baseUrl}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ role, password })
+    body: JSON.stringify({ role: 'admin', password })
   });
   const text = await res.text();
   if (!res.ok) {
@@ -78,7 +75,7 @@ async function login(baseUrl, role, password) {
   } catch {
     throw new Error(`login response not json: ${text.slice(0, 200)}`);
   }
-  if (!json.ok || json.role !== role) {
+  if (!json.ok || json.role !== 'admin') {
     throw new Error(`login response unexpected: ${text.slice(0, 200)}`);
   }
   return cookies.join('; ');
@@ -97,44 +94,38 @@ async function getJson(url, headers = {}) {
 }
 
 async function run() {
-  const { baseUrl, role, cfgPath } = parseArgs();
-  const { adminPassword, guestPassword } = readPasswords(cfgPath);
-  const password = role === 'admin' ? adminPassword : guestPassword;
+  const { baseUrl, cfgPath } = parseArgs();
+  const { adminPassword } = readPasswords(cfgPath);
 
   // 1) /meta must be healthy
   {
     const { res, json } = await getJson(`${baseUrl}/meta`);
     if (!res.ok) throw new Error(`/meta failed (${res.status})`);
-    if (!json.adminWsUrl || !json.guestWsUrl) throw new Error('/meta missing ws urls');
+    if (!json.adminWsUrl) throw new Error('/meta missing adminWsUrl');
   }
 
-  // 2) login -> /auth/role must reflect role
-  const cookieHeader = await login(baseUrl, role, password);
+  // 2) login -> /auth/role must reflect admin
+  const cookieHeader = await login(baseUrl, adminPassword);
   {
     const { res, json } = await getJson(`${baseUrl}/auth/role`, { Cookie: cookieHeader });
     if (!res.ok) throw new Error(`/auth/role failed (${res.status})`);
-    if (json.role !== role) throw new Error(`/auth/role mismatch: expected ${role} got ${json.role}`);
+    if (json.role !== 'admin') throw new Error(`/auth/role mismatch: expected admin got ${json.role}`);
   }
 
-  // 3) token is admin-only
+  // 3) token should be available
   {
     const { res, json } = await getJson(`${baseUrl}/token`, { Cookie: cookieHeader });
-    if (role === 'admin') {
-      if (!res.ok) throw new Error(`/token failed (${res.status})`);
-      if (!json.token) throw new Error('/token missing token');
-    } else {
-      if (res.status !== 403) throw new Error(`/token should be forbidden for guest; got ${res.status}`);
-      if (json.error !== 'forbidden') throw new Error('/token guest response unexpected');
-    }
+    if (!res.ok) throw new Error(`/token failed (${res.status})`);
+    if (!json.token) throw new Error('/token missing token');
   }
 
-  // 4) logout clears role
+  // 4) logout should succeed
   {
     const res = await fetch(`${baseUrl}/auth/logout`, { headers: { Cookie: cookieHeader } });
     if (!res.ok) throw new Error(`/auth/logout failed (${res.status})`);
   }
 
-  console.log(`verify-login: ok (${role}) ${baseUrl}`);
+  console.log(`verify-login: ok (admin) ${baseUrl}`);
 }
 
 run().catch((err) => {
