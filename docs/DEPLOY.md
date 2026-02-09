@@ -2,8 +2,11 @@
 
 Clawnsole runs two instances on one host:
 
-- **QA:** `http://clawnsole.local:5174` (`CLAWNSOLE_INSTANCE=qa`, `PORT=5174`)
-- **Prod:** `http://clawnsole.local:5173` (`CLAWNSOLE_INSTANCE=prod`, `PORT=5173`)
+- **QA (direct app port, HTTP):** `http://clawnsole.local:5174` (`CLAWNSOLE_INSTANCE=qa`, `PORT=5174`)
+- **Prod (direct app port, HTTP):** `http://clawnsole.local:5173` (`CLAWNSOLE_INSTANCE=prod`, `PORT=5173`)
+
+The default end-user install also sets up **Caddy TLS termination**, so the friendly URL is:
+- `https://clawnsole.local` (no port)
 
 > Why `CLAWNSOLE_INSTANCE` matters: browser cookies are not port-scoped, so QA/Prod must namespace cookies to avoid login collisions.
 

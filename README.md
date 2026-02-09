@@ -18,7 +18,8 @@ curl -fsSL https://raw.githubusercontent.com/rmdmattingly/clawnsole/main/scripts
 The installer will prompt for admin/guest passwords and will install a
 LaunchAgent to auto-start Clawnsole on login.
 You can also enable automatic updates (LaunchAgent).
-It will expose a nice local URL at http://clawnsole.local (macOS + sudo required).
+It will expose a nice local URL at https://clawnsole.local (macOS + sudo required).
+(HTTP redirects to HTTPS; HTTPS uses a local/internal Caddy certificate.)
 
 You can override defaults:
 
