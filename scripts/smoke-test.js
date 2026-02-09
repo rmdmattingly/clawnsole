@@ -102,7 +102,7 @@ async function wsChat({ baseUrl, wsPath, cookieHeader }) {
           id: 'chat-1',
           method: 'chat.send',
           params: {
-            sessionKey: 'agent:main:guest:smoke',
+            sessionKey: 'agent:main:admin:smoke',
             message: 'hello',
             deliver: true,
             idempotencyKey: 'smoke-1'
@@ -141,7 +141,7 @@ async function run() {
   writeJson(openclawJson, {
     gateway: { port: gatewayPort, auth: { mode: 'token', token: 'smoke-token' } }
   });
-  writeJson(clawnsoleJson, { adminPassword: 'admin', guestPassword: 'guest', authVersion: '1' });
+  writeJson(clawnsoleJson, { adminPassword: 'admin', authVersion: '1' });
 
   const mock = spawn('node', [path.join(__dirname, 'mock-gateway.js')], {
     env: {
@@ -160,12 +160,12 @@ async function run() {
   if (!ok) throw new Error('server did not start');
 
   const cookieJar = [];
-  await login(`http://127.0.0.1:${serverPort}`, 'guest', 'guest', cookieJar);
+  await login(`http://127.0.0.1:${serverPort}`, 'admin', 'admin', cookieJar);
   const cookieHeader = cookieJar.join('; ');
   await assertRole(`http://127.0.0.1:${serverPort}`, cookieHeader);
   const event = await wsChat({
     baseUrl: `http://127.0.0.1:${serverPort}`,
-    wsPath: '/guest-ws',
+    wsPath: '/admin-ws',
     cookieHeader
   });
 
