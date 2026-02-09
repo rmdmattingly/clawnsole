@@ -66,6 +66,11 @@ function httpPostJson(url, { headers = {}, body } = {}) {
   });
 }
 
+function adminCookie() {
+  const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+  return 'clawnsole_auth=' + cookie + '; clawnsole_role=admin';
+}
+
 function startServer({ openclawHome } = {}) {
   return new Promise((resolve) => {
     const { server } = createClawnsoleServer({ portRaw: 0, openclawHome });
@@ -254,8 +259,11 @@ test('workqueue API claim-next: when queues omitted falls back to defaults', asy
 
   const { server, port } = await startServer({ openclawHome });
   try {
-    const cookie = { Cookie: adminCookie() };
-    const claim = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/claim-next`, { agentId: 'agent-1' }, cookie);
+    const headers = { Cookie: adminCookie() };
+    const claim = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/claim-next`, {
+      headers,
+      body: { agentId: 'agent-1' }
+    });
     assert.equal(claim.status, 200);
     assert.equal(claim.json?.ok, true);
     assert.ok(claim.json?.item);
@@ -276,24 +284,26 @@ test('workqueue API claim-next: when queues omitted uses assignments for agent',
 
   const { server, port } = await startServer({ openclawHome });
   try {
-    const cookie = { Cookie: adminCookie() };
+    const headers = { Cookie: adminCookie() };
 
-    const set = await httpPostJson(
-      `http://127.0.0.1:${port}/api/workqueue/assignments`,
-      { agentId: 'agent-1', queues: ['qa'] },
-      cookie
-    );
+    const set = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/assignments`, {
+      headers,
+      body: { agentId: 'agent-1', queues: ['qa'] }
+    });
     assert.equal(set.status, 200);
     assert.equal(set.json?.ok, true);
 
-    const claim = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/claim-next`, { agentId: 'agent-1' }, cookie);
+    const claim = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/claim-next`, {
+      headers,
+      body: { agentId: 'agent-1' }
+    });
     assert.equal(claim.status, 200);
     assert.equal(claim.json?.ok, true);
     assert.ok(claim.json?.item);
     assert.equal(claim.json?.item?.queue, 'qa');
     assert.equal(claim.json?.queuesSource, 'assignment');
 
-    const list = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/assignments`, cookie);
+    const list = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/assignments`, headers);
     assert.equal(list.status, 200);
     assert.equal(list.json?.ok, true);
     assert.deepEqual(list.json?.assignments?.['agent-1'], ['qa']);

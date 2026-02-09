@@ -547,6 +547,65 @@ function createClawnsoleServer(options = {}) {
     // Admin-only workqueue API (safe read/write from other devices).
     // Mutations are limited to enqueue + claim-next.
 
+    if (req.url.startsWith('/api/workqueue/items')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      try {
+        const url = new URL(req.url, 'http://127.0.0.1');
+        const queue = String(url.searchParams.get('queue') || '').trim();
+        const { loadState } = require('./lib/workqueue');
+        const state = loadState(null);
+        const items = Array.isArray(state.items) ? state.items : [];
+        const filtered = queue ? items.filter((it) => it && it.queue === queue) : items;
+        // newest first for convenience
+        filtered.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+        sendJson(res, 200, { ok: true, items: filtered });
+      } catch (err) {
+        sendJson(res, 500, { error: 'workqueue_error' });
+      }
+      return;
+    }
+
+    if (req.url.startsWith('/api/workqueue/summary')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      try {
+        const url = new URL(req.url, 'http://127.0.0.1');
+        const queue = String(url.searchParams.get('queue') || '').trim();
+        const { loadState } = require('./lib/workqueue');
+        const state = loadState(null);
+        const items = Array.isArray(state.items) ? state.items : [];
+        const filtered = queue ? items.filter((it) => it && it.queue === queue) : items;
+        const counts = filtered.reduce((acc, it) => {
+          const st = String(it && it.status ? it.status : 'ready');
+          acc[st] = (acc[st] || 0) + 1;
+          return acc;
+        }, {});
+        const active = filtered.filter((it) => it && (it.status === 'claimed' || it.status === 'in_progress'));
+        active.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+        sendJson(res, 200, { ok: true, counts, active });
+      } catch (err) {
+        sendJson(res, 500, { error: 'workqueue_error' });
+      }
+      return;
+    }
+
     if (req.url === '/api/workqueue/enqueue') {
       if (!requireAuth(req, res)) return;
       if (req.clawnsoleRole !== 'admin') {
