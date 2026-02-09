@@ -1121,20 +1121,50 @@ function paneClearChatHistory(pane, { wipeStorage = false } = {}) {
   }
 }
 
-function paneAddChatMessage(pane, { role, text, runId, streaming = false, persist = true }) {
+function paneAddChatMessage(pane, { role, text, runId, streaming = false, persist = true, metaLabel = null, state = null, actions = null } = {}) {
   const shouldPin = pane.scroll.pinned || isNearBottom(pane.elements.thread);
   const bubble = document.createElement('div');
   bubble.className = `chat-bubble ${role}${streaming ? ' streaming' : ''}`;
   bubble.dataset.chatRole = role;
   if (runId) bubble.dataset.runId = String(runId);
+  if (state) bubble.dataset.chatState = String(state);
+
   const meta = document.createElement('div');
   meta.className = 'chat-meta';
-  meta.textContent = role === 'user' ? 'You' : paneAssistantLabel(pane);
+  meta.textContent = metaLabel || (role === 'user' ? 'You' : paneAssistantLabel(pane));
+
   const body = document.createElement('div');
   body.className = 'chat-text';
   body.innerHTML = renderMarkdown(text || '');
+
   bubble.appendChild(meta);
   bubble.appendChild(body);
+
+  if (actions && Array.isArray(actions) && actions.length > 0) {
+    const actionsRow = document.createElement('div');
+    actionsRow.className = 'chat-actions-row';
+    actions.forEach((action) => {
+      if (!action) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `chat-action ${action.className || ''}`.trim();
+      btn.textContent = String(action.label || 'Action');
+      btn.disabled = Boolean(action.disabled);
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (btn.disabled) return;
+        try {
+          action.onClick && action.onClick();
+        } catch (err) {
+          addFeed('err', 'chat', String(err));
+        }
+      });
+      actionsRow.appendChild(btn);
+    });
+    bubble.appendChild(actionsRow);
+  }
+
   pane.elements.thread.appendChild(bubble);
   pane.scroll.pinned = shouldPin;
   scrollToBottom(pane);
@@ -1153,6 +1183,8 @@ function paneAddChatMessage(pane, { role, text, runId, streaming = false, persis
   if (runId) {
     pane.chat.runs.set(runId, { body, index });
   }
+
+  return bubble;
 }
 
 function paneUpdateChatRun(pane, runId, text, done) {
@@ -1416,8 +1448,51 @@ function paneEnsureGuestPolicy(pane) {
   });
 }
 
-function paneEnqueueOutbound(pane, { message, sessionKey, idempotencyKey }) {
-  pane.outbox.push({ message, sessionKey, idempotencyKey, ts: Date.now() });
+function paneEnqueueOutbound(pane, { message, sessionKey, idempotencyKey, bubble }) {
+  pane.outbox.push({
+    localId: idempotencyKey,
+    message,
+    sessionKey,
+    idempotencyKey,
+    ts: Date.now(),
+    state: 'queued',
+    bubble: bubble || null
+  });
+}
+
+function paneUpdateOutboundBubble(entry) {
+  if (!entry || !entry.bubble) return;
+  const bubble = entry.bubble;
+  bubble.dataset.chatState = entry.state;
+  bubble.classList.toggle('queued', entry.state === 'queued');
+  bubble.classList.toggle('sending', entry.state === 'sending');
+  bubble.classList.toggle('failed', entry.state === 'failed');
+
+  const meta = bubble.querySelector('.chat-meta');
+  if (meta) {
+    if (entry.state === 'queued') meta.textContent = 'You · Queued (not sent)';
+    else if (entry.state === 'sending') meta.textContent = 'You · Sending…';
+    else if (entry.state === 'failed') meta.textContent = 'You · Failed to send';
+    else meta.textContent = 'You';
+  }
+}
+
+function panePersistUserMessage(pane, text) {
+  try {
+    pane.chat.history.push({ role: 'user', text: text || '', ts: Date.now() });
+    paneSaveChatHistory(pane);
+  } catch (err) {
+    addFeed('err', 'chat', `failed to persist user message: ${String(err)}`);
+  }
+}
+
+function paneRemoveOutboundById(pane, localId) {
+  const idx = pane.outbox.findIndex((m) => m.localId === localId);
+  if (idx >= 0) {
+    const [removed] = pane.outbox.splice(idx, 1);
+    return removed;
+  }
+  return null;
 }
 
 function panePumpOutbox(pane) {
@@ -1427,6 +1502,8 @@ function panePumpOutbox(pane) {
   if (!next) return;
 
   pane.inFlight = next;
+  next.state = 'sending';
+  paneUpdateOutboundBubble(next);
 
   // pendingSend is the recovery mechanism for in-flight sends.
   pane.pendingSend = {
@@ -1440,13 +1517,33 @@ function panePumpOutbox(pane) {
 
   if (!pane.thinking.active) paneStartThinking(pane);
 
-  pane.client.request('chat.send', {
-    sessionKey: next.sessionKey,
-    message: next.message,
-    deliver: true,
-    idempotencyKey: next.idempotencyKey
-  });
+  pane.client
+    .request('chat.send', {
+      sessionKey: next.sessionKey,
+      message: next.message,
+      deliver: true,
+      idempotencyKey: next.idempotencyKey
+    })
+    .then(() => {
+      // Mark sent once the gateway acks the send.
+      next.state = 'sent';
+      paneUpdateOutboundBubble(next);
+      panePersistUserMessage(pane, next.message);
+      pane.pendingSend = null;
+      pane.inFlight = null;
+      panePumpOutbox(pane);
+    })
+    .catch((err) => {
+      addFeed('err', 'chat.send', String(err));
+      next.state = 'failed';
+      paneUpdateOutboundBubble(next);
+      // Put it back at the front so user can edit/delete/retry manually.
+      pane.inFlight = null;
+      pane.pendingSend = null;
+      pane.outbox.unshift(next);
+    });
 }
+
 
 async function paneSendChat(pane) {
   const raw = pane.elements.input.value.trim();
@@ -1509,12 +1606,61 @@ async function paneSendChat(pane) {
 
   const outbound = `${message}${attachmentText}`;
 
-  // Render attachments in the local user bubble too (otherwise the sender never sees what they attached).
-  paneAddChatMessage(pane, { role: 'user', text: outbound });
+  const localId = idempotencyKey;
+
+  const makeActions = () => {
+    const entry = pane.outbox.find((m) => m.localId === localId) || (pane.inFlight && pane.inFlight.localId === localId ? pane.inFlight : null);
+    const state = entry ? entry.state : 'queued';
+    const disabled = state === 'sending' || state === 'sent';
+
+    return [
+      {
+        label: 'Edit',
+        className: 'edit',
+        disabled,
+        onClick: () => {
+          const target = pane.outbox.find((m) => m.localId === localId);
+          if (!target) return;
+          const nextText = window.prompt('Edit queued message:', target.message || '');
+          if (nextText === null) return;
+          const trimmed = String(nextText).trim();
+          if (!trimmed) return;
+          target.message = trimmed;
+          const body = target.bubble ? target.bubble.querySelector('.chat-text') : null;
+          if (body) body.innerHTML = renderMarkdown(trimmed);
+        }
+      },
+      {
+        label: 'Delete',
+        className: 'delete',
+        disabled,
+        onClick: () => {
+          const target = pane.outbox.find((m) => m.localId === localId);
+          if (!target) return;
+          if (!window.confirm('Delete this queued message? It will not be sent.')) return;
+          paneRemoveOutboundById(pane, localId);
+          try {
+            target.bubble && target.bubble.remove();
+          } catch {}
+        }
+      }
+    ];
+  };
+
+  // Render queued bubble (distinct from sent). We persist only after gateway ack.
+  const bubble = paneAddChatMessage(pane, {
+    role: 'user',
+    text: outbound,
+    persist: false,
+    metaLabel: 'You · Queued (not sent)',
+    state: 'queued',
+    actions: makeActions()
+  });
+
   pane.scroll.pinned = true;
   scrollToBottom(pane, true);
   triggerFiring(1.6, 3);
-  paneEnqueueOutbound(pane, { message: outbound, sessionKey, idempotencyKey });
+  paneEnqueueOutbound(pane, { message: outbound, sessionKey, idempotencyKey, bubble });
   panePumpOutbox(pane);
 
   pane.elements.input.value = '';
