@@ -138,6 +138,45 @@ test('workqueue: claimed-by-other enforced for terminal transitions (done/failed
   assert.equal(done.status, 'done');
 });
 
+test('workqueue: progress/terminal transitions require an explicit claim', () => {
+  const root = tempRoot();
+
+  const item = enqueueItem(root, { queue: 'dev', title: 'a', instructions: 'x', priority: 0 });
+
+  assert.throws(
+    () => transitionItem(root, { itemId: item.id, agentId: 'agent-1', status: 'in_progress', note: 'starting' }),
+    (err) => err && err.code === 'NOT_CLAIMED'
+  );
+
+  assert.throws(
+    () => transitionItem(root, { itemId: item.id, agentId: 'agent-1', status: 'done', result: { ok: true } }),
+    (err) => err && err.code === 'NOT_CLAIMED'
+  );
+
+  assert.throws(
+    () => transitionItem(root, { itemId: item.id, agentId: 'agent-1', status: 'failed', error: 'nope' }),
+    (err) => err && err.code === 'NOT_CLAIMED'
+  );
+});
+
+test('workqueue: claim-next treats pending as ready', () => {
+  const root = tempRoot();
+
+  const item = enqueueItem(root, { queue: 'dev', title: 'a', instructions: 'x', priority: 0 });
+
+  // Force status to pending.
+  const state = loadState(root);
+  const it = state.items.find((x) => x.id === item.id);
+  assert.ok(it);
+  it.status = 'pending';
+  saveState(root, state);
+
+  const claimed = claimNext(root, { agentId: 'agent-1', queues: ['dev'], leaseMs: 60_000 });
+  assert.ok(claimed);
+  assert.equal(claimed.id, item.id);
+  assert.equal(claimed.claimedBy, 'agent-1');
+});
+
 test('workqueue: enqueue supports dedupeKey idempotency', () => {
   const root = tempRoot();
 
