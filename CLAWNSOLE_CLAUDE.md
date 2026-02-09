@@ -20,8 +20,8 @@ npm run dev:qa     # CLAWNSOLE_INSTANCE=qa PORT=5174
 
 URLs:
 
-- Prod: `http://localhost:5173/admin` or `http://localhost:5173/guest`
-- QA: `http://localhost:5174/admin` or `http://localhost:5174/guest`
+- Prod: `http://localhost:5173/admin`
+- QA: `http://localhost:5174/admin`
 
 You sign in separately per instance because cookies are now suffixed:
 
@@ -33,17 +33,14 @@ You sign in separately per instance because cookies are now suffixed:
 - HTTP server: `server.js` boots `createClawnsoleServer()` from `clawnsole-server.js`.
 - Static UI: `index.html` + `styles.css` + `app.js`.
 - Gateway connectivity:
-  - UI fetches `/meta` to discover `adminWsUrl` and `guestWsUrl`.
   - UI connects to Clawnsole server WS endpoints, which proxy to the real OpenClaw gateway WS.
   - This keeps the gateway token off the browser (and allows role enforcement).
 
 Key server endpoints (see `clawnsole-server.js`):
 
-- `GET /meta`: returns `adminWsUrl`, `guestWsUrl`, `wsUrl`, `guestAgentId`.
 - `POST /auth/login`, `POST /auth/logout`, `GET /auth/role`: simple cookie auth.
 - `GET /agents` (admin-only): returns agent list including `displayName` + `emoji`.
 - `POST /upload`, `GET /uploads/...`: attachment support.
-- WS: `/admin-ws` and `/guest-ws` proxy to the gateway (via `proxy.js`).
 
 ## Connection Reliability / Multi-Tab / Multi-Pane
 
@@ -64,20 +61,12 @@ The UI sends a `connect` with a stable `client.id` and a unique `instanceId` per
 
 See: `app.js` `computeConnectClient()`, `computeSessionKey()`.
 
-## Role Separation / Message Routing (Admin vs Guest)
-
 High-level rules:
 
-- Admin and Guest use different WS endpoints (`/admin-ws` vs `/guest-ws`).
 - Session keys are role-scoped (and for admin, also pane-scoped) to prevent cross-talk:
-  - Guest session key: `agent:<guestAgentId>:guest:<device>`
   - Admin session key: `agent:<agentId>:admin:<device>-<pane>`
 
 See: `app.js` `computeSessionKey()`.
-
-Guest policy injection:
-
-- In guest mode, the server/proxy can inject a guest prompt, and the client has a fallback injection path.
 
 ## Agent Identity (Name + Signature Emoji)
 
@@ -104,8 +93,6 @@ Client-side (`app.js`):
 ## Chat Retention (Per-Agent)
 
 Clawnsole stores chat history locally in `localStorage` and now does so with a stable per-agent key:
-
-- Key format: `clawnsole.chat.history.agent:<agentId>:admin` (or `...:guest`)
 
 Migration:
 

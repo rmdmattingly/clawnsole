@@ -93,7 +93,6 @@ test.beforeAll(async () => {
     JSON.stringify(
       {
         adminPassword: 'admin',
-        guestPassword: 'guest',
         authVersion: 'test'
       },
       null,

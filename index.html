@@ -262,35 +262,7 @@
           <label>
             Device ID
             <input id="deviceId" type="text" />
-          </label>
-          <hr style="margin: 14px 0; opacity: 0.25;" />
-          <h3 style="margin: 0 0 8px;">Recurring Agent Prompts</h3>
-          <div class="hint" style="margin-bottom: 8px;">
-            Stored locally in <code>~/.openclaw</code>. Run the external scheduler script to deliver prompts.
-          </div>
-          <label>
-            Target agent
-            <select id="recurringPromptAgent"></select>
-          </label>
-          <label>
-            Interval (minutes)
-            <input id="recurringPromptInterval" type="number" min="1" step="1" value="60" />
-          </label>
-          <label>
-            Message
-            <textarea id="recurringPromptMessage" rows="4" placeholder="Message to send to the agent..."></textarea>
-          </label>
-          <label style="display:flex; gap:8px; align-items:center;">
-            <input id="recurringPromptEnabled" type="checkbox" checked />
-            Enabled
-          </label>
-          <div class="button-row">
-            <button id="recurringPromptCreateBtn" class="primary" type="button">Create</button>
-            <button id="recurringPromptRefreshBtn" class="secondary" type="button">Refresh</button>
-          </div>
-          <div id="recurringPromptStatus" class="hint"></div>
-          <div id="recurringPromptList" class="hint" style="margin-top: 10px;"></div>
-          <div class="button-row">
+          </label>          <div class="button-row">
             <button id="disconnectBtn">Disconnect</button>
           </div>
           <div class="hint">

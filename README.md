@@ -15,7 +15,7 @@ gateway and renders an interactive chat experience.
 curl -fsSL https://raw.githubusercontent.com/rmdmattingly/clawnsole/main/scripts/install.sh | bash
 ```
 
-The installer will prompt for admin/guest passwords and will install a
+The installer will prompt for an admin password and will install a
 LaunchAgent to auto-start Clawnsole on login.
 You can also enable automatic updates (LaunchAgent).
 It will expose a nice local URL at https://clawnsole.local (macOS + sudo required).
@@ -79,13 +79,11 @@ but you can update them manually too:
 
 ```json
 {
-  "adminPassword": "your-strong-password",
-  "guestPassword": "guest-password"
+  "adminPassword": "your-strong-password"
 }
 ```
 
-Clawnsole uses HTTP Basic auth; any username is accepted, the password must match.
-If omitted, admin defaults to `admin` and guest defaults to `guest`.
+If omitted, the admin password defaults to `admin`.
 
 ## Notes
 
@@ -150,8 +148,8 @@ CLAWNSOLE_INSTANCE=qa PORT=5174 npm run dev
 
 Connect:
 
-- Prod: `http://localhost:5173/admin` (or `/guest`)
-- QA: `http://localhost:5174/admin` (or `/guest`)
+- Prod: `http://localhost:5173/admin`
+- QA: `http://localhost:5174/admin`
 
 If QA keeps dying due to terminal logout / SIGTERM, run it as a managed service (macOS LaunchAgent):
 
