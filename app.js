@@ -2,9 +2,6 @@ const globalElements = {
   wsUrl: document.getElementById('wsUrl'),
   clientId: document.getElementById('clientId'),
   deviceId: document.getElementById('deviceId'),
-  guestPrompt: document.getElementById('guestPrompt'),
-  saveGuestPromptBtn: document.getElementById('saveGuestPromptBtn'),
-  guestPromptStatus: document.getElementById('guestPromptStatus'),
   disconnectBtn: document.getElementById('disconnectBtn'),
   status: document.getElementById('connectionStatus'),
   statusMeta: document.getElementById('statusMeta'),
@@ -23,7 +20,6 @@ const globalElements = {
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
-  loginRole: document.getElementById('loginRole'),
   loginPassword: document.getElementById('loginPassword'),
   loginBtn: document.getElementById('loginBtn'),
   loginError: document.getElementById('loginError'),
@@ -35,16 +31,30 @@ const globalElements = {
   paneTemplate: document.getElementById('paneTemplate')
 };
 
+function isGuestRoute() {
+  try {
+    const path = window.location.pathname || '/';
+    return path === '/guest' || path.startsWith('/guest/');
+  } catch {}
+  return false;
+}
+
 function getRouteRole() {
   try {
     const path = window.location.pathname || '/';
     if (path === '/admin' || path.startsWith('/admin/')) return 'admin';
-    if (path === '/guest' || path.startsWith('/guest/')) return 'guest';
   } catch {}
   return null;
 }
 
 const routeRole = getRouteRole();
+
+// Legacy guest routes are no longer supported by the client.
+if (isGuestRoute()) {
+  try {
+    window.location.replace('/admin');
+  } catch {}
+}
 
 function installViewportVhVar() {
   const setVh = () => {
@@ -78,8 +88,7 @@ const storage = {
 };
 
 const roleState = {
-  role: null,
-  guestPolicyInjected: false
+  role: null
 };
 
 const uiState = {
@@ -220,7 +229,7 @@ async function fetchRoleState() {
     if (!res.ok) return { reachable: true, role: null };
     const data = await res.json();
     if (data.role === 'admin') return { reachable: true, role: 'admin' };
-    if (data.role === 'guest') return { reachable: true, role: 'guest' };
+    // Client no longer supports guest role.
     return { reachable: true, role: null };
   } catch {
     return { reachable: false, role: null };
@@ -315,17 +324,16 @@ function resolveWsUrl(raw) {
   return raw;
 }
 
-function computeGatewayTarget(kind) {
-  const key = kind === 'guest' ? 'guestWsUrl' : 'adminWsUrl';
-  const proxyUrl = uiState.meta && uiState.meta[key] ? uiState.meta[key] : '';
+function computeGatewayTarget() {
+  const proxyUrl = uiState.meta && uiState.meta.adminWsUrl ? uiState.meta.adminWsUrl : '';
   const usingProxy = Boolean(proxyUrl);
   const rawUrl = proxyUrl || globalElements.wsUrl.value.trim();
   return { url: resolveWsUrl(rawUrl), usingProxy };
 }
 
-async function prepareGateway(kind) {
+async function prepareGateway() {
   await ensureMetaLoaded();
-  const { usingProxy } = computeGatewayTarget(kind);
+  const { usingProxy } = computeGatewayTarget();
   if (!usingProxy) {
     if (!cachedToken) await fetchToken();
     if (!cachedToken) throw new Error('missing gateway token');
@@ -410,14 +418,8 @@ function setRole(role) {
     globalElements.rolePill.textContent = role;
     globalElements.rolePill.classList.toggle('admin', role === 'admin');
   }
-  if (role === 'guest') {
-    roleState.guestPolicyInjected = false;
-    globalElements.settingsBtn?.setAttribute('disabled', 'disabled');
-    if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
-  } else {
-    globalElements.settingsBtn?.removeAttribute('disabled');
-    if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '1';
-  }
+  globalElements.settingsBtn?.removeAttribute('disabled');
+  if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '1';
 
   if (globalElements.paneControls) {
     globalElements.paneControls.hidden = role !== 'admin';
@@ -435,16 +437,7 @@ function showLogin(message = '') {
   globalElements.loginError.textContent = message;
   globalElements.loginPassword.value = '';
 
-  if (routeRole === 'admin' || routeRole === 'guest') {
-    globalElements.loginRole.value = routeRole;
-    globalElements.loginRole.disabled = true;
-  } else {
-    globalElements.loginRole.disabled = false;
-    const savedRole = storage.get('clawnsole.auth.role', '');
-    if (savedRole === 'admin' || savedRole === 'guest') {
-      globalElements.loginRole.value = savedRole;
-    }
-  }
+  // Admin-only login (role selection removed).
 
   setAuthState(false);
   if (globalElements.rolePill) {
@@ -468,7 +461,7 @@ function hideLogin() {
 }
 
 async function attemptLogin() {
-  const role = globalElements.loginRole.value === 'admin' ? 'admin' : 'guest';
+  const role = 'admin';
   const password = globalElements.loginPassword.value.trim();
   if (!password) {
     showLogin('Password required.');
@@ -486,9 +479,13 @@ async function attemptLogin() {
       return;
     }
     const data = await res.json();
-    const nextRole = data.role === 'admin' ? 'admin' : 'guest';
+    const nextRole = data.role === 'admin' ? 'admin' : null;
+    if (!nextRole) {
+      showLogin('Admin access required.');
+      return;
+    }
     storage.set('clawnsole.auth.role', nextRole);
-    window.location.replace(nextRole === 'admin' ? '/admin' : '/guest');
+    window.location.replace('/admin');
   } catch {
     showLogin('Login failed. Please retry.');
   }
@@ -497,9 +494,6 @@ async function attemptLogin() {
 function openSettings() {
   globalElements.settingsModal.classList.add('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'false');
-  if (roleState.role === 'admin') {
-    loadGuestPrompt();
-  }
 }
 
 function closeSettings() {
@@ -712,42 +706,7 @@ function startWorkqueueLeaseTicker() {
   }, 1000);
 }
 
-async function loadGuestPrompt() {
-  if (!globalElements.guestPrompt) return;
-  globalElements.guestPromptStatus.textContent = '';
-  try {
-    const res = await fetch('/config/guest-prompt', { credentials: 'include' });
-    if (!res.ok) {
-      globalElements.guestPromptStatus.textContent = 'Unable to load guest prompt.';
-      return;
-    }
-    const data = await res.json();
-    globalElements.guestPrompt.value = data.prompt || '';
-  } catch {
-    globalElements.guestPromptStatus.textContent = 'Unable to load guest prompt.';
-  }
-}
-
-async function saveGuestPrompt() {
-  if (!globalElements.guestPrompt) return;
-  const prompt = globalElements.guestPrompt.value.trim();
-  globalElements.guestPromptStatus.textContent = '';
-  try {
-    const res = await fetch('/config/guest-prompt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ prompt })
-    });
-    if (!res.ok) {
-      globalElements.guestPromptStatus.textContent = 'Failed to save guest prompt.';
-      return;
-    }
-    globalElements.guestPromptStatus.textContent = 'Guest prompt saved.';
-  } catch {
-    globalElements.guestPromptStatus.textContent = 'Failed to save guest prompt.';
-  }
-}
+// Guest prompt UI has been removed (admin-only client).
 
 function escapeHtml(value) {
   return value
@@ -1111,65 +1070,40 @@ function computeBaseDeviceLabel() {
   return TAB_ID ? `${base}-${TAB_ID}` : base;
 }
 
-function computeSessionKey({ role, agentId, paneKey }) {
+function computeSessionKey({ agentId, paneKey }) {
   const baseDeviceLabel = computeBaseDeviceLabel();
-  if (role === 'guest') {
-    const guestAgent = uiState.meta.guestAgentId || 'clawnsole-guest';
-    return `agent:${guestAgent}:guest:${baseDeviceLabel}`;
-  }
   const resolvedAgent = normalizeAgentId(agentId || 'main');
   const deviceLabel = paneKey ? `${baseDeviceLabel}-${paneKey}` : baseDeviceLabel;
   return `agent:${resolvedAgent}:admin:${deviceLabel}`;
 }
 
-function computeChatKey({ role, agentId }) {
-  if (role === 'guest') {
-    const guestAgent = uiState.meta.guestAgentId || 'clawnsole-guest';
-    return `agent:${guestAgent}:guest`;
-  }
+function computeChatKey({ agentId }) {
   const resolvedAgent = normalizeAgentId(agentId || 'main');
   return `agent:${resolvedAgent}:admin`;
 }
 
-function computeLegacySessionKey({ role, agentId }) {
+function computeLegacySessionKey({ agentId }) {
   const baseDeviceLabel = globalElements.deviceId.value.trim() || 'device';
-  if (role === 'guest') {
-    const guestAgent = uiState.meta.guestAgentId || 'clawnsole-guest';
-    return `agent:${guestAgent}:guest:${baseDeviceLabel}`;
-  }
   const resolvedAgent = normalizeAgentId(agentId || 'main');
   return `agent:${resolvedAgent}:admin:${baseDeviceLabel}`;
 }
 
-function computeConnectClient({ role, paneKey }) {
+function computeConnectClient({ paneKey }) {
   const baseDeviceLabel = computeBaseDeviceLabel();
   const baseClientId = globalElements.clientId.value.trim() || 'webchat-ui';
-  if (role === 'admin') {
-    const suffix = paneKey ? `-${paneKey}` : '';
-    return {
-      // OpenClaw validates client.id against a schema; keep it stable.
-      id: baseClientId,
-      version: '0.1.0',
-      platform: 'web',
-      mode: 'webchat',
-      instanceId: `${baseDeviceLabel}${suffix}`
-    };
-  }
+  const suffix = paneKey ? `-${paneKey}` : '';
   return {
+    // OpenClaw validates client.id against a schema; keep it stable.
     id: baseClientId,
     version: '0.1.0',
     platform: 'web',
     mode: 'webchat',
-    instanceId: baseDeviceLabel
+    instanceId: `${baseDeviceLabel}${suffix}`
   };
 }
 
 function paneAssistantLabel(pane) {
-  const id =
-    pane.role === 'guest'
-      ? uiState.meta.guestAgentId || 'clawnsole-guest'
-      : pane.agentId || 'main';
-  const record = getAgentRecord(id);
+  const record = getAgentRecord(pane.agentId || 'main');
   return formatAgentLabel(record, { includeId: false });
 }
 
@@ -1631,40 +1565,10 @@ function paneEnsureHiddenWelcome(pane) {
   const sessionKey = pane.sessionKey();
   const storageKey = `clawnsole.welcome.${sessionKey}`;
   if (storage.get(storageKey)) return;
-  const message =
-    pane.role === 'guest'
-      ? 'Welcome! You are assisting a guest. Greet them as a guest, do not assume identity, and ask how you can help today.'
-      : 'Welcome! You are in Admin mode. You can assist with full OpenClaw capabilities.';
-  if (pane.role === 'guest') {
-    paneAddChatMessage(pane, { role: 'assistant', text: message, persist: false });
-    storage.set(storageKey, 'sent');
-    return;
-  }
+
+  const message = 'Welcome! You are in Admin mode. You can assist with full OpenClaw capabilities.';
   pane.client.request('chat.inject', { sessionKey, message, label: 'Welcome' });
   storage.set(storageKey, 'sent');
-}
-
-function paneEnsureGuestPolicy(pane) {
-  if (pane.role !== 'guest') return;
-  if (!pane.connected) return;
-  if (roleState.guestPolicyInjected) return;
-  roleState.guestPolicyInjected = true;
-
-  // When connected through the guest proxy, the server injects the guest policy.
-  if (uiState.meta.guestWsUrl) return;
-
-  const sessionKey = pane.sessionKey();
-  pane.client.request('sessions.resolve', { key: sessionKey }).then((res) => {
-    if (!res?.ok) {
-      pane.client.request('sessions.reset', { key: sessionKey });
-    }
-  });
-  pane.client.request('chat.inject', {
-    sessionKey,
-    message:
-      'Guest mode: read-only. Do not access or summarize emails or private data. Do not assume the guest is the admin. Ask for their name if needed. You may assist with general questions and basic home automation (lights, climate, scenes).',
-    label: 'Guest policy'
-  });
 }
 
 function paneEnqueueOutbound(pane, { message, sessionKey, idempotencyKey, bubble }) {
@@ -1936,16 +1840,16 @@ function handleGatewayFrame(pane, data) {
 function buildClientForPane(pane) {
   return new window.Clawnsole.GatewayClient({
     prepare: async () => {
-      await prepareGateway(pane.role);
+      await prepareGateway();
     },
-    getUrl: () => computeGatewayTarget(pane.role).url,
+    getUrl: () => computeGatewayTarget().url,
     buildConnectParams: () => {
       const scopes = ['operator.read', 'operator.write'];
-      const { usingProxy } = computeGatewayTarget(pane.role);
+      const { usingProxy } = computeGatewayTarget();
       return {
         minProtocol: 3,
         maxProtocol: 3,
-        client: computeConnectClient({ role: pane.role, paneKey: pane.key }),
+        client: computeConnectClient({ paneKey: pane.key }),
         role: 'operator',
         scopes,
         caps: [],
@@ -1976,7 +1880,8 @@ function buildClientForPane(pane) {
       paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();
-      paneEnsureGuestPolicy(pane);
+      // Guest policy removed (admin-only client).
+
       paneEnsureHiddenWelcome(pane);
       pane.client.request('sessions.resolve', { key: pane.sessionKey() });
 
@@ -2081,9 +1986,9 @@ function createPane({ key, role, agentId, closable = true } = {}) {
 	    catchUp: { active: false, attemptsLeft: 0, timer: null },
 	    outbox: [],
 	    inFlight: null,
-	    chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
-	    legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
-	    sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
+	    chatKey: () => computeChatKey({ agentId: pane.agentId }),
+	    legacySessionKey: () => computeLegacySessionKey({ agentId: pane.agentId }),
+	    sessionKey: () => computeSessionKey({ agentId: pane.agentId, paneKey: pane.key }),
 	    client: null
 	  };
 
@@ -2179,14 +2084,9 @@ const paneManager = {
       this.initAdmin();
       return;
     }
-    this.initGuest();
+    this.initAdmin();
   },
-  initGuest() {
-    this.panes = [createPane({ key: 'guest', role: 'guest', closable: false })];
-    globalElements.paneGrid.appendChild(this.panes[0].elements.root);
-    this.updatePaneLabels();
-    this.applyInferredLayout();
-  },
+  // initGuest removed (client is admin-only).
   initAdmin() {
     const panes = this.loadAdminPanes();
     this.panes = panes.map((cfg) => createPane({ key: cfg.key, role: 'admin', agentId: cfg.agentId, closable: true }));
@@ -2328,7 +2228,8 @@ globalElements.settingsCloseBtn?.addEventListener('click', () => closeSettings()
 globalElements.settingsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.settingsModal) closeSettings();
 });
-globalElements.saveGuestPromptBtn?.addEventListener('click', () => saveGuestPrompt());
+// Guest prompt controls removed.
+
 
 globalElements.workqueueBtn?.addEventListener('click', () => openWorkqueue());
 globalElements.workqueueCloseBtn?.addEventListener('click', () => closeWorkqueue());
@@ -2426,34 +2327,30 @@ window.addEventListener('load', () => {
       }
 
       if (!routeRole) {
-        window.location.replace(role === 'admin' ? '/admin' : '/guest');
+        window.location.replace('/admin');
         return;
       }
 
-      if (role !== routeRole) {
+      if (role !== 'admin' || routeRole !== 'admin') {
         roleState.role = null;
-        showLogin(`Signed in as ${role}. Sign in as ${routeRole} to continue.`);
+        showLogin('Admin access required.');
         return;
       }
 
       hideLogin();
-      setRole(role);
+      setRole('admin');
 
-      if (role === 'admin') {
-        uiState.agents = await fetchAgents();
-        if (uiState.agents.length === 0) {
-          uiState.agents = [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
-        }
+      uiState.agents = await fetchAgents();
+      if (uiState.agents.length === 0) {
+        uiState.agents = [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
       }
 
-      paneManager.init(role);
+      paneManager.init('admin');
 
       // Update agent options now that we have a definitive list.
-      if (role === 'admin') {
-        paneManager.panes.forEach((pane) => {
-          renderAgentOptions(pane.elements.agentSelect, pane.agentId);
-        });
-      }
+      paneManager.panes.forEach((pane) => {
+        renderAgentOptions(pane.elements.agentSelect, pane.agentId);
+      });
 
       setAuthState(true);
       paneManager.connectAll();

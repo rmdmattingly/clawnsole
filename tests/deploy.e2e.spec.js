@@ -25,7 +25,6 @@ test.describe('@deploy Clawnsole deploy e2e', () => {
     // If already authed, these actions are no-ops.
     const overlay = page.locator('#loginOverlay');
     if (await overlay.isVisible().catch(() => false)) {
-      await page.selectOption('#loginRole', 'admin');
       await page.fill('#loginPassword', adminPassword);
       await page.click('#loginBtn');
     }
