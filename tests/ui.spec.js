@@ -178,7 +178,6 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   });
   expect(Math.round(Number.parseFloat(paneFontSize))).toBeGreaterThanOrEqual(16);
 
-  const pane = page.locator('[data-pane]').first();
   await pane.locator('[data-pane-input]').fill('hello');
   await pane.locator('[data-pane-send]').click();
 
