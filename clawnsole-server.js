@@ -72,11 +72,17 @@ function createClawnsoleServer(options = {}) {
   }
 
   function readToken() {
-    const raw = fs.readFileSync(configPath, 'utf8');
-    const cfg = JSON.parse(raw);
-    const token = cfg?.gateway?.auth?.token || '';
-    const mode = cfg?.gateway?.auth?.mode || 'token';
-    return { token, mode };
+    try {
+      const raw = fs.readFileSync(configPath, 'utf8');
+      const cfg = JSON.parse(raw);
+      const token = cfg?.gateway?.auth?.token || '';
+      const mode = cfg?.gateway?.auth?.mode || 'token';
+      return { token, mode };
+    } catch {
+      // In tests/CI we may start the server before a config exists; treat as missing token
+      // and let callers decide how to handle auth.
+      return { token: '', mode: 'token' };
+    }
   }
 
   function readGatewayPort() {
