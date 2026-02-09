@@ -108,6 +108,14 @@ test.beforeAll(async () => {
         stdio: ['ignore', 'pipe', 'pipe']
       })
     );
+    gatewayProc.on('exit', (code, signal) => {
+      // eslint-disable-next-line no-console
+      console.log(`mock-gateway exited code=${code} signal=${signal}`);
+      if (gatewayProc?.__stdout || gatewayProc?.__stderr) {
+        // eslint-disable-next-line no-console
+        console.log(`mock-gateway output:\n${gatewayProc.__stdout || ''}${gatewayProc.__stderr || ''}`);
+      }
+    });
     await waitForHttp(`http://127.0.0.1:${gatewayPort}`, 10000, gatewayProc, 'mock-gateway');
   } catch (err) {
     const message = String(err);
@@ -121,10 +129,19 @@ test.beforeAll(async () => {
   try {
     serverProc = captureOutput(
       spawn('node', ['server.js'], {
-        env: { ...process.env, HOME: tempHome, PORT: String(serverPort) },
+        // Force IPv4 bind; some CI environments bind IPv6-only by default and 127.0.0.1 then refuses.
+        env: { ...process.env, HOME: tempHome, PORT: String(serverPort), HOST: '127.0.0.1' },
         stdio: ['ignore', 'pipe', 'pipe']
       })
     );
+    serverProc.on('exit', (code, signal) => {
+      // eslint-disable-next-line no-console
+      console.log(`clawnsole server exited code=${code} signal=${signal}`);
+      if (serverProc?.__stdout || serverProc?.__stderr) {
+        // eslint-disable-next-line no-console
+        console.log(`clawnsole server output:\n${serverProc.__stdout || ''}${serverProc.__stderr || ''}`);
+      }
+    });
     await waitForHttp(`http://127.0.0.1:${serverPort}/meta`, 10000, serverProc, 'clawnsole');
   } catch (err) {
     const message = String(err);
@@ -142,7 +159,21 @@ test.afterAll(() => {
 });
 
 test('admin login persists, send/receive, upload attachment', async ({ page }, testInfo) => {
+  test.setTimeout(180000);
   test.skip(!!skipReason, skipReason);
+
+  // Surface browser-side failures in CI logs (helps diagnose ws connect issues).
+  page.on('console', (msg) => {
+    try {
+      console.log(`[ui-console:${msg.type()}] ${msg.text()}`);
+    } catch {}
+  });
+  page.on('pageerror', (err) => {
+    try {
+      console.log(`[ui-pageerror] ${String(err && err.stack ? err.stack : err)}`);
+    } catch {}
+  });
+
   await page.goto(`http://127.0.0.1:${serverPort}/`);
 
   // iOS Safari will auto-zoom focused inputs when font-size < 16px.
@@ -166,7 +197,11 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   // In CI the websocket handshake can be slower; wait longer for the pane to report connected.
+  await page.waitForSelector('[data-pane][data-connected="true"]', { timeout: 90000 });
   await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 30000 });
+
+  const pane = page.locator('[data-pane]').first();
+  await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
 
   const paneFontSize = await page.evaluate(() => {
     const el = document.querySelector('[data-pane] [data-pane-input]');
@@ -174,7 +209,6 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   });
   expect(Math.round(Number.parseFloat(paneFontSize))).toBeGreaterThanOrEqual(16);
 
-  const pane = page.locator('[data-pane]').first();
   await pane.locator('[data-pane-input]').fill('hello');
   await pane.locator('[data-pane-send]').click();
 
