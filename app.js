@@ -29,7 +29,6 @@ const globalElements = {
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
-  loginRole: document.getElementById('loginRole'),
   loginPassword: document.getElementById('loginPassword'),
   loginBtn: document.getElementById('loginBtn'),
   loginError: document.getElementById('loginError'),
@@ -441,14 +440,10 @@ function showLogin(message = '') {
   globalElements.loginError.textContent = message;
   globalElements.loginPassword.value = '';
 
-  if (routeRole === 'admin' || routeRole === 'guest') {
-    globalElements.loginRole.value = routeRole;
-    globalElements.loginRole.disabled = true;
+  if (routeRole === 'admin') {
   } else {
-    globalElements.loginRole.disabled = false;
     const savedRole = storage.get('clawnsole.auth.role', '');
-    if (savedRole === 'admin' || savedRole === 'guest') {
-      globalElements.loginRole.value = savedRole;
+    if (savedRole === 'admin') {
     }
   }
 
@@ -493,7 +488,7 @@ async function attemptLogin() {
     }
     const data = await res.json();
     const nextRole = data.role === 'admin' ? 'admin' : 'admin';
-    storage.set('clawnsole.auth.role', nextRole);
+    storage.set('clawnsole.auth.role', 'admin');
     window.location.replace('/admin');
   } catch {
     showLogin('Login failed. Please retry.');
@@ -3116,7 +3111,7 @@ window.addEventListener('load', () => {
       }
 
       if (!routeRole) {
-        window.location.replace(role === 'admin' ? '/admin' : '/guest');
+        window.location.replace('/admin');
         return;
       }
 
