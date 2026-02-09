@@ -129,7 +129,8 @@ test.beforeAll(async () => {
   try {
     serverProc = captureOutput(
       spawn('node', ['server.js'], {
-        env: { ...process.env, HOME: tempHome, PORT: String(serverPort) },
+        // Force IPv4 bind; some CI environments bind IPv6-only by default and 127.0.0.1 then refuses.
+        env: { ...process.env, HOME: tempHome, PORT: String(serverPort), HOST: '127.0.0.1' },
         stdio: ['ignore', 'pipe', 'pipe']
       })
     );
