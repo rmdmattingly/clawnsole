@@ -108,6 +108,14 @@ test.beforeAll(async () => {
         stdio: ['ignore', 'pipe', 'pipe']
       })
     );
+    gatewayProc.on('exit', (code, signal) => {
+      // eslint-disable-next-line no-console
+      console.log(`mock-gateway exited code=${code} signal=${signal}`);
+      if (gatewayProc?.__stdout || gatewayProc?.__stderr) {
+        // eslint-disable-next-line no-console
+        console.log(`mock-gateway output:\n${gatewayProc.__stdout || ''}${gatewayProc.__stderr || ''}`);
+      }
+    });
     await waitForHttp(`http://127.0.0.1:${gatewayPort}`, 10000, gatewayProc, 'mock-gateway');
   } catch (err) {
     const message = String(err);
@@ -125,6 +133,14 @@ test.beforeAll(async () => {
         stdio: ['ignore', 'pipe', 'pipe']
       })
     );
+    serverProc.on('exit', (code, signal) => {
+      // eslint-disable-next-line no-console
+      console.log(`clawnsole server exited code=${code} signal=${signal}`);
+      if (serverProc?.__stdout || serverProc?.__stderr) {
+        // eslint-disable-next-line no-console
+        console.log(`clawnsole server output:\n${serverProc.__stdout || ''}${serverProc.__stderr || ''}`);
+      }
+    });
     await waitForHttp(`http://127.0.0.1:${serverPort}/meta`, 10000, serverProc, 'clawnsole');
   } catch (err) {
     const message = String(err);
