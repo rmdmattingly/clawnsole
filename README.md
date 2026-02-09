@@ -93,6 +93,33 @@ If omitted, admin defaults to `admin` and guest defaults to `guest`.
   new default.
 - Clawnsole stores your token and device ID in localStorage for convenience.
 
+## Workqueue: agent→queue assignments + claim-next defaults
+
+Clawnsole's workqueue supports assigning agents to queues, and letting `claim-next`
+resolve queues automatically when you omit them.
+
+### Defaults
+
+- `CLAWNSOLE_DEFAULT_QUEUES` (comma-separated, default: `dev-team`)
+
+### CLI
+
+```bash
+# Persist assignment in the workqueue state file
+node bin/clawnsole.js workqueue assignments set --agent dev-3 --queues dev-team,qa
+node bin/clawnsole.js workqueue assignments list
+
+# If --queues is omitted, claim-next resolves:
+# requested queues → assignment → CLAWNSOLE_DEFAULT_QUEUES
+node bin/clawnsole.js workqueue claim-next --agent dev-3
+```
+
+### HTTP API (admin-only)
+
+- `POST /api/workqueue/claim-next` — `queues` is optional. If omitted, the server
+  uses the same resolution behavior as the CLI.
+- `GET /api/workqueue/assignments` / `POST /api/workqueue/assignments`
+
 <details>
 <summary>Developers: run locally</summary>
 

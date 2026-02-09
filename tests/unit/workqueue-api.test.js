@@ -267,9 +267,21 @@ test('workqueue API mutations: input validation', async () => {
     assert.equal(badEnq.status, 400);
     assert.ok(badEnq.json?.error);
 
-    const badClaim = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/claim-next`, { queues: ['dev-team'] }, cookie);
+    const badClaim = await httpPostJson(
+      `http://127.0.0.1:${port}/api/workqueue/claim-next`,
+      { queues: ['dev-team'] },
+      cookie
+    );
     assert.equal(badClaim.status, 400);
     assert.ok(badClaim.json?.error);
+
+    const badAssignments = await httpPostJson(
+      `http://127.0.0.1:${port}/api/workqueue/assignments`,
+      { agentId: 'a', queues: [] },
+      cookie
+    );
+    assert.equal(badAssignments.status, 400);
+    assert.ok(badAssignments.json?.error);
 
     const badTransition = await httpPostJson(
       `http://127.0.0.1:${port}/api/workqueue/transition`,
@@ -278,6 +290,63 @@ test('workqueue API mutations: input validation', async () => {
     );
     assert.equal(badTransition.status, 400);
     assert.ok(badTransition.json?.error);
+  } finally {
+    server.close();
+  }
+});
+
+test('workqueue API claim-next: when queues omitted falls back to defaults', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  enqueueItem(null, { queue: 'dev-team', title: 't', instructions: 'do', priority: 1 });
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = { Cookie: adminCookie() };
+    const claim = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/claim-next`, { agentId: 'agent-1' }, cookie);
+    assert.equal(claim.status, 200);
+    assert.equal(claim.json?.ok, true);
+    assert.ok(claim.json?.item);
+    assert.equal(claim.json?.item?.queue, 'dev-team');
+    assert.equal(claim.json?.queuesSource, 'default');
+  } finally {
+    server.close();
+  }
+});
+
+test('workqueue API claim-next: when queues omitted uses assignments for agent', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  enqueueItem(null, { queue: 'dev-team', title: 'a', instructions: 'x', priority: 0 });
+  enqueueItem(null, { queue: 'qa', title: 'b', instructions: 'y', priority: 5 });
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = { Cookie: adminCookie() };
+
+    const set = await httpPostJson(
+      `http://127.0.0.1:${port}/api/workqueue/assignments`,
+      { agentId: 'agent-1', queues: ['qa'] },
+      cookie
+    );
+    assert.equal(set.status, 200);
+    assert.equal(set.json?.ok, true);
+
+    const claim = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/claim-next`, { agentId: 'agent-1' }, cookie);
+    assert.equal(claim.status, 200);
+    assert.equal(claim.json?.ok, true);
+    assert.ok(claim.json?.item);
+    assert.equal(claim.json?.item?.queue, 'qa');
+    assert.equal(claim.json?.queuesSource, 'assignment');
+
+    const list = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/assignments`, cookie);
+    assert.equal(list.status, 200);
+    assert.equal(list.json?.ok, true);
+    assert.deepEqual(list.json?.assignments?.['agent-1'], ['qa']);
   } finally {
     server.close();
   }
