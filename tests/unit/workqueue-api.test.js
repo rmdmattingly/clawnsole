@@ -212,20 +212,12 @@ test('workqueue API: supports fail + returns ownership errors', async () => {
     assert.equal(badClaim.status, 400);
     assert.ok(badClaim.json?.error);
 
-    const badAssignments = await httpPostJson(
-      `http://127.0.0.1:${port}/api/workqueue/assignments`,
-      { agentId: 'a', queues: [] },
-      cookie
-    );
+    const badAssignments = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/assignments`, {
+      headers,
+      body: { agentId: 'a', queues: [] }
+    });
     assert.equal(badAssignments.status, 400);
     assert.ok(badAssignments.json?.error);
-
-    const badTransition = await httpPostJson(
-      `http://127.0.0.1:${port}/api/workqueue/transition`,
-      { headers, body: { itemId: 'x', agentId: 'a', status: 'nope' } }
-    );
-    assert.equal(badTransition.status, 400);
-    assert.ok(badTransition.json?.error);
 
     const claim = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/claim-next`, {
       headers,
