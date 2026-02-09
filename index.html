@@ -170,6 +170,53 @@
             <button id="wqRefreshBtn" class="secondary" type="button">Refresh</button>
           </div>
 
+          <div class="wq-actions" aria-label="Workqueue actions">
+            <div class="wq-actions-row">
+              <div class="wq-action-card">
+                <div class="wq-action-title">Enqueue</div>
+                <div class="wq-action-grid">
+                  <label class="wq-action-field">
+                    Title
+                    <input id="wqEnqueueTitle" type="text" placeholder="Short title" />
+                  </label>
+                  <label class="wq-action-field">
+                    Priority
+                    <input id="wqEnqueuePriority" type="number" value="50" min="0" max="999" />
+                  </label>
+                  <label class="wq-action-field" style="grid-column: 1 / -1;">
+                    Instructions
+                    <textarea id="wqEnqueueInstructions" rows="4" placeholder="What should the worker do?"></textarea>
+                  </label>
+                  <label class="wq-action-field" style="grid-column: 1 / -1;">
+                    Dedupe Key (optional)
+                    <input id="wqEnqueueDedupeKey" type="text" placeholder="e.g. issue22:actions" />
+                  </label>
+                </div>
+                <div class="wq-action-buttons">
+                  <button id="wqEnqueueBtn" class="primary" type="button">Enqueue</button>
+                </div>
+              </div>
+
+              <div class="wq-action-card">
+                <div class="wq-action-title">Claim next</div>
+                <div class="wq-action-grid">
+                  <label class="wq-action-field">
+                    Agent ID
+                    <input id="wqClaimAgentId" type="text" value="dev" />
+                  </label>
+                  <label class="wq-action-field">
+                    Lease (ms)
+                    <input id="wqClaimLeaseMs" type="number" value="900000" min="1000" step="1000" />
+                  </label>
+                </div>
+                <div class="wq-action-buttons">
+                  <button id="wqClaimBtn" class="secondary" type="button">Claim next</button>
+                </div>
+              </div>
+            </div>
+            <div id="wqActionStatus" class="wq-action-status" role="status" aria-live="polite"></div>
+          </div>
+
           <div class="wq-layout">
             <div class="wq-list" aria-label="Workqueue items">
               <div class="wq-list-header">
