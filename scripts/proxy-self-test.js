@@ -112,6 +112,9 @@ async function run() {
 
   clearTimeout(hardTimeout);
   console.log('proxy-self-test: ok');
+  // The proxy sets up background timers (e.g. heartbeats). Ensure the
+  // self-test terminates promptly in CI.
+  process.exit(0);
 }
 
 run().catch((err) => {
