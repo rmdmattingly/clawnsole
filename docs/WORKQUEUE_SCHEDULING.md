@@ -1,5 +1,10 @@
 # Workqueue Scheduling (Recurring Enqueue Jobs)
 
+## OpenClaw worker skill design
+
+If you want OpenClaw to run as a worker that *claims and executes* work items (vs enqueuing recurring items), see:
+- `docs/OPENCLAW_WORKQUEUE_WORKER_SKILL.md`
+
 ## Goal
 Sometimes you want to *add* a recurring work item into a queue on an interval (e.g. "Review open PRs" every hour) instead of keeping a worker running continuously.
 
