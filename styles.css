@@ -743,6 +743,12 @@ button.send-btn .btn-icon {
   opacity: 0;
   transform: translateY(10px) scale(0.99);
   transition: transform 0.18s ease, opacity 0.18s ease;
+
+  /* Prevent tall modals from overflowing the viewport.
+     Header stays visible; body becomes scrollable. */
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
 }
 
 .modal.open .modal-card {
@@ -755,6 +761,13 @@ button.send-btn .btn-icon {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+  flex: 0 0 auto;
+}
+
+.modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .modal-body label {
