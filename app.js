@@ -39,7 +39,6 @@ function getRouteRole() {
   try {
     const path = window.location.pathname || '/';
     if (path === '/admin' || path.startsWith('/admin/')) return 'admin';
-    if (path === '/guest' || path.startsWith('/guest/')) return 'guest';
   } catch {}
   return null;
 }
@@ -315,9 +314,8 @@ function resolveWsUrl(raw) {
   return raw;
 }
 
-function computeGatewayTarget(kind) {
-  const key = kind === 'guest' ? 'guestWsUrl' : 'adminWsUrl';
-  const proxyUrl = uiState.meta && uiState.meta[key] ? uiState.meta[key] : '';
+function computeGatewayTarget(_kind) {
+  const proxyUrl = uiState.meta && uiState.meta.adminWsUrl ? uiState.meta.adminWsUrl : '';
   const usingProxy = Boolean(proxyUrl);
   const rawUrl = proxyUrl || globalElements.wsUrl.value.trim();
   return { url: resolveWsUrl(rawUrl), usingProxy };
@@ -468,7 +466,7 @@ function hideLogin() {
 }
 
 async function attemptLogin() {
-  const role = globalElements.loginRole.value === 'admin' ? 'admin' : 'guest';
+  const role = 'admin';
   const password = globalElements.loginPassword.value.trim();
   if (!password) {
     showLogin('Password required.');
@@ -486,9 +484,9 @@ async function attemptLogin() {
       return;
     }
     const data = await res.json();
-    const nextRole = data.role === 'admin' ? 'admin' : 'guest';
+    const nextRole = data.role === 'admin' ? 'admin' : 'admin';
     storage.set('clawnsole.auth.role', nextRole);
-    window.location.replace(nextRole === 'admin' ? '/admin' : '/guest');
+    window.location.replace('/admin');
   } catch {
     showLogin('Login failed. Please retry.');
   }
@@ -497,9 +495,8 @@ async function attemptLogin() {
 function openSettings() {
   globalElements.settingsModal.classList.add('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'false');
-  if (roleState.role === 'admin') {
-    loadGuestPrompt();
-  }
+  // guest prompt removed
+
 }
 
 function closeSettings() {
@@ -2328,7 +2325,8 @@ globalElements.settingsCloseBtn?.addEventListener('click', () => closeSettings()
 globalElements.settingsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.settingsModal) closeSettings();
 });
-globalElements.saveGuestPromptBtn?.addEventListener('click', () => saveGuestPrompt());
+// guest prompt removed
+
 
 globalElements.workqueueBtn?.addEventListener('click', () => openWorkqueue());
 globalElements.workqueueCloseBtn?.addEventListener('click', () => closeWorkqueue());
