@@ -144,6 +144,19 @@ test.afterAll(() => {
 test('admin login persists, send/receive, upload attachment', async ({ page }, testInfo) => {
   test.setTimeout(180000);
   test.skip(!!skipReason, skipReason);
+
+  // Surface browser-side failures in CI logs (helps diagnose ws connect issues).
+  page.on('console', (msg) => {
+    try {
+      console.log(`[ui-console:${msg.type()}] ${msg.text()}`);
+    } catch {}
+  });
+  page.on('pageerror', (err) => {
+    try {
+      console.log(`[ui-pageerror] ${String(err && err.stack ? err.stack : err)}`);
+    } catch {}
+  });
+
   await page.goto(`http://127.0.0.1:${serverPort}/`);
 
   // iOS Safari will auto-zoom focused inputs when font-size < 16px.
