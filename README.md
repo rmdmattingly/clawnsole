@@ -121,3 +121,12 @@ Connect:
 
 - Prod: `http://localhost:5173/admin` (or `/guest`)
 - QA: `http://localhost:5174/admin` (or `/guest`)
+
+If QA keeps dying due to terminal logout / SIGTERM, run it as a managed service (macOS LaunchAgent):
+
+```bash
+cd ~/src/dev/clawnsole
+./scripts/install-qa-launchagent.sh
+```
+
+Runbook + health check: [`docs/DEPLOY.md`](./docs/DEPLOY.md)
