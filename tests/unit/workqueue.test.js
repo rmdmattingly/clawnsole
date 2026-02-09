@@ -43,6 +43,28 @@ test('workqueue: priority ordering (higher priority claimed first)', () => {
   assert.equal(claimed2.id, low.id);
 });
 
+test('workqueue: priority ordering tie-breaker is FIFO by createdAt', () => {
+  const root = tempRoot();
+
+  const first = enqueueItem(root, { queue: 'dev', title: 'first', instructions: 'a', priority: 5 });
+  const second = enqueueItem(root, { queue: 'dev', title: 'second', instructions: 'b', priority: 5 });
+
+  // Make ordering deterministic by explicitly setting createdAt.
+  const state = loadState(root);
+  const a = state.items.find((x) => x.id === first.id);
+  const b = state.items.find((x) => x.id === second.id);
+  assert.ok(a);
+  assert.ok(b);
+
+  a.createdAt = '2026-01-01T00:00:00.000Z';
+  b.createdAt = '2026-01-01T00:00:01.000Z';
+  saveState(root, state);
+
+  const claimed = claimNext(root, { agentId: 'agent-1', queues: ['dev'], leaseMs: 60_000 });
+  assert.ok(claimed);
+  assert.equal(claimed.id, first.id);
+});
+
 test('workqueue: lease expiry reaps claimed items back to ready', () => {
   const root = tempRoot();
 
@@ -66,6 +88,30 @@ test('workqueue: lease expiry reaps claimed items back to ready', () => {
   assert.equal(reclaimed.claimedBy, 'agent-2');
 });
 
+test('workqueue: lease expiry reaps in_progress items back to ready', () => {
+  const root = tempRoot();
+
+  const item = enqueueItem(root, { queue: 'dev', title: 'a', instructions: 'x', priority: 0 });
+  const claimed = claimNext(root, { agentId: 'agent-1', queues: ['dev'], leaseMs: 60_000 });
+  assert.ok(claimed);
+  assert.equal(claimed.id, item.id);
+
+  // Move to in_progress and then force-expire by editing state.
+  transitionItem(root, { itemId: item.id, agentId: 'agent-1', status: 'in_progress', note: 'working' });
+
+  const state = loadState(root);
+  const it = state.items.find((x) => x.id === item.id);
+  assert.ok(it);
+  assert.equal(it.status, 'in_progress');
+  it.leaseUntil = Date.now() - 1; // expired
+  saveState(root, state);
+
+  const reclaimed = claimNext(root, { agentId: 'agent-2', queues: ['dev'], leaseMs: 60_000 });
+  assert.ok(reclaimed);
+  assert.equal(reclaimed.id, item.id);
+  assert.equal(reclaimed.claimedBy, 'agent-2');
+});
+
 test('workqueue: claimed-by-other enforced for terminal transitions (done/failed)', () => {
   const root = tempRoot();
 
@@ -80,6 +126,11 @@ test('workqueue: claimed-by-other enforced for terminal transitions (done/failed
 
   assert.throws(
     () => transitionItem(root, { itemId: claimed.id, agentId: 'agent-2', status: 'failed', error: 'nope' }),
+    (err) => err && err.code === 'CLAIMED_BY_OTHER'
+  );
+
+  assert.throws(
+    () => transitionItem(root, { itemId: claimed.id, agentId: 'agent-2', status: 'in_progress', note: 'yoink' }),
     (err) => err && err.code === 'CLAIMED_BY_OTHER'
   );
 
