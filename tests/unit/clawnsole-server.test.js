@@ -86,8 +86,6 @@ test('GET /meta returns gateway urls and port', async () => {
   });
   writeJson(path.join(openclawDir, 'clawnsole.json'), {
     adminPassword: 'admin',
-    guestPassword: 'guest',
-    guestAgentId: 'clawnsole-guest',
     authVersion: '1'
   });
 
@@ -97,15 +95,14 @@ test('GET /meta returns gateway urls and port', async () => {
   const data = JSON.parse(res.body.toString('utf8'));
   assert.equal(data.wsUrl, 'ws://127.0.0.1:19999');
   assert.equal(data.adminWsUrl, '/admin-ws');
-  assert.equal(data.guestWsUrl, '/guest-ws');
-  assert.equal(data.guestAgentId, 'clawnsole-guest');
   assert.equal(data.port, 19999);
+  assert.equal(data.guestWsUrl, undefined);
 });
 
 test('login sets cookies; /auth/role uses auth cookie', async () => {
   const { homeDir, openclawDir } = makeTempHome();
   writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
-  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', guestPassword: 'guest', authVersion: 'v1' });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
 
   const { handleRequest } = createClawnsoleServer({ homeDir });
 
@@ -149,7 +146,7 @@ test('login sets cookies; /auth/role uses auth cookie', async () => {
 test('login scopes cookies by instance name', async () => {
   const { homeDir, openclawDir } = makeTempHome();
   writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
-  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', guestPassword: 'guest', authVersion: 'v1' });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
 
   const { handleRequest } = createClawnsoleServer({ homeDir, instance: 'qa' });
 
@@ -170,27 +167,15 @@ test('login scopes cookies by instance name', async () => {
   assert.equal(JSON.parse(role1.body.toString('utf8')).role, 'admin');
 });
 
-test('/token is admin-only (guest forbidden)', async () => {
+test('/token requires admin auth', async () => {
   const { homeDir, openclawDir } = makeTempHome();
   writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 'secret' } } });
-  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', guestPassword: 'guest', authVersion: 'v1' });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
 
   const { handleRequest } = createClawnsoleServer({ homeDir });
 
   const noAuth = await invoke(handleRequest, { url: '/token' });
   assert.equal(noAuth.statusCode, 401);
-
-  const guestLogin = await invoke(handleRequest, {
-    url: '/auth/login',
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ role: 'guest', password: 'guest' })
-  });
-  const guestCookie = parseCookiesFromSetCookie(guestLogin.headers['set-cookie']);
-
-  const guestToken = await invoke(handleRequest, { url: '/token', headers: { cookie: guestCookie } });
-  assert.equal(guestToken.statusCode, 403);
-  assert.equal(JSON.parse(guestToken.body.toString('utf8')).error, 'forbidden');
 
   const adminLogin = await invoke(handleRequest, {
     url: '/auth/login',
@@ -210,7 +195,7 @@ test('/token is admin-only (guest forbidden)', async () => {
 test('/token returns token_not_found when gateway token missing', async () => {
   const { homeDir, openclawDir } = makeTempHome();
   writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: '' } } });
-  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', guestPassword: 'guest', authVersion: 'v1' });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
 
   const { handleRequest } = createClawnsoleServer({ homeDir });
   const adminLogin = await invoke(handleRequest, {
@@ -229,7 +214,7 @@ test('authVersion rotation invalidates existing cookies', async () => {
   const { homeDir, openclawDir } = makeTempHome();
   const cfgPath = path.join(openclawDir, 'clawnsole.json');
   writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
-  writeJson(cfgPath, { adminPassword: 'admin', guestPassword: 'guest', authVersion: 'v1' });
+  writeJson(cfgPath, { adminPassword: 'admin', authVersion: 'v1' });
 
   const { handleRequest, encodeAuthCookie } = createClawnsoleServer({ homeDir });
   const cookieHeader = `clawnsole_auth=${encodeAuthCookie('admin', 'v1')}`;
@@ -237,78 +222,15 @@ test('authVersion rotation invalidates existing cookies', async () => {
   const role1 = await invoke(handleRequest, { url: '/auth/role', headers: { cookie: cookieHeader } });
   assert.equal(JSON.parse(role1.body.toString('utf8')).role, 'admin');
 
-  writeJson(cfgPath, { adminPassword: 'admin', guestPassword: 'guest', authVersion: 'v2' });
+  writeJson(cfgPath, { adminPassword: 'admin', authVersion: 'v2' });
   const role2 = await invoke(handleRequest, { url: '/auth/role', headers: { cookie: cookieHeader } });
   assert.equal(JSON.parse(role2.body.toString('utf8')).role, null);
-});
-
-test('/config/guest-prompt requires admin and persists updates', async () => {
-  const { homeDir, openclawDir } = makeTempHome();
-  const cfgPath = path.join(openclawDir, 'clawnsole.json');
-  writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
-  writeJson(cfgPath, {
-    adminPassword: 'admin',
-    guestPassword: 'guest',
-    guestPrompt: 'initial prompt',
-    authVersion: 'v1'
-  });
-
-  const { handleRequest } = createClawnsoleServer({ homeDir });
-
-  const noAuth = await invoke(handleRequest, { url: '/config/guest-prompt' });
-  assert.equal(noAuth.statusCode, 403);
-
-  const guestLogin = await invoke(handleRequest, {
-    url: '/auth/login',
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ role: 'guest', password: 'guest' })
-  });
-  const guestCookie = parseCookiesFromSetCookie(guestLogin.headers['set-cookie']);
-  const guestGet = await invoke(handleRequest, { url: '/config/guest-prompt', headers: { cookie: guestCookie } });
-  assert.equal(guestGet.statusCode, 403);
-
-  const adminLogin = await invoke(handleRequest, {
-    url: '/auth/login',
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ role: 'admin', password: 'admin' })
-  });
-  const adminCookie = parseCookiesFromSetCookie(adminLogin.headers['set-cookie']);
-
-  const get1 = await invoke(handleRequest, { url: '/config/guest-prompt', headers: { cookie: adminCookie } });
-  assert.equal(get1.statusCode, 200);
-  assert.equal(JSON.parse(get1.body.toString('utf8')).prompt, 'initial prompt');
-
-  const post = await invoke(handleRequest, {
-    url: '/config/guest-prompt',
-    method: 'POST',
-    headers: { cookie: adminCookie, 'content-type': 'application/json' },
-    body: JSON.stringify({ prompt: 'updated prompt' })
-  });
-  assert.equal(post.statusCode, 200);
-  assert.equal(JSON.parse(post.body.toString('utf8')).ok, true);
-
-  const tooLong = await invoke(handleRequest, {
-    url: '/config/guest-prompt',
-    method: 'POST',
-    headers: { cookie: adminCookie, 'content-type': 'application/json' },
-    body: JSON.stringify({ prompt: 'x'.repeat(4001) })
-  });
-  assert.equal(tooLong.statusCode, 400);
-  assert.equal(JSON.parse(tooLong.body.toString('utf8')).error, 'prompt_too_long');
-
-  const get2 = await invoke(handleRequest, { url: '/config/guest-prompt', headers: { cookie: adminCookie } });
-  assert.equal(JSON.parse(get2.body.toString('utf8')).prompt, 'updated prompt');
-
-  const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-  assert.equal(cfg.guestPrompt, 'updated prompt');
 });
 
 test('/upload stores files and /uploads serves them (auth required)', async () => {
   const { homeDir, openclawDir } = makeTempHome();
   writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
-  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', guestPassword: 'guest', authVersion: 'v1' });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
 
   const { handleRequest } = createClawnsoleServer({ homeDir });
 
@@ -363,7 +285,7 @@ test('/upload stores files and /uploads serves them (auth required)', async () =
 test('/auth/logout clears auth cookies', async () => {
   const { homeDir, openclawDir } = makeTempHome();
   writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
-  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', guestPassword: 'guest', authVersion: 'v1' });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
 
   const { handleRequest } = createClawnsoleServer({ homeDir });
   const res = await invoke(handleRequest, { url: '/auth/logout', method: 'POST' });
@@ -375,10 +297,10 @@ test('/auth/logout clears auth cookies', async () => {
   assert.match(joined, /Max-Age=0/);
 });
 
-test('GET /admin and /guest serve the kiosk shell (index.html)', async () => {
+test('GET /admin serves the kiosk shell (index.html); /guest redirects', async () => {
   const { homeDir, openclawDir } = makeTempHome();
   writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
-  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', guestPassword: 'guest', authVersion: 'v1' });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
 
   const { handleRequest } = createClawnsoleServer({ homeDir });
 
@@ -388,9 +310,8 @@ test('GET /admin and /guest serve the kiosk shell (index.html)', async () => {
   assert.match(admin.body.toString('utf8'), /<title>Clawnsole<\/title>/);
 
   const guest = await invoke(handleRequest, { url: '/guest' });
-  assert.equal(guest.statusCode, 200);
-  assert.match(String(guest.headers['content-type'] || ''), /text\/html/);
-  assert.match(guest.body.toString('utf8'), /<title>Clawnsole<\/title>/);
+  assert.equal(guest.statusCode, 302);
+  assert.equal(guest.headers.location, '/admin');
 });
 
 test('GET /agents is admin-only and returns agent ids', async () => {
@@ -407,29 +328,15 @@ test('GET /agents is admin-only and returns agent ids', async () => {
     gateway: { port: 18789, auth: { mode: 'token', token: 't' } },
     agents: {
       defaults: { workspace: path.join(homeDir, 'main-workspace') },
-      list: [
-        { id: 'main' },
-        { id: 'ops', name: 'Ops', workspace: opsWorkspace },
-        { id: 'dev' }
-      ]
+      list: [{ id: 'main' }, { id: 'ops', name: 'Ops', workspace: opsWorkspace }, { id: 'dev' }]
     }
   });
-  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', guestPassword: 'guest', authVersion: 'v1' });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
 
   const { handleRequest } = createClawnsoleServer({ homeDir });
 
   const noAuth = await invoke(handleRequest, { url: '/agents' });
   assert.equal(noAuth.statusCode, 401);
-
-  const guestLogin = await invoke(handleRequest, {
-    url: '/auth/login',
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ role: 'guest', password: 'guest' })
-  });
-  const guestCookie = parseCookiesFromSetCookie(guestLogin.headers['set-cookie']);
-  const guestAgents = await invoke(handleRequest, { url: '/agents', headers: { cookie: guestCookie } });
-  assert.equal(guestAgents.statusCode, 403);
 
   const adminLogin = await invoke(handleRequest, {
     url: '/auth/login',

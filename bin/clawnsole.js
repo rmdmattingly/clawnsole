@@ -2,7 +2,16 @@
 
 const fs = require('fs');
 const path = require('path');
-const { enqueueItem, claimNext, transitionItem, loadState, statePaths } = require('../lib/workqueue');
+const {
+  enqueueItem,
+  claimNext,
+  transitionItem,
+  loadState,
+  statePaths,
+  listAssignments,
+  setAssignments,
+  resolveClaimQueues
+} = require('../lib/workqueue');
 
 function parseArgs(argv) {
   const args = argv.slice(2);
@@ -45,12 +54,14 @@ Usage:
 
 Workqueue commands:
   enqueue            --queue <name> --title <t> --instructions <text> [--priority <n>] [--dedupeKey <k>]
-  claim-next         --agent <id> --queues <q1,q2> [--leaseMs <ms>]
+  claim-next         --agent <id> [--queues <q1,q2>] [--leaseMs <ms>]
   done               <itemId> --agent <id> [--result <json|@file>]
   fail               <itemId> --agent <id> --error <text>
   progress           <itemId> --agent <id> --note <text> [--leaseMs <ms>]
   inspect            <itemId>
   list               [--queue <name>] [--status <s1,s2>]
+  assignments list
+  assignments set    --agent <id> --queues <q1,q2>
 
 Notes:
   - Data is stored at: ${statePaths().stateFile}
@@ -115,11 +126,23 @@ async function main() {
 
   if (cmd === 'claim-next') {
     const agent = args.agent;
-    const queues = parseCsv(args.queues);
+    const requested = parseCsv(args.queues);
     const leaseMs = args.leaseMs !== undefined ? Number(args.leaseMs) : undefined;
     if (!agent) die('claim-next requires --agent');
-    if (!queues.length) die('claim-next requires --queues q1,q2');
-    const item = claimNext(null, { agentId: agent, queues, leaseMs });
+
+    const defaultQueues = parseCsv(process.env.CLAWNSOLE_DEFAULT_QUEUES ?? 'dev-team');
+    const resolved = resolveClaimQueues(null, {
+      agentId: agent,
+      requestedQueues: requested,
+      defaultQueues
+    });
+
+    if (!resolved.queues.length) {
+      printJson({ ok: true, item: null, reason: resolved.reason || 'NO_QUEUES' });
+      return;
+    }
+
+    const item = claimNext(null, { agentId: agent, queues: resolved.queues, leaseMs });
     printJson({ ok: true, item });
     return;
   }
@@ -182,6 +205,33 @@ async function main() {
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
     printJson({ ok: true, items });
     return;
+  }
+
+  if (cmd === 'assignments') {
+    const subcmd = rest[0];
+
+    if (!subcmd || subcmd === 'help' || subcmd === '--help' || subcmd === '-h') {
+      process.stdout.write(usage());
+      return;
+    }
+
+    if (subcmd === 'list') {
+      const assignments = listAssignments(null);
+      printJson({ ok: true, assignments });
+      return;
+    }
+
+    if (subcmd === 'set') {
+      const agent = args.agent;
+      const queues = parseCsv(args.queues);
+      if (!agent) die('assignments set requires --agent');
+      if (!queues.length) die('assignments set requires --queues q1,q2');
+      const result = setAssignments(null, { agentId: agent, queues });
+      printJson({ ok: true, agentId: result.agentId, queues: result.queues });
+      return;
+    }
+
+    die(`unknown workqueue assignments command: ${subcmd}\n\n${usage()}`);
   }
 
   die(`unknown workqueue command: ${cmd}\n\n${usage()}`);
