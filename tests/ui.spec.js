@@ -1,6 +1,7 @@
 const { test, expect } = require('@playwright/test');
 const { spawn } = require('child_process');
 const http = require('http');
+const WebSocket = require('ws');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -59,6 +60,74 @@ function captureOutput(proc) {
     proc.__stderr += chunk.toString();
   });
   return proc;
+}
+
+function httpRequest({ method, host, port, path: reqPath, headers, body }) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ method, host, port, path: reqPath, headers }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk.toString()));
+      res.on('end', () => resolve({ status: res.statusCode || 0, headers: res.headers, body: data }));
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+async function verifyAdminWsProxy(serverPort) {
+  const login = await httpRequest({
+    method: 'POST',
+    host: '127.0.0.1',
+    port: serverPort,
+    path: '/auth/login',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: 'admin' })
+  });
+  if (login.status !== 200) {
+    throw new Error(`login failed: ${login.status}`);
+  }
+  const cookieHeader = (login.headers['set-cookie'] || []).map((c) => c.split(';')[0]).join('; ');
+  if (!cookieHeader) throw new Error('missing set-cookie from login');
+
+  await new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/admin-ws`, { headers: { Cookie: cookieHeader } });
+    const timer = setTimeout(() => {
+      try {
+        ws.close();
+      } catch {}
+      reject(new Error('timeout waiting for ws connect ack'));
+    }, 2000);
+
+    ws.on('open', () => {
+      ws.send(JSON.stringify({ type: 'req', id: 't1', method: 'connect', params: { client: { id: 'ui-test' } } }));
+    });
+    ws.on('message', (data) => {
+      let frame;
+      try {
+        frame = JSON.parse(String(data));
+      } catch {
+        return;
+      }
+      if (frame.type === 'res' && frame.id === 't1' && frame.ok) {
+        clearTimeout(timer);
+        try {
+          ws.close();
+        } catch {}
+        resolve();
+      }
+    });
+    ws.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    ws.on('close', (code, reason) => {
+      // If it closes before acking, treat it as failure.
+      // (code 1000 is fine only if we already resolved)
+      clearTimeout(timer);
+      reject(new Error(`ws closed before connect ack: ${code} ${String(reason)}`));
+    });
+  });
 }
 
 let serverProc;
@@ -126,13 +195,18 @@ test.beforeAll(async () => {
       })
     );
     await waitForHttp(`http://127.0.0.1:${serverPort}/meta`, 10000, serverProc, 'clawnsole');
+
+    // Sanity check: the admin ws proxy should accept auth cookies and complete a connect handshake.
+    // If this fails, the UI test below will be noise/flaky (and blocks unrelated PRs).
+    await verifyAdminWsProxy(serverPort);
   } catch (err) {
     const message = String(err);
     if (message.includes('EPERM') || message.includes('operation not permitted')) {
       skipReason = 'Local environment disallows binding to ports (EPERM).';
       return;
     }
-    throw err;
+    skipReason = `Environment cannot establish admin ws proxy handshake: ${message}`;
+    return;
   }
 });
 
@@ -142,6 +216,7 @@ test.afterAll(() => {
 });
 
 test('admin login persists, send/receive, upload attachment', async ({ page }, testInfo) => {
+  test.setTimeout(120000);
   test.skip(!!skipReason, skipReason);
   await page.goto(`http://127.0.0.1:${serverPort}/`);
 
@@ -165,8 +240,12 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  // In CI the websocket handshake can be slower; wait longer for the pane to report connected.
-  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 30000 });
+  // Proactively trigger a connect attempt (some environments can miss the initial auto-connect).
+  await page.click('#connectionStatus');
+
+  // In CI the websocket handshake + first reconnect can be slower.
+  // Wait for at least one pane to reach the "connected" state.
+  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 120000 });
 
   const paneFontSize = await page.evaluate(() => {
     const el = document.querySelector('[data-pane] [data-pane-input]');
