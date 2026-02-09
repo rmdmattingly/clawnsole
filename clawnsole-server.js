@@ -196,6 +196,38 @@ function createClawnsoleServer(options = {}) {
     res.end(JSON.stringify(body));
   }
 
+  function readJsonBody(req, res, { maxBytes = 1_000_000 } = {}) {
+    return new Promise((resolve) => {
+      let body = '';
+      let tooLarge = false;
+      req.on('data', (chunk) => {
+        if (tooLarge) return;
+        body += chunk.toString();
+        if (body.length > maxBytes) {
+          tooLarge = true;
+          sendJson(res, 413, { error: 'request_too_large' });
+          resolve(null);
+          try {
+            req.destroy();
+          } catch {}
+        }
+      });
+      req.on('end', () => {
+        if (tooLarge) return;
+        if (!body) {
+          resolve({});
+          return;
+        }
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          sendJson(res, 400, { error: 'invalid_request' });
+          resolve(null);
+        }
+      });
+    });
+  }
+
   let lastGuestSessionKey = null;
 
   const { handleAdminProxy, handleGuestProxy } = createProxyHandlers({
@@ -359,8 +391,7 @@ function createClawnsoleServer(options = {}) {
       return;
     }
 
-    // Admin-only workqueue API (for viewing from other devices).
-    // NOTE: This is intentionally read-focused for MVP; mutation endpoints can be added later.
+    // Admin-only workqueue API.
     if (req.url === '/api/workqueue/items' || req.url.startsWith('/api/workqueue/items?')) {
       if (!requireAuth(req, res)) return;
       if (req.clawnsoleRole !== 'admin') {
@@ -489,6 +520,261 @@ function createClawnsoleServer(options = {}) {
       } catch (err) {
         sendJson(res, 500, { error: 'workqueue_error' });
       }
+      return;
+    }
+
+    if (req.url === '/api/workqueue/enqueue') {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      (async () => {
+        const payload = await readJsonBody(req, res);
+        if (!payload) return;
+        const queue = String(payload.queue || '').trim();
+        const title = String(payload.title || '').trim();
+        const instructions = String(payload.instructions || '').trim();
+        const dedupeKey = String(payload.dedupeKey || '').trim();
+        const priorityRaw = payload.priority;
+        const priority = Number.isFinite(priorityRaw) ? priorityRaw : Number.parseInt(String(priorityRaw ?? ''), 10);
+
+        if (!queue) {
+          sendJson(res, 400, { error: 'queue_required' });
+          return;
+        }
+        if (!instructions) {
+          sendJson(res, 400, { error: 'instructions_required' });
+          return;
+        }
+
+        try {
+          const { enqueueItem } = require('./lib/workqueue');
+          const item = enqueueItem(null, {
+            queue,
+            title,
+            instructions,
+            priority: Number.isFinite(priority) ? priority : 0,
+            dedupeKey: dedupeKey || undefined
+          });
+          sendJson(res, 200, { ok: true, item, deduped: Boolean(item && item._deduped) });
+        } catch (err) {
+          sendJson(res, 500, { error: 'workqueue_error' });
+        }
+      })();
+      return;
+    }
+
+    if (req.url === '/api/workqueue/claim-next') {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      (async () => {
+        const payload = await readJsonBody(req, res);
+        if (!payload) return;
+        const agentId = String(payload.agentId || '').trim();
+        const leaseMsRaw = payload.leaseMs;
+        const leaseMs = Number.isFinite(leaseMsRaw) ? leaseMsRaw : Number.parseInt(String(leaseMsRaw ?? ''), 10);
+        const queues = Array.isArray(payload.queues)
+          ? payload.queues.map((q) => String(q || '').trim()).filter(Boolean)
+          : [];
+
+        if (!agentId) {
+          sendJson(res, 400, { error: 'agentId_required' });
+          return;
+        }
+
+        try {
+          const { claimNext } = require('./lib/workqueue');
+          const item = claimNext(null, {
+            agentId,
+            queues: queues.length ? queues : null,
+            leaseMs: Number.isFinite(leaseMs) ? leaseMs : undefined
+          });
+          sendJson(res, 200, { ok: true, item: item || null });
+        } catch (err) {
+          sendJson(res, 500, { error: 'workqueue_error' });
+        }
+      })();
+      return;
+    }
+
+    if (req.url === '/api/workqueue/progress') {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      (async () => {
+        const payload = await readJsonBody(req, res);
+        if (!payload) return;
+        const itemId = String(payload.itemId || '').trim();
+        const agentId = String(payload.agentId || '').trim();
+        const note = String(payload.note || '').trim();
+        const leaseMsRaw = payload.leaseMs;
+        const leaseMs = Number.isFinite(leaseMsRaw) ? leaseMsRaw : Number.parseInt(String(leaseMsRaw ?? ''), 10);
+
+        if (!itemId) {
+          sendJson(res, 400, { error: 'itemId_required' });
+          return;
+        }
+        if (!agentId) {
+          sendJson(res, 400, { error: 'agentId_required' });
+          return;
+        }
+
+        try {
+          const { transitionItem } = require('./lib/workqueue');
+          const item = transitionItem(null, {
+            itemId,
+            agentId,
+            status: 'in_progress',
+            note: note || undefined,
+            leaseMs: Number.isFinite(leaseMs) ? leaseMs : undefined
+          });
+          sendJson(res, 200, { ok: true, item });
+        } catch (err) {
+          const code = err && err.code;
+          if (code === 'NOT_FOUND') {
+            sendJson(res, 404, { error: 'not_found' });
+            return;
+          }
+          if (code === 'CLAIMED_BY_OTHER') {
+            sendJson(res, 409, { error: 'claimed_by_other' });
+            return;
+          }
+          sendJson(res, 500, { error: 'workqueue_error' });
+        }
+      })();
+      return;
+    }
+
+    if (req.url === '/api/workqueue/done') {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      (async () => {
+        const payload = await readJsonBody(req, res);
+        if (!payload) return;
+        const itemId = String(payload.itemId || '').trim();
+        const agentId = String(payload.agentId || '').trim();
+        const note = String(payload.note || '').trim();
+        const result = payload.result;
+
+        if (!itemId) {
+          sendJson(res, 400, { error: 'itemId_required' });
+          return;
+        }
+        if (!agentId) {
+          sendJson(res, 400, { error: 'agentId_required' });
+          return;
+        }
+
+        try {
+          const { transitionItem } = require('./lib/workqueue');
+          const item = transitionItem(null, {
+            itemId,
+            agentId,
+            status: 'done',
+            result,
+            note: note || undefined
+          });
+          sendJson(res, 200, { ok: true, item });
+        } catch (err) {
+          const code = err && err.code;
+          if (code === 'NOT_FOUND') {
+            sendJson(res, 404, { error: 'not_found' });
+            return;
+          }
+          if (code === 'CLAIMED_BY_OTHER') {
+            sendJson(res, 409, { error: 'claimed_by_other' });
+            return;
+          }
+          sendJson(res, 500, { error: 'workqueue_error' });
+        }
+      })();
+      return;
+    }
+
+    if (req.url === '/api/workqueue/fail') {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      (async () => {
+        const payload = await readJsonBody(req, res);
+        if (!payload) return;
+        const itemId = String(payload.itemId || '').trim();
+        const agentId = String(payload.agentId || '').trim();
+        const note = String(payload.note || '').trim();
+        const error = String(payload.error || '').trim();
+
+        if (!itemId) {
+          sendJson(res, 400, { error: 'itemId_required' });
+          return;
+        }
+        if (!agentId) {
+          sendJson(res, 400, { error: 'agentId_required' });
+          return;
+        }
+        if (!error) {
+          sendJson(res, 400, { error: 'error_required' });
+          return;
+        }
+
+        try {
+          const { transitionItem } = require('./lib/workqueue');
+          const item = transitionItem(null, {
+            itemId,
+            agentId,
+            status: 'failed',
+            error,
+            note: note || undefined
+          });
+          sendJson(res, 200, { ok: true, item });
+        } catch (err) {
+          const code = err && err.code;
+          if (code === 'NOT_FOUND') {
+            sendJson(res, 404, { error: 'not_found' });
+            return;
+          }
+          if (code === 'CLAIMED_BY_OTHER') {
+            sendJson(res, 409, { error: 'claimed_by_other' });
+            return;
+          }
+          sendJson(res, 500, { error: 'workqueue_error' });
+        }
+      })();
       return;
     }
 
