@@ -2,6 +2,9 @@ const globalElements = {
   wsUrl: document.getElementById('wsUrl'),
   clientId: document.getElementById('clientId'),
   deviceId: document.getElementById('deviceId'),
+  guestPrompt: document.getElementById('guestPrompt'),
+  saveGuestPromptBtn: document.getElementById('saveGuestPromptBtn'),
+  guestPromptStatus: document.getElementById('guestPromptStatus'),
   disconnectBtn: document.getElementById('disconnectBtn'),
   status: document.getElementById('connectionStatus'),
   statusMeta: document.getElementById('statusMeta'),
@@ -11,8 +14,6 @@ const globalElements = {
   workqueueCloseBtn: document.getElementById('workqueueCloseBtn'),
   wqQueueSelect: document.getElementById('wqQueueSelect'),
   wqStatusFilters: document.getElementById('wqStatusFilters'),
-  wqAutoRefreshEnabled: document.getElementById('wqAutoRefreshEnabled'),
-  wqAutoRefreshInterval: document.getElementById('wqAutoRefreshInterval'),
   wqRefreshBtn: document.getElementById('wqRefreshBtn'),
   wqListBody: document.getElementById('wqListBody'),
   wqListEmpty: document.getElementById('wqListEmpty'),
@@ -31,6 +32,7 @@ const globalElements = {
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
+  loginRole: document.getElementById('loginRole'),
   loginPassword: document.getElementById('loginPassword'),
   loginBtn: document.getElementById('loginBtn'),
   loginError: document.getElementById('loginError'),
@@ -46,6 +48,7 @@ function getRouteRole() {
   try {
     const path = window.location.pathname || '/';
     if (path === '/admin' || path.startsWith('/admin/')) return 'admin';
+    if (path === '/guest' || path.startsWith('/guest/')) return 'guest';
   } catch {}
   return null;
 }
@@ -321,8 +324,9 @@ function resolveWsUrl(raw) {
   return raw;
 }
 
-function computeGatewayTarget(_kind) {
-  const proxyUrl = uiState.meta && uiState.meta.adminWsUrl ? uiState.meta.adminWsUrl : '';
+function computeGatewayTarget(kind) {
+  const key = kind === 'guest' ? 'guestWsUrl' : 'adminWsUrl';
+  const proxyUrl = uiState.meta && uiState.meta[key] ? uiState.meta[key] : '';
   const usingProxy = Boolean(proxyUrl);
   const rawUrl = proxyUrl || globalElements.wsUrl.value.trim();
   return { url: resolveWsUrl(rawUrl), usingProxy };
@@ -412,9 +416,7 @@ function setAuthState(authed) {
 function setRole(role) {
   roleState.role = role;
   if (globalElements.rolePill) {
-    // Clawnsole now effectively has a single signed-in role (admin), so showing the raw role name is redundant.
-    globalElements.rolePill.textContent = role === 'admin' ? 'signed in' : role;
-    // Keep the visual “signed in” styling for admin without exposing the role label.
+    globalElements.rolePill.textContent = role;
     globalElements.rolePill.classList.toggle('admin', role === 'admin');
   }
   if (role === 'guest') {
@@ -442,10 +444,14 @@ function showLogin(message = '') {
   globalElements.loginError.textContent = message;
   globalElements.loginPassword.value = '';
 
-  if (routeRole === 'admin') {
+  if (routeRole === 'admin' || routeRole === 'guest') {
+    globalElements.loginRole.value = routeRole;
+    globalElements.loginRole.disabled = true;
   } else {
+    globalElements.loginRole.disabled = false;
     const savedRole = storage.get('clawnsole.auth.role', '');
-    if (savedRole === 'admin') {
+    if (savedRole === 'admin' || savedRole === 'guest') {
+      globalElements.loginRole.value = savedRole;
     }
   }
 
@@ -471,7 +477,7 @@ function hideLogin() {
 }
 
 async function attemptLogin() {
-  const role = 'admin';
+  const role = globalElements.loginRole.value === 'admin' ? 'admin' : 'guest';
   const password = globalElements.loginPassword.value.trim();
   if (!password) {
     showLogin('Password required.');
@@ -489,9 +495,9 @@ async function attemptLogin() {
       return;
     }
     const data = await res.json();
-    const nextRole = data.role === 'admin' ? 'admin' : 'admin';
-    storage.set('clawnsole.auth.role', 'admin');
-    window.location.replace('/admin');
+    const nextRole = data.role === 'admin' ? 'admin' : 'guest';
+    storage.set('clawnsole.auth.role', nextRole);
+    window.location.replace(nextRole === 'admin' ? '/admin' : '/guest');
   } catch {
     showLogin('Login failed. Please retry.');
   }
@@ -500,12 +506,9 @@ async function attemptLogin() {
 function openSettings() {
   globalElements.settingsModal.classList.add('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'false');
-
-  // Legacy guest prompt (server endpoints may be absent in some builds).
-  loadGuestPrompt();
-
-  loadRecurringPromptAgents();
-  loadRecurringPrompts();
+  if (roleState.role === 'admin') {
+    loadGuestPrompt();
+  }
 }
 
 function closeSettings() {
@@ -523,10 +526,7 @@ const workqueueState = {
   statusFilter: new Set(['ready', 'pending', 'claimed', 'in_progress']),
   items: [],
   selectedItemId: null,
-  leaseTicker: null,
-  autoRefreshEnabled: true,
-  autoRefreshIntervalMs: 15000,
-  autoRefreshTimer: null
+  leaseTicker: null
 };
 
 function openWorkqueue() {
@@ -534,11 +534,9 @@ function openWorkqueue() {
   globalElements.workqueueModal?.classList.add('open');
   globalElements.workqueueModal?.setAttribute('aria-hidden', 'false');
   ensureWorkqueueBootstrapped();
-  startWorkqueueAutoRefresh();
 }
 
 function closeWorkqueue() {
-  stopWorkqueueAutoRefresh();
   globalElements.workqueueModal?.classList.remove('open');
   globalElements.workqueueModal?.setAttribute('aria-hidden', 'true');
 }
@@ -574,28 +572,10 @@ function renderWorkqueueStatusFilters() {
 }
 
 async function ensureWorkqueueBootstrapped() {
-  // Load persisted UI prefs
-  try {
-    const enabled = storage.get('clawnsole.wq.autorefresh.enabled');
-    const interval = storage.get('clawnsole.wq.autorefresh.intervalMs');
-    if (enabled !== null) workqueueState.autoRefreshEnabled = Boolean(enabled);
-    if (interval !== null && Number(interval) > 0) workqueueState.autoRefreshIntervalMs = Number(interval);
-  } catch {
-    // ignore
-  }
-
-  if (globalElements.wqAutoRefreshEnabled) {
-    globalElements.wqAutoRefreshEnabled.checked = !!workqueueState.autoRefreshEnabled;
-  }
-  if (globalElements.wqAutoRefreshInterval) {
-    globalElements.wqAutoRefreshInterval.value = String(workqueueState.autoRefreshIntervalMs);
-  }
-
   renderWorkqueueStatusFilters();
   await fetchWorkqueueQueues();
   await fetchAndRenderWorkqueueItems();
   startWorkqueueLeaseTicker();
-  startWorkqueueAutoRefresh();
 }
 
 async function fetchWorkqueueQueues() {
@@ -676,15 +656,14 @@ function renderWorkqueueItems() {
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
     const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
-    const status = String(it.status || '');
 
     row.innerHTML = `
       <div class="wq-col title">${escapeHtml(String(it.title || ''))}</div>
-      <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
-      <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
-      <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
+      <div class="wq-col status">${escapeHtml(String(it.status || ''))}</div>
+      <div class="wq-col prio">${escapeHtml(String(it.priority ?? ''))}</div>
+      <div class="wq-col attempts">${escapeHtml(String(it.attempts ?? ''))}</div>
       <div class="wq-col claimedBy">${escapeHtml(String(it.claimedBy || ''))}</div>
-      <div class="wq-col lease mono" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
+      <div class="wq-col lease" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
     `;
 
     row.addEventListener('click', () => {
@@ -728,302 +707,6 @@ function renderWorkqueueInspect(item) {
   `;
 }
 
-// --- Minimal Workqueue Pane (Issue #22c) ---
-// Standalone renderer that can be mounted into any container.
-// Acceptance: renderWorkqueuePane(rootEl, { queue }) exists and can be called via a debug hook.
-
-async function fetchWorkqueueSummary(queue = '') {
-  const params = new URLSearchParams();
-  if (queue) params.set('queue', queue);
-  const url = `/api/workqueue/summary${params.toString() ? `?${params.toString()}` : ''}`;
-  const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data?.ok) throw new Error(data?.error || String(res.status));
-  return data;
-}
-
-async function fetchWorkqueueItems({ queue = '', statuses = [] } = {}) {
-  const params = new URLSearchParams();
-  if (queue) params.set('queue', queue);
-  if (Array.isArray(statuses) && statuses.length) params.set('status', statuses.join(','));
-  const url = `/api/workqueue/items${params.toString() ? `?${params.toString()}` : ''}`;
-  const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data?.ok) throw new Error(data?.error || String(res.status));
-  return Array.isArray(data.items) ? data.items : [];
-}
-
-function renderWorkqueueCounts(rootEl, counts) {
-  const statuses = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
-  const list = document.createElement('dl');
-  list.className = 'wq-counts';
-  for (const s of statuses) {
-    const dt = document.createElement('dt');
-    dt.textContent = s;
-    const dd = document.createElement('dd');
-    dd.textContent = String(counts?.[s] || 0);
-    list.appendChild(dt);
-    list.appendChild(dd);
-  }
-  rootEl.appendChild(list);
-}
-
-function renderWorkqueueSimpleList(rootEl, items, { emptyText }) {
-  const ul = document.createElement('ul');
-  ul.className = 'wq-simple-list';
-
-  if (!items.length) {
-    const li = document.createElement('li');
-    li.className = 'hint';
-    li.textContent = emptyText || 'No items.';
-    ul.appendChild(li);
-    rootEl.appendChild(ul);
-    return;
-  }
-
-  for (const it of items) {
-    const li = document.createElement('li');
-    const lease = it.leaseUntil ? new Date(Number(it.leaseUntil)).toISOString() : '';
-    li.innerHTML = `<div><strong>${escapeHtml(String(it.title || ''))}</strong></div>
-<div class="meta">${escapeHtml(String(it.status || ''))}${it.claimedBy ? ` • ${escapeHtml(String(it.claimedBy))}` : ''}${lease ? ` • lease ${escapeHtml(lease)}` : ''}</div>`;
-    ul.appendChild(li);
-  }
-  rootEl.appendChild(ul);
-}
-
-async function renderWorkqueuePane(rootEl, { queue = '' } = {}) {
-  if (!rootEl) return;
-  const q = String(queue || '').trim();
-
-  rootEl.innerHTML = '';
-  rootEl.setAttribute('role', 'region');
-  rootEl.setAttribute('aria-label', `Workqueue${q ? `: ${q}` : ''}`);
-
-  const title = document.createElement('h2');
-  title.textContent = `Workqueue${q ? `: ${q}` : ''}`;
-  rootEl.appendChild(title);
-
-  const statusLine = document.createElement('div');
-  statusLine.className = 'wq-statusline';
-  statusLine.textContent = 'Loading…';
-  rootEl.appendChild(statusLine);
-
-  try {
-    const [summary, readyPending] = await Promise.all([
-      fetchWorkqueueSummary(q),
-      fetchWorkqueueItems({ queue: q, statuses: ['ready', 'pending'] })
-    ]);
-
-    statusLine.textContent = 'Loaded.';
-
-    const countsSection = document.createElement('section');
-    countsSection.innerHTML = '<h3>Counts</h3>';
-    renderWorkqueueCounts(countsSection, summary.counts || {});
-    rootEl.appendChild(countsSection);
-
-    const activeSection = document.createElement('section');
-    activeSection.innerHTML = '<h3>Active (claimed / in_progress)</h3>';
-    renderWorkqueueSimpleList(activeSection, Array.isArray(summary.active) ? summary.active : [], { emptyText: 'No active items.' });
-    rootEl.appendChild(activeSection);
-
-    const readySection = document.createElement('section');
-    readySection.innerHTML = '<h3>Ready / Pending</h3>';
-    const sorted = readyPending
-      .slice()
-      .sort((a, b) => (b.priority || 0) - (a.priority || 0) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
-    renderWorkqueueSimpleList(readySection, sorted, { emptyText: 'No ready/pending items.' });
-    rootEl.appendChild(readySection);
-
-    // Make scrollable without requiring pane-manager changes.
-    rootEl.style.overflow = 'auto';
-  } catch (err) {
-    statusLine.textContent = `Failed to load: ${String(err)}`;
-  }
-}
-
-// Temporary debug hook:
-// In DevTools: window.__debug.renderWorkqueuePane(document.querySelector('#someRoot'), { queue: 'dev-team' })
-window.__debug = window.__debug || {};
-window.__debug.renderWorkqueuePane = renderWorkqueuePane;
-
-
-async function fetchAndRenderWorkqueueItemsForPane(pane) {
-  if (!pane || pane.kind !== 'workqueue') return;
-  const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
-  if (!body) return;
-
-  const queue = (pane.workqueue?.queue || '').trim();
-  const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
-  const params = new URLSearchParams();
-  if (queue) params.set('queue', queue);
-  if (statuses.length) params.set('status', statuses.join(','));
-  const url = `/api/workqueue/items${params.toString() ? `?${params.toString()}` : ''}`;
-
-  const statusLine = pane.elements.thread.querySelector('[data-wq-statusline]');
-  if (statusLine) statusLine.textContent = 'Loading...';
-
-  try {
-    const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
-    if (!res.ok) throw new Error(String(res.status));
-    const data = await res.json();
-    const items = Array.isArray(data.items) ? data.items : [];
-    pane.workqueue.items = items;
-    if (statusLine) statusLine.textContent = `${items.length} item(s)`;
-    renderWorkqueuePaneItems(pane);
-  } catch (err) {
-    if (statusLine) statusLine.textContent = `Failed to load: ${String(err)}`;
-  }
-}
-
-function sortWorkqueueItemsForPane(items, { sortKey = 'default', sortDir = 'desc' } = {}) {
-  const dir = sortDir === 'asc' ? 1 : -1;
-  const statusRank = (s) => {
-    const v = String(s || '').trim();
-    if (v === 'in_progress') return 0;
-    if (v === 'claimed') return 1;
-    if (v === 'ready') return 2;
-    if (v === 'pending') return 3;
-    if (v === 'failed') return 4;
-    if (v === 'done') return 5;
-    return 6;
-  };
-
-  const numOr0 = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-  const timeOr0 = (v) => {
-    if (!v) return 0;
-    const n = Date.parse(String(v));
-    return Number.isFinite(n) ? n : 0;
-  };
-
-  return (Array.isArray(items) ? items : [])
-    .map((it, idx) => ({ it, idx }))
-    .sort((a, b) => {
-      const A = a.it || {};
-      const B = b.it || {};
-
-      // Default: status grouping (active first), then priority desc, then updatedAt desc, then createdAt desc.
-      if (sortKey === 'default' || sortKey === 'status') {
-        const sr = statusRank(A.status) - statusRank(B.status);
-        if (sr) return sr;
-      }
-
-      if (sortKey === 'priority' || sortKey === 'default') {
-        const pr = (numOr0(B.priority) - numOr0(A.priority));
-        if (pr) return pr;
-      }
-
-      if (sortKey === 'updatedAt' || sortKey === 'default') {
-        const ur = (timeOr0(B.updatedAt) - timeOr0(A.updatedAt));
-        if (ur) return ur;
-      }
-
-      if (sortKey === 'createdAt' || sortKey === 'default') {
-        const cr = (timeOr0(B.createdAt) - timeOr0(A.createdAt));
-        if (cr) return cr;
-      }
-
-      if (sortKey === 'attempts') {
-        const ar = (numOr0(B.attempts) - numOr0(A.attempts));
-        if (ar) return ar;
-      }
-
-      if (sortKey === 'claimedBy') {
-        const av = String(A.claimedBy || '');
-        const bv = String(B.claimedBy || '');
-        const r = av.localeCompare(bv);
-        if (r) return r * dir;
-      }
-
-      if (sortKey === 'title') {
-        const av = String(A.title || '');
-        const bv = String(B.title || '');
-        const r = av.localeCompare(bv);
-        if (r) return r * dir;
-      }
-
-      // Stable fallback.
-      return a.idx - b.idx;
-    })
-    .map((x) => x.it);
-}
-
-function renderWorkqueuePaneItems(pane) {
-  const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
-  const empty = pane.elements?.thread?.querySelector('[data-wq-empty]');
-  if (!body) return;
-  body.innerHTML = '';
-
-  const itemsRaw = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
-  const items = sortWorkqueueItemsForPane(itemsRaw, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
-  if (empty) empty.hidden = items.length > 0;
-
-  const now = Date.now();
-  for (const it of items) {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'wq-row';
-    if (it.id && it.id === pane.workqueue.selectedItemId) row.classList.add('selected');
-
-    const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
-    const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
-    const status = String(it.status || '');
-
-    row.innerHTML = `
-      <div class="wq-col title">${escapeHtml(String(it.title || ''))}</div>
-      <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
-      <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
-      <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
-      <div class="wq-col claimedBy">${escapeHtml(String(it.claimedBy || ''))}</div>
-      <div class="wq-col lease mono" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
-    `;
-
-    row.addEventListener('click', () => {
-      pane.workqueue.selectedItemId = it.id || null;
-      renderWorkqueuePaneItems(pane);
-      renderWorkqueuePaneInspect(pane, it);
-    });
-
-    body.appendChild(row);
-  }
-
-  // Keep inspect in sync if selection vanished.
-  if (pane.workqueue.selectedItemId && !items.some((it) => it.id === pane.workqueue.selectedItemId)) {
-    pane.workqueue.selectedItemId = null;
-    renderWorkqueuePaneInspect(pane, null);
-  }
-}
-
-function renderWorkqueuePaneInspect(pane, item) {
-  const root = pane.elements?.thread?.querySelector('[data-wq-inspect]');
-  if (!root) return;
-  if (!item) {
-    root.innerHTML = '<div class="hint">Select an item to inspect.</div>';
-    return;
-  }
-  const kv = (k, v) => `<div class="wq-kv"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(String(v ?? ''))}</div></div>`;
-  root.innerHTML = `
-    <div class="wq-inspect-meta">
-      ${kv('id', item.id)}
-      ${kv('queue', item.queue)}
-      ${kv('status', item.status)}
-      ${kv('priority', item.priority)}
-      ${kv('attempts', item.attempts)}
-      ${kv('claimedBy', item.claimedBy)}
-      ${kv('leaseUntil', item.leaseUntil ? new Date(Number(item.leaseUntil)).toISOString() : '')}
-      ${kv('updatedAt', item.updatedAt || '')}
-    </div>
-    <div class="wq-inspect-block">
-      <div class="wq-inspect-label">Title</div>
-      <div class="wq-inspect-pre">${escapeHtml(String(item.title || ''))}</div>
-    </div>
-    <div class="wq-inspect-block">
-      <div class="wq-inspect-label">Instructions</div>
-      <pre class="wq-inspect-pre">${escapeHtml(String(item.instructions || ''))}</pre>
-    </div>
-    ${item.lastError ? `<div class="wq-inspect-block"><div class="wq-inspect-label">Last error</div><pre class="wq-inspect-pre">${escapeHtml(String(item.lastError))}</pre></div>` : ''}
-  `;
-}
-
 function startWorkqueueLeaseTicker() {
   if (workqueueState.leaseTicker) return;
   workqueueState.leaseTicker = setInterval(() => {
@@ -1036,25 +719,6 @@ function startWorkqueueLeaseTicker() {
       el.textContent = fmtRemaining(until - now);
     });
   }, 1000);
-}
-
-function stopWorkqueueAutoRefresh() {
-  if (workqueueState.autoRefreshTimer) {
-    clearInterval(workqueueState.autoRefreshTimer);
-    workqueueState.autoRefreshTimer = null;
-  }
-}
-
-function startWorkqueueAutoRefresh() {
-  stopWorkqueueAutoRefresh();
-  if (!workqueueState.autoRefreshEnabled) return;
-  if (!globalElements.workqueueModal || !globalElements.workqueueModal.classList.contains('open')) return;
-
-  const intervalMs = Number(workqueueState.autoRefreshIntervalMs) || 15000;
-  workqueueState.autoRefreshTimer = setInterval(() => {
-    if (!globalElements.workqueueModal || !globalElements.workqueueModal.classList.contains('open')) return;
-    fetchAndRenderWorkqueueItems();
-  }, Math.max(2000, intervalMs));
 }
 
 let wqStatusTimer = null;
@@ -1142,6 +806,43 @@ async function workqueueClaimNextFromUi() {
     renderWorkqueueInspect(item);
   } catch (err) {
     setWorkqueueActionStatus(`Claim failed: ${String(err)}`, 'err');
+  }
+}
+
+async function loadGuestPrompt() {
+  if (!globalElements.guestPrompt) return;
+  globalElements.guestPromptStatus.textContent = '';
+  try {
+    const res = await fetch('/config/guest-prompt', { credentials: 'include' });
+    if (!res.ok) {
+      globalElements.guestPromptStatus.textContent = 'Unable to load guest prompt.';
+      return;
+    }
+    const data = await res.json();
+    globalElements.guestPrompt.value = data.prompt || '';
+  } catch {
+    globalElements.guestPromptStatus.textContent = 'Unable to load guest prompt.';
+  }
+}
+
+async function saveGuestPrompt() {
+  if (!globalElements.guestPrompt) return;
+  const prompt = globalElements.guestPrompt.value.trim();
+  globalElements.guestPromptStatus.textContent = '';
+  try {
+    const res = await fetch('/config/guest-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ prompt })
+    });
+    if (!res.ok) {
+      globalElements.guestPromptStatus.textContent = 'Failed to save guest prompt.';
+      return;
+    }
+    globalElements.guestPromptStatus.textContent = 'Guest prompt saved.';
+  } catch {
+    globalElements.guestPromptStatus.textContent = 'Failed to save guest prompt.';
   }
 }
 
@@ -2440,7 +2141,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sortKey, sortDir, closable = true } = {}) {
+function createPane({ key, role, agentId, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -2452,7 +2153,6 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     closeBtn: root.querySelector('[data-pane-close]'),
     thread: root.querySelector('[data-pane-thread]'),
     scrollDownBtn: root.querySelector('[data-pane-scroll-down]'),
-    inputRow: root.querySelector('.chat-input-row'),
     input: root.querySelector('[data-pane-input]'),
     commandHints: root.querySelector('[data-pane-command-hints]'),
     fileInput: root.querySelector('[data-pane-file-input]'),
@@ -2462,36 +2162,27 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     sendBtn: root.querySelector('[data-pane-send]')
   };
 
-  const pane = {
-    key,
-    role,
-    kind: kind === 'workqueue' ? 'workqueue' : 'chat',
-    agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
-    workqueue: {
-      queue: (queue || 'dev-team').trim() || 'dev-team',
-      statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
-      items: [],
-      selectedItemId: null,
-      sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'default',
-      sortDir: sortDir === 'asc' ? 'asc' : 'desc'
-    },
-    connected: false,
-    statusState: 'disconnected',
-    statusMeta: '',
-    elements,
-    chat: { runs: new Map(), history: [] },
-    scroll: { pinned: true },
-    thinking: { active: false, timer: null, dotsTimer: null, bubble: null },
-    attachments: { files: [] },
-    pendingSend: null,
-    catchUp: { active: false, attemptsLeft: 0, timer: null },
-    outbox: [],
-    inFlight: null,
-    chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
-    legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
-    sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
-    client: null
-  };
+	  const pane = {
+	    key,
+	    role,
+	    agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
+	    connected: false,
+	    statusState: 'disconnected',
+	    statusMeta: '',
+	    elements,
+	    chat: { runs: new Map(), history: [] },
+	    scroll: { pinned: true },
+	    thinking: { active: false, timer: null, dotsTimer: null, bubble: null },
+	    attachments: { files: [] },
+	    pendingSend: null,
+	    catchUp: { active: false, attemptsLeft: 0, timer: null },
+	    outbox: [],
+	    inFlight: null,
+	    chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
+	    legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
+	    sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
+	    client: null
+	  };
 
   if (elements.closeBtn) {
     elements.closeBtn.hidden = !closable;
@@ -2499,317 +2190,6 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       paneManager.removePane(pane.key);
     });
   }
-
-  // WORKQUEUE PANE
-  if (pane.role === 'admin' && pane.kind === 'workqueue') {
-    if (elements.agentWrap) elements.agentWrap.hidden = true;
-    if (elements.inputRow) elements.inputRow.hidden = true;
-    if (elements.scrollDownBtn) elements.scrollDownBtn.hidden = true;
-
-
-    // Replace thread with workqueue list + inspect.
-    elements.thread.classList.add('wq-pane');
-    elements.thread.innerHTML = `
-      <div class="wq-toolbar">
-        <div class="wq-toolbar-row">
-          <label class="wq-field">
-            <span class="wq-label">Queue</span>
-            <select data-wq-queue-select aria-label="Select workqueue"></select>
-            <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
-          </label>
-
-          <label class="wq-field wq-status-field">
-            <span class="wq-label">Status filter</span>
-            <input data-wq-status type="text" value="${escapeHtml(pane.workqueue.statusFilter.join(','))}" placeholder="ready,pending,claimed,in_progress" />
-          </label>
-
-          <button data-wq-refresh class="secondary" type="button">Refresh</button>
-
-          <div class="wq-sort" role="group" aria-label="Sort workqueue items">
-            <span class="wq-sort-label">Sort</span>
-            <button type="button" class="wq-sort-btn" data-wq-sort="default">Default</button>
-            <button type="button" class="wq-sort-btn" data-wq-sort="priority">Priority</button>
-            <button type="button" class="wq-sort-btn" data-wq-sort="updatedAt">Updated</button>
-            <button type="button" class="wq-sort-btn" data-wq-sort="createdAt">Created</button>
-          </div>
-        </div>
-
-        <details class="wq-enqueue">
-          <summary>Enqueue new item</summary>
-          <form data-wq-enqueue-form class="wq-enqueue-form">
-            <label class="wq-field">
-              <span class="wq-label">Title</span>
-              <input data-wq-enqueue-title type="text" required placeholder="Short title" />
-            </label>
-
-            <label class="wq-field">
-              <span class="wq-label">Priority</span>
-              <input data-wq-enqueue-priority type="number" value="0" />
-            </label>
-
-            <label class="wq-field">
-              <span class="wq-label">Dedupe key (optional)</span>
-              <input data-wq-enqueue-dedupe type="text" placeholder="e.g. pr-review:2026-02-10T01" />
-            </label>
-
-            <label class="wq-field wq-field-wide">
-              <span class="wq-label">Instructions</span>
-              <textarea data-wq-enqueue-instructions rows="3" placeholder="Links, context, acceptance criteria"></textarea>
-            </label>
-
-            <div class="wq-enqueue-actions">
-              <label class="wq-field">
-                <span class="wq-label">Claim as (optional)</span>
-                <select data-wq-claim-agent></select>
-              </label>
-              <label class="wq-field">
-                <span class="wq-label">Lease ms</span>
-                <input data-wq-claim-lease type="number" value="900000" />
-              </label>
-              <button data-wq-enqueue-submit type="submit">Enqueue</button>
-            </div>
-
-            <div class="hint" data-wq-enqueue-status aria-live="polite"></div>
-          </form>
-        </details>
-
-        <div class="hint" data-wq-statusline></div>
-      </div>
-
-      <div class="wq-layout">
-        <section class="wq-list" aria-label="Workqueue items">
-          <div class="wq-list-header">
-            <button type="button" class="wq-list-sort" data-wq-sort="title">title</button>
-            <button type="button" class="wq-list-sort" data-wq-sort="status">status</button>
-            <button type="button" class="wq-list-sort" data-wq-sort="priority">prio</button>
-            <button type="button" class="wq-list-sort" data-wq-sort="attempts">attempts</button>
-            <button type="button" class="wq-list-sort" data-wq-sort="claimedBy">claimedBy</button>
-            <div>lease</div>
-          </div>
-          <div class="wq-list-body" data-wq-list-body></div>
-          <div data-wq-empty class="hint" style="padding: 10px 12px;" hidden>No items.</div>
-        </section>
-
-        <section class="wq-inspect" aria-label="Workqueue item details">
-          <div class="wq-inspect-header">Inspect</div>
-          <div data-wq-inspect class="wq-inspect-body"></div>
-        </section>
-      </div>
-    `;
-
-    const queueSelectEl = elements.thread.querySelector('[data-wq-queue-select]');
-    const queueCustomEl = elements.thread.querySelector('[data-wq-queue-custom]');
-    const statusEl = elements.thread.querySelector('[data-wq-status]');
-    const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
-
-    const getQueueValue = () => {
-      const sel = String(queueSelectEl?.value || '').trim();
-      if (sel === '__custom__') return String(queueCustomEl?.value || '').trim();
-      return sel;
-    };
-
-    const doRefresh = async () => {
-      const q = getQueueValue() || 'dev-team';
-      pane.workqueue.queue = q;
-      const statuses = (statusEl?.value || '')
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      pane.workqueue.statusFilter = statuses.length ? statuses : ['ready', 'pending', 'claimed', 'in_progress'];
-      await fetchAndRenderWorkqueueItemsForPane(pane);
-      paneManager.persistAdminPanes();
-    };
-
-    const populateQueueSelect = async () => {
-      if (!queueSelectEl) return;
-      try {
-        const res = await fetch('/api/workqueue/queues', { credentials: 'include', cache: 'no-store' });
-        if (!res.ok) throw new Error(String(res.status));
-        const data = await res.json().catch(() => null);
-        const queues = Array.isArray(data?.queues) ? data.queues : [];
-
-        const current = (pane.workqueue.queue || 'dev-team').trim();
-        const unique = Array.from(new Set([current, ...queues].map((q) => String(q).trim()).filter(Boolean)));
-        unique.sort((a, b) => a.localeCompare(b));
-
-        queueSelectEl.innerHTML = '';
-        for (const q of unique) {
-          const opt = document.createElement('option');
-          opt.value = q;
-          opt.textContent = q;
-          queueSelectEl.appendChild(opt);
-        }
-
-        const customOpt = document.createElement('option');
-        customOpt.value = '__custom__';
-        customOpt.textContent = 'Custom…';
-        queueSelectEl.appendChild(customOpt);
-
-        if (unique.includes(current)) {
-          queueSelectEl.value = current;
-          if (queueCustomEl) queueCustomEl.hidden = true;
-        } else {
-          queueSelectEl.value = '__custom__';
-          if (queueCustomEl) {
-            queueCustomEl.hidden = false;
-            queueCustomEl.value = current;
-          }
-        }
-      } catch {
-        // fallback: keep current queue editable
-        queueSelectEl.innerHTML = '';
-        const opt = document.createElement('option');
-        opt.value = pane.workqueue.queue || 'dev-team';
-        opt.textContent = pane.workqueue.queue || 'dev-team';
-        queueSelectEl.appendChild(opt);
-        const customOpt = document.createElement('option');
-        customOpt.value = '__custom__';
-        customOpt.textContent = 'Custom…';
-        queueSelectEl.appendChild(customOpt);
-        queueSelectEl.value = opt.value;
-      }
-    };
-
-    queueSelectEl?.addEventListener('change', () => {
-      const isCustom = String(queueSelectEl.value) === '__custom__';
-      if (queueCustomEl) {
-        queueCustomEl.hidden = !isCustom;
-        if (isCustom) queueCustomEl.focus();
-      }
-      doRefresh();
-    });
-
-    populateQueueSelect().then(() => doRefresh());
-
-    refreshBtn?.addEventListener('click', () => doRefresh());
-    queueCustomEl?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') doRefresh();
-    });
-    statusEl?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') doRefresh();
-    });
-
-    // Sort controls (client-side): stable sorting with a status-grouping default.
-    const sortBtns = Array.from(elements.thread.querySelectorAll('[data-wq-sort]'));
-    const updateSortUi = () => {
-      sortBtns.forEach((btn) => {
-        const key = btn.getAttribute('data-wq-sort') || '';
-        const active = key && key === pane.workqueue.sortKey;
-        btn.classList.toggle('active', active);
-        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-        btn.title = active ? (pane.workqueue.sortDir === 'asc' ? 'Sorted ascending' : 'Sorted descending') : '';
-      });
-    };
-
-    const setSort = (key) => {
-      const nextKey = String(key || 'default');
-      if (pane.workqueue.sortKey === nextKey) {
-        pane.workqueue.sortDir = pane.workqueue.sortDir === 'asc' ? 'desc' : 'asc';
-      } else {
-        pane.workqueue.sortKey = nextKey;
-        pane.workqueue.sortDir = nextKey === 'claimedBy' || nextKey === 'title' || nextKey === 'status' ? 'asc' : 'desc';
-      }
-      updateSortUi();
-      renderWorkqueuePaneItems(pane);
-      paneManager.persistAdminPanes();
-    };
-
-    sortBtns.forEach((btn) => {
-      btn.addEventListener('click', () => setSort(btn.getAttribute('data-wq-sort')));
-    });
-    updateSortUi();
-
-    // Agent dropdown (prefer select over free-text).
-    const claimAgentSelect = elements.thread.querySelector('[data-wq-claim-agent]');
-    if (claimAgentSelect) {
-      claimAgentSelect.innerHTML = '';
-      const optNone = document.createElement('option');
-      optNone.value = '';
-      optNone.textContent = '(none)';
-      claimAgentSelect.appendChild(optNone);
-      const agents = Array.isArray(uiState.agents) ? uiState.agents : [];
-      for (const a of agents) {
-        const opt = document.createElement('option');
-        opt.value = a.id;
-        opt.textContent = formatAgentLabel(a);
-        claimAgentSelect.appendChild(opt);
-      }
-    }
-
-    // Enqueue (inline form).
-    const enqueueForm = elements.thread.querySelector('[data-wq-enqueue-form]');
-    const enqueueStatus = elements.thread.querySelector('[data-wq-enqueue-status]');
-    const enqueueTitle = elements.thread.querySelector('[data-wq-enqueue-title]');
-    const enqueueInstructions = elements.thread.querySelector('[data-wq-enqueue-instructions]');
-    const enqueuePriority = elements.thread.querySelector('[data-wq-enqueue-priority]');
-    const enqueueDedupe = elements.thread.querySelector('[data-wq-enqueue-dedupe]');
-
-    const setEnqueueStatus = (text) => {
-      if (!enqueueStatus) return;
-      enqueueStatus.textContent = String(text || '');
-    };
-
-    enqueueForm?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const queue = (getQueueValue() || pane.workqueue.queue || '').trim();
-      const title = (enqueueTitle?.value || '').trim();
-      const instructions = (enqueueInstructions?.value || '').trim();
-      const priority = Number(enqueuePriority?.value || 0) || 0;
-      const dedupeKey = (enqueueDedupe?.value || '').trim();
-
-      if (!queue) {
-        setEnqueueStatus('Select a queue first.');
-        return;
-      }
-      if (!title) {
-        setEnqueueStatus('Title is required.');
-        enqueueTitle?.focus();
-        return;
-      }
-
-      setEnqueueStatus('Enqueueing…');
-      try {
-        const res = await fetch('/api/workqueue/enqueue', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ queue, title, instructions, priority, dedupeKey })
-        });
-        const data = await res.json().catch(() => null);
-        if (!res.ok || !data?.ok) {
-          setEnqueueStatus('Enqueue failed: ' + String(data?.error || res.status));
-          return;
-        }
-
-        const item = data.item || null;
-        setEnqueueStatus(item && item._deduped ? 'Deduped: ' + item.id : 'Enqueued: ' + String(item?.id || ''));
-        if (enqueueTitle) enqueueTitle.value = '';
-        if (enqueueInstructions) enqueueInstructions.value = '';
-        if (enqueueDedupe) enqueueDedupe.value = '';
-
-        await doRefresh();
-        if (item?.id) {
-          pane.workqueue.selectedItemId = item.id;
-          renderWorkqueuePaneItems(pane);
-          renderWorkqueuePaneInspect(pane, pane.workqueue.items.find((it) => it.id === item.id) || item);
-        }
-      } catch (err) {
-        setEnqueueStatus('Enqueue failed: ' + String(err));
-      }
-    });
-
-    setStatusPill(elements.status, 'connected', '');
-    // initial fetch is deferred until admin authed, but safe to load immediately too.
-    setTimeout(() => {
-      if (uiState.authed) doRefresh();
-    }, 0);
-
-    pane.client = null;
-    pane.connected = true;
-    return pane;
-  }
-
-  // CHAT PANE (existing behavior)
 
   if (pane.role === 'admin') {
     renderAgentOptions(elements.agentSelect, pane.agentId);
@@ -2871,7 +2251,6 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
   return pane;
 }
 
-
 function inferPaneCols(count) {
   if (count <= 1) return 1;
   if (count === 2) return 2;
@@ -2907,17 +2286,7 @@ const paneManager = {
   },
   initAdmin() {
     const panes = this.loadAdminPanes();
-    this.panes = panes.map((cfg) =>
-      createPane({
-        key: cfg.key,
-        role: 'admin',
-        kind: cfg.kind || 'chat',
-        agentId: cfg.agentId,
-        queue: cfg.queue,
-        statusFilter: cfg.statusFilter,
-        closable: true
-      })
-    );
+    this.panes = panes.map((cfg) => createPane({ key: cfg.key, role: 'admin', agentId: cfg.agentId, closable: true }));
     this.panes.forEach((pane) => globalElements.paneGrid.appendChild(pane.elements.root));
     this.updatePaneLabels();
     this.updateCloseButtons();
@@ -2938,100 +2307,40 @@ const paneManager = {
   loadAdminPanes() {
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
     const defaultAgent = normalizeAgentId(storedDefault || 'main');
-
-    const coerce = (item) => {
-      // Legacy format: { key, agentId }
-      if (item && typeof item === 'object') {
-        const key = typeof item.key === 'string' && item.key ? item.key : '';
-        const kind = item.kind === 'workqueue' ? 'workqueue' : 'chat';
-        if (!key) return null;
-        if (kind === 'workqueue') {
-          const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
-          const statusFilter = Array.isArray(item.statusFilter)
-            ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
-            : ['ready', 'pending', 'claimed', 'in_progress'];
-          const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'default';
-          const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, queue, statusFilter, sortKey, sortDir };
-        }
-        const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
-        return { key, kind: 'chat', agentId };
-      }
-      // Super-legacy format: ['pabc','pdef'] (treat as chat panes)
-      if (typeof item === 'string' && item) {
-        return { key: item, kind: 'chat', agentId: defaultAgent };
-      }
-      return null;
-    };
-
     try {
       const raw = storage.get(ADMIN_PANES_KEY, '');
       if (!raw) throw new Error('empty');
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) throw new Error('not array');
-      const list = parsed.map(coerce).filter(Boolean);
+      const list = parsed
+        .map((item) => ({
+          key: typeof item?.key === 'string' && item.key ? item.key : '',
+          agentId: normalizeAgentId(typeof item?.agentId === 'string' ? item.agentId : defaultAgent)
+        }))
+        .filter((item) => item.key);
       if (list.length > 0) {
         return list.slice(0, this.maxPanes);
       }
     } catch {}
 
-    // Default: two chat panes.
     const secondary =
       uiState.agents.find((agent) => agent.id && agent.id !== defaultAgent)?.id || defaultAgent || 'main';
-    const paneA = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: defaultAgent };
-    const paneB = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: normalizeAgentId(secondary) };
+    const paneA = { key: `p${randomId().slice(0, 8)}`, agentId: defaultAgent };
+    const paneB = { key: `p${randomId().slice(0, 8)}`, agentId: normalizeAgentId(secondary) };
     const list = [paneA, paneB].slice(0, this.maxPanes);
     storage.set(ADMIN_PANES_KEY, JSON.stringify(list));
     return list;
   },
   persistAdminPanes() {
     if (roleState.role !== 'admin') return;
-    const payload = this.panes.map((pane) => {
-      if (pane.kind === 'workqueue') {
-        return {
-          key: pane.key,
-          kind: 'workqueue',
-          queue: pane.workqueue?.queue || 'dev-team',
-          statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
-          sortKey: pane.workqueue?.sortKey || 'default',
-          sortDir: pane.workqueue?.sortDir || 'desc'
-        };
-      }
-      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
-    });
+    const payload = this.panes.map((pane) => ({ key: pane.key, agentId: pane.agentId || 'main' }));
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
-  addPane(kind = 'chat') {
+  addPane() {
     if (roleState.role !== 'admin') return;
     if (this.panes.length >= this.maxPanes) return;
-
-    const normalizedKind = String(kind || 'chat')
-      .trim()
-      .toLowerCase()
-      .startsWith('w')
-      ? 'workqueue'
-      : 'chat';
-
-    if (normalizedKind === 'workqueue') {
-      const pane = createPane({
-        key: `p${randomId().slice(0, 8)}`,
-        role: 'admin',
-        kind: 'workqueue',
-        queue: 'dev-team',
-        statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
-        closable: true
-      });
-      this.panes.push(pane);
-      globalElements.paneGrid.appendChild(pane.elements.root);
-      this.updatePaneLabels();
-      this.updateCloseButtons();
-      this.applyInferredLayout();
-      this.persistAdminPanes();
-      return;
-    }
-
     const agentId = normalizeAgentId(storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
-    const pane = createPane({ key: `p${randomId().slice(0, 8)}`, role: 'admin', kind: 'chat', agentId, closable: true });
+    const pane = createPane({ key: `p${randomId().slice(0, 8)}`, role: 'admin', agentId, closable: true });
     this.panes.push(pane);
     globalElements.paneGrid.appendChild(pane.elements.root);
     this.updatePaneLabels();
@@ -3040,105 +2349,6 @@ const paneManager = {
     this.persistAdminPanes();
     if (uiState.authed) {
       pane.client.connect();
-    }
-  },
-  openAddPaneMenu(anchorEl) {
-    if (roleState.role !== 'admin') return;
-
-    if (this._addPaneMenuState?.open) {
-      this.closeAddPaneMenu();
-      return;
-    }
-
-    if (!anchorEl || !(anchorEl instanceof Element)) return;
-
-    const state = this._addPaneMenuState || { open: false };
-
-    if (!state.menuEl) {
-      const menu = document.createElement('div');
-      menu.className = 'pane-add-menu';
-      menu.setAttribute('role', 'menu');
-      menu.setAttribute('aria-label', 'Add pane');
-
-      const chatBtn = document.createElement('button');
-      chatBtn.type = 'button';
-      chatBtn.className = 'pane-add-menu__item';
-      chatBtn.textContent = 'Chat pane';
-
-      const wqBtn = document.createElement('button');
-      wqBtn.type = 'button';
-      wqBtn.className = 'pane-add-menu__item';
-      wqBtn.textContent = 'Workqueue pane';
-
-      menu.appendChild(chatBtn);
-      menu.appendChild(wqBtn);
-
-      chatBtn.addEventListener('click', () => {
-        this.closeAddPaneMenu();
-        this.addPane('chat');
-      });
-
-      wqBtn.addEventListener('click', () => {
-        this.closeAddPaneMenu();
-        this.addPane('workqueue');
-      });
-
-      state.menuEl = menu;
-      state.chatBtn = chatBtn;
-      state.wqBtn = wqBtn;
-    }
-
-    const positionMenu = () => {
-      const rect = anchorEl.getBoundingClientRect();
-      const menuRect = state.menuEl.getBoundingClientRect();
-      const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - menuRect.width - 8));
-      const top = Math.min(Math.max(8, rect.bottom + 8), Math.max(8, window.innerHeight - menuRect.height - 8));
-      state.menuEl.style.left = `${Math.round(left)}px`;
-      state.menuEl.style.top = `${Math.round(top)}px`;
-    };
-
-    const closeIfOutside = (event) => {
-      if (!state.open) return;
-      if (event.target === anchorEl) return;
-      if (state.menuEl.contains(event.target)) return;
-      this.closeAddPaneMenu();
-    };
-
-    state.positionMenu = positionMenu;
-    state.closeIfOutside = closeIfOutside;
-
-    document.body.appendChild(state.menuEl);
-    state.menuEl.style.display = 'block';
-    state.open = true;
-
-    positionMenu();
-
-    document.addEventListener('mousedown', closeIfOutside);
-    window.addEventListener('resize', positionMenu);
-    window.addEventListener('scroll', positionMenu, true);
-
-    const atMax = this.panes.length >= this.maxPanes;
-    state.chatBtn.disabled = atMax;
-    state.wqBtn.disabled = atMax;
-
-    this._addPaneMenuState = state;
-  },
-  closeAddPaneMenu() {
-    const state = this._addPaneMenuState;
-    if (!state?.open) return;
-
-    state.open = false;
-    try {
-      document.removeEventListener('mousedown', state.closeIfOutside);
-      window.removeEventListener('resize', state.positionMenu);
-      window.removeEventListener('scroll', state.positionMenu, true);
-    } catch {}
-
-    if (state.menuEl) {
-      state.menuEl.style.display = 'none';
-      try {
-        state.menuEl.remove();
-      } catch {}
     }
   },
   removePane(key) {
@@ -3187,30 +2397,22 @@ const paneManager = {
   },
   connectAll() {
     this.panes.forEach((pane, index) => {
-      if (pane.kind === 'workqueue') return;
-      if (!pane.client) return;
       setTimeout(() => pane.client.connect(), index * 120);
     });
   },
   connectIfNeeded() {
     if (!uiState.authed) return;
     this.panes.forEach((pane) => {
-      if (pane.kind === 'workqueue') return;
-      if (!pane.client) return;
       if (pane.client.manualDisconnect) return;
       if (pane.connected) return;
       pane.client.connect({ isRetry: true });
     });
   },
   disconnectAll({ silent = false } = {}) {
-    this.panes.forEach((pane) => {
-      if (pane.kind === 'workqueue') return;
-      pane.client?.disconnect(silent);
-    });
+    this.panes.forEach((pane) => pane.client.disconnect(silent));
   },
   refreshChatEnabled() {
     this.panes.forEach((pane) => {
-      if (pane.kind === 'workqueue') return;
       paneSetChatEnabled(pane);
     });
   }
@@ -3224,9 +2426,6 @@ globalElements.settingsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.settingsModal) closeSettings();
 });
 globalElements.saveGuestPromptBtn?.addEventListener('click', () => saveGuestPrompt());
-globalElements.recurringPromptCreateBtn?.addEventListener('click', () => createRecurringPromptFromUi());
-globalElements.recurringPromptRefreshBtn?.addEventListener('click', () => loadRecurringPrompts());
-
 
 globalElements.workqueueBtn?.addEventListener('click', () => openWorkqueue());
 globalElements.workqueueCloseBtn?.addEventListener('click', () => closeWorkqueue());
@@ -3237,20 +2436,6 @@ globalElements.wqQueueSelect?.addEventListener('change', () => {
   workqueueState.selectedQueue = globalElements.wqQueueSelect.value;
   fetchAndRenderWorkqueueItems();
 });
-
-globalElements.wqAutoRefreshEnabled?.addEventListener('change', () => {
-  workqueueState.autoRefreshEnabled = !!globalElements.wqAutoRefreshEnabled.checked;
-  storage.set('clawnsole.wq.autorefresh.enabled', workqueueState.autoRefreshEnabled);
-  startWorkqueueAutoRefresh();
-});
-
-globalElements.wqAutoRefreshInterval?.addEventListener('change', () => {
-  const next = Number(globalElements.wqAutoRefreshInterval.value) || 15000;
-  workqueueState.autoRefreshIntervalMs = next;
-  storage.set('clawnsole.wq.autorefresh.intervalMs', workqueueState.autoRefreshIntervalMs);
-  startWorkqueueAutoRefresh();
-});
-
 globalElements.wqRefreshBtn?.addEventListener('click', () => {
   fetchWorkqueueQueues().then(() => fetchAndRenderWorkqueueItems());
 });
@@ -3262,7 +2447,6 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     closeSettings();
     closeWorkqueue();
-    paneManager.closeAddPaneMenu();
   }
 });
 
@@ -3309,9 +2493,8 @@ globalElements.logoutBtn?.addEventListener('click', async () => {
   window.location.replace('/');
 });
 
-globalElements.addPaneBtn?.addEventListener('click', (event) => {
-  event?.preventDefault?.();
-  paneManager.openAddPaneMenu(globalElements.addPaneBtn);
+globalElements.addPaneBtn?.addEventListener('click', () => {
+  paneManager.addPane();
 });
 
 // layoutSelect deprecated; layout is inferred from pane count.
@@ -3343,7 +2526,7 @@ window.addEventListener('load', () => {
       }
 
       if (!routeRole) {
-        window.location.replace('/admin');
+        window.location.replace(role === 'admin' ? '/admin' : '/guest');
         return;
       }
 

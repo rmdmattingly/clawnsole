@@ -35,7 +35,7 @@ function httpGetJson(url, headers = {}) {
   });
 }
 
-function httpPostJson(url, { headers = {}, body } = {}) {
+function httpPostJson(url, body, headers = {}) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body ?? {});
     const req = http.request(
@@ -64,11 +64,6 @@ function httpPostJson(url, { headers = {}, body } = {}) {
     req.write(payload);
     req.end();
   });
-}
-
-function adminCookie() {
-  const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
-  return 'clawnsole_auth=' + cookie + '; clawnsole_role=admin';
 }
 
 function startServer({ openclawHome } = {}) {
@@ -125,8 +120,8 @@ test('workqueue API: summary returns counts + active list', async () => {
   fs.mkdirSync(openclawHome, { recursive: true });
   fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
 
-  enqueueItem(null, { queue: 'dev-team', title: 't1', instructions: 'do1', priority: 1 });
-  enqueueItem(null, { queue: 'dev-team', title: 't2', instructions: 'do2', priority: 2 });
+  const a = enqueueItem(null, { queue: 'dev-team', title: 't1', instructions: 'do1', priority: 1 });
+  const b = enqueueItem(null, { queue: 'dev-team', title: 't2', instructions: 'do2', priority: 2 });
 
   // Claim one item to make it active.
   const { claimNext } = require('../../lib/workqueue');
@@ -148,7 +143,8 @@ test('workqueue API: summary returns counts + active list', async () => {
   }
 });
 
-test('workqueue API: supports enqueue + claim-next + progress + done', async () => {
+
+test('workqueue API: enqueue creates item', async () => {
   const { openclawHome } = mkTempEnv();
   fs.mkdirSync(openclawHome, { recursive: true });
   fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
@@ -156,48 +152,21 @@ test('workqueue API: supports enqueue + claim-next + progress + done', async () 
   const { server, port } = await startServer({ openclawHome });
   try {
     const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
-    const headers = { Cookie: `clawnsole_auth=${cookie}; clawnsole_role=admin` };
-
-    const enq = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/enqueue`, {
-      headers,
-      body: { queue: 'dev-team', title: 't1', instructions: 'do1', priority: 2 }
-    });
-    assert.equal(enq.status, 200);
-    assert.equal(enq.json?.ok, true);
-    assert.ok(enq.json?.item?.id);
-
-    const claim = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/claim-next`, {
-      headers,
-      body: { agentId: 'agent-1', queues: ['dev-team'], leaseMs: 60_000 }
-    });
-    assert.equal(claim.status, 200);
-    assert.equal(claim.json?.ok, true);
-    assert.equal(claim.json?.item?.claimedBy, 'agent-1');
-
-    const itemId = claim.json.item.id;
-
-    const prog = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/progress`, {
-      headers,
-      body: { itemId, agentId: 'agent-1', note: 'working', leaseMs: 60_000 }
-    });
-    assert.equal(prog.status, 200);
-    assert.equal(prog.json?.ok, true);
-    assert.equal(prog.json?.item?.status, 'in_progress');
-
-    const done = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/done`, {
-      headers,
-      body: { itemId, agentId: 'agent-1', result: { ok: true }, note: 'done' }
-    });
-    assert.equal(done.status, 200);
-    assert.equal(done.json?.ok, true);
-    assert.equal(done.json?.item?.status, 'done');
-    assert.deepEqual(done.json?.item?.result, { ok: true });
+    const res = await httpPostJson(
+      'http://127.0.0.1:' + port + '/api/workqueue/enqueue',
+      { queue: 'dev-team', title: 't3', instructions: 'do3', priority: 3, dedupeKey: 'k1' },
+      { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' }
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.json?.ok, true);
+    assert.equal(res.json?.item?.queue, 'dev-team');
+    assert.equal(res.json?.item?.dedupeKey, 'k1');
   } finally {
     server.close();
   }
 });
 
-test('workqueue API: supports fail + returns ownership errors', async () => {
+test('workqueue API: claim-next claims a ready item', async () => {
   const { openclawHome } = mkTempEnv();
   fs.mkdirSync(openclawHome, { recursive: true });
   fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
@@ -207,106 +176,15 @@ test('workqueue API: supports fail + returns ownership errors', async () => {
   const { server, port } = await startServer({ openclawHome });
   try {
     const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
-    const headers = { Cookie: `clawnsole_auth=${cookie}; clawnsole_role=admin` };
-
-    const badEnq = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/enqueue`, { headers, body: { title: 'x' } });
-    assert.equal(badEnq.status, 400);
-    assert.ok(badEnq.json?.error);
-
-    const badClaim = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/claim-next`, { headers, body: { queues: ['dev-team'] } });
-    assert.equal(badClaim.status, 400);
-    assert.ok(badClaim.json?.error);
-
-    const badAssignments = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/assignments`, {
-      headers,
-      body: { agentId: 'a', queues: [] }
-    });
-    assert.equal(badAssignments.status, 400);
-    assert.ok(badAssignments.json?.error);
-
-    const claim = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/claim-next`, {
-      headers,
-      body: { agentId: 'agent-1', queues: ['dev-team'], leaseMs: 60_000 }
-    });
-    const itemId = claim.json.item.id;
-
-    const conflict = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/fail`, {
-      headers,
-      body: { itemId, agentId: 'agent-2', error: 'nope' }
-    });
-    assert.equal(conflict.status, 409);
-    assert.equal(conflict.json?.error, 'claimed_by_other');
-
-    const fail = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/fail`, {
-      headers,
-      body: { itemId, agentId: 'agent-1', error: 'boom', note: 'failed' }
-    });
-    assert.equal(fail.status, 200);
-    assert.equal(fail.json?.ok, true);
-    assert.equal(fail.json?.item?.status, 'failed');
-    assert.equal(fail.json?.item?.lastError, 'boom');
-  } finally {
-    server.close();
-  }
-});
-
-test('workqueue API claim-next: when queues omitted falls back to defaults', async () => {
-  const { openclawHome } = mkTempEnv();
-  fs.mkdirSync(openclawHome, { recursive: true });
-  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
-
-  enqueueItem(null, { queue: 'dev-team', title: 't', instructions: 'do', priority: 1 });
-
-  const { server, port } = await startServer({ openclawHome });
-  try {
-    const headers = { Cookie: adminCookie() };
-    const claim = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/claim-next`, {
-      headers,
-      body: { agentId: 'agent-1' }
-    });
-    assert.equal(claim.status, 200);
-    assert.equal(claim.json?.ok, true);
-    assert.ok(claim.json?.item);
-    assert.equal(claim.json?.item?.queue, 'dev-team');
-    assert.equal(claim.json?.queuesSource, 'default');
-  } finally {
-    server.close();
-  }
-});
-
-test('workqueue API claim-next: when queues omitted uses assignments for agent', async () => {
-  const { openclawHome } = mkTempEnv();
-  fs.mkdirSync(openclawHome, { recursive: true });
-  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
-
-  enqueueItem(null, { queue: 'dev-team', title: 'a', instructions: 'x', priority: 0 });
-  enqueueItem(null, { queue: 'qa', title: 'b', instructions: 'y', priority: 5 });
-
-  const { server, port } = await startServer({ openclawHome });
-  try {
-    const headers = { Cookie: adminCookie() };
-
-    const set = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/assignments`, {
-      headers,
-      body: { agentId: 'agent-1', queues: ['qa'] }
-    });
-    assert.equal(set.status, 200);
-    assert.equal(set.json?.ok, true);
-
-    const claim = await httpPostJson(`http://127.0.0.1:${port}/api/workqueue/claim-next`, {
-      headers,
-      body: { agentId: 'agent-1' }
-    });
-    assert.equal(claim.status, 200);
-    assert.equal(claim.json?.ok, true);
-    assert.ok(claim.json?.item);
-    assert.equal(claim.json?.item?.queue, 'qa');
-    assert.equal(claim.json?.queuesSource, 'assignment');
-
-    const list = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/assignments`, headers);
-    assert.equal(list.status, 200);
-    assert.equal(list.json?.ok, true);
-    assert.deepEqual(list.json?.assignments?.['agent-1'], ['qa']);
+    const res = await httpPostJson(
+      'http://127.0.0.1:' + port + '/api/workqueue/claim-next',
+      { agentId: 'agent-1', queue: 'dev-team', leaseMs: 60000 },
+      { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' }
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.json?.ok, true);
+    assert.equal(res.json?.item?.status, 'claimed');
+    assert.equal(res.json?.item?.claimedBy, 'agent-1');
   } finally {
     server.close();
   }
