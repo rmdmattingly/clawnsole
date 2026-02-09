@@ -18,6 +18,15 @@ const globalElements = {
   wqListBody: document.getElementById('wqListBody'),
   wqListEmpty: document.getElementById('wqListEmpty'),
   wqInspectBody: document.getElementById('wqInspectBody'),
+  wqEnqueueTitle: document.getElementById('wqEnqueueTitle'),
+  wqEnqueuePriority: document.getElementById('wqEnqueuePriority'),
+  wqEnqueueInstructions: document.getElementById('wqEnqueueInstructions'),
+  wqEnqueueDedupeKey: document.getElementById('wqEnqueueDedupeKey'),
+  wqEnqueueBtn: document.getElementById('wqEnqueueBtn'),
+  wqClaimAgentId: document.getElementById('wqClaimAgentId'),
+  wqClaimLeaseMs: document.getElementById('wqClaimLeaseMs'),
+  wqClaimBtn: document.getElementById('wqClaimBtn'),
+  wqActionStatus: document.getElementById('wqActionStatus'),
   settingsBtn: document.getElementById('settingsBtn'),
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
@@ -710,6 +719,94 @@ function startWorkqueueLeaseTicker() {
       el.textContent = fmtRemaining(until - now);
     });
   }, 1000);
+}
+
+let wqStatusTimer = null;
+function setWorkqueueActionStatus(text, kind = 'info') {
+  const el = globalElements.wqActionStatus;
+  if (!el) return;
+  el.textContent = String(text || '');
+  el.dataset.kind = kind;
+  if (wqStatusTimer) clearTimeout(wqStatusTimer);
+  if (text) {
+    wqStatusTimer = setTimeout(() => {
+      if (globalElements.wqActionStatus) globalElements.wqActionStatus.textContent = '';
+    }, 6000);
+  }
+}
+
+async function workqueueEnqueueFromUi() {
+  if (roleState.role !== 'admin') return;
+  const queue = (workqueueState.selectedQueue || '').trim();
+  if (!queue) {
+    setWorkqueueActionStatus('Select a queue before enqueueing.', 'err');
+    return;
+  }
+
+  const title = (globalElements.wqEnqueueTitle?.value || '').trim();
+  const instructions = (globalElements.wqEnqueueInstructions?.value || '').trim();
+  const dedupeKey = (globalElements.wqEnqueueDedupeKey?.value || '').trim();
+  const priority = Number(globalElements.wqEnqueuePriority?.value || 0);
+
+  try {
+    const res = await fetch('/api/workqueue/enqueue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ queue, title, instructions, priority, dedupeKey })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) {
+      setWorkqueueActionStatus(`Enqueue failed: ${data?.error || res.status}`, 'err');
+      return;
+    }
+
+    const item = data.item || null;
+    setWorkqueueActionStatus(item && item._deduped ? `Deduped (already exists): ${item.id}` : `Enqueued: ${item?.id || ''}`);
+
+    await fetchAndRenderWorkqueueItems();
+    if (item?.id) {
+      workqueueState.selectedItemId = item.id;
+      renderWorkqueueItems();
+      renderWorkqueueInspect(item);
+    }
+  } catch (err) {
+    setWorkqueueActionStatus(`Enqueue failed: ${String(err)}`, 'err');
+  }
+}
+
+async function workqueueClaimNextFromUi() {
+  if (roleState.role !== 'admin') return;
+  const agentId = (globalElements.wqClaimAgentId?.value || '').trim() || 'dev';
+  const leaseMs = Number(globalElements.wqClaimLeaseMs?.value || 0) || 0;
+  const queue = (workqueueState.selectedQueue || '').trim();
+
+  try {
+    const res = await fetch('/api/workqueue/claim-next', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ agentId, leaseMs, queue })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) {
+      setWorkqueueActionStatus(`Claim failed: ${data?.error || res.status}`, 'err');
+      return;
+    }
+    const item = data.item || null;
+    if (!item) {
+      setWorkqueueActionStatus('No ready items to claim.');
+      await fetchAndRenderWorkqueueItems();
+      return;
+    }
+    setWorkqueueActionStatus(`Claimed: ${item.id}`);
+    await fetchAndRenderWorkqueueItems();
+    workqueueState.selectedItemId = item.id;
+    renderWorkqueueItems();
+    renderWorkqueueInspect(item);
+  } catch (err) {
+    setWorkqueueActionStatus(`Claim failed: ${String(err)}`, 'err');
+  }
 }
 
 async function loadGuestPrompt() {
@@ -2342,6 +2439,9 @@ globalElements.wqQueueSelect?.addEventListener('change', () => {
 globalElements.wqRefreshBtn?.addEventListener('click', () => {
   fetchWorkqueueQueues().then(() => fetchAndRenderWorkqueueItems());
 });
+
+globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFromUi());
+globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFromUi());
 
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
