@@ -130,3 +130,19 @@ cd ~/src/dev/clawnsole
 ```
 
 Runbook + health check: [`docs/DEPLOY.md`](./docs/DEPLOY.md)
+
+## Recurring Agent Prompts (external scheduler)
+
+Clawnsole can store recurring prompts targeted at individual agents. Delivery is handled by an **external** scheduler process (e.g. systemd timer / launchd / cron), not OpenClaw cron.
+
+1) In Clawnsole (Admin) open **Gateway Link** → **Recurring Agent Prompts** and create prompts.
+
+2) Run the scheduler (example: once per minute):
+
+```bash
+node scripts/recurring-prompts-scheduler.js --once
+# or loop
+node scripts/recurring-prompts-scheduler.js --loopSeconds 60
+```
+
+Prompts are stored in `~/.openclaw/clawnsole-recurring-prompts*.json` (instance-aware).

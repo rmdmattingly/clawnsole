@@ -19,12 +19,19 @@ function createClawnsoleServer(options = {}) {
   const uploadRoot =
     options.uploadRoot ?? process.env.CLAWNSOLE_UPLOAD_ROOT ?? path.join(openclawHome, 'clawnsole-uploads');
 
+
   const instanceRaw = options.instance ?? process.env.CLAWNSOLE_INSTANCE ?? '';
   const instance = typeof instanceRaw === 'string' ? instanceRaw.trim() : String(instanceRaw || '').trim();
   const instanceSlug = instance.toLowerCase().replace(/[^a-z0-9_-]/g, '');
   const cookieSuffix = instanceSlug ? `_${instanceSlug}` : '';
   const authCookieName = `clawnsole_auth${cookieSuffix}`;
   const roleCookieName = `clawnsole_role${cookieSuffix}`;
+
+  const recurringPromptsPath =
+    options.recurringPromptsPath ??
+    process.env.CLAWNSOLE_RECURRING_PROMPTS_PATH ??
+    path.join(openclawHome, `clawnsole-recurring-prompts${cookieSuffix}.json`);
+
 
   const WebSocketImpl = options.WebSocketImpl || WebSocket;
 
@@ -125,6 +132,47 @@ function createClawnsoleServer(options = {}) {
     const dir = path.dirname(clawnsoleConfigPath);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(clawnsoleConfigPath, JSON.stringify(merged, null, 2) + '\n', 'utf8');
+  }
+
+
+  function readRecurringPrompts() {
+    try {
+      const raw = fs.readFileSync(recurringPromptsPath, 'utf8');
+      const data = JSON.parse(raw);
+      const prompts = Array.isArray(data?.prompts) ? data.prompts : [];
+      return { prompts };
+    } catch {
+      return { prompts: [] };
+    }
+  }
+
+  function writeRecurringPrompts(state) {
+    const prompts = Array.isArray(state?.prompts) ? state.prompts : [];
+    const dir = path.dirname(recurringPromptsPath);
+    fs.mkdirSync(dir, { recursive: true });
+    const tmp = recurringPromptsPath + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ prompts }, null, 2) + '\n', 'utf8');
+    fs.renameSync(tmp, recurringPromptsPath);
+  }
+
+  function randomId() {
+    try {
+      return require('crypto').randomUUID();
+    } catch {
+      return String(Date.now()) + '-' + Math.random().toString(16).slice(2) + '-' + Math.random().toString(16).slice(2);
+    }
+  }
+
+  function sanitizeRecurringPrompt(input = {}, now) {
+    const title = typeof input.title === 'string' ? input.title.trim() : '';
+    const agentId = typeof input.agentId === 'string' ? input.agentId.trim() : 'main';
+    const message = typeof input.message === 'string' ? input.message.trim() : '';
+    const intervalMinutesRaw = Number(input.intervalMinutes);
+    const intervalMinutes = Number.isFinite(intervalMinutesRaw) ? Math.max(1, Math.floor(intervalMinutesRaw)) : 60;
+    const enabled = input.enabled === false ? false : true;
+    const intervalMs = intervalMinutes * 60 * 1000;
+    const nextRunAt = Number.isFinite(Number(input.nextRunAt)) ? Number(input.nextRunAt) : now + intervalMs;
+    return { title, agentId, message, intervalMinutes, intervalMs, enabled, nextRunAt };
   }
 
   function safeFilename(name) {
@@ -286,6 +334,147 @@ function createClawnsoleServer(options = {}) {
       });
 
       sendJson(res, 200, { agents });
+      return;
+    }
+
+
+    if (
+      req.url === '/api/recurring-prompts' ||
+      req.url === '/api/recurring-prompts/' ||
+      req.url.startsWith('/api/recurring-prompts?')
+    ) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+
+      if (req.method === 'GET') {
+        const state = readRecurringPrompts();
+        sendJson(res, 200, { ok: true, prompts: state.prompts });
+        return;
+      }
+
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk.toString();
+        if (body.length > 200_000) {
+          try {
+            req.destroy();
+          } catch {}
+        }
+      });
+      req.on('end', () => {
+        const now = Date.now();
+        try {
+          const payload = JSON.parse(body || '{}');
+          const state = readRecurringPrompts();
+          const cleaned = sanitizeRecurringPrompt(payload, now);
+          if (!cleaned.message) {
+            sendJson(res, 400, { ok: false, error: 'message_required' });
+            return;
+          }
+
+          const prompt = {
+            id: randomId(),
+            title: cleaned.title || 'Recurring prompt',
+            agentId: cleaned.agentId,
+            message: cleaned.message,
+            intervalMinutes: cleaned.intervalMinutes,
+            enabled: cleaned.enabled,
+            createdAt: now,
+            updatedAt: now,
+            lastRunAt: null,
+            nextRunAt: cleaned.nextRunAt,
+            lastStatus: 'never',
+            lastError: ''
+          };
+
+          state.prompts.push(prompt);
+          writeRecurringPrompts(state);
+          sendJson(res, 200, { ok: true, prompt });
+        } catch (err) {
+          sendJson(res, 400, { ok: false, error: 'invalid_request' });
+        }
+      });
+      return;
+    }
+
+    if (req.url.startsWith('/api/recurring-prompts/')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+
+      const parts = req.url.split('?')[0].split('/').filter(Boolean);
+      const id = parts[2] || '';
+      if (!id) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+
+      if (req.method === 'DELETE') {
+        const state = readRecurringPrompts();
+        const before = state.prompts.length;
+        state.prompts = state.prompts.filter((p) => p && p.id !== id);
+        if (state.prompts.length === before) {
+          sendJson(res, 404, { ok: false, error: 'not_found' });
+          return;
+        }
+        writeRecurringPrompts(state);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (req.method !== 'PUT') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk.toString();
+        if (body.length > 200_000) {
+          try {
+            req.destroy();
+          } catch {}
+        }
+      });
+      req.on('end', () => {
+        const now = Date.now();
+        try {
+          const payload = JSON.parse(body || '{}');
+          const state = readRecurringPrompts();
+          const idx = state.prompts.findIndex((p) => p && p.id === id);
+          if (idx < 0) {
+            sendJson(res, 404, { ok: false, error: 'not_found' });
+            return;
+          }
+          const existing = state.prompts[idx];
+          const cleaned = sanitizeRecurringPrompt({ ...existing, ...payload }, now);
+          const updated = {
+            ...existing,
+            title: cleaned.title || existing.title || 'Recurring prompt',
+            agentId: cleaned.agentId,
+            message: cleaned.message,
+            intervalMinutes: cleaned.intervalMinutes,
+            enabled: cleaned.enabled,
+            nextRunAt: cleaned.nextRunAt,
+            updatedAt: now
+          };
+          state.prompts[idx] = updated;
+          writeRecurringPrompts(state);
+          sendJson(res, 200, { ok: true, prompt: updated });
+        } catch (err) {
+          sendJson(res, 400, { ok: false, error: 'invalid_request' });
+        }
+      });
       return;
     }
 
