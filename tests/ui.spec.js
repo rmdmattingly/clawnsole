@@ -169,6 +169,9 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   await page.waitForSelector('[data-pane][data-connected="true"]', { timeout: 90000 });
   await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 30000 });
 
+  const pane = page.locator('[data-pane]').first();
+  await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+
   const paneFontSize = await page.evaluate(() => {
     const el = document.querySelector('[data-pane] [data-pane-input]');
     return el ? getComputedStyle(el).fontSize : '';
