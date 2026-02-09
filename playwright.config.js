@@ -2,6 +2,9 @@ const { defineConfig } = require('@playwright/test');
 
 module.exports = defineConfig({
   testDir: './tests',
+  // Only run Playwright E2E specs; unit tests live under tests/unit but are run via node --test.
+  testMatch: ['**/*.spec.js', '**/*.e2e.spec.js'],
+  testIgnore: ['**/unit/**'],
   timeout: 60000,
   expect: {
     timeout: 10000
