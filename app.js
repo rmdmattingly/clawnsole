@@ -9,6 +9,15 @@ const globalElements = {
   status: document.getElementById('connectionStatus'),
   statusMeta: document.getElementById('statusMeta'),
   pulseCanvas: document.getElementById('pulseCanvas'),
+  workqueueBtn: document.getElementById('workqueueBtn'),
+  workqueueModal: document.getElementById('workqueueModal'),
+  workqueueCloseBtn: document.getElementById('workqueueCloseBtn'),
+  wqQueueSelect: document.getElementById('wqQueueSelect'),
+  wqStatusFilters: document.getElementById('wqStatusFilters'),
+  wqRefreshBtn: document.getElementById('wqRefreshBtn'),
+  wqListBody: document.getElementById('wqListBody'),
+  wqListEmpty: document.getElementById('wqListEmpty'),
+  wqInspectBody: document.getElementById('wqInspectBody'),
   settingsBtn: document.getElementById('settingsBtn'),
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
@@ -413,6 +422,11 @@ function setRole(role) {
   if (globalElements.paneControls) {
     globalElements.paneControls.hidden = role !== 'admin';
   }
+  if (globalElements.workqueueBtn) {
+    globalElements.workqueueBtn.hidden = role !== 'admin';
+    globalElements.workqueueBtn.disabled = role !== 'admin';
+    globalElements.workqueueBtn.style.opacity = role === 'admin' ? '1' : '0.5';
+  }
 }
 
 function showLogin(message = '') {
@@ -491,6 +505,211 @@ function openSettings() {
 function closeSettings() {
   globalElements.settingsModal.classList.remove('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'true');
+}
+
+// Workqueue (admin-only)
+
+const WORKQUEUE_STATUSES = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
+
+const workqueueState = {
+  queues: [],
+  selectedQueue: '',
+  statusFilter: new Set(['ready', 'pending', 'claimed', 'in_progress']),
+  items: [],
+  selectedItemId: null,
+  leaseTicker: null
+};
+
+function openWorkqueue() {
+  if (roleState.role !== 'admin') return;
+  globalElements.workqueueModal?.classList.add('open');
+  globalElements.workqueueModal?.setAttribute('aria-hidden', 'false');
+  ensureWorkqueueBootstrapped();
+}
+
+function closeWorkqueue() {
+  globalElements.workqueueModal?.classList.remove('open');
+  globalElements.workqueueModal?.setAttribute('aria-hidden', 'true');
+}
+
+function fmtRemaining(msUntil) {
+  if (!Number.isFinite(msUntil)) return '';
+  if (msUntil <= 0) return 'expired';
+  const sec = Math.floor(msUntil / 1000);
+  const min = Math.floor(sec / 60);
+  const hr = Math.floor(min / 60);
+  if (hr > 0) return `${hr}h ${min % 60}m`;
+  if (min > 0) return `${min}m ${sec % 60}s`;
+  return `${sec}s`;
+}
+
+function renderWorkqueueStatusFilters() {
+  const root = globalElements.wqStatusFilters;
+  if (!root) return;
+  root.innerHTML = '';
+  for (const s of WORKQUEUE_STATUSES) {
+    const id = `wq-status-${s}`;
+    const label = document.createElement('label');
+    label.className = 'wq-status-chip';
+    label.innerHTML = `<input type="checkbox" id="${id}" ${workqueueState.statusFilter.has(s) ? 'checked' : ''} /> <span>${escapeHtml(s)}</span>`;
+    const checkbox = label.querySelector('input');
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) workqueueState.statusFilter.add(s);
+      else workqueueState.statusFilter.delete(s);
+      fetchAndRenderWorkqueueItems();
+    });
+    root.appendChild(label);
+  }
+}
+
+async function ensureWorkqueueBootstrapped() {
+  renderWorkqueueStatusFilters();
+  await fetchWorkqueueQueues();
+  await fetchAndRenderWorkqueueItems();
+  startWorkqueueLeaseTicker();
+}
+
+async function fetchWorkqueueQueues() {
+  if (!globalElements.wqQueueSelect) return;
+  try {
+    const res = await fetch('/api/workqueue/queues', { credentials: 'include', cache: 'no-store' });
+    if (!res.ok) throw new Error(String(res.status));
+    const data = await res.json();
+    const queues = Array.isArray(data.queues) ? data.queues : [];
+    workqueueState.queues = queues;
+
+    const select = globalElements.wqQueueSelect;
+    const prev = workqueueState.selectedQueue || select.value || '';
+    select.innerHTML = '';
+
+    const allOpt = document.createElement('option');
+    allOpt.value = '';
+    allOpt.textContent = '(all queues)';
+    select.appendChild(allOpt);
+
+    for (const q of queues) {
+      const opt = document.createElement('option');
+      opt.value = q;
+      opt.textContent = q;
+      select.appendChild(opt);
+    }
+
+    if (prev && queues.includes(prev)) {
+      select.value = prev;
+      workqueueState.selectedQueue = prev;
+    } else {
+      select.value = '';
+      workqueueState.selectedQueue = '';
+    }
+  } catch (err) {
+    addFeed('err', 'workqueue', `failed to load queues: ${String(err)}`);
+  }
+}
+
+async function fetchAndRenderWorkqueueItems() {
+  if (!globalElements.wqListBody) return;
+  const queue = (workqueueState.selectedQueue || '').trim();
+  const statuses = Array.from(workqueueState.statusFilter);
+  const params = new URLSearchParams();
+  if (queue) params.set('queue', queue);
+  if (statuses.length) params.set('status', statuses.join(','));
+  const url = `/api/workqueue/items${params.toString() ? `?${params.toString()}` : ''}`;
+
+  try {
+    const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+    if (!res.ok) throw new Error(String(res.status));
+    const data = await res.json();
+    const items = Array.isArray(data.items) ? data.items : [];
+    workqueueState.items = items;
+    renderWorkqueueItems();
+  } catch (err) {
+    addFeed('err', 'workqueue', `failed to load items: ${String(err)}`);
+  }
+}
+
+function renderWorkqueueItems() {
+  const body = globalElements.wqListBody;
+  if (!body) return;
+  body.innerHTML = '';
+
+  if (!workqueueState.items.length) {
+    globalElements.wqListEmpty.hidden = false;
+  } else {
+    globalElements.wqListEmpty.hidden = true;
+  }
+
+  const now = Date.now();
+  for (const it of workqueueState.items) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'wq-row';
+    if (it.id && it.id === workqueueState.selectedItemId) row.classList.add('selected');
+
+    const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
+    const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
+
+    row.innerHTML = `
+      <div class="wq-col title">${escapeHtml(String(it.title || ''))}</div>
+      <div class="wq-col status">${escapeHtml(String(it.status || ''))}</div>
+      <div class="wq-col prio">${escapeHtml(String(it.priority ?? ''))}</div>
+      <div class="wq-col attempts">${escapeHtml(String(it.attempts ?? ''))}</div>
+      <div class="wq-col claimedBy">${escapeHtml(String(it.claimedBy || ''))}</div>
+      <div class="wq-col lease" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
+    `;
+
+    row.addEventListener('click', () => {
+      workqueueState.selectedItemId = it.id || null;
+      renderWorkqueueItems();
+      renderWorkqueueInspect(it);
+    });
+
+    body.appendChild(row);
+  }
+}
+
+function renderWorkqueueInspect(item) {
+  const root = globalElements.wqInspectBody;
+  if (!root) return;
+  if (!item) {
+    root.innerHTML = '<div class="hint">Select an item to inspect.</div>';
+    return;
+  }
+  const kv = (k, v) => `<div class="wq-kv"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(String(v ?? ''))}</div></div>`;
+  root.innerHTML = `
+    <div class="wq-inspect-meta">
+      ${kv('id', item.id)}
+      ${kv('queue', item.queue)}
+      ${kv('status', item.status)}
+      ${kv('priority', item.priority)}
+      ${kv('attempts', item.attempts)}
+      ${kv('claimedBy', item.claimedBy)}
+      ${kv('leaseUntil', item.leaseUntil ? new Date(Number(item.leaseUntil)).toISOString() : '')}
+      ${kv('updatedAt', item.updatedAt || '')}
+    </div>
+    <div class="wq-inspect-block">
+      <div class="wq-inspect-label">Title</div>
+      <div class="wq-inspect-pre">${escapeHtml(String(item.title || ''))}</div>
+    </div>
+    <div class="wq-inspect-block">
+      <div class="wq-inspect-label">Instructions</div>
+      <pre class="wq-inspect-pre">${escapeHtml(String(item.instructions || ''))}</pre>
+    </div>
+    ${item.lastError ? `<div class="wq-inspect-block"><div class="wq-inspect-label">Last error</div><pre class="wq-inspect-pre">${escapeHtml(String(item.lastError))}</pre></div>` : ''}
+  `;
+}
+
+function startWorkqueueLeaseTicker() {
+  if (workqueueState.leaseTicker) return;
+  workqueueState.leaseTicker = setInterval(() => {
+    if (!globalElements.workqueueModal || !globalElements.workqueueModal.classList.contains('open')) return;
+    const now = Date.now();
+    document.querySelectorAll('.wq-col.lease[data-lease-until]').forEach((el) => {
+      const raw = el.getAttribute('data-lease-until') || '';
+      const until = Number(raw);
+      if (!until) return;
+      el.textContent = fmtRemaining(until - now);
+    });
+  }, 1000);
 }
 
 async function loadGuestPrompt() {
@@ -1965,8 +2184,24 @@ globalElements.settingsModal?.addEventListener('click', (event) => {
 });
 globalElements.saveGuestPromptBtn?.addEventListener('click', () => saveGuestPrompt());
 
+globalElements.workqueueBtn?.addEventListener('click', () => openWorkqueue());
+globalElements.workqueueCloseBtn?.addEventListener('click', () => closeWorkqueue());
+globalElements.workqueueModal?.addEventListener('click', (event) => {
+  if (event.target === globalElements.workqueueModal) closeWorkqueue();
+});
+globalElements.wqQueueSelect?.addEventListener('change', () => {
+  workqueueState.selectedQueue = globalElements.wqQueueSelect.value;
+  fetchAndRenderWorkqueueItems();
+});
+globalElements.wqRefreshBtn?.addEventListener('click', () => {
+  fetchWorkqueueQueues().then(() => fetchAndRenderWorkqueueItems());
+});
+
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') closeSettings();
+  if (event.key === 'Escape') {
+    closeSettings();
+    closeWorkqueue();
+  }
 });
 
 globalElements.disconnectBtn?.addEventListener('click', () => {
