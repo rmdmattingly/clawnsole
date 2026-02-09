@@ -177,6 +177,12 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   const pane = page.locator('[data-pane]').first();
   await pane.locator('[data-pane-input]').fill('hello');
   await pane.locator('[data-pane-send]').click();
+
+  // Queued/sending indicator should be visible before we receive the assistant reply.
+  await expect(pane.locator('[data-chat-role="user"]').last().locator('.chat-meta')).toContainText(
+    /Queued|Sending/i
+  );
+
   await expect(pane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: hello');
 
   const testFile = testInfo.outputPath('upload.txt');

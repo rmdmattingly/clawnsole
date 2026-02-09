@@ -855,6 +855,47 @@ button.send-btn .btn-icon {
   box-shadow: 0 0 18px rgba(255, 179, 71, 0.2);
 }
 
+.chat-bubble.queued {
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+}
+
+.chat-bubble.sending {
+  border-style: dashed;
+  border-color: rgba(127, 209, 185, 0.55);
+}
+
+.chat-bubble.failed {
+  border-style: dashed;
+  border-color: rgba(255, 86, 86, 0.6);
+}
+
+.chat-actions-row {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.chat-action {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(8, 10, 14, 0.3);
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+}
+
+.chat-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-action.delete {
+  border-color: rgba(255, 86, 86, 0.35);
+}
+
 .chat-bubble.thinking {
   opacity: 0.85;
   border-style: dashed;
