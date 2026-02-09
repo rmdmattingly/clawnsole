@@ -90,6 +90,9 @@ If omitted, the admin password defaults to `admin`.
 - Existing OpenClaw sessions keep their model. Start a new session to pick up a
   new default.
 - Clawnsole stores your token and device ID in localStorage for convenience.
+- Workqueue docs:
+  - Overview + assignments contract: [`docs/WORKQUEUE.md`](./docs/WORKQUEUE.md)
+  - Recurring enqueue patterns: [`docs/WORKQUEUE_SCHEDULING.md`](./docs/WORKQUEUE_SCHEDULING.md)
 
 ## Workqueue: agent→queue assignments + claim-next defaults
 
