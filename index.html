@@ -48,6 +48,9 @@
           <button id="logoutBtn" class="icon-btn" type="button" aria-label="Log out">
             ⎋
           </button>
+          <button id="workqueueBtn" class="icon-btn" type="button" aria-label="Open workqueue" hidden>
+            WQ
+          </button>
           <button id="settingsBtn" class="icon-btn" type="button" aria-label="Open settings">
             ⚙︎
           </button>
@@ -150,6 +153,52 @@
         </label>
         <div id="loginError" class="login-error" role="alert"></div>
         <button id="loginBtn" class="primary">Unlock</button>
+      </div>
+    </div>
+
+    <div id="workqueueModal" class="modal" aria-hidden="true">
+      <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="workqueueTitle">
+        <div class="modal-header">
+          <h2 id="workqueueTitle">Workqueue</h2>
+          <button id="workqueueCloseBtn" class="icon-btn" type="button" aria-label="Close workqueue">
+            ✕
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="wq-toolbar">
+            <label class="wq-field">
+              Queue
+              <select id="wqQueueSelect" aria-label="Select workqueue"></select>
+            </label>
+            <div class="wq-field">
+              Status
+              <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters"></div>
+            </div>
+            <button id="wqRefreshBtn" class="secondary" type="button">Refresh</button>
+          </div>
+
+          <div class="wq-layout">
+            <div class="wq-list" aria-label="Workqueue items">
+              <div class="wq-list-header">
+                <div class="wq-col title">Title</div>
+                <div class="wq-col status">Status</div>
+                <div class="wq-col prio">Prio</div>
+                <div class="wq-col attempts">Att</div>
+                <div class="wq-col claimedBy">Claimed By</div>
+                <div class="wq-col lease">Lease</div>
+              </div>
+              <div id="wqListBody" class="wq-list-body"></div>
+              <div id="wqListEmpty" class="hint" hidden>No items match.</div>
+            </div>
+
+            <div class="wq-inspect" aria-label="Inspect workqueue item">
+              <div class="wq-inspect-header">Item</div>
+              <div id="wqInspectBody" class="wq-inspect-body">
+                <div class="hint">Select an item to inspect.</div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
