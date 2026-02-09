@@ -20,6 +20,9 @@ LaunchAgent to auto-start Clawnsole on login.
 You can also enable automatic updates (LaunchAgent).
 It will expose a nice local URL at http://clawnsole.local (macOS + sudo required).
 
+### HTTPS
+If you’re trying to access a QA/hosted Clawnsole instance over **https** and see `ERR_SSL_PROTOCOL_ERROR`, you likely need TLS termination in front of the app (Caddy/nginx). See: [`docs/HTTPS.md`](./docs/HTTPS.md)
+
 You can override defaults:
 
 - `CLAWNSOLE_REPO` (repo URL)
