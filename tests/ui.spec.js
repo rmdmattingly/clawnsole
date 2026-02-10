@@ -198,3 +198,58 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   await expect(page.locator('#loginOverlay')).not.toHaveClass(/open/);
   await expect(page.locator('#rolePill')).toContainText('admin');
 });
+
+test('admin can add a chat pane via pane-type dropdown', async ({ page }) => {
+  test.skip(!!skipReason, skipReason);
+  await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+  await page.selectOption('#loginRole', 'admin');
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 30000 });
+
+  // Adding a chat pane should not require any prompt()/dialog interaction.
+  page.on('dialog', (dialog) => {
+    throw new Error(`unexpected dialog: ${dialog.type()} ${dialog.message()}`);
+  });
+
+  await expect(page.locator('#addPaneKindSelect')).toHaveCount(0);
+
+  const panes = page.locator('[data-pane]');
+  await expect(panes).toHaveCount(2);
+
+  // + opens the menu; selecting Chat adds a pane.
+  await page.click('#addPaneBtn');
+  await expect(page.locator('#addPaneMenu')).toBeVisible();
+  await page.click('#addPaneMenu [data-add-pane-kind="chat"]');
+  await expect(panes).toHaveCount(3);
+});
+
+test('admin can add cron + timeline panes', async ({ page }) => {
+  test.skip(!!skipReason, skipReason);
+  await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+  await page.selectOption('#loginRole', 'admin');
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 30000 });
+
+  page.on('dialog', (dialog) => {
+    throw new Error(`unexpected dialog: ${dialog.type()} ${dialog.message()}`);
+  });
+
+  const panes = page.locator('[data-pane]');
+  await expect(panes).toHaveCount(2);
+
+  await page.click('#addPaneBtn');
+  await page.click('#addPaneMenu [data-add-pane-kind="cron"]');
+  await expect(panes).toHaveCount(3);
+  await expect(panes.nth(2)).toContainText('Cron');
+
+  await page.click('#addPaneBtn');
+  await page.click('#addPaneMenu [data-add-pane-kind="timeline"]');
+  await expect(panes).toHaveCount(4);
+  await expect(panes.nth(3)).toContainText('Timeline');
+});
