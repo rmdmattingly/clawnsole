@@ -7,6 +7,8 @@ const globalElements = {
   statusMeta: document.getElementById('statusMeta'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
+  refreshAgentsBtn: document.getElementById('refreshAgentsBtn'),
+  toastHost: document.getElementById('toastHost'),
   workqueueModal: document.getElementById('workqueueModal'),
   workqueueCloseBtn: document.getElementById('workqueueCloseBtn'),
   wqQueueSelect: document.getElementById('wqQueueSelect'),
@@ -93,6 +95,125 @@ const uiState = {
   meta: {},
   agents: []
 };
+
+let toastSeq = 0;
+function showToast(message, { kind = 'info', timeoutMs = 2600 } = {}) {
+  if (!globalElements.toastHost) return;
+  const text = typeof message === 'string' ? message.trim() : String(message || '').trim();
+  if (!text) return;
+
+  const el = document.createElement('div');
+  el.className = `toast ${kind === 'error' ? 'toast-error' : 'toast-info'}`;
+  el.textContent = text;
+  const id = ++toastSeq;
+  el.dataset.toastId = String(id);
+
+  globalElements.toastHost.appendChild(el);
+
+  // Force reflow so transitions apply.
+  void el.offsetWidth;
+  el.classList.add('open');
+
+  const remove = () => {
+    try {
+      el.classList.remove('open');
+      setTimeout(() => {
+        try {
+          el.remove();
+        } catch {}
+      }, 220);
+    } catch {}
+  };
+
+  const timer = setTimeout(remove, Math.max(800, Number(timeoutMs) || 2600));
+  el.addEventListener('click', () => {
+    clearTimeout(timer);
+    remove();
+  });
+}
+
+let agentRefreshTimer = null;
+let agentRefreshInFlight = null;
+async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {}) {
+  if (roleState.role !== 'admin') return uiState.agents;
+  if (!uiState.authed) return uiState.agents;
+
+  if (agentRefreshInFlight) return agentRefreshInFlight;
+
+  const prev = Array.isArray(uiState.agents) ? uiState.agents : [];
+  agentRefreshInFlight = (async () => {
+    const next = await fetchAgents();
+    agentRefreshInFlight = null;
+
+    if (!Array.isArray(next) || next.length === 0) {
+      if (prev.length > 0) {
+        showToast('Agent refresh failed; showing last-known list.', { kind: 'error', timeoutMs: 3500 });
+        return prev;
+      }
+      showToast('No agents found.', { kind: 'error', timeoutMs: 3000 });
+      return prev;
+    }
+
+    uiState.agents = next;
+
+    // Preserve UI state (selected agent per pane).
+    paneManager.panes.forEach((pane) => {
+      if (!pane?.elements?.agentSelect) return;
+      const prior = pane.agentId;
+      pane.agentId = normalizeAgentId(prior);
+      renderAgentOptions(pane.elements.agentSelect, pane.agentId);
+      try {
+        pane.elements.agentSelect.value = pane.agentId;
+      } catch {}
+    });
+
+    // Refresh workqueue agent claim selectors (modal + item cards) if present.
+    refreshWorkqueueAgentSelects();
+
+    if (showSuccessToast) {
+      showToast(`Agents refreshed (${reason}).`, { kind: 'info', timeoutMs: 1800 });
+    }
+    return next;
+  })();
+
+  return agentRefreshInFlight;
+}
+
+function scheduleAgentRefresh(reason = 'ws_connected') {
+  if (roleState.role !== 'admin') return;
+  if (!uiState.authed) return;
+  if (agentRefreshTimer) return;
+  agentRefreshTimer = setTimeout(() => {
+    agentRefreshTimer = null;
+    refreshAgents({ reason }).catch(() => {});
+  }, 450);
+}
+
+function refreshWorkqueueAgentSelects() {
+  const selects = document.querySelectorAll('[data-wq-claim-agent]');
+  if (!selects || selects.length === 0) return;
+
+  const agents = Array.isArray(uiState.agents) ? uiState.agents : [];
+  selects.forEach((selectEl) => {
+    if (!selectEl) return;
+    const prior = selectEl.value;
+    selectEl.innerHTML = '';
+    const optNone = document.createElement('option');
+    optNone.value = '';
+    optNone.textContent = 'Unassigned';
+    selectEl.appendChild(optNone);
+    for (const a of agents) {
+      const opt = document.createElement('option');
+      opt.value = a.id;
+      opt.textContent = formatAgentLabel(a, { includeId: true });
+      selectEl.appendChild(opt);
+    }
+    try {
+      selectEl.value = prior;
+    } catch {}
+  });
+}
+
 
 const commandList = [
   { command: '/clear', description: 'Clear local chat history' },
@@ -416,6 +537,12 @@ function setRole(role) {
     globalElements.rolePill.textContent = role === 'admin' ? 'signed in' : role;
     // Keep the visual “signed in” styling for admin without exposing the role label.
     globalElements.rolePill.classList.toggle('admin', role === 'admin');
+  }
+
+  if (globalElements.refreshAgentsBtn) {
+    globalElements.refreshAgentsBtn.hidden = role !== 'admin';
+    globalElements.refreshAgentsBtn.disabled = role !== 'admin';
+    globalElements.refreshAgentsBtn.style.opacity = role === 'admin' ? '1' : '0.5';
   }
   if (role === 'guest') {
     roleState.guestPolicyInjected = false;
@@ -2376,6 +2503,10 @@ function buildClientForPane(pane) {
       paneEnsureHiddenWelcome(pane);
       pane.client.request('sessions.resolve', { key: pane.sessionKey() });
 
+      // Refresh the agent list when we regain connectivity (debounced) so new agents appear
+      // without forcing a full page reload.
+      scheduleAgentRefresh('reconnected');
+
       // If we disconnected mid-stream, pull remote history to catch up.
       paneScheduleCatchUp(pane);
 
@@ -3227,6 +3358,11 @@ globalElements.saveGuestPromptBtn?.addEventListener('click', () => saveGuestProm
 globalElements.recurringPromptCreateBtn?.addEventListener('click', () => createRecurringPromptFromUi());
 globalElements.recurringPromptRefreshBtn?.addEventListener('click', () => loadRecurringPrompts());
 
+globalElements.refreshAgentsBtn?.addEventListener('click', () => {
+  refreshAgents({ reason: 'manual', showSuccessToast: true }).catch(() => {
+    showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
+  });
+});
 
 globalElements.workqueueBtn?.addEventListener('click', () => openWorkqueue());
 globalElements.workqueueCloseBtn?.addEventListener('click', () => closeWorkqueue());
