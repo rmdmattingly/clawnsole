@@ -904,6 +904,151 @@ button.send-btn .btn-icon {
   }
 }
 
+/* Workqueue pane (Issue #70): keep controls visible and make list scroll within viewport. */
+.wq-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.wq-pane .wq-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: 10px;
+  background: rgba(12, 15, 20, 0.92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.wq-toolbar-row {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.wq-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.wq-status-field {
+  min-width: min(420px, 100%);
+  flex: 1;
+}
+
+.wq-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.wq-sort {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.wq-sort-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+.wq-sort-btn,
+.wq-list-sort {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.wq-sort-btn.active,
+.wq-list-sort.active {
+  border-color: rgba(127, 209, 185, 0.5);
+  background: rgba(127, 209, 185, 0.12);
+}
+
+.wq-enqueue {
+  margin-top: 10px;
+}
+
+.wq-enqueue summary {
+  cursor: pointer;
+  user-select: none;
+  color: var(--text);
+}
+
+.wq-enqueue-form {
+  display: grid;
+  grid-template-columns: 1.2fr 0.5fr 0.8fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.wq-field-wide {
+  grid-column: 1 / -1;
+}
+
+.wq-enqueue-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.wq-pane .wq-layout {
+  flex: 1;
+  min-height: 0;
+  padding: 10px;
+}
+
+.wq-pane .wq-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.wq-pane .wq-list-body {
+  flex: 1;
+  max-height: none;
+}
+
+.wq-pane .wq-inspect {
+  min-height: 0;
+}
+
+.wq-pane .wq-inspect-body {
+  flex: 1;
+  max-height: none;
+}
+
+.wq-pane .wq-list-header button {
+  text-align: left;
+}
+
+.wq-list-sort {
+  text-transform: uppercase;
+}
+
+.wq-list-sort:focus-visible,
+.wq-sort-btn:focus-visible {
+  outline: 2px solid rgba(127, 209, 185, 0.7);
+  outline-offset: 2px;
+}
+
 .wq-list {
   border: 1px solid var(--panel-border);
   border-radius: 14px;
