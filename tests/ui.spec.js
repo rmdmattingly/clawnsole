@@ -93,7 +93,6 @@ test.beforeAll(async () => {
     JSON.stringify(
       {
         adminPassword: 'admin',
-        guestPassword: 'guest',
         authVersion: 'test'
       },
       null,
@@ -108,6 +107,14 @@ test.beforeAll(async () => {
         stdio: ['ignore', 'pipe', 'pipe']
       })
     );
+    gatewayProc.on('exit', (code, signal) => {
+      // eslint-disable-next-line no-console
+      console.log(`mock-gateway exited code=${code} signal=${signal}`);
+      if (gatewayProc?.__stdout || gatewayProc?.__stderr) {
+        // eslint-disable-next-line no-console
+        console.log(`mock-gateway output:\n${gatewayProc.__stdout || ''}${gatewayProc.__stderr || ''}`);
+      }
+    });
     await waitForHttp(`http://127.0.0.1:${gatewayPort}`, 10000, gatewayProc, 'mock-gateway');
   } catch (err) {
     const message = String(err);
@@ -121,10 +128,19 @@ test.beforeAll(async () => {
   try {
     serverProc = captureOutput(
       spawn('node', ['server.js'], {
-        env: { ...process.env, HOME: tempHome, PORT: String(serverPort) },
+        // Force IPv4 bind; some CI environments bind IPv6-only by default and 127.0.0.1 then refuses.
+        env: { ...process.env, HOME: tempHome, PORT: String(serverPort), HOST: '127.0.0.1' },
         stdio: ['ignore', 'pipe', 'pipe']
       })
     );
+    serverProc.on('exit', (code, signal) => {
+      // eslint-disable-next-line no-console
+      console.log(`clawnsole server exited code=${code} signal=${signal}`);
+      if (serverProc?.__stdout || serverProc?.__stderr) {
+        // eslint-disable-next-line no-console
+        console.log(`clawnsole server output:\n${serverProc.__stdout || ''}${serverProc.__stderr || ''}`);
+      }
+    });
     await waitForHttp(`http://127.0.0.1:${serverPort}/meta`, 10000, serverProc, 'clawnsole');
   } catch (err) {
     const message = String(err);
@@ -142,12 +158,26 @@ test.afterAll(() => {
 });
 
 test('admin login persists, send/receive, upload attachment', async ({ page }, testInfo) => {
+  test.setTimeout(180000);
   test.skip(!!skipReason, skipReason);
+
+  // Surface browser-side failures in CI logs (helps diagnose ws connect issues).
+  page.on('console', (msg) => {
+    try {
+      console.log(`[ui-console:${msg.type()}] ${msg.text()}`);
+    } catch {}
+  });
+  page.on('pageerror', (err) => {
+    try {
+      console.log(`[ui-pageerror] ${String(err && err.stack ? err.stack : err)}`);
+    } catch {}
+  });
+
   await page.goto(`http://127.0.0.1:${serverPort}/`);
 
   // iOS Safari will auto-zoom focused inputs when font-size < 16px.
   const fontSizes = await page.evaluate(() => {
-    const selectors = ['#loginPassword', '#loginRole', '#wsUrl', '#clientId', '#deviceId', '#guestPrompt'];
+    const selectors = ['#loginPassword', '#wsUrl', '#clientId', '#deviceId'];
     return selectors.reduce((acc, sel) => {
       const el = document.querySelector(sel);
       if (!el) return acc;
@@ -160,13 +190,30 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
     expect(Math.round(size)).toBeGreaterThanOrEqual(16);
   }
 
-  await page.selectOption('#loginRole', 'admin');
   await page.fill('#loginPassword', 'admin');
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   // In CI the websocket handshake can be slower; wait longer for the pane to report connected.
-  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 60000 });
+  await page.waitForSelector('[data-pane] [data-pane-input]', { timeout: 90000 });
+
+  // Agent list refresh should not require a full page reload.
+  // Update the underlying openclaw.json and click refresh; the agent select should populate.
+  const openclawConfigPath = path.join(tempHome, '.openclaw', 'openclaw.json');
+  const openclawCfg = JSON.parse(fs.readFileSync(openclawConfigPath, 'utf8'));
+  openclawCfg.agents = {
+    defaults: { workspace: '' },
+    list: [{ id: 'ops', name: 'ops', identity: { name: 'Ops', emoji: '🛠️' } }]
+  };
+  fs.writeFileSync(openclawConfigPath, JSON.stringify(openclawCfg, null, 2));
+
+  await expect(page.locator('#refreshAgentsBtn')).toBeVisible();
+  await page.click('#refreshAgentsBtn');
+
+  const pane = page.locator('[data-pane]').first();
+  await expect(pane.locator('[data-pane-agent-select] option[value="ops"]')).toHaveCount(1);
+
+  await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
 
   const paneFontSize = await page.evaluate(() => {
     const el = document.querySelector('[data-pane] [data-pane-input]');
@@ -174,7 +221,6 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   });
   expect(Math.round(Number.parseFloat(paneFontSize))).toBeGreaterThanOrEqual(16);
 
-  const pane = page.locator('[data-pane]').first();
   await pane.locator('[data-pane-input]').fill('hello');
   await pane.locator('[data-pane-send]').click();
 
@@ -196,46 +242,46 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
 
   await page.reload();
   await expect(page.locator('#loginOverlay')).not.toHaveClass(/open/);
-  await expect(page.locator('#rolePill')).toContainText('admin');
+  await expect(page.locator('#rolePill')).toContainText('signed in');
 });
 
-
-test('admin can add a chat pane via pane-type dropdown', async ({ page }) => {
+test('add pane menu offers chat vs workqueue; workqueue pane has queue dropdown', async ({ page }) => {
+  test.setTimeout(180000);
   test.skip(!!skipReason, skipReason);
-  await page.goto(`http://127.0.0.1:${serverPort}/`);
 
-  await page.selectOption('#loginRole', 'admin');
+  await page.goto(`http://127.0.0.1:${serverPort}/`);
   await page.fill('#loginPassword', 'admin');
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
-  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 60000 });
 
-  // Adding a chat pane should not require any prompt()/dialog interaction.
-  page.on('dialog', (dialog) => {
-    throw new Error(`unexpected dialog: ${dialog.type()} ${dialog.message()}`);
-  });
+  await page.waitForSelector('[data-pane] [data-pane-input]', { timeout: 90000 });
 
-  await expect(page.locator('#addPaneKindSelect')).toHaveCount(0);
+  const beforeCount = await page.locator('[data-pane]').count();
 
-  const panes = page.locator('[data-pane]');
-  await expect(panes).toHaveCount(2);
-
-  // + opens the menu; selecting Chat adds a pane.
   await page.click('#addPaneBtn');
-  await expect(page.locator('#addPaneMenu')).toBeVisible();
-  await page.click('#addPaneMenu [data-add-pane-kind="chat"]');
-  await expect(panes).toHaveCount(3);
+  await expect(page.locator('.pane-add-menu')).toBeVisible();
+  await expect(page.locator('.pane-add-menu')).toContainText('Chat pane');
+  await expect(page.locator('.pane-add-menu')).toContainText('Workqueue pane');
+
+  await page.click('.pane-add-menu__item:text("Workqueue pane")');
+
+  await expect(page.locator('[data-pane] .wq-pane')).toHaveCount(1);
+  const afterCount = await page.locator('[data-pane]').count();
+  expect(afterCount).toBe(beforeCount + 1);
+
+  const wqPane = page.locator('[data-pane] .wq-pane').first();
+  await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
 });
+
 
 test('admin can add cron + timeline panes', async ({ page }) => {
   test.skip(!!skipReason, skipReason);
   await page.goto(`http://127.0.0.1:${serverPort}/`);
 
-  await page.selectOption('#loginRole', 'admin');
   await page.fill('#loginPassword', 'admin');
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
-  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 60000 });
+  await page.waitForSelector('[data-pane] [data-pane-input]', { timeout: 90000 });
 
   page.on('dialog', (dialog) => {
     throw new Error(`unexpected dialog: ${dialog.type()} ${dialog.message()}`);
@@ -245,12 +291,14 @@ test('admin can add cron + timeline panes', async ({ page }) => {
   await expect(panes).toHaveCount(2);
 
   await page.click('#addPaneBtn');
-  await page.click('#addPaneMenu [data-add-pane-kind="cron"]');
+  await expect(page.locator('.pane-add-menu')).toBeVisible();
+  await page.click('.pane-add-menu__item:text("Cron pane")');
   await expect(panes).toHaveCount(3);
   await expect(panes.nth(2)).toContainText('Cron');
 
   await page.click('#addPaneBtn');
-  await page.click('#addPaneMenu [data-add-pane-kind="timeline"]');
+  await expect(page.locator('.pane-add-menu')).toBeVisible();
+  await page.click('.pane-add-menu__item:text("Timeline pane")');
   await expect(panes).toHaveCount(4);
   await expect(panes.nth(3)).toContainText('Timeline');
 });

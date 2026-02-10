@@ -15,7 +15,7 @@ gateway and renders an interactive chat experience.
 curl -fsSL https://raw.githubusercontent.com/rmdmattingly/clawnsole/main/scripts/install.sh | bash
 ```
 
-The installer will prompt for admin/guest passwords and will install a
+The installer will prompt for an admin password and will install a
 LaunchAgent to auto-start Clawnsole on login.
 You can also enable automatic updates (LaunchAgent).
 It will expose a nice local URL at https://clawnsole.local (macOS + sudo required).
@@ -79,19 +79,51 @@ but you can update them manually too:
 
 ```json
 {
-  "adminPassword": "your-strong-password",
-  "guestPassword": "guest-password"
+  "adminPassword": "your-strong-password"
 }
 ```
 
-Clawnsole uses HTTP Basic auth; any username is accepted, the password must match.
-If omitted, admin defaults to `admin` and guest defaults to `guest`.
+If omitted, the admin password defaults to `admin`.
 
 ## Notes
 
 - Existing OpenClaw sessions keep their model. Start a new session to pick up a
   new default.
 - Clawnsole stores your token and device ID in localStorage for convenience.
+- Workqueue docs:
+  - Overview + assignments contract: [`docs/WORKQUEUE.md`](./docs/WORKQUEUE.md)
+  - Recurring enqueue patterns: [`docs/WORKQUEUE_SCHEDULING.md`](./docs/WORKQUEUE_SCHEDULING.md)
+
+## Workqueue: agent→queue assignments + claim-next defaults
+
+See also:
+- `docs/OPENCLAW_WORKQUEUE_WORKER_SKILL.md` (worker loop / OpenClaw agent pattern)
+- `docs/WORKQUEUE_SCHEDULING.md`
+
+Clawnsole's workqueue supports assigning agents to queues, and letting `claim-next`
+resolve queues automatically when you omit them.
+
+### Defaults
+
+- `CLAWNSOLE_DEFAULT_QUEUES` (comma-separated, default: `dev-team`)
+
+### CLI
+
+```bash
+# Persist assignment in the workqueue state file
+node bin/clawnsole.js workqueue assignments set --agent dev-3 --queues dev-team,qa
+node bin/clawnsole.js workqueue assignments list
+
+# If --queues is omitted, claim-next resolves:
+# requested queues → assignment → CLAWNSOLE_DEFAULT_QUEUES
+node bin/clawnsole.js workqueue claim-next --agent dev-3
+```
+
+### HTTP API (admin-only)
+
+- `POST /api/workqueue/claim-next` — `queues` is optional. If omitted, the server
+  uses the same resolution behavior as the CLI.
+- `GET /api/workqueue/assignments` / `POST /api/workqueue/assignments`
 
 <details>
 <summary>Developers: run locally</summary>
@@ -119,8 +151,8 @@ CLAWNSOLE_INSTANCE=qa PORT=5174 npm run dev
 
 Connect:
 
-- Prod: `http://localhost:5173/admin` (or `/guest`)
-- QA: `http://localhost:5174/admin` (or `/guest`)
+- Prod: `http://localhost:5173/admin`
+- QA: `http://localhost:5174/admin`
 
 If QA keeps dying due to terminal logout / SIGTERM, run it as a managed service (macOS LaunchAgent):
 
@@ -130,3 +162,19 @@ cd ~/src/dev/clawnsole
 ```
 
 Runbook + health check: [`docs/DEPLOY.md`](./docs/DEPLOY.md)
+
+## Recurring Agent Prompts (external scheduler)
+
+Clawnsole can store recurring prompts targeted at individual agents. Delivery is handled by an **external** scheduler process (e.g. systemd timer / launchd / cron), not OpenClaw cron.
+
+1) In Clawnsole (Admin) open **Gateway Link** → **Recurring Agent Prompts** and create prompts.
+
+2) Run the scheduler (example: once per minute):
+
+```bash
+node scripts/recurring-prompts-scheduler.js --once
+# or loop
+node scripts/recurring-prompts-scheduler.js --loopSeconds 60
+```
+
+Prompts are stored in `~/.openclaw/clawnsole-recurring-prompts*.json` (instance-aware).

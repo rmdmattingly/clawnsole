@@ -25,7 +25,6 @@ test.describe('@deploy Clawnsole deploy e2e', () => {
     // If already authed, these actions are no-ops.
     const overlay = page.locator('#loginOverlay');
     if (await overlay.isVisible().catch(() => false)) {
-      await page.selectOption('#loginRole', 'admin');
       await page.fill('#loginPassword', adminPassword);
       await page.click('#loginBtn');
     }
@@ -34,7 +33,7 @@ test.describe('@deploy Clawnsole deploy e2e', () => {
     await page.waitForURL(/\/admin\/?$/, { timeout: 20000 });
 
     // Ensure we are not "bounced" back to signed out.
-    await expect(page.locator('#rolePill')).toContainText(/admin/i, { timeout: 20000 });
+    await expect(page.locator('#rolePill')).toContainText(/signed in/i, { timeout: 20000 });
     await expect(page.locator('#loginOverlay')).not.toHaveClass(/open/, { timeout: 20000 });
 
     // Wait for pane to connect.
@@ -54,6 +53,6 @@ test.describe('@deploy Clawnsole deploy e2e', () => {
     // Regression guard: do a reload and ensure we are still authed (no silent logout/bounce).
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.locator('#loginOverlay')).not.toHaveClass(/open/, { timeout: 20000 });
-    await expect(page.locator('#rolePill')).toContainText(/admin/i, { timeout: 20000 });
+    await expect(page.locator('#rolePill')).toContainText(/signed in/i, { timeout: 20000 });
   });
 });

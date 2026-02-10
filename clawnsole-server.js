@@ -19,12 +19,19 @@ function createClawnsoleServer(options = {}) {
   const uploadRoot =
     options.uploadRoot ?? process.env.CLAWNSOLE_UPLOAD_ROOT ?? path.join(openclawHome, 'clawnsole-uploads');
 
+
   const instanceRaw = options.instance ?? process.env.CLAWNSOLE_INSTANCE ?? '';
   const instance = typeof instanceRaw === 'string' ? instanceRaw.trim() : String(instanceRaw || '').trim();
   const instanceSlug = instance.toLowerCase().replace(/[^a-z0-9_-]/g, '');
   const cookieSuffix = instanceSlug ? `_${instanceSlug}` : '';
   const authCookieName = `clawnsole_auth${cookieSuffix}`;
   const roleCookieName = `clawnsole_role${cookieSuffix}`;
+
+  const recurringPromptsPath =
+    options.recurringPromptsPath ??
+    process.env.CLAWNSOLE_RECURRING_PROMPTS_PATH ??
+    path.join(openclawHome, `clawnsole-recurring-prompts${cookieSuffix}.json`);
+
 
   const WebSocketImpl = options.WebSocketImpl || WebSocket;
 
@@ -72,11 +79,17 @@ function createClawnsoleServer(options = {}) {
   }
 
   function readToken() {
-    const raw = fs.readFileSync(configPath, 'utf8');
-    const cfg = JSON.parse(raw);
-    const token = cfg?.gateway?.auth?.token || '';
-    const mode = cfg?.gateway?.auth?.mode || 'token';
-    return { token, mode };
+    try {
+      const raw = fs.readFileSync(configPath, 'utf8');
+      const cfg = JSON.parse(raw);
+      const token = cfg?.gateway?.auth?.token || '';
+      const mode = cfg?.gateway?.auth?.mode || 'token';
+      return { token, mode };
+    } catch {
+      // In tests/CI we may start the server before a config exists; treat as missing token
+      // and let callers decide how to handle auth.
+      return { token: '', mode: 'token' };
+    }
   }
 
   function readGatewayPort() {
@@ -134,6 +147,47 @@ function createClawnsoleServer(options = {}) {
     const dir = path.dirname(clawnsoleConfigPath);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(clawnsoleConfigPath, JSON.stringify(merged, null, 2) + '\n', 'utf8');
+  }
+
+
+  function readRecurringPrompts() {
+    try {
+      const raw = fs.readFileSync(recurringPromptsPath, 'utf8');
+      const data = JSON.parse(raw);
+      const prompts = Array.isArray(data?.prompts) ? data.prompts : [];
+      return { prompts };
+    } catch {
+      return { prompts: [] };
+    }
+  }
+
+  function writeRecurringPrompts(state) {
+    const prompts = Array.isArray(state?.prompts) ? state.prompts : [];
+    const dir = path.dirname(recurringPromptsPath);
+    fs.mkdirSync(dir, { recursive: true });
+    const tmp = recurringPromptsPath + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ prompts }, null, 2) + '\n', 'utf8');
+    fs.renameSync(tmp, recurringPromptsPath);
+  }
+
+  function randomId() {
+    try {
+      return require('crypto').randomUUID();
+    } catch {
+      return String(Date.now()) + '-' + Math.random().toString(16).slice(2) + '-' + Math.random().toString(16).slice(2);
+    }
+  }
+
+  function sanitizeRecurringPrompt(input = {}, now) {
+    const title = typeof input.title === 'string' ? input.title.trim() : '';
+    const agentId = typeof input.agentId === 'string' ? input.agentId.trim() : 'main';
+    const message = typeof input.message === 'string' ? input.message.trim() : '';
+    const intervalMinutesRaw = Number(input.intervalMinutes);
+    const intervalMinutes = Number.isFinite(intervalMinutesRaw) ? Math.max(1, Math.floor(intervalMinutesRaw)) : 60;
+    const enabled = input.enabled === false ? false : true;
+    const intervalMs = intervalMinutes * 60 * 1000;
+    const nextRunAt = Number.isFinite(Number(input.nextRunAt)) ? Number(input.nextRunAt) : now + intervalMs;
+    return { title, agentId, message, intervalMinutes, intervalMs, enabled, nextRunAt };
   }
 
   function safeFilename(name) {
@@ -196,19 +250,44 @@ function createClawnsoleServer(options = {}) {
     res.end(JSON.stringify(body));
   }
 
-  let lastGuestSessionKey = null;
+  function readJsonBody(req, res, { maxBytes = 1_000_000 } = {}) {
+    return new Promise((resolve) => {
+      let body = '';
+      let tooLarge = false;
+      req.on('data', (chunk) => {
+        if (tooLarge) return;
+        body += chunk.toString();
+        if (body.length > maxBytes) {
+          tooLarge = true;
+          sendJson(res, 413, { error: 'request_too_large' });
+          resolve(null);
+          try {
+            req.destroy();
+          } catch {}
+        }
+      });
+      req.on('end', () => {
+        if (tooLarge) return;
+        if (!body) {
+          resolve({});
+          return;
+        }
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          sendJson(res, 400, { error: 'invalid_request' });
+          resolve(null);
+        }
+      });
+    });
+  }
 
-  const { handleAdminProxy, handleGuestProxy } = createProxyHandlers({
+  const { handleAdminProxy } = createProxyHandlers({
     WebSocket: WebSocketImpl,
     getRoleFromCookies,
     readToken,
     gatewayWsUrl,
-    heartbeatMs: 2000,
-    getGuestPrompt: () => readUiPasswords().guestPrompt,
-    getGuestAgentId: () => readUiPasswords().guestAgentId,
-    onGuestSessionKey: (key) => {
-      lastGuestSessionKey = key;
-    }
+    heartbeatMs: 2000
   });
 
   const wss = new WebSocketImpl.Server({ noServer: true });
@@ -232,7 +311,6 @@ function createClawnsoleServer(options = {}) {
 
     if (req.url.startsWith('/meta')) {
       const wsUrl = gatewayWsUrl();
-      const { guestAgentId } = readUiPasswords();
       let gatewayPort = readGatewayPort();
       try {
         const parsed = new URL(wsUrl);
@@ -246,8 +324,6 @@ function createClawnsoleServer(options = {}) {
       sendJson(res, 200, {
         wsUrl,
         adminWsUrl: '/admin-ws',
-        guestWsUrl: '/guest-ws',
-        guestAgentId,
         port: gatewayPort
       });
       return;
@@ -309,41 +385,150 @@ function createClawnsoleServer(options = {}) {
       return;
     }
 
-    if (req.url.startsWith('/config/guest-prompt')) {
-      const role = getRoleFromCookies(req);
-      if (role !== 'admin') {
+
+
+    if (
+      req.url === '/api/recurring-prompts' ||
+      req.url === '/api/recurring-prompts/' ||
+      req.url.startsWith('/api/recurring-prompts?')
+    ) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
         sendJson(res, 403, { error: 'forbidden' });
         return;
       }
+
       if (req.method === 'GET') {
-        const { guestPrompt } = readUiPasswords();
-        sendJson(res, 200, { prompt: guestPrompt });
+        const state = readRecurringPrompts();
+        sendJson(res, 200, { ok: true, prompts: state.prompts });
         return;
       }
-      if (req.method === 'POST') {
-        let body = '';
-        req.on('data', (chunk) => {
-          body += chunk.toString();
-        });
-        req.on('end', () => {
+
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk.toString();
+        if (body.length > 200_000) {
           try {
-            const payload = JSON.parse(body || '{}');
-            const prompt = String(payload.prompt || '').trim();
-            if (prompt.length > 4000) {
-              sendJson(res, 400, { error: 'prompt_too_long' });
-              return;
-            }
-            writeClawnsoleConfig({ guestPrompt: prompt });
-            sendJson(res, 200, { ok: true });
-          } catch (err) {
-            sendJson(res, 400, { error: 'invalid_request' });
+            req.destroy();
+          } catch {}
+        }
+      });
+      req.on('end', () => {
+        const now = Date.now();
+        try {
+          const payload = JSON.parse(body || '{}');
+          const state = readRecurringPrompts();
+          const cleaned = sanitizeRecurringPrompt(payload, now);
+          if (!cleaned.message) {
+            sendJson(res, 400, { ok: false, error: 'message_required' });
+            return;
           }
-        });
-        return;
-      }
-      sendJson(res, 405, { error: 'method_not_allowed' });
+
+          const prompt = {
+            id: randomId(),
+            title: cleaned.title || 'Recurring prompt',
+            agentId: cleaned.agentId,
+            message: cleaned.message,
+            intervalMinutes: cleaned.intervalMinutes,
+            enabled: cleaned.enabled,
+            createdAt: now,
+            updatedAt: now,
+            lastRunAt: null,
+            nextRunAt: cleaned.nextRunAt,
+            lastStatus: 'never',
+            lastError: ''
+          };
+
+          state.prompts.push(prompt);
+          writeRecurringPrompts(state);
+          sendJson(res, 200, { ok: true, prompt });
+        } catch (err) {
+          sendJson(res, 400, { ok: false, error: 'invalid_request' });
+        }
+      });
       return;
     }
+
+    if (req.url.startsWith('/api/recurring-prompts/')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+
+      const parts = req.url.split('?')[0].split('/').filter(Boolean);
+      const id = parts[2] || '';
+      if (!id) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+
+      if (req.method === 'DELETE') {
+        const state = readRecurringPrompts();
+        const before = state.prompts.length;
+        state.prompts = state.prompts.filter((p) => p && p.id !== id);
+        if (state.prompts.length === before) {
+          sendJson(res, 404, { ok: false, error: 'not_found' });
+          return;
+        }
+        writeRecurringPrompts(state);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (req.method !== 'PUT') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk.toString();
+        if (body.length > 200_000) {
+          try {
+            req.destroy();
+          } catch {}
+        }
+      });
+      req.on('end', () => {
+        const now = Date.now();
+        try {
+          const payload = JSON.parse(body || '{}');
+          const state = readRecurringPrompts();
+          const idx = state.prompts.findIndex((p) => p && p.id === id);
+          if (idx < 0) {
+            sendJson(res, 404, { ok: false, error: 'not_found' });
+            return;
+          }
+          const existing = state.prompts[idx];
+          const cleaned = sanitizeRecurringPrompt({ ...existing, ...payload }, now);
+          const updated = {
+            ...existing,
+            title: cleaned.title || existing.title || 'Recurring prompt',
+            agentId: cleaned.agentId,
+            message: cleaned.message,
+            intervalMinutes: cleaned.intervalMinutes,
+            enabled: cleaned.enabled,
+            nextRunAt: cleaned.nextRunAt,
+            updatedAt: now
+          };
+          state.prompts[idx] = updated;
+          writeRecurringPrompts(state);
+          sendJson(res, 200, { ok: true, prompt: updated });
+        } catch (err) {
+          sendJson(res, 400, { ok: false, error: 'invalid_request' });
+        }
+      });
+      return;
+    }
+
+    // Guest endpoints removed (admin-only server).
+
 
     if (req.url.startsWith('/diag/guest')) {
       const role = getRoleFromCookies(req);
@@ -359,8 +544,107 @@ function createClawnsoleServer(options = {}) {
       return;
     }
 
-    // Admin-only workqueue API (for viewing from other devices).
-    // Mutations are limited to enqueue + claim-next (no delete).
+    // Admin-only workqueue API (safe read/write from other devices).
+    // Mutations are limited to enqueue + claim-next.
+
+    if (req.url.startsWith('/api/workqueue/queues')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      try {
+        const { loadState } = require('./lib/workqueue');
+        const state = loadState(null);
+        const items = Array.isArray(state.items) ? state.items : [];
+        const fromItems = items.map((it) => (it && it.queue ? String(it.queue).trim() : '')).filter(Boolean);
+        const fromQueues = state.queues && typeof state.queues === 'object' ? Object.keys(state.queues) : [];
+        const set = new Set([...fromQueues, ...fromItems].map((q) => String(q).trim()).filter(Boolean));
+        const queues = Array.from(set).sort((a, b) => a.localeCompare(b));
+        sendJson(res, 200, { ok: true, queues });
+      } catch (err) {
+        sendJson(res, 500, { error: 'workqueue_error' });
+      }
+      return;
+    }
+
+    if (req.url.startsWith('/api/workqueue/items')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      try {
+        const url = new URL(req.url, 'http://127.0.0.1');
+        const queue = String(url.searchParams.get('queue') || '').trim();
+        const statusRaw = String(url.searchParams.get('status') || '').trim();
+        const statuses = statusRaw
+          ? statusRaw
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : [];
+        const statusSet = statuses.length ? new Set(statuses) : null;
+
+        const { loadState } = require('./lib/workqueue');
+        const state = loadState(null);
+        const items = Array.isArray(state.items) ? state.items : [];
+        const filtered = items.filter((it) => {
+          if (!it) return false;
+          if (queue && it.queue !== queue) return false;
+          if (statusSet && !statusSet.has(String(it.status || 'ready'))) return false;
+          return true;
+        });
+        // newest first for convenience
+        filtered.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+        sendJson(res, 200, { ok: true, items: filtered });
+      } catch (err) {
+        sendJson(res, 500, { error: 'workqueue_error' });
+      }
+      return;
+    }
+
+    if (req.url.startsWith('/api/workqueue/summary')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      try {
+        const url = new URL(req.url, 'http://127.0.0.1');
+        const queue = String(url.searchParams.get('queue') || '').trim();
+        const { loadState } = require('./lib/workqueue');
+        const state = loadState(null);
+        const items = Array.isArray(state.items) ? state.items : [];
+        const filtered = queue ? items.filter((it) => it && it.queue === queue) : items;
+        const counts = filtered.reduce((acc, it) => {
+          const st = String(it && it.status ? it.status : 'ready');
+          acc[st] = (acc[st] || 0) + 1;
+          return acc;
+        }, {});
+        const active = filtered.filter((it) => it && (it.status === 'claimed' || it.status === 'in_progress'));
+        active.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+        sendJson(res, 200, { ok: true, counts, active });
+      } catch (err) {
+        sendJson(res, 500, { error: 'workqueue_error' });
+      }
+      return;
+    }
 
     if (req.url === '/api/workqueue/enqueue') {
       if (!requireAuth(req, res)) return;
@@ -418,160 +702,256 @@ function createClawnsoleServer(options = {}) {
       }
 
       let body = '';
-      req.on('data', (chunk) => {
-        body += chunk.toString();
-        if (body.length > 100_000) {
-          try {
-            req.destroy();
-          } catch {}
-        }
-      });
+      req.on('data', (chunk) => (body += chunk.toString()));
       req.on('end', () => {
         try {
           const payload = JSON.parse(body || '{}');
           const agentId = String(payload.agentId || '').trim();
+          const requestedQueues = Array.isArray(payload.queues)
+            ? payload.queues.map((q) => String(q).trim()).filter(Boolean)
+            : [];
           const leaseMs = payload.leaseMs;
-          const queue = String(payload.queue || '').trim();
-          const queues = queue ? [queue] : null;
+          if (!agentId) {
+            sendJson(res, 400, { error: 'invalid_request' });
+            return;
+          }
 
-          const { claimNext } = require('./lib/workqueue');
-          const item = claimNext(null, { agentId, queues, leaseMs });
-          sendJson(res, 200, { ok: true, item });
-        } catch (err) {
-          sendJson(res, 400, { ok: false, error: 'invalid_request' });
+          const { claimNext, resolveClaimQueues } = require('./lib/workqueue');
+          const defaultQueues = String(process.env.CLAWNSOLE_DEFAULT_QUEUES ?? 'dev-team')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+
+          const resolved = resolveClaimQueues(null, {
+            agentId,
+            requestedQueues,
+            defaultQueues
+          });
+
+          if (!resolved.queues.length) {
+            sendJson(res, 200, { ok: true, item: null, reason: resolved.reason || 'NO_QUEUES' });
+            return;
+          }
+
+          const item = claimNext(null, { agentId, queues: resolved.queues, leaseMs });
+          sendJson(res, 200, { ok: true, item, queues: resolved.queues, queuesSource: resolved.source });
+        } catch {
+          sendJson(res, 400, { error: 'invalid_request' });
         }
       });
       return;
     }
 
-    if (req.url === '/api/workqueue/items' || req.url.startsWith('/api/workqueue/items?')) {
+    if (req.url === '/api/workqueue/assignments') {
       if (!requireAuth(req, res)) return;
       if (req.clawnsoleRole !== 'admin') {
         sendJson(res, 403, { error: 'forbidden' });
         return;
       }
-      if (req.method !== 'GET') {
-        sendJson(res, 405, { error: 'method_not_allowed' });
+
+      if (req.method === 'GET') {
+        try {
+          const { listAssignments } = require('./lib/workqueue');
+          const assignments = listAssignments(null);
+          sendJson(res, 200, { ok: true, assignments });
+        } catch {
+          sendJson(res, 500, { error: 'workqueue_error' });
+        }
         return;
       }
 
-      try {
-        const { loadState } = require('./lib/workqueue');
-        const url = new URL(req.url, 'http://localhost');
-        const queue = (url.searchParams.get('queue') || '').trim();
-        const statusRaw = (url.searchParams.get('status') || '').trim();
-        const status = statusRaw
-          ? statusRaw
-              .split(',')
-              .map((s) => s.trim())
-              .filter(Boolean)
-          : [];
-
-        const state = loadState(null);
-        const items = state.items
-          .filter((it) => {
-            if (queue && it.queue !== queue) return false;
-            if (status.length && !status.includes(it.status)) return false;
-            return true;
-          })
-          .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
-
-        sendJson(res, 200, { ok: true, items });
-      } catch (err) {
-        sendJson(res, 500, { error: 'workqueue_error' });
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', (chunk) => (body += chunk.toString()));
+        req.on('end', () => {
+          try {
+            const payload = JSON.parse(body || '{}');
+            const agentId = String(payload.agentId || '').trim();
+            const queues = Array.isArray(payload.queues)
+              ? payload.queues.map((q) => String(q).trim()).filter(Boolean)
+              : [];
+            if (!agentId || !queues.length) {
+              sendJson(res, 400, { error: 'invalid_request' });
+              return;
+            }
+            const { setAssignments } = require('./lib/workqueue');
+            const result = setAssignments(null, { agentId, queues });
+            sendJson(res, 200, { ok: true, agentId: result.agentId, queues: result.queues });
+          } catch {
+            sendJson(res, 400, { error: 'invalid_request' });
+          }
+        });
+        return;
       }
+
+      sendJson(res, 405, { error: 'method_not_allowed' });
       return;
     }
 
-    if (req.url === '/api/workqueue/queues' || req.url.startsWith('/api/workqueue/queues?')) {
+    if (req.url === '/api/workqueue/progress') {
       if (!requireAuth(req, res)) return;
       if (req.clawnsoleRole !== 'admin') {
         sendJson(res, 403, { error: 'forbidden' });
         return;
       }
-      if (req.method !== 'GET') {
+      if (req.method !== 'POST') {
         sendJson(res, 405, { error: 'method_not_allowed' });
         return;
       }
 
-      try {
-        const { loadState } = require('./lib/workqueue');
-        const state = loadState(null);
-        const queues = Object.keys(state.queues || {}).sort();
-        sendJson(res, 200, { ok: true, queues });
-      } catch (err) {
-        sendJson(res, 500, { error: 'workqueue_error' });
-      }
+      (async () => {
+        const payload = await readJsonBody(req, res);
+        if (!payload) return;
+        const itemId = String(payload.itemId || '').trim();
+        const agentId = String(payload.agentId || '').trim();
+        const note = String(payload.note || '').trim();
+        const leaseMsRaw = payload.leaseMs;
+        const leaseMs = Number.isFinite(leaseMsRaw) ? leaseMsRaw : Number.parseInt(String(leaseMsRaw ?? ''), 10);
+
+        if (!itemId) {
+          sendJson(res, 400, { error: 'itemId_required' });
+          return;
+        }
+        if (!agentId) {
+          sendJson(res, 400, { error: 'agentId_required' });
+          return;
+        }
+
+        try {
+          const { transitionItem } = require('./lib/workqueue');
+          const item = transitionItem(null, {
+            itemId,
+            agentId,
+            status: 'in_progress',
+            note: note || undefined,
+            leaseMs: Number.isFinite(leaseMs) ? leaseMs : undefined
+          });
+          sendJson(res, 200, { ok: true, item });
+        } catch (err) {
+          const code = err && err.code;
+          if (code === 'NOT_FOUND') {
+            sendJson(res, 404, { error: 'not_found' });
+            return;
+          }
+          if (code === 'CLAIMED_BY_OTHER') {
+            sendJson(res, 409, { error: 'claimed_by_other' });
+            return;
+          }
+          sendJson(res, 500, { error: 'workqueue_error' });
+        }
+      })();
       return;
     }
 
-    if (req.url === '/api/workqueue/summary' || req.url.startsWith('/api/workqueue/summary?')) {
+    if (req.url === '/api/workqueue/done') {
       if (!requireAuth(req, res)) return;
       if (req.clawnsoleRole !== 'admin') {
         sendJson(res, 403, { error: 'forbidden' });
         return;
       }
-      if (req.method !== 'GET') {
+      if (req.method !== 'POST') {
         sendJson(res, 405, { error: 'method_not_allowed' });
         return;
       }
 
-      try {
-        const { loadState } = require('./lib/workqueue');
-        const url = new URL(req.url, 'http://localhost');
-        const queue = (url.searchParams.get('queue') || '').trim();
-        const state = loadState(null);
-        const items = state.items.filter((it) => (queue ? it.queue === queue : true));
+      (async () => {
+        const payload = await readJsonBody(req, res);
+        if (!payload) return;
+        const itemId = String(payload.itemId || '').trim();
+        const agentId = String(payload.agentId || '').trim();
+        const note = String(payload.note || '').trim();
+        const result = payload.result;
 
-        const counts = items.reduce((acc, it) => {
-          const key = it.status || 'unknown';
-          acc[key] = (acc[key] || 0) + 1;
-          return acc;
-        }, {});
+        if (!itemId) {
+          sendJson(res, 400, { error: 'itemId_required' });
+          return;
+        }
+        if (!agentId) {
+          sendJson(res, 400, { error: 'agentId_required' });
+          return;
+        }
 
-        const active = items
-          .filter((it) => it.status === 'claimed' || it.status === 'in_progress')
-          .sort((a, b) => (b.priority || 0) - (a.priority || 0))
-          .map((it) => ({
-            id: it.id,
-            queue: it.queue,
-            title: it.title,
-            status: it.status,
-            priority: it.priority,
-            claimedBy: it.claimedBy,
-            claimedAt: it.claimedAt,
-            leaseUntil: it.leaseUntil,
-            attempts: it.attempts,
-            updatedAt: it.updatedAt
-          }));
-
-        sendJson(res, 200, { ok: true, queue: queue || null, counts, active });
-      } catch (err) {
-        sendJson(res, 500, { error: 'workqueue_error' });
-      }
+        try {
+          const { transitionItem } = require('./lib/workqueue');
+          const item = transitionItem(null, {
+            itemId,
+            agentId,
+            status: 'done',
+            result,
+            note: note || undefined
+          });
+          sendJson(res, 200, { ok: true, item });
+        } catch (err) {
+          const code = err && err.code;
+          if (code === 'NOT_FOUND') {
+            sendJson(res, 404, { error: 'not_found' });
+            return;
+          }
+          if (code === 'CLAIMED_BY_OTHER') {
+            sendJson(res, 409, { error: 'claimed_by_other' });
+            return;
+          }
+          sendJson(res, 500, { error: 'workqueue_error' });
+        }
+      })();
       return;
     }
 
-    if (req.url.startsWith('/api/workqueue/item/')) {
+    if (req.url === '/api/workqueue/fail') {
       if (!requireAuth(req, res)) return;
       if (req.clawnsoleRole !== 'admin') {
         sendJson(res, 403, { error: 'forbidden' });
         return;
       }
-      if (req.method !== 'GET') {
+      if (req.method !== 'POST') {
         sendJson(res, 405, { error: 'method_not_allowed' });
         return;
       }
 
-      try {
-        const { loadState } = require('./lib/workqueue');
-        const id = decodeURIComponent(req.url.slice('/api/workqueue/item/'.length)).replace(/\?.*$/, '');
-        const state = loadState(null);
-        const item = state.items.find((it) => it.id === id) || null;
-        sendJson(res, 200, { ok: true, item });
-      } catch (err) {
-        sendJson(res, 500, { error: 'workqueue_error' });
-      }
+      (async () => {
+        const payload = await readJsonBody(req, res);
+        if (!payload) return;
+        const itemId = String(payload.itemId || '').trim();
+        const agentId = String(payload.agentId || '').trim();
+        const note = String(payload.note || '').trim();
+        const error = String(payload.error || '').trim();
+
+        if (!itemId) {
+          sendJson(res, 400, { error: 'itemId_required' });
+          return;
+        }
+        if (!agentId) {
+          sendJson(res, 400, { error: 'agentId_required' });
+          return;
+        }
+        if (!error) {
+          sendJson(res, 400, { error: 'error_required' });
+          return;
+        }
+
+        try {
+          const { transitionItem } = require('./lib/workqueue');
+          const item = transitionItem(null, {
+            itemId,
+            agentId,
+            status: 'failed',
+            error,
+            note: note || undefined
+          });
+          sendJson(res, 200, { ok: true, item });
+        } catch (err) {
+          const code = err && err.code;
+          if (code === 'NOT_FOUND') {
+            sendJson(res, 404, { error: 'not_found' });
+            return;
+          }
+          if (code === 'CLAIMED_BY_OTHER') {
+            sendJson(res, 409, { error: 'claimed_by_other' });
+            return;
+          }
+          sendJson(res, 500, { error: 'workqueue_error' });
+        }
+      })();
       return;
     }
 
@@ -681,9 +1061,15 @@ function createClawnsoleServer(options = {}) {
       });
       return;
     }
+    if (req.url === "/guest" || req.url === "/guest/") {
+      res.writeHead(302, { Location: "/admin" });
+      res.end();
+      return;
+    }
+
 
     const urlPath =
-      req.url === '/' || req.url === '/admin' || req.url === '/admin/' || req.url === '/guest' || req.url === '/guest/'
+      req.url === '/' || req.url === '/admin' || req.url === '/admin/'
         ? '/index.html'
         : req.url;
     const filePath = path.join(root, decodeURIComponent(urlPath));
@@ -737,10 +1123,6 @@ function createClawnsoleServer(options = {}) {
   server.on('upgrade', (req, socket, head) => {
     if (req.url === '/admin-ws') {
       wss.handleUpgrade(req, socket, head, (ws) => handleAdminProxy(ws, req));
-      return;
-    }
-    if (req.url === '/guest-ws') {
-      wss.handleUpgrade(req, socket, head, (ws) => handleGuestProxy(ws, req));
       return;
     }
     socket.destroy();

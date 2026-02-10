@@ -53,14 +53,17 @@
             </select>
           </div>
           <div class="role-pill" id="rolePill">signed out</div>
-          <button id="logoutBtn" class="icon-btn" type="button" aria-label="Log out">
-            ⎋
+          <button id="refreshAgentsBtn" class="icon-btn" type="button" aria-label="Refresh agent list" hidden>
+            ⟳
           </button>
           <button id="workqueueBtn" class="icon-btn" type="button" aria-label="Open workqueue" hidden>
             WQ
           </button>
           <button id="settingsBtn" class="icon-btn" type="button" aria-label="Open settings">
             ⚙︎
+          </button>
+          <button id="logoutBtn" class="icon-btn" type="button" aria-label="Log out">
+            ⎋
           </button>
         </div>
       </header>
@@ -94,7 +97,7 @@
 
             <div class="chat-input-row">
               <div class="chat-input-stack">
-                <textarea data-pane-input placeholder="Message... (Press Enter to send)"></textarea>
+                <textarea data-pane-input placeholder="Message..."></textarea>
                 <div data-pane-command-hints class="command-hints" aria-live="polite"></div>
                 <div class="attachment-row">
                   <input class="file-input" data-pane-file-input type="file" multiple />
@@ -154,14 +157,7 @@
             <p class="login-subtitle">Live console for OpenClaw.</p>
           </div>
         </div>
-        <p class="login-copy">Choose a role and enter the password to continue.</p>
-        <label>
-          Role
-          <select id="loginRole">
-            <option value="guest" selected>Guest</option>
-            <option value="admin">Admin</option>
-          </select>
-        </label>
+        <p class="login-copy">Enter the admin password to continue.</p>
         <label>
           Password
           <input id="loginPassword" type="password" placeholder="Enter password" />
@@ -170,6 +166,8 @@
         <button id="loginBtn" class="primary">Unlock</button>
       </div>
     </div>
+
+    <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
 
     <div id="workqueueModal" class="modal" aria-hidden="true">
       <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="workqueueTitle">
@@ -189,6 +187,18 @@
               Status
               <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters"></div>
             </div>
+            <label class="wq-field">
+              Auto-refresh
+              <div class="wq-autorefresh">
+                <label class="wq-toggle"><input id="wqAutoRefreshEnabled" type="checkbox" /> <span>On</span></label>
+                <select id="wqAutoRefreshInterval" aria-label="Auto-refresh interval">
+                  <option value="5000">5s</option>
+                  <option value="15000" selected>15s</option>
+                  <option value="30000">30s</option>
+                  <option value="60000">60s</option>
+                </select>
+              </div>
+            </label>
             <button id="wqRefreshBtn" class="secondary" type="button">Refresh</button>
           </div>
 
@@ -285,14 +295,6 @@
             Device ID
             <input id="deviceId" type="text" />
           </label>
-          <label>
-            Guest Prompt
-            <textarea id="guestPrompt" rows="4" placeholder="Set the guest profile prompt..."></textarea>
-          </label>
-          <div class="button-row">
-            <button id="saveGuestPromptBtn" class="primary">Save Guest Prompt</button>
-          </div>
-          <div id="guestPromptStatus" class="hint"></div>
           <div class="button-row">
             <button id="disconnectBtn">Disconnect</button>
           </div>
