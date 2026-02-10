@@ -44,7 +44,38 @@ Add a crontab entry (hourly):
 
 Create a LaunchAgent that runs every hour and calls the same command.
 
-This repo doesn't ship a LaunchAgent template yet; if we standardize one, we should add it to `scripts/`.
+This repo ships a template LaunchAgent plist:
+- `scripts/workqueue-enqueue.launchagent.plist`
+
+### Install (per-user)
+
+```bash
+cp scripts/workqueue-enqueue.launchagent.plist \
+  ~/Library/LaunchAgents/ai.openclaw.clawnsole-workqueue-enqueue.plist
+
+# (re)load
+launchctl bootout gui/$(id -u) \
+  ~/Library/LaunchAgents/ai.openclaw.clawnsole-workqueue-enqueue.plist 2>/dev/null || true
+launchctl bootstrap gui/$(id -u) \
+  ~/Library/LaunchAgents/ai.openclaw.clawnsole-workqueue-enqueue.plist
+
+# run once immediately
+launchctl kickstart -k gui/$(id -u)/ai.openclaw.clawnsole-workqueue-enqueue
+```
+
+### Uninstall
+
+```bash
+launchctl bootout gui/$(id -u) \
+  ~/Library/LaunchAgents/ai.openclaw.clawnsole-workqueue-enqueue.plist 2>/dev/null || true
+rm -f ~/Library/LaunchAgents/ai.openclaw.clawnsole-workqueue-enqueue.plist
+```
+
+### Notes
+
+- Launchd provides a minimal environment; the template uses `/bin/bash -lc` so your shell init can set `PATH`.
+- Logs go to `/tmp/clawnsole-workqueue-enqueue.{out,err}.log` by default.
+- Edit the template to change schedule, queue/title/instructions, and the `--dedupeKey` windowing scheme.
 
 ---
 
