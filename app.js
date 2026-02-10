@@ -2020,7 +2020,7 @@ function paneSetChatEnabled(pane) {
     pane.elements.input.placeholder = 'Reconnecting... (Drafting enabled)';
     return;
   }
-  pane.elements.input.placeholder = `Message ${paneAssistantLabel(pane)}... (Press Enter to send)`;
+  pane.elements.input.placeholder = `Message ${paneAssistantLabel(pane)}...`;
 }
 
 function paneEnsureHiddenWelcome(pane) {
