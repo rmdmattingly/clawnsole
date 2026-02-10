@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, dev-3/stop-button-abort ]
   pull_request:
     branches: [ main ]
 
