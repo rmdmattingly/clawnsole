@@ -39,6 +39,8 @@ const globalElements = {
   logoutBtn: document.getElementById('logoutBtn'),
   paneControls: document.getElementById('paneControls'),
   addPaneBtn: document.getElementById('addPaneBtn'),
+  addChatPaneBtn: document.getElementById('addChatPaneBtn'),
+  addQueuePaneBtn: document.getElementById('addQueuePaneBtn'),
   layoutSelect: document.getElementById('layoutSelect'),
   paneGrid: document.getElementById('paneGrid'),
   paneTemplate: document.getElementById('paneTemplate')
@@ -3746,6 +3748,16 @@ globalElements.logoutBtn?.addEventListener('click', async () => {
 globalElements.addPaneBtn?.addEventListener('click', (event) => {
   event?.preventDefault?.();
   paneManager.openAddPaneMenu(globalElements.addPaneBtn);
+});
+
+globalElements.addChatPaneBtn?.addEventListener('click', (event) => {
+  event?.preventDefault?.();
+  paneManager.addPane('chat');
+});
+
+globalElements.addQueuePaneBtn?.addEventListener('click', (event) => {
+  event?.preventDefault?.();
+  paneManager.addPane('workqueue');
 });
 
 // layoutSelect deprecated; layout is inferred from pane count.
