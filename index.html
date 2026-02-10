@@ -35,12 +35,11 @@
             <div class="status-meta" id="statusMeta"></div>
           </div>
           <div id="paneControls" class="pane-controls" hidden>
-            <button id="addChatPaneBtn" class="icon-btn" type="button" aria-label="Add chat pane">
-              +Chat
-            </button>
-            <button id="addQueuePaneBtn" class="icon-btn" type="button" aria-label="Add queue pane">
-              +Queue
-            </button>
+            <div class="pane-add-wrap">
+              <button id="addPaneBtn" class="icon-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add pane">
+                +
+              </button>
+            </div>
             <select id="layoutSelect" aria-label="Pane layout">
               <option value="1">1-up</option>
               <option value="2" selected>2-up</option>
