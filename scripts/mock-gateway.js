@@ -33,25 +33,7 @@ wss.on('connection', (socket) => {
       return;
     }
     if (frame.method === 'chat.send') {
-      socket.send(JSON.stringify({ type: 'res', id, ok: true, payload: {} }));
-      const sessionKey = typeof frame.params?.sessionKey === 'string' ? frame.params.sessionKey : '';
-      socket.send(
-        JSON.stringify({
-          type: 'event',
-          event: 'chat',
-          payload: {
-            state: 'final',
-            runId: `run-${Date.now()}`,
-            sessionKey,
-            message: {
-              content: [{ text: `mock-reply: ${frame.params?.message || ''}` }]
-            }
-          }
-        })
-      );
-      return;
-    }
-
+  
     if (frame.method === 'cron.status') {
       socket.send(
         JSON.stringify({
@@ -84,12 +66,7 @@ wss.on('connection', (socket) => {
                 sessionTarget: 'isolated',
                 wakeMode: 'next-heartbeat',
                 payload: { kind: 'agentTurn', message: 'do thing' },
-                state: {
-                  nextRunAtMs: now + 5 * 60_000,
-                  lastRunAtMs: now - 60 * 60_000,
-                  lastStatus: 'ok',
-                  lastDurationMs: 1200
-                }
+                state: { nextRunAtMs: now + 5 * 60_000, lastRunAtMs: now - 60 * 60_000, lastStatus: 'ok', lastDurationMs: 1200 }
               },
               {
                 id: 'job-2',
@@ -102,13 +79,7 @@ wss.on('connection', (socket) => {
                 sessionTarget: 'isolated',
                 wakeMode: 'next-heartbeat',
                 payload: { kind: 'agentTurn', message: 'run worker' },
-                state: {
-                  nextRunAtMs: now + 2 * 60_000,
-                  lastRunAtMs: now - 2 * 60 * 60_000,
-                  lastStatus: 'error',
-                  lastError: 'mock failure',
-                  lastDurationMs: 500
-                }
+                state: { nextRunAtMs: now + 2 * 60_000, lastRunAtMs: now - 2 * 60 * 60_000, lastStatus: 'error', lastError: 'mock failure', lastDurationMs: 500 }
               }
             ]
           }
@@ -126,22 +97,8 @@ wss.on('connection', (socket) => {
           ok: true,
           payload: {
             entries: [
-              {
-                ts: now - 60_000,
-                jobId: String(frame.params?.id || frame.params?.jobId || 'job-1'),
-                action: 'finished',
-                status: 'ok',
-                durationMs: 1234,
-                summary: 'mock run ok'
-              },
-              {
-                ts: now - 2 * 60 * 60_000,
-                jobId: String(frame.params?.id || frame.params?.jobId || 'job-1'),
-                action: 'finished',
-                status: 'error',
-                durationMs: 200,
-                error: 'mock error'
-              }
+              { ts: now - 60_000, jobId: String(frame.params?.id || frame.params?.jobId || 'job-1'), action: 'finished', status: 'ok', durationMs: 1234, summary: 'mock run ok' },
+              { ts: now - 2 * 60 * 60_000, jobId: String(frame.params?.id || frame.params?.jobId || 'job-1'), action: 'finished', status: 'error', durationMs: 200, error: 'mock error' }
             ]
           }
         })
@@ -153,7 +110,24 @@ wss.on('connection', (socket) => {
       socket.send(JSON.stringify({ type: 'res', id, ok: true, payload: { ok: true } }));
       return;
     }
-
+    socket.send(JSON.stringify({ type: 'res', id, ok: true, payload: {} }));
+      const sessionKey = typeof frame.params?.sessionKey === 'string' ? frame.params.sessionKey : '';
+      socket.send(
+        JSON.stringify({
+          type: 'event',
+          event: 'chat',
+          payload: {
+            state: 'final',
+            runId: `run-${Date.now()}`,
+            sessionKey,
+            message: {
+              content: [{ text: `mock-reply: ${frame.params?.message || ''}` }]
+            }
+          }
+        })
+      );
+      return;
+    }
     socket.send(JSON.stringify({ type: 'res', id, ok: true, payload: {} }));
   });
 });

@@ -2,9 +2,6 @@ const globalElements = {
   wsUrl: document.getElementById('wsUrl'),
   clientId: document.getElementById('clientId'),
   deviceId: document.getElementById('deviceId'),
-  guestPrompt: document.getElementById('guestPrompt'),
-  saveGuestPromptBtn: document.getElementById('saveGuestPromptBtn'),
-  guestPromptStatus: document.getElementById('guestPromptStatus'),
   disconnectBtn: document.getElementById('disconnectBtn'),
   status: document.getElementById('connectionStatus'),
   statusMeta: document.getElementById('statusMeta'),
@@ -14,6 +11,8 @@ const globalElements = {
   workqueueCloseBtn: document.getElementById('workqueueCloseBtn'),
   wqQueueSelect: document.getElementById('wqQueueSelect'),
   wqStatusFilters: document.getElementById('wqStatusFilters'),
+  wqAutoRefreshEnabled: document.getElementById('wqAutoRefreshEnabled'),
+  wqAutoRefreshInterval: document.getElementById('wqAutoRefreshInterval'),
   wqRefreshBtn: document.getElementById('wqRefreshBtn'),
   wqListBody: document.getElementById('wqListBody'),
   wqListEmpty: document.getElementById('wqListEmpty'),
@@ -32,14 +31,12 @@ const globalElements = {
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
-  loginRole: document.getElementById('loginRole'),
   loginPassword: document.getElementById('loginPassword'),
   loginBtn: document.getElementById('loginBtn'),
   loginError: document.getElementById('loginError'),
   logoutBtn: document.getElementById('logoutBtn'),
   paneControls: document.getElementById('paneControls'),
   addPaneBtn: document.getElementById('addPaneBtn'),
-  addPaneMenu: document.getElementById('addPaneMenu'),
   layoutSelect: document.getElementById('layoutSelect'),
   paneGrid: document.getElementById('paneGrid'),
   paneTemplate: document.getElementById('paneTemplate')
@@ -49,7 +46,6 @@ function getRouteRole() {
   try {
     const path = window.location.pathname || '/';
     if (path === '/admin' || path.startsWith('/admin/')) return 'admin';
-    if (path === '/guest' || path.startsWith('/guest/')) return 'guest';
   } catch {}
   return null;
 }
@@ -325,9 +321,8 @@ function resolveWsUrl(raw) {
   return raw;
 }
 
-function computeGatewayTarget(kind) {
-  const key = kind === 'guest' ? 'guestWsUrl' : 'adminWsUrl';
-  const proxyUrl = uiState.meta && uiState.meta[key] ? uiState.meta[key] : '';
+function computeGatewayTarget(_kind) {
+  const proxyUrl = uiState.meta && uiState.meta.adminWsUrl ? uiState.meta.adminWsUrl : '';
   const usingProxy = Boolean(proxyUrl);
   const rawUrl = proxyUrl || globalElements.wsUrl.value.trim();
   return { url: resolveWsUrl(rawUrl), usingProxy };
@@ -417,7 +412,9 @@ function setAuthState(authed) {
 function setRole(role) {
   roleState.role = role;
   if (globalElements.rolePill) {
-    globalElements.rolePill.textContent = role;
+    // Clawnsole now effectively has a single signed-in role (admin), so showing the raw role name is redundant.
+    globalElements.rolePill.textContent = role === 'admin' ? 'signed in' : role;
+    // Keep the visual “signed in” styling for admin without exposing the role label.
     globalElements.rolePill.classList.toggle('admin', role === 'admin');
   }
   if (role === 'guest') {
@@ -445,14 +442,10 @@ function showLogin(message = '') {
   globalElements.loginError.textContent = message;
   globalElements.loginPassword.value = '';
 
-  if (routeRole === 'admin' || routeRole === 'guest') {
-    globalElements.loginRole.value = routeRole;
-    globalElements.loginRole.disabled = true;
+  if (routeRole === 'admin') {
   } else {
-    globalElements.loginRole.disabled = false;
     const savedRole = storage.get('clawnsole.auth.role', '');
-    if (savedRole === 'admin' || savedRole === 'guest') {
-      globalElements.loginRole.value = savedRole;
+    if (savedRole === 'admin') {
     }
   }
 
@@ -478,7 +471,7 @@ function hideLogin() {
 }
 
 async function attemptLogin() {
-  const role = globalElements.loginRole.value === 'admin' ? 'admin' : 'guest';
+  const role = 'admin';
   const password = globalElements.loginPassword.value.trim();
   if (!password) {
     showLogin('Password required.');
@@ -496,9 +489,9 @@ async function attemptLogin() {
       return;
     }
     const data = await res.json();
-    const nextRole = data.role === 'admin' ? 'admin' : 'guest';
-    storage.set('clawnsole.auth.role', nextRole);
-    window.location.replace(nextRole === 'admin' ? '/admin' : '/guest');
+    const nextRole = data.role === 'admin' ? 'admin' : 'admin';
+    storage.set('clawnsole.auth.role', 'admin');
+    window.location.replace('/admin');
   } catch {
     showLogin('Login failed. Please retry.');
   }
@@ -507,9 +500,12 @@ async function attemptLogin() {
 function openSettings() {
   globalElements.settingsModal.classList.add('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'false');
-  if (roleState.role === 'admin') {
-    loadGuestPrompt();
-  }
+
+  // Legacy guest prompt (server endpoints may be absent in some builds).
+  loadGuestPrompt();
+
+  loadRecurringPromptAgents();
+  loadRecurringPrompts();
 }
 
 function closeSettings() {
@@ -527,7 +523,10 @@ const workqueueState = {
   statusFilter: new Set(['ready', 'pending', 'claimed', 'in_progress']),
   items: [],
   selectedItemId: null,
-  leaseTicker: null
+  leaseTicker: null,
+  autoRefreshEnabled: true,
+  autoRefreshIntervalMs: 15000,
+  autoRefreshTimer: null
 };
 
 function openWorkqueue() {
@@ -535,9 +534,11 @@ function openWorkqueue() {
   globalElements.workqueueModal?.classList.add('open');
   globalElements.workqueueModal?.setAttribute('aria-hidden', 'false');
   ensureWorkqueueBootstrapped();
+  startWorkqueueAutoRefresh();
 }
 
 function closeWorkqueue() {
+  stopWorkqueueAutoRefresh();
   globalElements.workqueueModal?.classList.remove('open');
   globalElements.workqueueModal?.setAttribute('aria-hidden', 'true');
 }
@@ -573,10 +574,28 @@ function renderWorkqueueStatusFilters() {
 }
 
 async function ensureWorkqueueBootstrapped() {
+  // Load persisted UI prefs
+  try {
+    const enabled = storage.get('clawnsole.wq.autorefresh.enabled');
+    const interval = storage.get('clawnsole.wq.autorefresh.intervalMs');
+    if (enabled !== null) workqueueState.autoRefreshEnabled = Boolean(enabled);
+    if (interval !== null && Number(interval) > 0) workqueueState.autoRefreshIntervalMs = Number(interval);
+  } catch {
+    // ignore
+  }
+
+  if (globalElements.wqAutoRefreshEnabled) {
+    globalElements.wqAutoRefreshEnabled.checked = !!workqueueState.autoRefreshEnabled;
+  }
+  if (globalElements.wqAutoRefreshInterval) {
+    globalElements.wqAutoRefreshInterval.value = String(workqueueState.autoRefreshIntervalMs);
+  }
+
   renderWorkqueueStatusFilters();
   await fetchWorkqueueQueues();
   await fetchAndRenderWorkqueueItems();
   startWorkqueueLeaseTicker();
+  startWorkqueueAutoRefresh();
 }
 
 async function fetchWorkqueueQueues() {
@@ -657,14 +676,15 @@ function renderWorkqueueItems() {
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
     const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
+    const status = String(it.status || '');
 
     row.innerHTML = `
       <div class="wq-col title">${escapeHtml(String(it.title || ''))}</div>
-      <div class="wq-col status">${escapeHtml(String(it.status || ''))}</div>
-      <div class="wq-col prio">${escapeHtml(String(it.priority ?? ''))}</div>
-      <div class="wq-col attempts">${escapeHtml(String(it.attempts ?? ''))}</div>
+      <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
+      <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
+      <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
       <div class="wq-col claimedBy">${escapeHtml(String(it.claimedBy || ''))}</div>
-      <div class="wq-col lease" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
+      <div class="wq-col lease mono" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
     `;
 
     row.addEventListener('click', () => {
@@ -708,6 +728,124 @@ function renderWorkqueueInspect(item) {
   `;
 }
 
+// --- Minimal Workqueue Pane (Issue #22c) ---
+// Standalone renderer that can be mounted into any container.
+// Acceptance: renderWorkqueuePane(rootEl, { queue }) exists and can be called via a debug hook.
+
+async function fetchWorkqueueSummary(queue = '') {
+  const params = new URLSearchParams();
+  if (queue) params.set('queue', queue);
+  const url = `/api/workqueue/summary${params.toString() ? `?${params.toString()}` : ''}`;
+  const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.ok) throw new Error(data?.error || String(res.status));
+  return data;
+}
+
+async function fetchWorkqueueItems({ queue = '', statuses = [] } = {}) {
+  const params = new URLSearchParams();
+  if (queue) params.set('queue', queue);
+  if (Array.isArray(statuses) && statuses.length) params.set('status', statuses.join(','));
+  const url = `/api/workqueue/items${params.toString() ? `?${params.toString()}` : ''}`;
+  const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.ok) throw new Error(data?.error || String(res.status));
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+function renderWorkqueueCounts(rootEl, counts) {
+  const statuses = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
+  const list = document.createElement('dl');
+  list.className = 'wq-counts';
+  for (const s of statuses) {
+    const dt = document.createElement('dt');
+    dt.textContent = s;
+    const dd = document.createElement('dd');
+    dd.textContent = String(counts?.[s] || 0);
+    list.appendChild(dt);
+    list.appendChild(dd);
+  }
+  rootEl.appendChild(list);
+}
+
+function renderWorkqueueSimpleList(rootEl, items, { emptyText }) {
+  const ul = document.createElement('ul');
+  ul.className = 'wq-simple-list';
+
+  if (!items.length) {
+    const li = document.createElement('li');
+    li.className = 'hint';
+    li.textContent = emptyText || 'No items.';
+    ul.appendChild(li);
+    rootEl.appendChild(ul);
+    return;
+  }
+
+  for (const it of items) {
+    const li = document.createElement('li');
+    const lease = it.leaseUntil ? new Date(Number(it.leaseUntil)).toISOString() : '';
+    li.innerHTML = `<div><strong>${escapeHtml(String(it.title || ''))}</strong></div>
+<div class="meta">${escapeHtml(String(it.status || ''))}${it.claimedBy ? ` • ${escapeHtml(String(it.claimedBy))}` : ''}${lease ? ` • lease ${escapeHtml(lease)}` : ''}</div>`;
+    ul.appendChild(li);
+  }
+  rootEl.appendChild(ul);
+}
+
+async function renderWorkqueuePane(rootEl, { queue = '' } = {}) {
+  if (!rootEl) return;
+  const q = String(queue || '').trim();
+
+  rootEl.innerHTML = '';
+  rootEl.setAttribute('role', 'region');
+  rootEl.setAttribute('aria-label', `Workqueue${q ? `: ${q}` : ''}`);
+
+  const title = document.createElement('h2');
+  title.textContent = `Workqueue${q ? `: ${q}` : ''}`;
+  rootEl.appendChild(title);
+
+  const statusLine = document.createElement('div');
+  statusLine.className = 'wq-statusline';
+  statusLine.textContent = 'Loading…';
+  rootEl.appendChild(statusLine);
+
+  try {
+    const [summary, readyPending] = await Promise.all([
+      fetchWorkqueueSummary(q),
+      fetchWorkqueueItems({ queue: q, statuses: ['ready', 'pending'] })
+    ]);
+
+    statusLine.textContent = 'Loaded.';
+
+    const countsSection = document.createElement('section');
+    countsSection.innerHTML = '<h3>Counts</h3>';
+    renderWorkqueueCounts(countsSection, summary.counts || {});
+    rootEl.appendChild(countsSection);
+
+    const activeSection = document.createElement('section');
+    activeSection.innerHTML = '<h3>Active (claimed / in_progress)</h3>';
+    renderWorkqueueSimpleList(activeSection, Array.isArray(summary.active) ? summary.active : [], { emptyText: 'No active items.' });
+    rootEl.appendChild(activeSection);
+
+    const readySection = document.createElement('section');
+    readySection.innerHTML = '<h3>Ready / Pending</h3>';
+    const sorted = readyPending
+      .slice()
+      .sort((a, b) => (b.priority || 0) - (a.priority || 0) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+    renderWorkqueueSimpleList(readySection, sorted, { emptyText: 'No ready/pending items.' });
+    rootEl.appendChild(readySection);
+
+    // Make scrollable without requiring pane-manager changes.
+    rootEl.style.overflow = 'auto';
+  } catch (err) {
+    statusLine.textContent = `Failed to load: ${String(err)}`;
+  }
+}
+
+// Temporary debug hook:
+// In DevTools: window.__debug.renderWorkqueuePane(document.querySelector('#someRoot'), { queue: 'dev-team' })
+window.__debug = window.__debug || {};
+window.__debug.renderWorkqueuePane = renderWorkqueuePane;
+
 
 async function fetchAndRenderWorkqueueItemsForPane(pane) {
   if (!pane || pane.kind !== 'workqueue') return;
@@ -737,13 +875,86 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
   }
 }
 
+function sortWorkqueueItemsForPane(items, { sortKey = 'default', sortDir = 'desc' } = {}) {
+  const dir = sortDir === 'asc' ? 1 : -1;
+  const statusRank = (s) => {
+    const v = String(s || '').trim();
+    if (v === 'in_progress') return 0;
+    if (v === 'claimed') return 1;
+    if (v === 'ready') return 2;
+    if (v === 'pending') return 3;
+    if (v === 'failed') return 4;
+    if (v === 'done') return 5;
+    return 6;
+  };
+
+  const numOr0 = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const timeOr0 = (v) => {
+    if (!v) return 0;
+    const n = Date.parse(String(v));
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  return (Array.isArray(items) ? items : [])
+    .map((it, idx) => ({ it, idx }))
+    .sort((a, b) => {
+      const A = a.it || {};
+      const B = b.it || {};
+
+      // Default: status grouping (active first), then priority desc, then updatedAt desc, then createdAt desc.
+      if (sortKey === 'default' || sortKey === 'status') {
+        const sr = statusRank(A.status) - statusRank(B.status);
+        if (sr) return sr;
+      }
+
+      if (sortKey === 'priority' || sortKey === 'default') {
+        const pr = (numOr0(B.priority) - numOr0(A.priority));
+        if (pr) return pr;
+      }
+
+      if (sortKey === 'updatedAt' || sortKey === 'default') {
+        const ur = (timeOr0(B.updatedAt) - timeOr0(A.updatedAt));
+        if (ur) return ur;
+      }
+
+      if (sortKey === 'createdAt' || sortKey === 'default') {
+        const cr = (timeOr0(B.createdAt) - timeOr0(A.createdAt));
+        if (cr) return cr;
+      }
+
+      if (sortKey === 'attempts') {
+        const ar = (numOr0(B.attempts) - numOr0(A.attempts));
+        if (ar) return ar;
+      }
+
+      if (sortKey === 'claimedBy') {
+        const av = String(A.claimedBy || '');
+        const bv = String(B.claimedBy || '');
+        const r = av.localeCompare(bv);
+        if (r) return r * dir;
+      }
+
+      if (sortKey === 'title') {
+        const av = String(A.title || '');
+        const bv = String(B.title || '');
+        const r = av.localeCompare(bv);
+        if (r) return r * dir;
+      }
+
+      // Stable fallback.
+      return a.idx - b.idx;
+    })
+    .map((x) => x.it);
+}
+
 function renderWorkqueuePaneItems(pane) {
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
   const empty = pane.elements?.thread?.querySelector('[data-wq-empty]');
   if (!body) return;
   body.innerHTML = '';
 
-  const items = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
+  const itemsRaw = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
+  const items = sortWorkqueueItemsForPane(itemsRaw, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
   if (empty) empty.hidden = items.length > 0;
 
   const now = Date.now();
@@ -755,14 +966,15 @@ function renderWorkqueuePaneItems(pane) {
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
     const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
+    const status = String(it.status || '');
 
     row.innerHTML = `
       <div class="wq-col title">${escapeHtml(String(it.title || ''))}</div>
-      <div class="wq-col status">${escapeHtml(String(it.status || ''))}</div>
-      <div class="wq-col prio">${escapeHtml(String(it.priority ?? ''))}</div>
-      <div class="wq-col attempts">${escapeHtml(String(it.attempts ?? ''))}</div>
+      <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
+      <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
+      <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
       <div class="wq-col claimedBy">${escapeHtml(String(it.claimedBy || ''))}</div>
-      <div class="wq-col lease" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
+      <div class="wq-col lease mono" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
     `;
 
     row.addEventListener('click', () => {
@@ -824,6 +1036,25 @@ function startWorkqueueLeaseTicker() {
       el.textContent = fmtRemaining(until - now);
     });
   }, 1000);
+}
+
+function stopWorkqueueAutoRefresh() {
+  if (workqueueState.autoRefreshTimer) {
+    clearInterval(workqueueState.autoRefreshTimer);
+    workqueueState.autoRefreshTimer = null;
+  }
+}
+
+function startWorkqueueAutoRefresh() {
+  stopWorkqueueAutoRefresh();
+  if (!workqueueState.autoRefreshEnabled) return;
+  if (!globalElements.workqueueModal || !globalElements.workqueueModal.classList.contains('open')) return;
+
+  const intervalMs = Number(workqueueState.autoRefreshIntervalMs) || 15000;
+  workqueueState.autoRefreshTimer = setInterval(() => {
+    if (!globalElements.workqueueModal || !globalElements.workqueueModal.classList.contains('open')) return;
+    fetchAndRenderWorkqueueItems();
+  }, Math.max(2000, intervalMs));
 }
 
 let wqStatusTimer = null;
@@ -911,43 +1142,6 @@ async function workqueueClaimNextFromUi() {
     renderWorkqueueInspect(item);
   } catch (err) {
     setWorkqueueActionStatus(`Claim failed: ${String(err)}`, 'err');
-  }
-}
-
-async function loadGuestPrompt() {
-  if (!globalElements.guestPrompt) return;
-  globalElements.guestPromptStatus.textContent = '';
-  try {
-    const res = await fetch('/config/guest-prompt', { credentials: 'include' });
-    if (!res.ok) {
-      globalElements.guestPromptStatus.textContent = 'Unable to load guest prompt.';
-      return;
-    }
-    const data = await res.json();
-    globalElements.guestPrompt.value = data.prompt || '';
-  } catch {
-    globalElements.guestPromptStatus.textContent = 'Unable to load guest prompt.';
-  }
-}
-
-async function saveGuestPrompt() {
-  if (!globalElements.guestPrompt) return;
-  const prompt = globalElements.guestPrompt.value.trim();
-  globalElements.guestPromptStatus.textContent = '';
-  try {
-    const res = await fetch('/config/guest-prompt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ prompt })
-    });
-    if (!res.ok) {
-      globalElements.guestPromptStatus.textContent = 'Failed to save guest prompt.';
-      return;
-    }
-    globalElements.guestPromptStatus.textContent = 'Guest prompt saved.';
-  } catch {
-    globalElements.guestPromptStatus.textContent = 'Failed to save guest prompt.';
   }
 }
 
@@ -1826,7 +2020,7 @@ function paneSetChatEnabled(pane) {
     pane.elements.input.placeholder = 'Reconnecting... (Drafting enabled)';
     return;
   }
-  pane.elements.input.placeholder = `Message ${paneAssistantLabel(pane)}... (Press Enter to send)`;
+  pane.elements.input.placeholder = `Message ${paneAssistantLabel(pane)}...`;
 }
 
 function paneEnsureHiddenWelcome(pane) {
@@ -2178,17 +2372,15 @@ function buildClientForPane(pane) {
       paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();
-      if (pane.kind === 'chat') {
-        paneEnsureGuestPolicy(pane);
-        paneEnsureHiddenWelcome(pane);
-        pane.client.request('sessions.resolve', { key: pane.sessionKey() });
+      paneEnsureGuestPolicy(pane);
+      paneEnsureHiddenWelcome(pane);
+      pane.client.request('sessions.resolve', { key: pane.sessionKey() });
 
-        // If we disconnected mid-stream, pull remote history to catch up.
-        paneScheduleCatchUp(pane);
+      // If we disconnected mid-stream, pull remote history to catch up.
+      paneScheduleCatchUp(pane);
 
-        // Resume sending queued messages.
-        panePumpOutbox(pane);
-      }
+      // Resume sending queued messages.
+      panePumpOutbox(pane);
 
       try {
         if (typeof pane.onConnectedHook === 'function') pane.onConnectedHook();
@@ -2252,7 +2444,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sortKey, sortDir, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -2274,19 +2466,22 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
     sendBtn: root.querySelector('[data-pane-send]')
   };
 
-  const allowedKinds = new Set(['chat', 'workqueue', 'cron', 'timeline']);
-  const normalizedKind = allowedKinds.has(kind) ? kind : 'chat';
-
   const pane = {
     key,
     role,
-    kind: normalizedKind,
+    kind: (() => {
+      const allowed = new Set(['chat', 'workqueue', 'cron', 'timeline']);
+      const k = String(kind || 'chat').trim().toLowerCase();
+      return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
+    })(),
     agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
       items: [],
-      selectedItemId: null
+      selectedItemId: null,
+      sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'default',
+      sortDir: sortDir === 'asc' ? 'asc' : 'desc'
     },
     connected: false,
     statusState: 'disconnected',
@@ -2320,39 +2515,110 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
     if (elements.inputRow) elements.inputRow.hidden = true;
     if (elements.scrollDownBtn) elements.scrollDownBtn.hidden = true;
 
+
     // Replace thread with workqueue list + inspect.
     elements.thread.classList.add('wq-pane');
     elements.thread.innerHTML = `
-      <div class="wq-toolbar" style="padding: 10px; position: sticky; top: 0; background: rgba(12, 15, 20, 0.92); backdrop-filter: blur(8px); z-index: 2; border-bottom: 1px solid rgba(255,255,255,0.06);">
-        <div style="display:flex; gap: 10px; align-items: end; flex-wrap: wrap;">
-          <label class="wq-field" style="min-width: 180px;">
-            Queue
-            <input data-wq-queue type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="e.g. dev-team" />
+      <div class="wq-toolbar">
+        <div class="wq-toolbar-row">
+          <label class="wq-field">
+            <span class="wq-label">Queue</span>
+            <select data-wq-queue-select aria-label="Select workqueue"></select>
+            <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
           </label>
-          <label class="wq-field" style="min-width: 320px;">
-            Status (comma-separated)
+
+          <label class="wq-field wq-status-field">
+            <span class="wq-label">Status filter</span>
             <input data-wq-status type="text" value="${escapeHtml(pane.workqueue.statusFilter.join(','))}" placeholder="ready,pending,claimed,in_progress" />
           </label>
+
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
+
+          <div class="wq-sort" role="group" aria-label="Sort workqueue items">
+            <span class="wq-sort-label">Sort</span>
+            <button type="button" class="wq-sort-btn" data-wq-sort="default">Default</button>
+            <button type="button" class="wq-sort-btn" data-wq-sort="priority">Priority</button>
+            <button type="button" class="wq-sort-btn" data-wq-sort="updatedAt">Updated</button>
+            <button type="button" class="wq-sort-btn" data-wq-sort="createdAt">Created</button>
+          </div>
         </div>
-        <div class="hint" data-wq-statusline style="margin-top:6px;"></div>
+
+        <details class="wq-enqueue">
+          <summary>Enqueue new item</summary>
+          <form data-wq-enqueue-form class="wq-enqueue-form">
+            <label class="wq-field">
+              <span class="wq-label">Title</span>
+              <input data-wq-enqueue-title type="text" required placeholder="Short title" />
+            </label>
+
+            <label class="wq-field">
+              <span class="wq-label">Priority</span>
+              <input data-wq-enqueue-priority type="number" value="0" />
+            </label>
+
+            <label class="wq-field">
+              <span class="wq-label">Dedupe key (optional)</span>
+              <input data-wq-enqueue-dedupe type="text" placeholder="e.g. pr-review:2026-02-10T01" />
+            </label>
+
+            <label class="wq-field wq-field-wide">
+              <span class="wq-label">Instructions</span>
+              <textarea data-wq-enqueue-instructions rows="3" placeholder="Links, context, acceptance criteria"></textarea>
+            </label>
+
+            <div class="wq-enqueue-actions">
+              <label class="wq-field">
+                <span class="wq-label">Claim as (optional)</span>
+                <select data-wq-claim-agent></select>
+              </label>
+              <label class="wq-field">
+                <span class="wq-label">Lease ms</span>
+                <input data-wq-claim-lease type="number" value="900000" />
+              </label>
+              <button data-wq-enqueue-submit type="submit">Enqueue</button>
+            </div>
+
+            <div class="hint" data-wq-enqueue-status aria-live="polite"></div>
+          </form>
+        </details>
+
+        <div class="hint" data-wq-statusline></div>
       </div>
-      <div class="wq-list" style="padding: 10px;">
-        <div class="wq-list-head" style="display:grid; grid-template-columns: 1.6fr 0.9fr 0.4fr 0.5fr 0.8fr 0.6fr; gap: 8px; font-size: 12px; opacity: 0.75; padding: 6px 8px;">
-          <div>title</div><div>status</div><div>prio</div><div>attempts</div><div>claimedBy</div><div>lease</div>
-        </div>
-        <div data-wq-list-body></div>
-        <div data-wq-empty class="hint" style="padding: 10px 8px;" hidden>No items.</div>
-        <div data-wq-inspect class="wq-inspect" style="margin-top: 10px;"></div>
+
+      <div class="wq-layout">
+        <section class="wq-list" aria-label="Workqueue items">
+          <div class="wq-list-header">
+            <button type="button" class="wq-list-sort" data-wq-sort="title">title</button>
+            <button type="button" class="wq-list-sort" data-wq-sort="status">status</button>
+            <button type="button" class="wq-list-sort" data-wq-sort="priority">prio</button>
+            <button type="button" class="wq-list-sort" data-wq-sort="attempts">attempts</button>
+            <button type="button" class="wq-list-sort" data-wq-sort="claimedBy">claimedBy</button>
+            <div>lease</div>
+          </div>
+          <div class="wq-list-body" data-wq-list-body></div>
+          <div data-wq-empty class="hint" style="padding: 10px 12px;" hidden>No items.</div>
+        </section>
+
+        <section class="wq-inspect" aria-label="Workqueue item details">
+          <div class="wq-inspect-header">Inspect</div>
+          <div data-wq-inspect class="wq-inspect-body"></div>
+        </section>
       </div>
     `;
 
-    const queueEl = elements.thread.querySelector('[data-wq-queue]');
+    const queueSelectEl = elements.thread.querySelector('[data-wq-queue-select]');
+    const queueCustomEl = elements.thread.querySelector('[data-wq-queue-custom]');
     const statusEl = elements.thread.querySelector('[data-wq-status]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
 
+    const getQueueValue = () => {
+      const sel = String(queueSelectEl?.value || '').trim();
+      if (sel === '__custom__') return String(queueCustomEl?.value || '').trim();
+      return sel;
+    };
+
     const doRefresh = async () => {
-      const q = (queueEl?.value || '').trim() || 'dev-team';
+      const q = getQueueValue() || 'dev-team';
       pane.workqueue.queue = q;
       const statuses = (statusEl?.value || '')
         .split(',')
@@ -2363,12 +2629,182 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
       paneManager.persistAdminPanes();
     };
 
+    const populateQueueSelect = async () => {
+      if (!queueSelectEl) return;
+      try {
+        const res = await fetch('/api/workqueue/queues', { credentials: 'include', cache: 'no-store' });
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json().catch(() => null);
+        const queues = Array.isArray(data?.queues) ? data.queues : [];
+
+        const current = (pane.workqueue.queue || 'dev-team').trim();
+        const unique = Array.from(new Set([current, ...queues].map((q) => String(q).trim()).filter(Boolean)));
+        unique.sort((a, b) => a.localeCompare(b));
+
+        queueSelectEl.innerHTML = '';
+        for (const q of unique) {
+          const opt = document.createElement('option');
+          opt.value = q;
+          opt.textContent = q;
+          queueSelectEl.appendChild(opt);
+        }
+
+        const customOpt = document.createElement('option');
+        customOpt.value = '__custom__';
+        customOpt.textContent = 'Custom…';
+        queueSelectEl.appendChild(customOpt);
+
+        if (unique.includes(current)) {
+          queueSelectEl.value = current;
+          if (queueCustomEl) queueCustomEl.hidden = true;
+        } else {
+          queueSelectEl.value = '__custom__';
+          if (queueCustomEl) {
+            queueCustomEl.hidden = false;
+            queueCustomEl.value = current;
+          }
+        }
+      } catch {
+        // fallback: keep current queue editable
+        queueSelectEl.innerHTML = '';
+        const opt = document.createElement('option');
+        opt.value = pane.workqueue.queue || 'dev-team';
+        opt.textContent = pane.workqueue.queue || 'dev-team';
+        queueSelectEl.appendChild(opt);
+        const customOpt = document.createElement('option');
+        customOpt.value = '__custom__';
+        customOpt.textContent = 'Custom…';
+        queueSelectEl.appendChild(customOpt);
+        queueSelectEl.value = opt.value;
+      }
+    };
+
+    queueSelectEl?.addEventListener('change', () => {
+      const isCustom = String(queueSelectEl.value) === '__custom__';
+      if (queueCustomEl) {
+        queueCustomEl.hidden = !isCustom;
+        if (isCustom) queueCustomEl.focus();
+      }
+      doRefresh();
+    });
+
+    populateQueueSelect().then(() => doRefresh());
+
     refreshBtn?.addEventListener('click', () => doRefresh());
-    queueEl?.addEventListener('keydown', (e) => {
+    queueCustomEl?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doRefresh();
     });
     statusEl?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doRefresh();
+    });
+
+    // Sort controls (client-side): stable sorting with a status-grouping default.
+    const sortBtns = Array.from(elements.thread.querySelectorAll('[data-wq-sort]'));
+    const updateSortUi = () => {
+      sortBtns.forEach((btn) => {
+        const key = btn.getAttribute('data-wq-sort') || '';
+        const active = key && key === pane.workqueue.sortKey;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        btn.title = active ? (pane.workqueue.sortDir === 'asc' ? 'Sorted ascending' : 'Sorted descending') : '';
+      });
+    };
+
+    const setSort = (key) => {
+      const nextKey = String(key || 'default');
+      if (pane.workqueue.sortKey === nextKey) {
+        pane.workqueue.sortDir = pane.workqueue.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        pane.workqueue.sortKey = nextKey;
+        pane.workqueue.sortDir = nextKey === 'claimedBy' || nextKey === 'title' || nextKey === 'status' ? 'asc' : 'desc';
+      }
+      updateSortUi();
+      renderWorkqueuePaneItems(pane);
+      paneManager.persistAdminPanes();
+    };
+
+    sortBtns.forEach((btn) => {
+      btn.addEventListener('click', () => setSort(btn.getAttribute('data-wq-sort')));
+    });
+    updateSortUi();
+
+    // Agent dropdown (prefer select over free-text).
+    const claimAgentSelect = elements.thread.querySelector('[data-wq-claim-agent]');
+    if (claimAgentSelect) {
+      claimAgentSelect.innerHTML = '';
+      const optNone = document.createElement('option');
+      optNone.value = '';
+      optNone.textContent = '(none)';
+      claimAgentSelect.appendChild(optNone);
+      const agents = Array.isArray(uiState.agents) ? uiState.agents : [];
+      for (const a of agents) {
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = formatAgentLabel(a);
+        claimAgentSelect.appendChild(opt);
+      }
+    }
+
+    // Enqueue (inline form).
+    const enqueueForm = elements.thread.querySelector('[data-wq-enqueue-form]');
+    const enqueueStatus = elements.thread.querySelector('[data-wq-enqueue-status]');
+    const enqueueTitle = elements.thread.querySelector('[data-wq-enqueue-title]');
+    const enqueueInstructions = elements.thread.querySelector('[data-wq-enqueue-instructions]');
+    const enqueuePriority = elements.thread.querySelector('[data-wq-enqueue-priority]');
+    const enqueueDedupe = elements.thread.querySelector('[data-wq-enqueue-dedupe]');
+
+    const setEnqueueStatus = (text) => {
+      if (!enqueueStatus) return;
+      enqueueStatus.textContent = String(text || '');
+    };
+
+    enqueueForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const queue = (getQueueValue() || pane.workqueue.queue || '').trim();
+      const title = (enqueueTitle?.value || '').trim();
+      const instructions = (enqueueInstructions?.value || '').trim();
+      const priority = Number(enqueuePriority?.value || 0) || 0;
+      const dedupeKey = (enqueueDedupe?.value || '').trim();
+
+      if (!queue) {
+        setEnqueueStatus('Select a queue first.');
+        return;
+      }
+      if (!title) {
+        setEnqueueStatus('Title is required.');
+        enqueueTitle?.focus();
+        return;
+      }
+
+      setEnqueueStatus('Enqueueing…');
+      try {
+        const res = await fetch('/api/workqueue/enqueue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ queue, title, instructions, priority, dedupeKey })
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.ok) {
+          setEnqueueStatus('Enqueue failed: ' + String(data?.error || res.status));
+          return;
+        }
+
+        const item = data.item || null;
+        setEnqueueStatus(item && item._deduped ? 'Deduped: ' + item.id : 'Enqueued: ' + String(item?.id || ''));
+        if (enqueueTitle) enqueueTitle.value = '';
+        if (enqueueInstructions) enqueueInstructions.value = '';
+        if (enqueueDedupe) enqueueDedupe.value = '';
+
+        await doRefresh();
+        if (item?.id) {
+          pane.workqueue.selectedItemId = item.id;
+          renderWorkqueuePaneItems(pane);
+          renderWorkqueuePaneInspect(pane, pane.workqueue.items.find((it) => it.id === item.id) || item);
+        }
+      } catch (err) {
+        setEnqueueStatus('Enqueue failed: ' + String(err));
+      }
     });
 
     setStatusPill(elements.status, 'connected', '');
@@ -2390,52 +2826,26 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
 
     const isTimeline = pane.kind === 'timeline';
     elements.thread.classList.add('cron-pane');
-
-    const defaultRange = isTimeline ? '24h' : '24h';
-
     elements.thread.innerHTML = `
-      <div class="wq-toolbar" style="padding: 10px; position: sticky; top: 0; background: rgba(12, 15, 20, 0.92); backdrop-filter: blur(8px); z-index: 2; border-bottom: 1px solid rgba(255,255,255,0.06);">
-        <div style="display:flex; gap: 10px; align-items: end; flex-wrap: wrap;">
-          <div class="hint" style="min-width: 120px; font-weight: 600;">${isTimeline ? 'Timeline' : 'Cron'}</div>
+      <div class="wq-toolbar">
+        <div class="wq-toolbar-row" style="align-items:end; flex-wrap:wrap;">
+          <div class="wq-field" style="min-width: 120px; font-weight: 600;">${isTimeline ? 'Timeline' : 'Cron'}</div>
           <label class="wq-field" style="min-width: 220px;">
-            Agent
+            <span class="wq-label">Agent</span>
             <select data-cron-agent></select>
-          </label>
-          <label class="wq-field" style="min-width: 240px;">
-            Search
-            <input data-cron-search type="text" value="" placeholder="job name / id" />
-          </label>
-          <label class="wq-field" style="min-width: 140px;">
-            Range
-            <select data-cron-range>
-              <option value="1h">1h</option>
-              <option value="6h">6h</option>
-              <option value="24h" selected>24h</option>
-              <option value="7d">7d</option>
-            </select>
-          </label>
-          <label class="wq-field" style="min-width: 160px;">
-            Status
-            <select data-cron-status>
-              <option value="all" selected>all</option>
-              <option value="failing">failing</option>
-              <option value="due">due soon</option>
-              <option value="disabled">disabled</option>
-            </select>
           </label>
           <button data-cron-refresh class="secondary" type="button">Refresh</button>
         </div>
-        <div class="hint" data-cron-statusline style="margin-top:6px;"></div>
+        <div class="hint" data-cron-statusline></div>
       </div>
-      <div class="wq-list" style="padding: 10px;">
-        <div data-cron-body></div>
+      <div class="wq-layout" style="grid-template-columns: 1fr;">
+        <section class="wq-list" aria-label="${isTimeline ? 'Timeline' : 'Cron'} data">
+          <div class="wq-list-body" data-cron-body></div>
+        </section>
       </div>
     `;
 
     const agentSel = elements.thread.querySelector('[data-cron-agent]');
-    const searchEl = elements.thread.querySelector('[data-cron-search]');
-    const rangeEl = elements.thread.querySelector('[data-cron-range]');
-    const statusEl = elements.thread.querySelector('[data-cron-status]');
     const refreshBtn = elements.thread.querySelector('[data-cron-refresh]');
     const statusline = elements.thread.querySelector('[data-cron-statusline]');
     const body = elements.thread.querySelector('[data-cron-body]');
@@ -2457,9 +2867,6 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
       agentSel.value = 'all';
     };
 
-    renderAgentFilterOptions();
-    if (rangeEl) rangeEl.value = defaultRange;
-
     const fmtTime = (ms) => {
       const n = Number(ms || 0);
       if (!Number.isFinite(n) || n <= 0) return '';
@@ -2470,247 +2877,68 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
       }
     };
 
-    const getRangeMs = () => {
-      const v = String(rangeEl?.value || '24h');
-      if (v === '1h') return 60 * 60 * 1000;
-      if (v === '6h') return 6 * 60 * 60 * 1000;
-      if (v === '7d') return 7 * 24 * 60 * 60 * 1000;
-      return 24 * 60 * 60 * 1000;
-    };
+    renderAgentFilterOptions();
 
-    const fetchCronOverview = async () => {
-      const startedAt = Date.now();
-      statusline.textContent = 'Loading…';
-      const [stRes, listRes] = await Promise.all([
-        pane.client.request('cron.status', {}),
-        pane.client.request('cron.list', { includeDisabled: true })
-      ]);
-      if (!stRes?.ok) throw new Error(stRes?.error?.message || 'cron.status failed');
-      if (!listRes?.ok) throw new Error(listRes?.error?.message || 'cron.list failed');
-      const jobs = Array.isArray(listRes.payload?.jobs) ? listRes.payload.jobs : [];
-      const status = stRes.payload || {};
-      const took = Date.now() - startedAt;
-      return { jobs, status, took };
-    };
+    const doRefresh = async () => {
+      try {
+        if (statusline) statusline.textContent = 'Loading…';
+        const startedAt = Date.now();
+        const [stRes, listRes] = await Promise.all([
+          pane.client.request('cron.status', {}),
+          pane.client.request('cron.list', { includeDisabled: true })
+        ]);
+        if (!stRes?.ok) throw new Error(stRes?.error?.message || 'cron.status failed');
+        if (!listRes?.ok) throw new Error(listRes?.error?.message || 'cron.list failed');
+        const jobs = Array.isArray(listRes.payload?.jobs) ? listRes.payload.jobs : [];
+        const status = stRes.payload || {};
+        const took = Date.now() - startedAt;
 
-    const renderCronList = ({ jobs, status, took }) => {
-      const agentFilter = String(agentSel?.value || 'all');
-      const q = String(searchEl?.value || '').trim().toLowerCase();
-      const statusFilter = String(statusEl?.value || 'all');
-      const now = Date.now();
-      const rangeMs = getRangeMs();
-      const rangeStart = now - rangeMs;
+        const agentFilter = String(agentSel?.value || 'all');
+        const filtered = jobs.filter((job) => {
+          const a = String(job.agentId || 'main').trim();
+          if (agentFilter !== 'all' && a !== agentFilter) return false;
+          return true;
+        });
 
-      const schedulerLabel = status?.enabled === false ? 'paused' : status?.enabled === true ? 'running' : 'unknown';
-      statusline.textContent = `scheduler: ${schedulerLabel} · jobs: ${jobs.length} · refreshed: ${new Date().toLocaleTimeString()} · ${took}ms`;
+        const schedulerLabel = status?.enabled === false ? 'paused' : status?.enabled === true ? 'running' : 'unknown';
+        if (statusline) statusline.textContent = `scheduler: ${schedulerLabel} · jobs: ${filtered.length}/${jobs.length} · ${took}ms`;
 
-      if (!body) return;
+        if (!body) return;
 
-      if (!isTimeline) {
-        const filtered = jobs
-          .filter((job) => {
-            const a = (job.agentId || 'main').trim();
-            if (agentFilter !== 'all' && a !== agentFilter) return false;
-            if (q) {
-              const hay = `${job.name || ''} ${job.id || ''}`.toLowerCase();
-              if (!hay.includes(q)) return false;
-            }
-            if (statusFilter === 'disabled' && job.enabled !== false) return false;
-            if (statusFilter === 'failing' && job.state?.lastStatus !== 'error') return false;
-            if (statusFilter === 'due') {
-              const next = Number(job.state?.nextRunAtMs || 0);
-              if (!next || next > now + 10 * 60 * 1000) return false;
-            }
-            return true;
-          })
-          .toSorted((a, b) => {
-            const an = Number(a.state?.nextRunAtMs || 0);
-            const bn = Number(b.state?.nextRunAtMs || 0);
-            return an - bn;
-          });
-
-        if (filtered.length === 0) {
-          body.innerHTML = `<div class="hint" style="padding: 10px 8px;">No cron jobs match.</div>`;
+        if (!isTimeline) {
+          body.innerHTML = filtered
+            .map((job) => {
+              const nextRun = fmtTime(job.state?.nextRunAtMs);
+              const lastStatus = String(job.state?.lastStatus || '');
+              const enabled = job.enabled !== false;
+              return `<div class="wq-item" style="padding: 8px; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin: 6px 0;">
+                <div style="font-weight:600">${escapeHtml(job.name || job.id)}</div>
+                <div class="hint">${escapeHtml(job.id)} · ${escapeHtml(job.agentId || 'main')} · ${enabled ? 'enabled' : 'disabled'} · next: ${escapeHtml(nextRun || '—')} · last: ${escapeHtml(lastStatus || '—')}</div>
+              </div>`;
+            })
+            .join('');
           return;
         }
 
-        const groups = new Map();
-        filtered.forEach((job) => {
-          const key = (job.agentId || 'main').trim() || 'main';
-          const list = groups.get(key) || [];
-          list.push(job);
-          groups.set(key, list);
-        });
-
-        const agentOrder = Array.from(groups.keys()).toSorted((a, b) => (a === 'main' ? -1 : b === 'main' ? 1 : a.localeCompare(b)));
-
-        body.innerHTML = agentOrder
-          .map((aid) => {
-            const items = groups.get(aid) || [];
-            const rows = items
-              .map((job) => {
-                const nextRun = fmtTime(job.state?.nextRunAtMs);
-                const lastRun = fmtTime(job.state?.lastRunAtMs);
-                const lastStatus = job.state?.lastStatus || '';
-                const lastErr = (job.state?.lastError || '').slice(0, 200);
-                const enabled = job.enabled !== false;
-                return `
-                  <div class="wq-item" style="display:grid; grid-template-columns: 1.4fr 0.5fr 0.9fr 0.9fr 0.5fr; gap: 8px; padding: 8px; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin: 6px 0;">
-                    <div style="min-width: 0;">
-                      <div style="font-weight: 600; overflow:hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(job.name || job.id)}</div>
-                      <div class="hint" style="overflow:hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(job.id)}</div>
-                      ${lastErr ? `<div class="hint" style="color: rgba(255,130,130,0.9);">${escapeHtml(lastErr)}</div>` : ''}
-                    </div>
-                    <div>${enabled ? 'enabled' : '<span style="color: rgba(255,200,120,0.9)">disabled</span>'}</div>
-                    <div><div class="hint">next</div><div>${escapeHtml(nextRun || '—')}</div></div>
-                    <div><div class="hint">last</div><div>${escapeHtml(lastRun || '—')}</div></div>
-                    <div>${escapeHtml(lastStatus || '—')}</div>
-                    <div style="grid-column: 1 / -1; display:flex; gap: 8px;">
-                      <button class="secondary" type="button" data-cron-show-runs="${escapeHtml(job.id)}">Runs</button>
-                      <button class="secondary" type="button" data-cron-run-now="${escapeHtml(job.id)}">Run now</button>
-                    </div>
-                  </div>
-                `;
-              })
-              .join('');
-            return `
-              <div style="margin-bottom: 14px;">
-                <div class="hint" style="padding: 6px 2px; font-weight: 600;">${escapeHtml(aid)}</div>
-                ${rows}
-              </div>
-            `;
-          })
-          .join('');
-
-        // wire buttons
-        body.querySelectorAll('[data-cron-show-runs]').forEach((btn) => {
-          btn.addEventListener('click', async () => {
-            const jobId = btn.getAttribute('data-cron-show-runs');
-            if (!jobId) return;
-            btn.disabled = true;
-            try {
-              const res = await pane.client.request('cron.runs', { id: jobId, limit: 50 });
-              if (!res?.ok) throw new Error(res?.error?.message || 'cron.runs failed');
-              const entries = Array.isArray(res.payload?.entries) ? res.payload.entries : [];
-              const lines = entries
-                .slice(-50)
-                .reverse()
-                .map((e) => {
-                  const when = fmtTime(e.ts);
-                  const s = e.status || '';
-                  const dur = e.durationMs ? `${Math.round(e.durationMs)}ms` : '';
-                  const summary = (e.summary || e.error || '').slice(0, 240);
-                  return `${when} · ${s} ${dur} ${summary}`.trim();
-                })
-                .join('\n');
-              window.alert(lines || 'No runs recorded yet.');
-            } catch (err) {
-              window.alert(err ? String(err) : 'Failed to load runs');
-            } finally {
-              btn.disabled = false;
-            }
-          });
-        });
-
-        body.querySelectorAll('[data-cron-run-now]').forEach((btn) => {
-          btn.addEventListener('click', async () => {
-            const jobId = btn.getAttribute('data-cron-run-now');
-            if (!jobId) return;
-            if (!window.confirm('Run this job now?')) return;
-            btn.disabled = true;
-            try {
-              const res = await pane.client.request('cron.run', { id: jobId, mode: 'force' });
-              if (!res?.ok) throw new Error(res?.error?.message || 'cron.run failed');
-              await doRefresh();
-            } catch (err) {
-              window.alert(err ? String(err) : 'Failed to run job');
-            } finally {
-              btn.disabled = false;
-            }
-          });
-        });
-
-        return;
-      }
-
-      // TIMELINE
-      const filteredJobs = jobs.filter((job) => {
-        const a = (job.agentId || 'main').trim();
-        if (agentFilter !== 'all' && a !== agentFilter) return false;
-        if (q) {
-          const hay = `${job.name || ''} ${job.id || ''}`.toLowerCase();
-          if (!hay.includes(q)) return false;
-        }
-        return true;
-      });
-
-      const renderTimeline = async () => {
+        // Timeline: show recent runs (best-effort)
         const events = [];
-        for (const job of filteredJobs) {
-          const res = await pane.client.request('cron.runs', { id: job.id, limit: 200 });
+        for (const job of filtered.slice(0, 10)) {
+          const res = await pane.client.request('cron.runs', { id: job.id, limit: 10 });
           if (!res?.ok) continue;
           const entries = Array.isArray(res.payload?.entries) ? res.payload.entries : [];
           entries.forEach((e) => {
             if (!e || typeof e.ts !== 'number') return;
-            if (e.ts < rangeStart) return;
-            events.push({
-              ts: e.ts,
-              agentId: (job.agentId || 'main').trim() || 'main',
-              jobId: job.id,
-              jobName: job.name || job.id,
-              status: e.status || 'unknown',
-              durationMs: e.durationMs || null,
-              summary: e.summary || '',
-              error: e.error || ''
-            });
+            events.push({ ts: e.ts, jobId: job.id, jobName: job.name || job.id, status: e.status || 'unknown' });
           });
         }
         events.sort((a, b) => b.ts - a.ts);
-
-        if (events.length === 0) {
-          body.innerHTML = `<div class="hint" style="padding: 10px 8px;">No cron run events in range.</div>`;
-          return;
-        }
-
         body.innerHTML = events
-          .map((ev) => {
-            const when = fmtTime(ev.ts);
-            const dur = ev.durationMs ? `${Math.round(ev.durationMs)}ms` : '';
-            const detail = (ev.summary || ev.error || '').slice(0, 300);
-            const color = ev.status === 'error' ? 'rgba(255,130,130,0.95)' : ev.status === 'ok' ? 'rgba(150,255,190,0.95)' : 'rgba(255,255,255,0.8)';
-            return `
-              <div style="padding: 10px; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin: 6px 0;">
-                <div style="display:flex; justify-content: space-between; gap: 10px;">
-                  <div style="min-width: 0;">
-                    <div style="font-weight: 600; overflow:hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(ev.jobName)}</div>
-                    <div class="hint">${escapeHtml(ev.agentId)} · ${escapeHtml(ev.jobId)}</div>
-                  </div>
-                  <div style="text-align:right;">
-                    <div style="color: ${color}; font-weight: 600;">${escapeHtml(ev.status)}</div>
-                    <div class="hint">${escapeHtml(when)} ${escapeHtml(dur)}</div>
-                  </div>
-                </div>
-                ${detail ? `<div class="hint" style="margin-top:6px; white-space: pre-wrap;">${escapeHtml(detail)}</div>` : ''}
-              </div>
-            `;
-          })
+          .slice(0, 50)
+          .map((ev) => `<div class="wq-item" style="padding: 8px; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin: 6px 0;">
+            <div style="font-weight:600">${escapeHtml(ev.jobName)}</div>
+            <div class="hint">${escapeHtml(fmtTime(ev.ts))} · ${escapeHtml(ev.status)} · ${escapeHtml(ev.jobId)}</div>
+          </div>`)
           .join('');
-      };
-
-      statusline.textContent = `Loading run history… (jobs: ${filteredJobs.length})`;
-      renderTimeline()
-        .then(() => {
-          statusline.textContent = `scheduler: ${schedulerLabel} · events loaded: OK · refreshed: ${new Date().toLocaleTimeString()}`;
-        })
-        .catch((err) => {
-          statusline.textContent = `Failed loading timeline: ${err ? String(err) : 'unknown error'}`;
-        });
-    };
-
-    const doRefresh = async () => {
-      try {
-        const data = await fetchCronOverview();
-        renderCronList(data);
       } catch (err) {
         if (statusline) statusline.textContent = err ? String(err) : 'Failed to load';
         if (body) body.innerHTML = `<div class="hint" style="padding: 10px 8px;">${escapeHtml(err ? String(err) : 'Failed to load')}</div>`;
@@ -2718,20 +2946,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
     };
 
     refreshBtn?.addEventListener('click', () => doRefresh());
-    searchEl?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') doRefresh();
-    });
     agentSel?.addEventListener('change', () => doRefresh());
-    statusEl?.addEventListener('change', () => doRefresh());
-    rangeEl?.addEventListener('change', () => doRefresh());
 
-    paneRestoreChatHistory(pane); // harmless; keeps history map sane if any existing storage.
-    paneSetChatEnabled(pane);
-
-    pane.onConnectedHook = () => {
-      // initial fetch once websocket is connected
-      doRefresh();
-    };
+    pane.onConnectedHook = () => doRefresh();
 
     pane.client = buildClientForPane(pane);
     setStatusPill(elements.status, 'disconnected', '');
@@ -2880,7 +3097,9 @@ const paneManager = {
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'claimed', 'in_progress'];
-          return { key, kind, queue, statusFilter };
+          const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'default';
+          const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
+          return { key, kind, queue, statusFilter, sortKey, sortDir };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
@@ -2923,7 +3142,9 @@ const paneManager = {
           key: pane.key,
           kind: 'workqueue',
           queue: pane.workqueue?.queue || 'dev-team',
-          statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : []
+          statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
+          sortKey: pane.workqueue?.sortKey || 'default',
+          sortDir: pane.workqueue?.sortDir || 'desc'
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
@@ -2937,22 +3158,23 @@ const paneManager = {
     if (roleState.role !== 'admin') return;
     if (this.panes.length >= this.maxPanes) return;
 
-    const rawKind = String(kind || '').trim().toLowerCase();
-    const normalized = rawKind.startsWith('w')
-      ? 'workqueue'
-      : rawKind.startsWith('c')
-        ? 'cron'
-        : rawKind.startsWith('t')
-          ? 'timeline'
-          : 'chat';
+    const rawKind = String(kind || 'chat').trim().toLowerCase();
+    const normalizedKind = rawKind === 'workqueue' || rawKind === 'cron' || rawKind === 'timeline'
+      ? rawKind
+      : rawKind.startsWith('w')
+        ? 'workqueue'
+        : rawKind.startsWith('c')
+          ? 'cron'
+          : rawKind.startsWith('t')
+            ? 'timeline'
+            : 'chat';
 
-    if (normalized === 'workqueue') {
-      const queue = (window.prompt('Workqueue name', 'dev-team') || '').trim() || 'dev-team';
+    if (normalizedKind === 'workqueue') {
       const pane = createPane({
         key: `p${randomId().slice(0, 8)}`,
         role: 'admin',
         kind: 'workqueue',
-        queue,
+        queue: 'dev-team',
         statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
         closable: true
       });
@@ -2965,8 +3187,13 @@ const paneManager = {
       return;
     }
 
-    if (normalized === 'cron' || normalized === 'timeline') {
-      const pane = createPane({ key: `p${randomId().slice(0, 8)}`, role: 'admin', kind: normalized, closable: true });
+    if (normalizedKind === 'cron' || normalizedKind === 'timeline') {
+      const pane = createPane({
+        key: `p${randomId().slice(0, 8)}`,
+        role: 'admin',
+        kind: normalizedKind,
+        closable: true
+      });
       this.panes.push(pane);
       globalElements.paneGrid.appendChild(pane.elements.root);
       this.updatePaneLabels();
@@ -2989,6 +3216,129 @@ const paneManager = {
     this.persistAdminPanes();
     if (uiState.authed) {
       pane.client.connect();
+    }
+  },
+  openAddPaneMenu(anchorEl) {
+    if (roleState.role !== 'admin') return;
+
+    if (this._addPaneMenuState?.open) {
+      this.closeAddPaneMenu();
+      return;
+    }
+
+    if (!anchorEl || !(anchorEl instanceof Element)) return;
+
+    const state = this._addPaneMenuState || { open: false };
+
+    if (!state.menuEl) {
+      const menu = document.createElement('div');
+      menu.className = 'pane-add-menu';
+      menu.setAttribute('role', 'menu');
+      menu.setAttribute('aria-label', 'Add pane');
+
+      const chatBtn = document.createElement('button');
+      chatBtn.type = 'button';
+      chatBtn.className = 'pane-add-menu__item';
+      chatBtn.textContent = 'Chat pane';
+
+      const wqBtn = document.createElement('button');
+      wqBtn.type = 'button';
+      wqBtn.className = 'pane-add-menu__item';
+      wqBtn.textContent = 'Workqueue pane';
+
+      const cronBtn = document.createElement('button');
+      cronBtn.type = 'button';
+      cronBtn.className = 'pane-add-menu__item';
+      cronBtn.textContent = 'Cron pane';
+
+      const timelineBtn = document.createElement('button');
+      timelineBtn.type = 'button';
+      timelineBtn.className = 'pane-add-menu__item';
+      timelineBtn.textContent = 'Timeline pane';
+
+      menu.appendChild(chatBtn);
+      menu.appendChild(wqBtn);
+      menu.appendChild(cronBtn);
+      menu.appendChild(timelineBtn);
+
+      chatBtn.addEventListener('click', () => {
+        this.closeAddPaneMenu();
+        this.addPane('chat');
+      });
+
+      wqBtn.addEventListener('click', () => {
+        this.closeAddPaneMenu();
+        this.addPane('workqueue');
+      });
+
+      cronBtn.addEventListener('click', () => {
+        this.closeAddPaneMenu();
+        this.addPane('cron');
+      });
+
+      timelineBtn.addEventListener('click', () => {
+        this.closeAddPaneMenu();
+        this.addPane('timeline');
+      });
+
+      state.menuEl = menu;
+      state.chatBtn = chatBtn;
+      state.wqBtn = wqBtn;
+      state.cronBtn = cronBtn;
+      state.timelineBtn = timelineBtn;
+    }
+
+    const positionMenu = () => {
+      const rect = anchorEl.getBoundingClientRect();
+      const menuRect = state.menuEl.getBoundingClientRect();
+      const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - menuRect.width - 8));
+      const top = Math.min(Math.max(8, rect.bottom + 8), Math.max(8, window.innerHeight - menuRect.height - 8));
+      state.menuEl.style.left = `${Math.round(left)}px`;
+      state.menuEl.style.top = `${Math.round(top)}px`;
+    };
+
+    const closeIfOutside = (event) => {
+      if (!state.open) return;
+      if (event.target === anchorEl) return;
+      if (state.menuEl.contains(event.target)) return;
+      this.closeAddPaneMenu();
+    };
+
+    state.positionMenu = positionMenu;
+    state.closeIfOutside = closeIfOutside;
+
+    document.body.appendChild(state.menuEl);
+    state.menuEl.style.display = 'block';
+    state.open = true;
+
+    positionMenu();
+
+    document.addEventListener('mousedown', closeIfOutside);
+    window.addEventListener('resize', positionMenu);
+    window.addEventListener('scroll', positionMenu, true);
+
+    const atMax = this.panes.length >= this.maxPanes;
+    state.chatBtn.disabled = atMax;
+    state.wqBtn.disabled = atMax;
+
+    this._addPaneMenuState = state;
+  },
+  closeAddPaneMenu() {
+    const state = this._addPaneMenuState;
+    if (!state?.open) return;
+
+    state.open = false;
+    try {
+      document.removeEventListener('mousedown', state.closeIfOutside);
+      window.removeEventListener('resize', state.positionMenu);
+      window.removeEventListener('scroll', state.positionMenu, true);
+    } catch {}
+
+    if (state.menuEl) {
+      state.menuEl.style.display = 'none';
+      try {
+        state.menuEl.remove();
+      } catch {}
     }
   },
   removePane(key) {
@@ -3074,6 +3424,9 @@ globalElements.settingsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.settingsModal) closeSettings();
 });
 globalElements.saveGuestPromptBtn?.addEventListener('click', () => saveGuestPrompt());
+globalElements.recurringPromptCreateBtn?.addEventListener('click', () => createRecurringPromptFromUi());
+globalElements.recurringPromptRefreshBtn?.addEventListener('click', () => loadRecurringPrompts());
+
 
 globalElements.workqueueBtn?.addEventListener('click', () => openWorkqueue());
 globalElements.workqueueCloseBtn?.addEventListener('click', () => closeWorkqueue());
@@ -3084,6 +3437,20 @@ globalElements.wqQueueSelect?.addEventListener('change', () => {
   workqueueState.selectedQueue = globalElements.wqQueueSelect.value;
   fetchAndRenderWorkqueueItems();
 });
+
+globalElements.wqAutoRefreshEnabled?.addEventListener('change', () => {
+  workqueueState.autoRefreshEnabled = !!globalElements.wqAutoRefreshEnabled.checked;
+  storage.set('clawnsole.wq.autorefresh.enabled', workqueueState.autoRefreshEnabled);
+  startWorkqueueAutoRefresh();
+});
+
+globalElements.wqAutoRefreshInterval?.addEventListener('change', () => {
+  const next = Number(globalElements.wqAutoRefreshInterval.value) || 15000;
+  workqueueState.autoRefreshIntervalMs = next;
+  storage.set('clawnsole.wq.autorefresh.intervalMs', workqueueState.autoRefreshIntervalMs);
+  startWorkqueueAutoRefresh();
+});
+
 globalElements.wqRefreshBtn?.addEventListener('click', () => {
   fetchWorkqueueQueues().then(() => fetchAndRenderWorkqueueItems());
 });
@@ -3095,6 +3462,7 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     closeSettings();
     closeWorkqueue();
+    paneManager.closeAddPaneMenu();
   }
 });
 
@@ -3141,75 +3509,9 @@ globalElements.logoutBtn?.addEventListener('click', async () => {
   window.location.replace('/');
 });
 
-function isAddPaneMenuOpen() {
-  return Boolean(globalElements.addPaneMenu && !globalElements.addPaneMenu.hidden);
-}
-
-function closeAddPaneMenu({ restoreFocus = true } = {}) {
-  const menu = globalElements.addPaneMenu;
-  const btn = globalElements.addPaneBtn;
-  if (!menu || !btn) return;
-  menu.hidden = true;
-  btn.setAttribute('aria-expanded', 'false');
-  if (restoreFocus) {
-    try {
-      btn.focus();
-    } catch {}
-  }
-}
-
-function openAddPaneMenu() {
-  const menu = globalElements.addPaneMenu;
-  const btn = globalElements.addPaneBtn;
-  if (!menu || !btn) return;
-
-  menu.hidden = false;
-  btn.setAttribute('aria-expanded', 'true');
-
-  const first = menu.querySelector('[data-add-pane-kind="chat"]');
-  try {
-    first?.focus();
-  } catch {}
-}
-
 globalElements.addPaneBtn?.addEventListener('click', (event) => {
-  event.preventDefault();
-  if (isAddPaneMenuOpen()) {
-    closeAddPaneMenu({ restoreFocus: false });
-    return;
-  }
-  openAddPaneMenu();
-});
-
-globalElements.addPaneMenu?.addEventListener('click', (event) => {
-  const btn = event.target?.closest?.('[data-add-pane-kind]');
-  if (!btn) return;
-  const kind = String(btn.getAttribute('data-add-pane-kind') || '').trim() || 'chat';
-  closeAddPaneMenu({ restoreFocus: false });
-  paneManager.addPane(kind);
-});
-
-document.addEventListener('click', (event) => {
-  if (!isAddPaneMenuOpen()) return;
-  const btn = globalElements.addPaneBtn;
-  const menu = globalElements.addPaneMenu;
-  if (!btn || !menu) return;
-  const target = event.target;
-  if (menu.contains(target) || btn.contains(target)) return;
-  closeAddPaneMenu({ restoreFocus: false });
-});
-
-document.addEventListener('keydown', (event) => {
-  if (!isAddPaneMenuOpen()) return;
-  if (event.key === 'Escape') {
-    event.preventDefault();
-    closeAddPaneMenu({ restoreFocus: true });
-  }
-});
-
-window.addEventListener('resize', () => {
-  if (!isAddPaneMenuOpen()) return;
-  closeAddPaneMenu({ restoreFocus: false });
+  event?.preventDefault?.();
+  paneManager.openAddPaneMenu(globalElements.addPaneBtn);
 });
 
 // layoutSelect deprecated; layout is inferred from pane count.
@@ -3241,7 +3543,7 @@ window.addEventListener('load', () => {
       }
 
       if (!routeRole) {
-        window.location.replace(role === 'admin' ? '/admin' : '/guest');
+        window.location.replace('/admin');
         return;
       }
 
