@@ -11,6 +11,9 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocket.Server({ server });
 
+// sessionKey -> { runId, timer }
+const activeRuns = new Map();
+
 wss.on('connection', (socket) => {
   socket.on('message', (data) => {
     let frame;
@@ -33,7 +36,73 @@ wss.on('connection', (socket) => {
       return;
     }
     if (frame.method === 'chat.send') {
-  
+      socket.send(JSON.stringify({ type: 'res', id, ok: true, payload: {} }));
+      const sessionKey = typeof frame.params?.sessionKey === 'string' ? frame.params.sessionKey : '';
+      const runId = `run-${Date.now()}`;
+
+      // Emit a delta immediately, then delay the final so UI has time to press Stop.
+      socket.send(
+        JSON.stringify({
+          type: 'event',
+          event: 'chat',
+          payload: {
+            state: 'delta',
+            runId,
+            sessionKey,
+            message: { content: [{ text: `mock-stream: ${String(frame.params?.message || '').slice(0, 16)}` }] }
+          }
+        })
+      );
+
+      const existing = activeRuns.get(sessionKey);
+      if (existing?.timer) clearTimeout(existing.timer);
+
+      const timer = setTimeout(() => {
+        activeRuns.delete(sessionKey);
+        socket.send(
+          JSON.stringify({
+            type: 'event',
+            event: 'chat',
+            payload: {
+              state: 'final',
+              runId,
+              sessionKey,
+              message: {
+                content: [{ text: `mock-reply: ${frame.params?.message || ''}` }]
+              }
+            }
+          })
+        );
+      }, 3000);
+
+      activeRuns.set(sessionKey, { runId, timer });
+      return;
+    }
+
+
+
+    if (frame.method === 'chat.abort') {
+      socket.send(JSON.stringify({ type: 'res', id, ok: true, payload: {} }));
+      const sessionKey = typeof frame.params?.sessionKey === 'string' ? frame.params.sessionKey : '';
+      const runId = typeof frame.params?.runId === 'string' ? frame.params.runId : activeRuns.get(sessionKey)?.runId;
+      const entry = activeRuns.get(sessionKey);
+      if (entry?.timer) clearTimeout(entry.timer);
+      activeRuns.delete(sessionKey);
+
+      socket.send(
+        JSON.stringify({
+          type: 'event',
+          event: 'chat',
+          payload: {
+            state: 'error',
+            runId: runId || `run-${Date.now()}`,
+            sessionKey,
+            errorMessage: 'Canceled'
+          }
+        })
+      );
+      return;
+    }
     if (frame.method === 'cron.status') {
       socket.send(
         JSON.stringify({
@@ -111,23 +180,6 @@ wss.on('connection', (socket) => {
       return;
     }
     socket.send(JSON.stringify({ type: 'res', id, ok: true, payload: {} }));
-      const sessionKey = typeof frame.params?.sessionKey === 'string' ? frame.params.sessionKey : '';
-      socket.send(
-        JSON.stringify({
-          type: 'event',
-          event: 'chat',
-          payload: {
-            state: 'final',
-            runId: `run-${Date.now()}`,
-            sessionKey,
-            message: {
-              content: [{ text: `mock-reply: ${frame.params?.message || ''}` }]
-            }
-          }
-        })
-      );
-      return;
-    }
     socket.send(JSON.stringify({ type: 'res', id, ok: true, payload: {} }));
   });
 });
