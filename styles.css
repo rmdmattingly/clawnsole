@@ -1626,3 +1626,38 @@ button.send-btn .btn-icon {
     font-size: 16px;
   }
 }
+
+.pane-add-menu {
+  position: fixed;
+  z-index: 2000;
+  display: none;
+  min-width: 180px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(20, 20, 24, 0.98);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(10px);
+}
+
+.pane-add-menu__item {
+  width: 100%;
+  display: block;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.pane-add-menu__item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.pane-add-menu__item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
