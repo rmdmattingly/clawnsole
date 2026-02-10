@@ -45,14 +45,14 @@
             </select>
           </div>
           <div class="role-pill" id="rolePill">signed out</div>
-          <button id="logoutBtn" class="icon-btn" type="button" aria-label="Log out">
-            ⎋
-          </button>
           <button id="workqueueBtn" class="icon-btn" type="button" aria-label="Open workqueue" hidden>
             WQ
           </button>
           <button id="settingsBtn" class="icon-btn" type="button" aria-label="Open settings">
             ⚙︎
+          </button>
+          <button id="logoutBtn" class="icon-btn" type="button" aria-label="Log out">
+            ⎋
           </button>
         </div>
       </header>
@@ -167,6 +167,18 @@
               Status
               <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters"></div>
             </div>
+            <label class="wq-field">
+              Auto-refresh
+              <div class="wq-autorefresh">
+                <label class="wq-toggle"><input id="wqAutoRefreshEnabled" type="checkbox" /> <span>On</span></label>
+                <select id="wqAutoRefreshInterval" aria-label="Auto-refresh interval">
+                  <option value="5000">5s</option>
+                  <option value="15000" selected>15s</option>
+                  <option value="30000">30s</option>
+                  <option value="60000">60s</option>
+                </select>
+              </div>
+            </label>
             <button id="wqRefreshBtn" class="secondary" type="button">Refresh</button>
           </div>
 

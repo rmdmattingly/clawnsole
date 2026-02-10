@@ -744,11 +744,11 @@ button.send-btn .btn-icon {
   transform: translateY(10px) scale(0.99);
   transition: transform 0.18s ease, opacity 0.18s ease;
 
-  /* Prevent tall modals from overflowing the viewport.
-     Header stays visible; body becomes scrollable. */
+  /* Prevent tall modals from overflowing off-screen (e.g. MacBook). */
+  max-height: min(92vh, 920px);
   display: flex;
   flex-direction: column;
-  max-height: 90vh;
+  overflow: hidden;
 }
 
 .modal.open .modal-card {
@@ -767,7 +767,8 @@ button.send-btn .btn-icon {
 .modal-body {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow: auto;
+  padding-right: 2px; /* avoid scrollbar covering content */
 }
 
 .modal-body label {
@@ -872,6 +873,29 @@ button.send-btn .btn-icon {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.wq-autorefresh {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wq-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  cursor: pointer;
+  user-select: none;
+  color: var(--text);
+}
+
+.wq-toggle input {
+  accent-color: var(--accent);
 }
 
 .wq-status-chip {
@@ -1105,6 +1129,29 @@ button.send-btn .btn-icon {
   white-space: nowrap;
   font-size: 13px;
 }
+
+.wq-col.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+
+.wq-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.wq-badge-ready { background: rgba(127, 209, 185, 0.12); border-color: rgba(127, 209, 185, 0.25); }
+.wq-badge-pending { background: rgba(255, 212, 104, 0.12); border-color: rgba(255, 212, 104, 0.25); }
+.wq-badge-claimed { background: rgba(160, 170, 255, 0.12); border-color: rgba(160, 170, 255, 0.25); }
+.wq-badge-in_progress { background: rgba(104, 201, 255, 0.12); border-color: rgba(104, 201, 255, 0.25); }
+.wq-badge-done { background: rgba(120, 255, 170, 0.10); border-color: rgba(120, 255, 170, 0.22); }
+.wq-badge-failed { background: rgba(255, 104, 104, 0.10); border-color: rgba(255, 104, 104, 0.22); }
 
 .wq-col.prio,
 .wq-col.attempts {

@@ -11,6 +11,8 @@ const globalElements = {
   workqueueCloseBtn: document.getElementById('workqueueCloseBtn'),
   wqQueueSelect: document.getElementById('wqQueueSelect'),
   wqStatusFilters: document.getElementById('wqStatusFilters'),
+  wqAutoRefreshEnabled: document.getElementById('wqAutoRefreshEnabled'),
+  wqAutoRefreshInterval: document.getElementById('wqAutoRefreshInterval'),
   wqRefreshBtn: document.getElementById('wqRefreshBtn'),
   wqListBody: document.getElementById('wqListBody'),
   wqListEmpty: document.getElementById('wqListEmpty'),
@@ -521,7 +523,10 @@ const workqueueState = {
   statusFilter: new Set(['ready', 'pending', 'claimed', 'in_progress']),
   items: [],
   selectedItemId: null,
-  leaseTicker: null
+  leaseTicker: null,
+  autoRefreshEnabled: true,
+  autoRefreshIntervalMs: 15000,
+  autoRefreshTimer: null
 };
 
 function openWorkqueue() {
@@ -529,9 +534,11 @@ function openWorkqueue() {
   globalElements.workqueueModal?.classList.add('open');
   globalElements.workqueueModal?.setAttribute('aria-hidden', 'false');
   ensureWorkqueueBootstrapped();
+  startWorkqueueAutoRefresh();
 }
 
 function closeWorkqueue() {
+  stopWorkqueueAutoRefresh();
   globalElements.workqueueModal?.classList.remove('open');
   globalElements.workqueueModal?.setAttribute('aria-hidden', 'true');
 }
@@ -567,10 +574,28 @@ function renderWorkqueueStatusFilters() {
 }
 
 async function ensureWorkqueueBootstrapped() {
+  // Load persisted UI prefs
+  try {
+    const enabled = storage.get('clawnsole.wq.autorefresh.enabled');
+    const interval = storage.get('clawnsole.wq.autorefresh.intervalMs');
+    if (enabled !== null) workqueueState.autoRefreshEnabled = Boolean(enabled);
+    if (interval !== null && Number(interval) > 0) workqueueState.autoRefreshIntervalMs = Number(interval);
+  } catch {
+    // ignore
+  }
+
+  if (globalElements.wqAutoRefreshEnabled) {
+    globalElements.wqAutoRefreshEnabled.checked = !!workqueueState.autoRefreshEnabled;
+  }
+  if (globalElements.wqAutoRefreshInterval) {
+    globalElements.wqAutoRefreshInterval.value = String(workqueueState.autoRefreshIntervalMs);
+  }
+
   renderWorkqueueStatusFilters();
   await fetchWorkqueueQueues();
   await fetchAndRenderWorkqueueItems();
   startWorkqueueLeaseTicker();
+  startWorkqueueAutoRefresh();
 }
 
 async function fetchWorkqueueQueues() {
@@ -651,14 +676,15 @@ function renderWorkqueueItems() {
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
     const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
+    const status = String(it.status || '');
 
     row.innerHTML = `
       <div class="wq-col title">${escapeHtml(String(it.title || ''))}</div>
-      <div class="wq-col status">${escapeHtml(String(it.status || ''))}</div>
-      <div class="wq-col prio">${escapeHtml(String(it.priority ?? ''))}</div>
-      <div class="wq-col attempts">${escapeHtml(String(it.attempts ?? ''))}</div>
+      <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
+      <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
+      <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
       <div class="wq-col claimedBy">${escapeHtml(String(it.claimedBy || ''))}</div>
-      <div class="wq-col lease" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
+      <div class="wq-col lease mono" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
     `;
 
     row.addEventListener('click', () => {
@@ -940,14 +966,15 @@ function renderWorkqueuePaneItems(pane) {
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
     const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
+    const status = String(it.status || '');
 
     row.innerHTML = `
       <div class="wq-col title">${escapeHtml(String(it.title || ''))}</div>
-      <div class="wq-col status">${escapeHtml(String(it.status || ''))}</div>
-      <div class="wq-col prio">${escapeHtml(String(it.priority ?? ''))}</div>
-      <div class="wq-col attempts">${escapeHtml(String(it.attempts ?? ''))}</div>
+      <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
+      <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
+      <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
       <div class="wq-col claimedBy">${escapeHtml(String(it.claimedBy || ''))}</div>
-      <div class="wq-col lease" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
+      <div class="wq-col lease mono" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
     `;
 
     row.addEventListener('click', () => {
@@ -1009,6 +1036,25 @@ function startWorkqueueLeaseTicker() {
       el.textContent = fmtRemaining(until - now);
     });
   }, 1000);
+}
+
+function stopWorkqueueAutoRefresh() {
+  if (workqueueState.autoRefreshTimer) {
+    clearInterval(workqueueState.autoRefreshTimer);
+    workqueueState.autoRefreshTimer = null;
+  }
+}
+
+function startWorkqueueAutoRefresh() {
+  stopWorkqueueAutoRefresh();
+  if (!workqueueState.autoRefreshEnabled) return;
+  if (!globalElements.workqueueModal || !globalElements.workqueueModal.classList.contains('open')) return;
+
+  const intervalMs = Number(workqueueState.autoRefreshIntervalMs) || 15000;
+  workqueueState.autoRefreshTimer = setInterval(() => {
+    if (!globalElements.workqueueModal || !globalElements.workqueueModal.classList.contains('open')) return;
+    fetchAndRenderWorkqueueItems();
+  }, Math.max(2000, intervalMs));
 }
 
 let wqStatusTimer = null;
@@ -3021,6 +3067,20 @@ globalElements.wqQueueSelect?.addEventListener('change', () => {
   workqueueState.selectedQueue = globalElements.wqQueueSelect.value;
   fetchAndRenderWorkqueueItems();
 });
+
+globalElements.wqAutoRefreshEnabled?.addEventListener('change', () => {
+  workqueueState.autoRefreshEnabled = !!globalElements.wqAutoRefreshEnabled.checked;
+  storage.set('clawnsole.wq.autorefresh.enabled', workqueueState.autoRefreshEnabled);
+  startWorkqueueAutoRefresh();
+});
+
+globalElements.wqAutoRefreshInterval?.addEventListener('change', () => {
+  const next = Number(globalElements.wqAutoRefreshInterval.value) || 15000;
+  workqueueState.autoRefreshIntervalMs = next;
+  storage.set('clawnsole.wq.autorefresh.intervalMs', workqueueState.autoRefreshIntervalMs);
+  startWorkqueueAutoRefresh();
+});
+
 globalElements.wqRefreshBtn?.addEventListener('click', () => {
   fetchWorkqueueQueues().then(() => fetchAndRenderWorkqueueItems());
 });
