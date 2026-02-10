@@ -547,6 +547,32 @@ function createClawnsoleServer(options = {}) {
     // Admin-only workqueue API (safe read/write from other devices).
     // Mutations are limited to enqueue + claim-next.
 
+    if (req.url.startsWith('/api/workqueue/queues')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      try {
+        const { loadState } = require('./lib/workqueue');
+        const state = loadState(null);
+        const items = Array.isArray(state.items) ? state.items : [];
+        const fromItems = items.map((it) => (it && it.queue ? String(it.queue).trim() : '')).filter(Boolean);
+        const fromQueues = state.queues && typeof state.queues === 'object' ? Object.keys(state.queues) : [];
+        const set = new Set([...fromQueues, ...fromItems].map((q) => String(q).trim()).filter(Boolean));
+        const queues = Array.from(set).sort((a, b) => a.localeCompare(b));
+        sendJson(res, 200, { ok: true, queues });
+      } catch (err) {
+        sendJson(res, 500, { error: 'workqueue_error' });
+      }
+      return;
+    }
+
     if (req.url.startsWith('/api/workqueue/items')) {
       if (!requireAuth(req, res)) return;
       if (req.clawnsoleRole !== 'admin') {
@@ -561,10 +587,24 @@ function createClawnsoleServer(options = {}) {
       try {
         const url = new URL(req.url, 'http://127.0.0.1');
         const queue = String(url.searchParams.get('queue') || '').trim();
+        const statusRaw = String(url.searchParams.get('status') || '').trim();
+        const statuses = statusRaw
+          ? statusRaw
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : [];
+        const statusSet = statuses.length ? new Set(statuses) : null;
+
         const { loadState } = require('./lib/workqueue');
         const state = loadState(null);
         const items = Array.isArray(state.items) ? state.items : [];
-        const filtered = queue ? items.filter((it) => it && it.queue === queue) : items;
+        const filtered = items.filter((it) => {
+          if (!it) return false;
+          if (queue && it.queue !== queue) return false;
+          if (statusSet && !statusSet.has(String(it.status || 'ready'))) return false;
+          return true;
+        });
         // newest first for convenience
         filtered.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
         sendJson(res, 200, { ok: true, items: filtered });

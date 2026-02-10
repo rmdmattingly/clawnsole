@@ -2514,7 +2514,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         <div class="wq-toolbar-row">
           <label class="wq-field">
             <span class="wq-label">Queue</span>
-            <input data-wq-queue type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="e.g. dev-team" />
+            <select data-wq-queue-select aria-label="Select workqueue"></select>
+            <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
           </label>
 
           <label class="wq-field wq-status-field">
@@ -2596,12 +2597,19 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       </div>
     `;
 
-    const queueEl = elements.thread.querySelector('[data-wq-queue]');
+    const queueSelectEl = elements.thread.querySelector('[data-wq-queue-select]');
+    const queueCustomEl = elements.thread.querySelector('[data-wq-queue-custom]');
     const statusEl = elements.thread.querySelector('[data-wq-status]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
 
+    const getQueueValue = () => {
+      const sel = String(queueSelectEl?.value || '').trim();
+      if (sel === '__custom__') return String(queueCustomEl?.value || '').trim();
+      return sel;
+    };
+
     const doRefresh = async () => {
-      const q = (queueEl?.value || '').trim() || 'dev-team';
+      const q = getQueueValue() || 'dev-team';
       pane.workqueue.queue = q;
       const statuses = (statusEl?.value || '')
         .split(',')
@@ -2612,8 +2620,69 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       paneManager.persistAdminPanes();
     };
 
+    const populateQueueSelect = async () => {
+      if (!queueSelectEl) return;
+      try {
+        const res = await fetch('/api/workqueue/queues', { credentials: 'include', cache: 'no-store' });
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json().catch(() => null);
+        const queues = Array.isArray(data?.queues) ? data.queues : [];
+
+        const current = (pane.workqueue.queue || 'dev-team').trim();
+        const unique = Array.from(new Set([current, ...queues].map((q) => String(q).trim()).filter(Boolean)));
+        unique.sort((a, b) => a.localeCompare(b));
+
+        queueSelectEl.innerHTML = '';
+        for (const q of unique) {
+          const opt = document.createElement('option');
+          opt.value = q;
+          opt.textContent = q;
+          queueSelectEl.appendChild(opt);
+        }
+
+        const customOpt = document.createElement('option');
+        customOpt.value = '__custom__';
+        customOpt.textContent = 'Custom…';
+        queueSelectEl.appendChild(customOpt);
+
+        if (unique.includes(current)) {
+          queueSelectEl.value = current;
+          if (queueCustomEl) queueCustomEl.hidden = true;
+        } else {
+          queueSelectEl.value = '__custom__';
+          if (queueCustomEl) {
+            queueCustomEl.hidden = false;
+            queueCustomEl.value = current;
+          }
+        }
+      } catch {
+        // fallback: keep current queue editable
+        queueSelectEl.innerHTML = '';
+        const opt = document.createElement('option');
+        opt.value = pane.workqueue.queue || 'dev-team';
+        opt.textContent = pane.workqueue.queue || 'dev-team';
+        queueSelectEl.appendChild(opt);
+        const customOpt = document.createElement('option');
+        customOpt.value = '__custom__';
+        customOpt.textContent = 'Custom…';
+        queueSelectEl.appendChild(customOpt);
+        queueSelectEl.value = opt.value;
+      }
+    };
+
+    queueSelectEl?.addEventListener('change', () => {
+      const isCustom = String(queueSelectEl.value) === '__custom__';
+      if (queueCustomEl) {
+        queueCustomEl.hidden = !isCustom;
+        if (isCustom) queueCustomEl.focus();
+      }
+      doRefresh();
+    });
+
+    populateQueueSelect().then(() => doRefresh());
+
     refreshBtn?.addEventListener('click', () => doRefresh());
-    queueEl?.addEventListener('keydown', (e) => {
+    queueCustomEl?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doRefresh();
     });
     statusEl?.addEventListener('keydown', (e) => {
@@ -2682,7 +2751,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
     enqueueForm?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const queue = (queueEl?.value || pane.workqueue.queue || '').trim();
+      const queue = (getQueueValue() || pane.workqueue.queue || '').trim();
       const title = (enqueueTitle?.value || '').trim();
       const instructions = (enqueueInstructions?.value || '').trim();
       const priority = Number(enqueuePriority?.value || 0) || 0;
@@ -2944,12 +3013,11 @@ const paneManager = {
       : 'chat';
 
     if (normalizedKind === 'workqueue') {
-      const queue = (window.prompt('Workqueue name', 'dev-team') || '').trim() || 'dev-team';
       const pane = createPane({
         key: `p${randomId().slice(0, 8)}`,
         role: 'admin',
         kind: 'workqueue',
-        queue,
+        queue: 'dev-team',
         statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
         closable: true
       });
