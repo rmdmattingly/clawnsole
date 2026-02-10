@@ -39,6 +39,7 @@ const globalElements = {
   logoutBtn: document.getElementById('logoutBtn'),
   paneControls: document.getElementById('paneControls'),
   addPaneBtn: document.getElementById('addPaneBtn'),
+  addPaneMenu: document.getElementById('addPaneMenu'),
   layoutSelect: document.getElementById('layoutSelect'),
   paneGrid: document.getElementById('paneGrid'),
   paneTemplate: document.getElementById('paneTemplate')
@@ -2177,15 +2178,21 @@ function buildClientForPane(pane) {
       paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();
-      paneEnsureGuestPolicy(pane);
-      paneEnsureHiddenWelcome(pane);
-      pane.client.request('sessions.resolve', { key: pane.sessionKey() });
+      if (pane.kind === 'chat') {
+        paneEnsureGuestPolicy(pane);
+        paneEnsureHiddenWelcome(pane);
+        pane.client.request('sessions.resolve', { key: pane.sessionKey() });
 
-      // If we disconnected mid-stream, pull remote history to catch up.
-      paneScheduleCatchUp(pane);
+        // If we disconnected mid-stream, pull remote history to catch up.
+        paneScheduleCatchUp(pane);
 
-      // Resume sending queued messages.
-      panePumpOutbox(pane);
+        // Resume sending queued messages.
+        panePumpOutbox(pane);
+      }
+
+      try {
+        if (typeof pane.onConnectedHook === 'function') pane.onConnectedHook();
+      } catch {}
     },
     onDisconnected: () => {
       paneStopThinking(pane);
@@ -2267,10 +2274,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
     sendBtn: root.querySelector('[data-pane-send]')
   };
 
+  const allowedKinds = new Set(['chat', 'workqueue', 'cron', 'timeline']);
+  const normalizedKind = allowedKinds.has(kind) ? kind : 'chat';
+
   const pane = {
     key,
     role,
-    kind: kind === 'workqueue' ? 'workqueue' : 'chat',
+    kind: normalizedKind,
     agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
@@ -2293,6 +2303,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
     chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
     legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
     sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
+    onConnectedHook: null,
     client: null
   };
 
@@ -2368,6 +2379,362 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
 
     pane.client = null;
     pane.connected = true;
+    return pane;
+  }
+
+  // CRON + TIMELINE PANES (admin-only)
+  if (pane.role === 'admin' && (pane.kind === 'cron' || pane.kind === 'timeline')) {
+    if (elements.agentWrap) elements.agentWrap.hidden = true;
+    if (elements.inputRow) elements.inputRow.hidden = true;
+    if (elements.scrollDownBtn) elements.scrollDownBtn.hidden = true;
+
+    const isTimeline = pane.kind === 'timeline';
+    elements.thread.classList.add('cron-pane');
+
+    const defaultRange = isTimeline ? '24h' : '24h';
+
+    elements.thread.innerHTML = `
+      <div class="wq-toolbar" style="padding: 10px; position: sticky; top: 0; background: rgba(12, 15, 20, 0.92); backdrop-filter: blur(8px); z-index: 2; border-bottom: 1px solid rgba(255,255,255,0.06);">
+        <div style="display:flex; gap: 10px; align-items: end; flex-wrap: wrap;">
+          <div class="hint" style="min-width: 120px; font-weight: 600;">${isTimeline ? 'Timeline' : 'Cron'}</div>
+          <label class="wq-field" style="min-width: 220px;">
+            Agent
+            <select data-cron-agent></select>
+          </label>
+          <label class="wq-field" style="min-width: 240px;">
+            Search
+            <input data-cron-search type="text" value="" placeholder="job name / id" />
+          </label>
+          <label class="wq-field" style="min-width: 140px;">
+            Range
+            <select data-cron-range>
+              <option value="1h">1h</option>
+              <option value="6h">6h</option>
+              <option value="24h" selected>24h</option>
+              <option value="7d">7d</option>
+            </select>
+          </label>
+          <label class="wq-field" style="min-width: 160px;">
+            Status
+            <select data-cron-status>
+              <option value="all" selected>all</option>
+              <option value="failing">failing</option>
+              <option value="due">due soon</option>
+              <option value="disabled">disabled</option>
+            </select>
+          </label>
+          <button data-cron-refresh class="secondary" type="button">Refresh</button>
+        </div>
+        <div class="hint" data-cron-statusline style="margin-top:6px;"></div>
+      </div>
+      <div class="wq-list" style="padding: 10px;">
+        <div data-cron-body></div>
+      </div>
+    `;
+
+    const agentSel = elements.thread.querySelector('[data-cron-agent]');
+    const searchEl = elements.thread.querySelector('[data-cron-search]');
+    const rangeEl = elements.thread.querySelector('[data-cron-range]');
+    const statusEl = elements.thread.querySelector('[data-cron-status]');
+    const refreshBtn = elements.thread.querySelector('[data-cron-refresh]');
+    const statusline = elements.thread.querySelector('[data-cron-statusline]');
+    const body = elements.thread.querySelector('[data-cron-body]');
+
+    const renderAgentFilterOptions = () => {
+      if (!agentSel) return;
+      agentSel.innerHTML = '';
+      const optAll = document.createElement('option');
+      optAll.value = 'all';
+      optAll.textContent = 'All agents';
+      agentSel.appendChild(optAll);
+      const agents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', displayName: 'main', emoji: '' }];
+      agents.forEach((agent) => {
+        const opt = document.createElement('option');
+        opt.value = agent.id;
+        opt.textContent = formatAgentLabel(agent, { includeId: true });
+        agentSel.appendChild(opt);
+      });
+      agentSel.value = 'all';
+    };
+
+    renderAgentFilterOptions();
+    if (rangeEl) rangeEl.value = defaultRange;
+
+    const fmtTime = (ms) => {
+      const n = Number(ms || 0);
+      if (!Number.isFinite(n) || n <= 0) return '';
+      try {
+        return new Date(n).toLocaleString();
+      } catch {
+        return String(n);
+      }
+    };
+
+    const getRangeMs = () => {
+      const v = String(rangeEl?.value || '24h');
+      if (v === '1h') return 60 * 60 * 1000;
+      if (v === '6h') return 6 * 60 * 60 * 1000;
+      if (v === '7d') return 7 * 24 * 60 * 60 * 1000;
+      return 24 * 60 * 60 * 1000;
+    };
+
+    const fetchCronOverview = async () => {
+      const startedAt = Date.now();
+      statusline.textContent = 'Loading…';
+      const [stRes, listRes] = await Promise.all([
+        pane.client.request('cron.status', {}),
+        pane.client.request('cron.list', { includeDisabled: true })
+      ]);
+      if (!stRes?.ok) throw new Error(stRes?.error?.message || 'cron.status failed');
+      if (!listRes?.ok) throw new Error(listRes?.error?.message || 'cron.list failed');
+      const jobs = Array.isArray(listRes.payload?.jobs) ? listRes.payload.jobs : [];
+      const status = stRes.payload || {};
+      const took = Date.now() - startedAt;
+      return { jobs, status, took };
+    };
+
+    const renderCronList = ({ jobs, status, took }) => {
+      const agentFilter = String(agentSel?.value || 'all');
+      const q = String(searchEl?.value || '').trim().toLowerCase();
+      const statusFilter = String(statusEl?.value || 'all');
+      const now = Date.now();
+      const rangeMs = getRangeMs();
+      const rangeStart = now - rangeMs;
+
+      const schedulerLabel = status?.enabled === false ? 'paused' : status?.enabled === true ? 'running' : 'unknown';
+      statusline.textContent = `scheduler: ${schedulerLabel} · jobs: ${jobs.length} · refreshed: ${new Date().toLocaleTimeString()} · ${took}ms`;
+
+      if (!body) return;
+
+      if (!isTimeline) {
+        const filtered = jobs
+          .filter((job) => {
+            const a = (job.agentId || 'main').trim();
+            if (agentFilter !== 'all' && a !== agentFilter) return false;
+            if (q) {
+              const hay = `${job.name || ''} ${job.id || ''}`.toLowerCase();
+              if (!hay.includes(q)) return false;
+            }
+            if (statusFilter === 'disabled' && job.enabled !== false) return false;
+            if (statusFilter === 'failing' && job.state?.lastStatus !== 'error') return false;
+            if (statusFilter === 'due') {
+              const next = Number(job.state?.nextRunAtMs || 0);
+              if (!next || next > now + 10 * 60 * 1000) return false;
+            }
+            return true;
+          })
+          .toSorted((a, b) => {
+            const an = Number(a.state?.nextRunAtMs || 0);
+            const bn = Number(b.state?.nextRunAtMs || 0);
+            return an - bn;
+          });
+
+        if (filtered.length === 0) {
+          body.innerHTML = `<div class="hint" style="padding: 10px 8px;">No cron jobs match.</div>`;
+          return;
+        }
+
+        const groups = new Map();
+        filtered.forEach((job) => {
+          const key = (job.agentId || 'main').trim() || 'main';
+          const list = groups.get(key) || [];
+          list.push(job);
+          groups.set(key, list);
+        });
+
+        const agentOrder = Array.from(groups.keys()).toSorted((a, b) => (a === 'main' ? -1 : b === 'main' ? 1 : a.localeCompare(b)));
+
+        body.innerHTML = agentOrder
+          .map((aid) => {
+            const items = groups.get(aid) || [];
+            const rows = items
+              .map((job) => {
+                const nextRun = fmtTime(job.state?.nextRunAtMs);
+                const lastRun = fmtTime(job.state?.lastRunAtMs);
+                const lastStatus = job.state?.lastStatus || '';
+                const lastErr = (job.state?.lastError || '').slice(0, 200);
+                const enabled = job.enabled !== false;
+                return `
+                  <div class="wq-item" style="display:grid; grid-template-columns: 1.4fr 0.5fr 0.9fr 0.9fr 0.5fr; gap: 8px; padding: 8px; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin: 6px 0;">
+                    <div style="min-width: 0;">
+                      <div style="font-weight: 600; overflow:hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(job.name || job.id)}</div>
+                      <div class="hint" style="overflow:hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(job.id)}</div>
+                      ${lastErr ? `<div class="hint" style="color: rgba(255,130,130,0.9);">${escapeHtml(lastErr)}</div>` : ''}
+                    </div>
+                    <div>${enabled ? 'enabled' : '<span style="color: rgba(255,200,120,0.9)">disabled</span>'}</div>
+                    <div><div class="hint">next</div><div>${escapeHtml(nextRun || '—')}</div></div>
+                    <div><div class="hint">last</div><div>${escapeHtml(lastRun || '—')}</div></div>
+                    <div>${escapeHtml(lastStatus || '—')}</div>
+                    <div style="grid-column: 1 / -1; display:flex; gap: 8px;">
+                      <button class="secondary" type="button" data-cron-show-runs="${escapeHtml(job.id)}">Runs</button>
+                      <button class="secondary" type="button" data-cron-run-now="${escapeHtml(job.id)}">Run now</button>
+                    </div>
+                  </div>
+                `;
+              })
+              .join('');
+            return `
+              <div style="margin-bottom: 14px;">
+                <div class="hint" style="padding: 6px 2px; font-weight: 600;">${escapeHtml(aid)}</div>
+                ${rows}
+              </div>
+            `;
+          })
+          .join('');
+
+        // wire buttons
+        body.querySelectorAll('[data-cron-show-runs]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const jobId = btn.getAttribute('data-cron-show-runs');
+            if (!jobId) return;
+            btn.disabled = true;
+            try {
+              const res = await pane.client.request('cron.runs', { id: jobId, limit: 50 });
+              if (!res?.ok) throw new Error(res?.error?.message || 'cron.runs failed');
+              const entries = Array.isArray(res.payload?.entries) ? res.payload.entries : [];
+              const lines = entries
+                .slice(-50)
+                .reverse()
+                .map((e) => {
+                  const when = fmtTime(e.ts);
+                  const s = e.status || '';
+                  const dur = e.durationMs ? `${Math.round(e.durationMs)}ms` : '';
+                  const summary = (e.summary || e.error || '').slice(0, 240);
+                  return `${when} · ${s} ${dur} ${summary}`.trim();
+                })
+                .join('\n');
+              window.alert(lines || 'No runs recorded yet.');
+            } catch (err) {
+              window.alert(err ? String(err) : 'Failed to load runs');
+            } finally {
+              btn.disabled = false;
+            }
+          });
+        });
+
+        body.querySelectorAll('[data-cron-run-now]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const jobId = btn.getAttribute('data-cron-run-now');
+            if (!jobId) return;
+            if (!window.confirm('Run this job now?')) return;
+            btn.disabled = true;
+            try {
+              const res = await pane.client.request('cron.run', { id: jobId, mode: 'force' });
+              if (!res?.ok) throw new Error(res?.error?.message || 'cron.run failed');
+              await doRefresh();
+            } catch (err) {
+              window.alert(err ? String(err) : 'Failed to run job');
+            } finally {
+              btn.disabled = false;
+            }
+          });
+        });
+
+        return;
+      }
+
+      // TIMELINE
+      const filteredJobs = jobs.filter((job) => {
+        const a = (job.agentId || 'main').trim();
+        if (agentFilter !== 'all' && a !== agentFilter) return false;
+        if (q) {
+          const hay = `${job.name || ''} ${job.id || ''}`.toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+
+      const renderTimeline = async () => {
+        const events = [];
+        for (const job of filteredJobs) {
+          const res = await pane.client.request('cron.runs', { id: job.id, limit: 200 });
+          if (!res?.ok) continue;
+          const entries = Array.isArray(res.payload?.entries) ? res.payload.entries : [];
+          entries.forEach((e) => {
+            if (!e || typeof e.ts !== 'number') return;
+            if (e.ts < rangeStart) return;
+            events.push({
+              ts: e.ts,
+              agentId: (job.agentId || 'main').trim() || 'main',
+              jobId: job.id,
+              jobName: job.name || job.id,
+              status: e.status || 'unknown',
+              durationMs: e.durationMs || null,
+              summary: e.summary || '',
+              error: e.error || ''
+            });
+          });
+        }
+        events.sort((a, b) => b.ts - a.ts);
+
+        if (events.length === 0) {
+          body.innerHTML = `<div class="hint" style="padding: 10px 8px;">No cron run events in range.</div>`;
+          return;
+        }
+
+        body.innerHTML = events
+          .map((ev) => {
+            const when = fmtTime(ev.ts);
+            const dur = ev.durationMs ? `${Math.round(ev.durationMs)}ms` : '';
+            const detail = (ev.summary || ev.error || '').slice(0, 300);
+            const color = ev.status === 'error' ? 'rgba(255,130,130,0.95)' : ev.status === 'ok' ? 'rgba(150,255,190,0.95)' : 'rgba(255,255,255,0.8)';
+            return `
+              <div style="padding: 10px; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin: 6px 0;">
+                <div style="display:flex; justify-content: space-between; gap: 10px;">
+                  <div style="min-width: 0;">
+                    <div style="font-weight: 600; overflow:hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(ev.jobName)}</div>
+                    <div class="hint">${escapeHtml(ev.agentId)} · ${escapeHtml(ev.jobId)}</div>
+                  </div>
+                  <div style="text-align:right;">
+                    <div style="color: ${color}; font-weight: 600;">${escapeHtml(ev.status)}</div>
+                    <div class="hint">${escapeHtml(when)} ${escapeHtml(dur)}</div>
+                  </div>
+                </div>
+                ${detail ? `<div class="hint" style="margin-top:6px; white-space: pre-wrap;">${escapeHtml(detail)}</div>` : ''}
+              </div>
+            `;
+          })
+          .join('');
+      };
+
+      statusline.textContent = `Loading run history… (jobs: ${filteredJobs.length})`;
+      renderTimeline()
+        .then(() => {
+          statusline.textContent = `scheduler: ${schedulerLabel} · events loaded: OK · refreshed: ${new Date().toLocaleTimeString()}`;
+        })
+        .catch((err) => {
+          statusline.textContent = `Failed loading timeline: ${err ? String(err) : 'unknown error'}`;
+        });
+    };
+
+    const doRefresh = async () => {
+      try {
+        const data = await fetchCronOverview();
+        renderCronList(data);
+      } catch (err) {
+        if (statusline) statusline.textContent = err ? String(err) : 'Failed to load';
+        if (body) body.innerHTML = `<div class="hint" style="padding: 10px 8px;">${escapeHtml(err ? String(err) : 'Failed to load')}</div>`;
+      }
+    };
+
+    refreshBtn?.addEventListener('click', () => doRefresh());
+    searchEl?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doRefresh();
+    });
+    agentSel?.addEventListener('change', () => doRefresh());
+    statusEl?.addEventListener('change', () => doRefresh());
+    rangeEl?.addEventListener('change', () => doRefresh());
+
+    paneRestoreChatHistory(pane); // harmless; keeps history map sane if any existing storage.
+    paneSetChatEnabled(pane);
+
+    pane.onConnectedHook = () => {
+      // initial fetch once websocket is connected
+      doRefresh();
+    };
+
+    pane.client = buildClientForPane(pane);
+    setStatusPill(elements.status, 'disconnected', '');
     return pane;
   }
 
@@ -2505,7 +2872,8 @@ const paneManager = {
       // Legacy format: { key, agentId }
       if (item && typeof item === 'object') {
         const key = typeof item.key === 'string' && item.key ? item.key : '';
-        const kind = item.kind === 'workqueue' ? 'workqueue' : 'chat';
+        const rawKind = typeof item.kind === 'string' ? item.kind.trim().toLowerCase() : '';
+        const kind = rawKind === 'workqueue' || rawKind === 'cron' || rawKind === 'timeline' ? rawKind : 'chat';
         if (!key) return null;
         if (kind === 'workqueue') {
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
@@ -2513,6 +2881,9 @@ const paneManager = {
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'claimed', 'in_progress'];
           return { key, kind, queue, statusFilter };
+        }
+        if (kind === 'cron' || kind === 'timeline') {
+          return { key, kind };
         }
         const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
         return { key, kind: 'chat', agentId };
@@ -2555,19 +2926,27 @@ const paneManager = {
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : []
         };
       }
+      if (pane.kind === 'cron' || pane.kind === 'timeline') {
+        return { key: pane.key, kind: pane.kind };
+      }
       return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
-  addPane() {
+  addPane(kind = 'chat') {
     if (roleState.role !== 'admin') return;
     if (this.panes.length >= this.maxPanes) return;
 
-    const kindRaw = window.prompt('Add pane: type "chat" or "workqueue"', 'chat');
-    if (kindRaw == null) return;
-    const kind = String(kindRaw || '').trim().toLowerCase().startsWith('w') ? 'workqueue' : 'chat';
+    const rawKind = String(kind || '').trim().toLowerCase();
+    const normalized = rawKind.startsWith('w')
+      ? 'workqueue'
+      : rawKind.startsWith('c')
+        ? 'cron'
+        : rawKind.startsWith('t')
+          ? 'timeline'
+          : 'chat';
 
-    if (kind === 'workqueue') {
+    if (normalized === 'workqueue') {
       const queue = (window.prompt('Workqueue name', 'dev-team') || '').trim() || 'dev-team';
       const pane = createPane({
         key: `p${randomId().slice(0, 8)}`,
@@ -2583,6 +2962,20 @@ const paneManager = {
       this.updateCloseButtons();
       this.applyInferredLayout();
       this.persistAdminPanes();
+      return;
+    }
+
+    if (normalized === 'cron' || normalized === 'timeline') {
+      const pane = createPane({ key: `p${randomId().slice(0, 8)}`, role: 'admin', kind: normalized, closable: true });
+      this.panes.push(pane);
+      globalElements.paneGrid.appendChild(pane.elements.root);
+      this.updatePaneLabels();
+      this.updateCloseButtons();
+      this.applyInferredLayout();
+      this.persistAdminPanes();
+      if (uiState.authed) {
+        pane.client.connect();
+      }
       return;
     }
 
@@ -2748,8 +3141,75 @@ globalElements.logoutBtn?.addEventListener('click', async () => {
   window.location.replace('/');
 });
 
-globalElements.addPaneBtn?.addEventListener('click', () => {
-  paneManager.addPane();
+function isAddPaneMenuOpen() {
+  return Boolean(globalElements.addPaneMenu && !globalElements.addPaneMenu.hidden);
+}
+
+function closeAddPaneMenu({ restoreFocus = true } = {}) {
+  const menu = globalElements.addPaneMenu;
+  const btn = globalElements.addPaneBtn;
+  if (!menu || !btn) return;
+  menu.hidden = true;
+  btn.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) {
+    try {
+      btn.focus();
+    } catch {}
+  }
+}
+
+function openAddPaneMenu() {
+  const menu = globalElements.addPaneMenu;
+  const btn = globalElements.addPaneBtn;
+  if (!menu || !btn) return;
+
+  menu.hidden = false;
+  btn.setAttribute('aria-expanded', 'true');
+
+  const first = menu.querySelector('[data-add-pane-kind="chat"]');
+  try {
+    first?.focus();
+  } catch {}
+}
+
+globalElements.addPaneBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  if (isAddPaneMenuOpen()) {
+    closeAddPaneMenu({ restoreFocus: false });
+    return;
+  }
+  openAddPaneMenu();
+});
+
+globalElements.addPaneMenu?.addEventListener('click', (event) => {
+  const btn = event.target?.closest?.('[data-add-pane-kind]');
+  if (!btn) return;
+  const kind = String(btn.getAttribute('data-add-pane-kind') || '').trim() || 'chat';
+  closeAddPaneMenu({ restoreFocus: false });
+  paneManager.addPane(kind);
+});
+
+document.addEventListener('click', (event) => {
+  if (!isAddPaneMenuOpen()) return;
+  const btn = globalElements.addPaneBtn;
+  const menu = globalElements.addPaneMenu;
+  if (!btn || !menu) return;
+  const target = event.target;
+  if (menu.contains(target) || btn.contains(target)) return;
+  closeAddPaneMenu({ restoreFocus: false });
+});
+
+document.addEventListener('keydown', (event) => {
+  if (!isAddPaneMenuOpen()) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeAddPaneMenu({ restoreFocus: true });
+  }
+});
+
+window.addEventListener('resize', () => {
+  if (!isAddPaneMenuOpen()) return;
+  closeAddPaneMenu({ restoreFocus: false });
 });
 
 // layoutSelect deprecated; layout is inferred from pane count.
