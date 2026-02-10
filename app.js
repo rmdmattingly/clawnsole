@@ -2932,15 +2932,18 @@ const paneManager = {
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
-  addPane() {
+  addPane(kind = 'chat') {
     if (roleState.role !== 'admin') return;
     if (this.panes.length >= this.maxPanes) return;
 
-    const kindRaw = window.prompt('Add pane: type "chat" or "workqueue"', 'chat');
-    if (kindRaw == null) return;
-    const kind = String(kindRaw || '').trim().toLowerCase().startsWith('w') ? 'workqueue' : 'chat';
+    const normalizedKind = String(kind || 'chat')
+      .trim()
+      .toLowerCase()
+      .startsWith('w')
+      ? 'workqueue'
+      : 'chat';
 
-    if (kind === 'workqueue') {
+    if (normalizedKind === 'workqueue') {
       const queue = (window.prompt('Workqueue name', 'dev-team') || '').trim() || 'dev-team';
       const pane = createPane({
         key: `p${randomId().slice(0, 8)}`,
@@ -2969,6 +2972,105 @@ const paneManager = {
     this.persistAdminPanes();
     if (uiState.authed) {
       pane.client.connect();
+    }
+  },
+  openAddPaneMenu(anchorEl) {
+    if (roleState.role !== 'admin') return;
+
+    if (this._addPaneMenuState?.open) {
+      this.closeAddPaneMenu();
+      return;
+    }
+
+    if (!anchorEl || !(anchorEl instanceof Element)) return;
+
+    const state = this._addPaneMenuState || { open: false };
+
+    if (!state.menuEl) {
+      const menu = document.createElement('div');
+      menu.className = 'pane-add-menu';
+      menu.setAttribute('role', 'menu');
+      menu.setAttribute('aria-label', 'Add pane');
+
+      const chatBtn = document.createElement('button');
+      chatBtn.type = 'button';
+      chatBtn.className = 'pane-add-menu__item';
+      chatBtn.textContent = 'Chat pane';
+
+      const wqBtn = document.createElement('button');
+      wqBtn.type = 'button';
+      wqBtn.className = 'pane-add-menu__item';
+      wqBtn.textContent = 'Workqueue pane';
+
+      menu.appendChild(chatBtn);
+      menu.appendChild(wqBtn);
+
+      chatBtn.addEventListener('click', () => {
+        this.closeAddPaneMenu();
+        this.addPane('chat');
+      });
+
+      wqBtn.addEventListener('click', () => {
+        this.closeAddPaneMenu();
+        this.addPane('workqueue');
+      });
+
+      state.menuEl = menu;
+      state.chatBtn = chatBtn;
+      state.wqBtn = wqBtn;
+    }
+
+    const positionMenu = () => {
+      const rect = anchorEl.getBoundingClientRect();
+      const menuRect = state.menuEl.getBoundingClientRect();
+      const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - menuRect.width - 8));
+      const top = Math.min(Math.max(8, rect.bottom + 8), Math.max(8, window.innerHeight - menuRect.height - 8));
+      state.menuEl.style.left = `${Math.round(left)}px`;
+      state.menuEl.style.top = `${Math.round(top)}px`;
+    };
+
+    const closeIfOutside = (event) => {
+      if (!state.open) return;
+      if (event.target === anchorEl) return;
+      if (state.menuEl.contains(event.target)) return;
+      this.closeAddPaneMenu();
+    };
+
+    state.positionMenu = positionMenu;
+    state.closeIfOutside = closeIfOutside;
+
+    document.body.appendChild(state.menuEl);
+    state.menuEl.style.display = 'block';
+    state.open = true;
+
+    positionMenu();
+
+    document.addEventListener('mousedown', closeIfOutside);
+    window.addEventListener('resize', positionMenu);
+    window.addEventListener('scroll', positionMenu, true);
+
+    const atMax = this.panes.length >= this.maxPanes;
+    state.chatBtn.disabled = atMax;
+    state.wqBtn.disabled = atMax;
+
+    this._addPaneMenuState = state;
+  },
+  closeAddPaneMenu() {
+    const state = this._addPaneMenuState;
+    if (!state?.open) return;
+
+    state.open = false;
+    try {
+      document.removeEventListener('mousedown', state.closeIfOutside);
+      window.removeEventListener('resize', state.positionMenu);
+      window.removeEventListener('scroll', state.positionMenu, true);
+    } catch {}
+
+    if (state.menuEl) {
+      state.menuEl.style.display = 'none';
+      try {
+        state.menuEl.remove();
+      } catch {}
     }
   },
   removePane(key) {
@@ -3092,6 +3194,7 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     closeSettings();
     closeWorkqueue();
+    paneManager.closeAddPaneMenu();
   }
 });
 
@@ -3138,8 +3241,9 @@ globalElements.logoutBtn?.addEventListener('click', async () => {
   window.location.replace('/');
 });
 
-globalElements.addPaneBtn?.addEventListener('click', () => {
-  paneManager.addPane();
+globalElements.addPaneBtn?.addEventListener('click', (event) => {
+  event?.preventDefault?.();
+  paneManager.openAddPaneMenu(globalElements.addPaneBtn);
 });
 
 // layoutSelect deprecated; layout is inferred from pane count.
