@@ -422,7 +422,9 @@ function setAuthState(authed) {
 function setRole(role) {
   roleState.role = role;
   if (globalElements.rolePill) {
-    globalElements.rolePill.textContent = role;
+    // Clawnsole now effectively has a single signed-in role (admin), so showing the raw role name is redundant.
+    globalElements.rolePill.textContent = role === 'admin' ? 'signed in' : role;
+    // Keep the visual “signed in” styling for admin without exposing the role label.
     globalElements.rolePill.classList.toggle('admin', role === 'admin');
   }
   if (role === 'guest') {

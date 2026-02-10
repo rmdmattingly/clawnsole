@@ -229,5 +229,5 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
 
   await page.reload();
   await expect(page.locator('#loginOverlay')).not.toHaveClass(/open/);
-  await expect(page.locator('#rolePill')).toContainText('admin');
+  await expect(page.locator('#rolePill')).toContainText('signed in');
 });
