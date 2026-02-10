@@ -45,6 +45,9 @@
             </select>
           </div>
           <div class="role-pill" id="rolePill">signed out</div>
+          <button id="refreshAgentsBtn" class="icon-btn" type="button" aria-label="Refresh agent list" hidden>
+            ⟳
+          </button>
           <button id="workqueueBtn" class="icon-btn" type="button" aria-label="Open workqueue" hidden>
             WQ
           </button>
@@ -148,6 +151,8 @@
         <button id="loginBtn" class="primary">Unlock</button>
       </div>
     </div>
+
+    <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
 
     <div id="workqueueModal" class="modal" aria-hidden="true">
       <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="workqueueTitle">

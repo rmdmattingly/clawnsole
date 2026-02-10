@@ -198,7 +198,22 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   await page.waitForSelector('[data-pane][data-connected="true"]', { timeout: 90000 });
   await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 30000 });
 
+  // Agent list refresh should not require a full page reload.
+  // Update the underlying openclaw.json and click refresh; the agent select should populate.
+  const openclawConfigPath = path.join(tempHome, '.openclaw', 'openclaw.json');
+  const openclawCfg = JSON.parse(fs.readFileSync(openclawConfigPath, 'utf8'));
+  openclawCfg.agents = {
+    defaults: { workspace: '' },
+    list: [{ id: 'ops', name: 'ops', identity: { name: 'Ops', emoji: '🛠️' } }]
+  };
+  fs.writeFileSync(openclawConfigPath, JSON.stringify(openclawCfg, null, 2));
+
+  await expect(page.locator('#refreshAgentsBtn')).toBeVisible();
+  await page.click('#refreshAgentsBtn');
+
   const pane = page.locator('[data-pane]').first();
+  await expect(pane.locator('[data-pane-agent-select] option[value="ops"]')).toHaveCount(1);
+
   await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
 
   const paneFontSize = await page.evaluate(() => {
