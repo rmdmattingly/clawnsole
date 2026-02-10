@@ -230,3 +230,31 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   await expect(page.locator('#loginOverlay')).not.toHaveClass(/open/);
   await expect(page.locator('#rolePill')).toContainText('signed in');
 });
+
+test('add pane menu offers chat vs workqueue; workqueue pane has queue dropdown', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!skipReason, skipReason);
+
+  await page.goto(`http://127.0.0.1:${serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.waitForSelector('[data-pane][data-connected="true"]', { timeout: 90000 });
+
+  const beforeCount = await page.locator('[data-pane]').count();
+
+  await page.click('#addPaneBtn');
+  await expect(page.locator('.pane-add-menu')).toBeVisible();
+  await expect(page.locator('.pane-add-menu')).toContainText('Chat pane');
+  await expect(page.locator('.pane-add-menu')).toContainText('Workqueue pane');
+
+  await page.click('.pane-add-menu__item:text("Workqueue pane")');
+
+  await expect(page.locator('[data-pane] .wq-pane')).toHaveCount(1);
+  const afterCount = await page.locator('[data-pane]').count();
+  expect(afterCount).toBe(beforeCount + 1);
+
+  const wqPane = page.locator('[data-pane] .wq-pane').first();
+  await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
+});
