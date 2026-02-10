@@ -865,13 +865,86 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
   }
 }
 
+function sortWorkqueueItemsForPane(items, { sortKey = 'default', sortDir = 'desc' } = {}) {
+  const dir = sortDir === 'asc' ? 1 : -1;
+  const statusRank = (s) => {
+    const v = String(s || '').trim();
+    if (v === 'in_progress') return 0;
+    if (v === 'claimed') return 1;
+    if (v === 'ready') return 2;
+    if (v === 'pending') return 3;
+    if (v === 'failed') return 4;
+    if (v === 'done') return 5;
+    return 6;
+  };
+
+  const numOr0 = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const timeOr0 = (v) => {
+    if (!v) return 0;
+    const n = Date.parse(String(v));
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  return (Array.isArray(items) ? items : [])
+    .map((it, idx) => ({ it, idx }))
+    .sort((a, b) => {
+      const A = a.it || {};
+      const B = b.it || {};
+
+      // Default: status grouping (active first), then priority desc, then updatedAt desc, then createdAt desc.
+      if (sortKey === 'default' || sortKey === 'status') {
+        const sr = statusRank(A.status) - statusRank(B.status);
+        if (sr) return sr;
+      }
+
+      if (sortKey === 'priority' || sortKey === 'default') {
+        const pr = (numOr0(B.priority) - numOr0(A.priority));
+        if (pr) return pr;
+      }
+
+      if (sortKey === 'updatedAt' || sortKey === 'default') {
+        const ur = (timeOr0(B.updatedAt) - timeOr0(A.updatedAt));
+        if (ur) return ur;
+      }
+
+      if (sortKey === 'createdAt' || sortKey === 'default') {
+        const cr = (timeOr0(B.createdAt) - timeOr0(A.createdAt));
+        if (cr) return cr;
+      }
+
+      if (sortKey === 'attempts') {
+        const ar = (numOr0(B.attempts) - numOr0(A.attempts));
+        if (ar) return ar;
+      }
+
+      if (sortKey === 'claimedBy') {
+        const av = String(A.claimedBy || '');
+        const bv = String(B.claimedBy || '');
+        const r = av.localeCompare(bv);
+        if (r) return r * dir;
+      }
+
+      if (sortKey === 'title') {
+        const av = String(A.title || '');
+        const bv = String(B.title || '');
+        const r = av.localeCompare(bv);
+        if (r) return r * dir;
+      }
+
+      // Stable fallback.
+      return a.idx - b.idx;
+    })
+    .map((x) => x.it);
+}
+
 function renderWorkqueuePaneItems(pane) {
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
   const empty = pane.elements?.thread?.querySelector('[data-wq-empty]');
   if (!body) return;
   body.innerHTML = '';
 
-  const items = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
+  const itemsRaw = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
+  const items = sortWorkqueueItemsForPane(itemsRaw, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
   if (empty) empty.hidden = items.length > 0;
 
   const now = Date.now();
@@ -2556,7 +2629,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sortKey, sortDir, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -2587,7 +2660,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
       items: [],
-      selectedItemId: null
+      selectedItemId: null,
+      sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'default',
+      sortDir: sortDir === 'asc' ? 'asc' : 'desc'
     },
     connected: false,
     statusState: 'disconnected',
@@ -2620,30 +2695,93 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
     if (elements.inputRow) elements.inputRow.hidden = true;
     if (elements.scrollDownBtn) elements.scrollDownBtn.hidden = true;
 
+
     // Replace thread with workqueue list + inspect.
     elements.thread.classList.add('wq-pane');
     elements.thread.innerHTML = `
-      <div class="wq-toolbar" style="padding: 10px; position: sticky; top: 0; background: rgba(12, 15, 20, 0.92); backdrop-filter: blur(8px); z-index: 2; border-bottom: 1px solid rgba(255,255,255,0.06);">
-        <div style="display:flex; gap: 10px; align-items: end; flex-wrap: wrap;">
-          <label class="wq-field" style="min-width: 180px;">
-            Queue
+      <div class="wq-toolbar">
+        <div class="wq-toolbar-row">
+          <label class="wq-field">
+            <span class="wq-label">Queue</span>
             <input data-wq-queue type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="e.g. dev-team" />
           </label>
-          <label class="wq-field" style="min-width: 320px;">
-            Status (comma-separated)
+
+          <label class="wq-field wq-status-field">
+            <span class="wq-label">Status filter</span>
             <input data-wq-status type="text" value="${escapeHtml(pane.workqueue.statusFilter.join(','))}" placeholder="ready,pending,claimed,in_progress" />
           </label>
+
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
+
+          <div class="wq-sort" role="group" aria-label="Sort workqueue items">
+            <span class="wq-sort-label">Sort</span>
+            <button type="button" class="wq-sort-btn" data-wq-sort="default">Default</button>
+            <button type="button" class="wq-sort-btn" data-wq-sort="priority">Priority</button>
+            <button type="button" class="wq-sort-btn" data-wq-sort="updatedAt">Updated</button>
+            <button type="button" class="wq-sort-btn" data-wq-sort="createdAt">Created</button>
+          </div>
         </div>
-        <div class="hint" data-wq-statusline style="margin-top:6px;"></div>
+
+        <details class="wq-enqueue">
+          <summary>Enqueue new item</summary>
+          <form data-wq-enqueue-form class="wq-enqueue-form">
+            <label class="wq-field">
+              <span class="wq-label">Title</span>
+              <input data-wq-enqueue-title type="text" required placeholder="Short title" />
+            </label>
+
+            <label class="wq-field">
+              <span class="wq-label">Priority</span>
+              <input data-wq-enqueue-priority type="number" value="0" />
+            </label>
+
+            <label class="wq-field">
+              <span class="wq-label">Dedupe key (optional)</span>
+              <input data-wq-enqueue-dedupe type="text" placeholder="e.g. pr-review:2026-02-10T01" />
+            </label>
+
+            <label class="wq-field wq-field-wide">
+              <span class="wq-label">Instructions</span>
+              <textarea data-wq-enqueue-instructions rows="3" placeholder="Links, context, acceptance criteria"></textarea>
+            </label>
+
+            <div class="wq-enqueue-actions">
+              <label class="wq-field">
+                <span class="wq-label">Claim as (optional)</span>
+                <select data-wq-claim-agent></select>
+              </label>
+              <label class="wq-field">
+                <span class="wq-label">Lease ms</span>
+                <input data-wq-claim-lease type="number" value="900000" />
+              </label>
+              <button data-wq-enqueue-submit type="submit">Enqueue</button>
+            </div>
+
+            <div class="hint" data-wq-enqueue-status aria-live="polite"></div>
+          </form>
+        </details>
+
+        <div class="hint" data-wq-statusline></div>
       </div>
-      <div class="wq-list" style="padding: 10px;">
-        <div class="wq-list-head" style="display:grid; grid-template-columns: 1.6fr 0.9fr 0.4fr 0.5fr 0.8fr 0.6fr; gap: 8px; font-size: 12px; opacity: 0.75; padding: 6px 8px;">
-          <div>title</div><div>status</div><div>prio</div><div>attempts</div><div>claimedBy</div><div>lease</div>
-        </div>
-        <div data-wq-list-body></div>
-        <div data-wq-empty class="hint" style="padding: 10px 8px;" hidden>No items.</div>
-        <div data-wq-inspect class="wq-inspect" style="margin-top: 10px;"></div>
+
+      <div class="wq-layout">
+        <section class="wq-list" aria-label="Workqueue items">
+          <div class="wq-list-header">
+            <button type="button" class="wq-list-sort" data-wq-sort="title">title</button>
+            <button type="button" class="wq-list-sort" data-wq-sort="status">status</button>
+            <button type="button" class="wq-list-sort" data-wq-sort="priority">prio</button>
+            <button type="button" class="wq-list-sort" data-wq-sort="attempts">attempts</button>
+            <button type="button" class="wq-list-sort" data-wq-sort="claimedBy">claimedBy</button>
+            <div>lease</div>
+          </div>
+          <div class="wq-list-body" data-wq-list-body></div>
+          <div data-wq-empty class="hint" style="padding: 10px 12px;" hidden>No items.</div>
+        </section>
+
+        <section class="wq-inspect" aria-label="Workqueue item details">
+          <div class="wq-inspect-header">Inspect</div>
+          <div data-wq-inspect class="wq-inspect-body"></div>
+        </section>
       </div>
     `;
 
@@ -2669,6 +2807,115 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
     });
     statusEl?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doRefresh();
+    });
+
+    // Sort controls (client-side): stable sorting with a status-grouping default.
+    const sortBtns = Array.from(elements.thread.querySelectorAll('[data-wq-sort]'));
+    const updateSortUi = () => {
+      sortBtns.forEach((btn) => {
+        const key = btn.getAttribute('data-wq-sort') || '';
+        const active = key && key === pane.workqueue.sortKey;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        btn.title = active ? (pane.workqueue.sortDir === 'asc' ? 'Sorted ascending' : 'Sorted descending') : '';
+      });
+    };
+
+    const setSort = (key) => {
+      const nextKey = String(key || 'default');
+      if (pane.workqueue.sortKey === nextKey) {
+        pane.workqueue.sortDir = pane.workqueue.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        pane.workqueue.sortKey = nextKey;
+        pane.workqueue.sortDir = nextKey === 'claimedBy' || nextKey === 'title' || nextKey === 'status' ? 'asc' : 'desc';
+      }
+      updateSortUi();
+      renderWorkqueuePaneItems(pane);
+      paneManager.persistAdminPanes();
+    };
+
+    sortBtns.forEach((btn) => {
+      btn.addEventListener('click', () => setSort(btn.getAttribute('data-wq-sort')));
+    });
+    updateSortUi();
+
+    // Agent dropdown (prefer select over free-text).
+    const claimAgentSelect = elements.thread.querySelector('[data-wq-claim-agent]');
+    if (claimAgentSelect) {
+      claimAgentSelect.innerHTML = '';
+      const optNone = document.createElement('option');
+      optNone.value = '';
+      optNone.textContent = '(none)';
+      claimAgentSelect.appendChild(optNone);
+      const agents = Array.isArray(uiState.agents) ? uiState.agents : [];
+      for (const a of agents) {
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = formatAgentLabel(a);
+        claimAgentSelect.appendChild(opt);
+      }
+    }
+
+    // Enqueue (inline form).
+    const enqueueForm = elements.thread.querySelector('[data-wq-enqueue-form]');
+    const enqueueStatus = elements.thread.querySelector('[data-wq-enqueue-status]');
+    const enqueueTitle = elements.thread.querySelector('[data-wq-enqueue-title]');
+    const enqueueInstructions = elements.thread.querySelector('[data-wq-enqueue-instructions]');
+    const enqueuePriority = elements.thread.querySelector('[data-wq-enqueue-priority]');
+    const enqueueDedupe = elements.thread.querySelector('[data-wq-enqueue-dedupe]');
+
+    const setEnqueueStatus = (text) => {
+      if (!enqueueStatus) return;
+      enqueueStatus.textContent = String(text || '');
+    };
+
+    enqueueForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const queue = (queueEl?.value || pane.workqueue.queue || '').trim();
+      const title = (enqueueTitle?.value || '').trim();
+      const instructions = (enqueueInstructions?.value || '').trim();
+      const priority = Number(enqueuePriority?.value || 0) || 0;
+      const dedupeKey = (enqueueDedupe?.value || '').trim();
+
+      if (!queue) {
+        setEnqueueStatus('Select a queue first.');
+        return;
+      }
+      if (!title) {
+        setEnqueueStatus('Title is required.');
+        enqueueTitle?.focus();
+        return;
+      }
+
+      setEnqueueStatus('Enqueueing…');
+      try {
+        const res = await fetch('/api/workqueue/enqueue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ queue, title, instructions, priority, dedupeKey })
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.ok) {
+          setEnqueueStatus('Enqueue failed: ' + String(data?.error || res.status));
+          return;
+        }
+
+        const item = data.item || null;
+        setEnqueueStatus(item && item._deduped ? 'Deduped: ' + item.id : 'Enqueued: ' + String(item?.id || ''));
+        if (enqueueTitle) enqueueTitle.value = '';
+        if (enqueueInstructions) enqueueInstructions.value = '';
+        if (enqueueDedupe) enqueueDedupe.value = '';
+
+        await doRefresh();
+        if (item?.id) {
+          pane.workqueue.selectedItemId = item.id;
+          renderWorkqueuePaneItems(pane);
+          renderWorkqueuePaneInspect(pane, pane.workqueue.items.find((it) => it.id === item.id) || item);
+        }
+      } catch (err) {
+        setEnqueueStatus('Enqueue failed: ' + String(err));
+      }
     });
 
     setStatusPill(elements.status, 'connected', '');
@@ -2823,7 +3070,9 @@ const paneManager = {
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'claimed', 'in_progress'];
-          return { key, kind, queue, statusFilter };
+          const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'default';
+          const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
+          return { key, kind, queue, statusFilter, sortKey, sortDir };
         }
         const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
         return { key, kind: 'chat', agentId };
@@ -2863,7 +3112,9 @@ const paneManager = {
           key: pane.key,
           kind: 'workqueue',
           queue: pane.workqueue?.queue || 'dev-team',
-          statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : []
+          statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
+          sortKey: pane.workqueue?.sortKey || 'default',
+          sortDir: pane.workqueue?.sortDir || 'desc'
         };
       }
       return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
