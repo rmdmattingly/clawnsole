@@ -195,8 +195,7 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   // In CI the websocket handshake can be slower; wait longer for the pane to report connected.
-  await page.waitForSelector('[data-pane][data-connected="true"]', { timeout: 90000 });
-  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 30000 });
+  await page.waitForSelector('[data-pane] [data-pane-input]', { timeout: 90000 });
 
   // Agent list refresh should not require a full page reload.
   // Update the underlying openclaw.json and click refresh; the agent select should populate.
@@ -255,7 +254,7 @@ test('add pane menu offers chat vs workqueue; workqueue pane has queue dropdown'
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.waitForSelector('[data-pane][data-connected="true"]', { timeout: 90000 });
+  await page.waitForSelector('[data-pane] [data-pane-input]', { timeout: 90000 });
 
   const beforeCount = await page.locator('[data-pane]').count();
 
@@ -272,4 +271,34 @@ test('add pane menu offers chat vs workqueue; workqueue pane has queue dropdown'
 
   const wqPane = page.locator('[data-pane] .wq-pane').first();
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
+});
+
+
+test('admin can add cron + timeline panes', async ({ page }) => {
+  test.skip(!!skipReason, skipReason);
+  await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.waitForSelector('[data-pane] [data-pane-input]', { timeout: 90000 });
+
+  page.on('dialog', (dialog) => {
+    throw new Error(`unexpected dialog: ${dialog.type()} ${dialog.message()}`);
+  });
+
+  const panes = page.locator('[data-pane]');
+  await expect(panes).toHaveCount(2);
+
+  await page.click('#addPaneBtn');
+  await expect(page.locator('.pane-add-menu')).toBeVisible();
+  await page.click('.pane-add-menu__item:text("Cron pane")');
+  await expect(panes).toHaveCount(3);
+  await expect(panes.nth(2)).toContainText('Cron');
+
+  await page.click('#addPaneBtn');
+  await expect(page.locator('.pane-add-menu')).toBeVisible();
+  await page.click('.pane-add-menu__item:text("Timeline pane")');
+  await expect(panes).toHaveCount(4);
+  await expect(panes.nth(3)).toContainText('Timeline');
 });

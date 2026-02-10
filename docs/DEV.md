@@ -81,6 +81,14 @@ This test:
 - sends a prompt
 - confirms an assistant response arrives
 
+## Workqueue admin API
+
+If you’re building UI or integrations for the built-in workqueue modal/panes, the HTTP contract is documented here:
+
+- `docs/WORKQUEUE_HTTP_API.md`
+
+(Workqueue scheduling/idempotent enqueue is documented separately in `docs/WORKQUEUE_SCHEDULING.md`.)
+
 ## CI expectations
 
 CI runs, in order:

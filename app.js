@@ -2512,6 +2512,10 @@ function buildClientForPane(pane) {
 
       // Resume sending queued messages.
       panePumpOutbox(pane);
+
+      try {
+        if (typeof pane.onConnectedHook === 'function') pane.onConnectedHook();
+      } catch {}
     },
     onDisconnected: () => {
       paneStopThinking(pane);
@@ -2596,7 +2600,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
   const pane = {
     key,
     role,
-    kind: kind === 'workqueue' ? 'workqueue' : 'chat',
+    kind: (() => {
+      const allowed = new Set(['chat', 'workqueue', 'cron', 'timeline']);
+      const k = String(kind || 'chat').trim().toLowerCase();
+      return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
+    })(),
     agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
@@ -2621,6 +2629,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
     legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
     sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
+    onConnectedHook: null,
     client: null
   };
 
@@ -2940,6 +2949,143 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     return pane;
   }
 
+  // CRON + TIMELINE PANES (admin-only)
+  if (pane.role === 'admin' && (pane.kind === 'cron' || pane.kind === 'timeline')) {
+    if (elements.agentWrap) elements.agentWrap.hidden = true;
+    if (elements.inputRow) elements.inputRow.hidden = true;
+    if (elements.scrollDownBtn) elements.scrollDownBtn.hidden = true;
+
+    const isTimeline = pane.kind === 'timeline';
+    elements.thread.classList.add('cron-pane');
+    elements.thread.innerHTML = `
+      <div class="wq-toolbar">
+        <div class="wq-toolbar-row" style="align-items:end; flex-wrap:wrap;">
+          <div class="wq-field" style="min-width: 120px; font-weight: 600;">${isTimeline ? 'Timeline' : 'Cron'}</div>
+          <label class="wq-field" style="min-width: 220px;">
+            <span class="wq-label">Agent</span>
+            <select data-cron-agent></select>
+          </label>
+          <button data-cron-refresh class="secondary" type="button">Refresh</button>
+        </div>
+        <div class="hint" data-cron-statusline></div>
+      </div>
+      <div class="wq-layout" style="grid-template-columns: 1fr;">
+        <section class="wq-list" aria-label="${isTimeline ? 'Timeline' : 'Cron'} data">
+          <div class="wq-list-body" data-cron-body></div>
+        </section>
+      </div>
+    `;
+
+    const agentSel = elements.thread.querySelector('[data-cron-agent]');
+    const refreshBtn = elements.thread.querySelector('[data-cron-refresh]');
+    const statusline = elements.thread.querySelector('[data-cron-statusline]');
+    const body = elements.thread.querySelector('[data-cron-body]');
+
+    const renderAgentFilterOptions = () => {
+      if (!agentSel) return;
+      agentSel.innerHTML = '';
+      const optAll = document.createElement('option');
+      optAll.value = 'all';
+      optAll.textContent = 'All agents';
+      agentSel.appendChild(optAll);
+      const agents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', displayName: 'main', emoji: '' }];
+      agents.forEach((agent) => {
+        const opt = document.createElement('option');
+        opt.value = agent.id;
+        opt.textContent = formatAgentLabel(agent, { includeId: true });
+        agentSel.appendChild(opt);
+      });
+      agentSel.value = 'all';
+    };
+
+    const fmtTime = (ms) => {
+      const n = Number(ms || 0);
+      if (!Number.isFinite(n) || n <= 0) return '';
+      try {
+        return new Date(n).toLocaleString();
+      } catch {
+        return String(n);
+      }
+    };
+
+    renderAgentFilterOptions();
+
+    const doRefresh = async () => {
+      try {
+        if (statusline) statusline.textContent = 'Loading…';
+        const startedAt = Date.now();
+        const [stRes, listRes] = await Promise.all([
+          pane.client.request('cron.status', {}),
+          pane.client.request('cron.list', { includeDisabled: true })
+        ]);
+        if (!stRes?.ok) throw new Error(stRes?.error?.message || 'cron.status failed');
+        if (!listRes?.ok) throw new Error(listRes?.error?.message || 'cron.list failed');
+        const jobs = Array.isArray(listRes.payload?.jobs) ? listRes.payload.jobs : [];
+        const status = stRes.payload || {};
+        const took = Date.now() - startedAt;
+
+        const agentFilter = String(agentSel?.value || 'all');
+        const filtered = jobs.filter((job) => {
+          const a = String(job.agentId || 'main').trim();
+          if (agentFilter !== 'all' && a !== agentFilter) return false;
+          return true;
+        });
+
+        const schedulerLabel = status?.enabled === false ? 'paused' : status?.enabled === true ? 'running' : 'unknown';
+        if (statusline) statusline.textContent = `scheduler: ${schedulerLabel} · jobs: ${filtered.length}/${jobs.length} · ${took}ms`;
+
+        if (!body) return;
+
+        if (!isTimeline) {
+          body.innerHTML = filtered
+            .map((job) => {
+              const nextRun = fmtTime(job.state?.nextRunAtMs);
+              const lastStatus = String(job.state?.lastStatus || '');
+              const enabled = job.enabled !== false;
+              return `<div class="wq-item" style="padding: 8px; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin: 6px 0;">
+                <div style="font-weight:600">${escapeHtml(job.name || job.id)}</div>
+                <div class="hint">${escapeHtml(job.id)} · ${escapeHtml(job.agentId || 'main')} · ${enabled ? 'enabled' : 'disabled'} · next: ${escapeHtml(nextRun || '—')} · last: ${escapeHtml(lastStatus || '—')}</div>
+              </div>`;
+            })
+            .join('');
+          return;
+        }
+
+        // Timeline: show recent runs (best-effort)
+        const events = [];
+        for (const job of filtered.slice(0, 10)) {
+          const res = await pane.client.request('cron.runs', { id: job.id, limit: 10 });
+          if (!res?.ok) continue;
+          const entries = Array.isArray(res.payload?.entries) ? res.payload.entries : [];
+          entries.forEach((e) => {
+            if (!e || typeof e.ts !== 'number') return;
+            events.push({ ts: e.ts, jobId: job.id, jobName: job.name || job.id, status: e.status || 'unknown' });
+          });
+        }
+        events.sort((a, b) => b.ts - a.ts);
+        body.innerHTML = events
+          .slice(0, 50)
+          .map((ev) => `<div class="wq-item" style="padding: 8px; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin: 6px 0;">
+            <div style="font-weight:600">${escapeHtml(ev.jobName)}</div>
+            <div class="hint">${escapeHtml(fmtTime(ev.ts))} · ${escapeHtml(ev.status)} · ${escapeHtml(ev.jobId)}</div>
+          </div>`)
+          .join('');
+      } catch (err) {
+        if (statusline) statusline.textContent = err ? String(err) : 'Failed to load';
+        if (body) body.innerHTML = `<div class="hint" style="padding: 10px 8px;">${escapeHtml(err ? String(err) : 'Failed to load')}</div>`;
+      }
+    };
+
+    refreshBtn?.addEventListener('click', () => doRefresh());
+    agentSel?.addEventListener('change', () => doRefresh());
+
+    pane.onConnectedHook = () => doRefresh();
+
+    pane.client = buildClientForPane(pane);
+    setStatusPill(elements.status, 'disconnected', '');
+    return pane;
+  }
+
   // CHAT PANE (existing behavior)
 
   if (pane.role === 'admin') {
@@ -3074,7 +3220,8 @@ const paneManager = {
       // Legacy format: { key, agentId }
       if (item && typeof item === 'object') {
         const key = typeof item.key === 'string' && item.key ? item.key : '';
-        const kind = item.kind === 'workqueue' ? 'workqueue' : 'chat';
+        const rawKind = typeof item.kind === 'string' ? item.kind.trim().toLowerCase() : '';
+        const kind = rawKind === 'workqueue' || rawKind === 'cron' || rawKind === 'timeline' ? rawKind : 'chat';
         if (!key) return null;
         if (kind === 'workqueue') {
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
@@ -3084,6 +3231,9 @@ const paneManager = {
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'default';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
           return { key, kind, queue, statusFilter, sortKey, sortDir };
+        }
+        if (kind === 'cron' || kind === 'timeline') {
+          return { key, kind };
         }
         const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
         return { key, kind: 'chat', agentId };
@@ -3128,6 +3278,9 @@ const paneManager = {
           sortDir: pane.workqueue?.sortDir || 'desc'
         };
       }
+      if (pane.kind === 'cron' || pane.kind === 'timeline') {
+        return { key: pane.key, kind: pane.kind };
+      }
       return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
@@ -3136,12 +3289,16 @@ const paneManager = {
     if (roleState.role !== 'admin') return;
     if (this.panes.length >= this.maxPanes) return;
 
-    const normalizedKind = String(kind || 'chat')
-      .trim()
-      .toLowerCase()
-      .startsWith('w')
-      ? 'workqueue'
-      : 'chat';
+    const rawKind = String(kind || 'chat').trim().toLowerCase();
+    const normalizedKind = rawKind === 'workqueue' || rawKind === 'cron' || rawKind === 'timeline'
+      ? rawKind
+      : rawKind.startsWith('w')
+        ? 'workqueue'
+        : rawKind.startsWith('c')
+          ? 'cron'
+          : rawKind.startsWith('t')
+            ? 'timeline'
+            : 'chat';
 
     if (normalizedKind === 'workqueue') {
       const pane = createPane({
@@ -3158,6 +3315,25 @@ const paneManager = {
       this.updateCloseButtons();
       this.applyInferredLayout();
       this.persistAdminPanes();
+      return;
+    }
+
+    if (normalizedKind === 'cron' || normalizedKind === 'timeline') {
+      const pane = createPane({
+        key: `p${randomId().slice(0, 8)}`,
+        role: 'admin',
+        kind: normalizedKind,
+        closable: true
+      });
+      this.panes.push(pane);
+      globalElements.paneGrid.appendChild(pane.elements.root);
+      this.updatePaneLabels();
+      this.updateCloseButtons();
+      this.applyInferredLayout();
+      this.persistAdminPanes();
+      if (uiState.authed) {
+        pane.client.connect();
+      }
       return;
     }
 
@@ -3201,8 +3377,20 @@ const paneManager = {
       wqBtn.className = 'pane-add-menu__item';
       wqBtn.textContent = 'Workqueue pane';
 
+      const cronBtn = document.createElement('button');
+      cronBtn.type = 'button';
+      cronBtn.className = 'pane-add-menu__item';
+      cronBtn.textContent = 'Cron pane';
+
+      const timelineBtn = document.createElement('button');
+      timelineBtn.type = 'button';
+      timelineBtn.className = 'pane-add-menu__item';
+      timelineBtn.textContent = 'Timeline pane';
+
       menu.appendChild(chatBtn);
       menu.appendChild(wqBtn);
+      menu.appendChild(cronBtn);
+      menu.appendChild(timelineBtn);
 
       chatBtn.addEventListener('click', () => {
         this.closeAddPaneMenu();
@@ -3214,9 +3402,21 @@ const paneManager = {
         this.addPane('workqueue');
       });
 
+      cronBtn.addEventListener('click', () => {
+        this.closeAddPaneMenu();
+        this.addPane('cron');
+      });
+
+      timelineBtn.addEventListener('click', () => {
+        this.closeAddPaneMenu();
+        this.addPane('timeline');
+      });
+
       state.menuEl = menu;
       state.chatBtn = chatBtn;
       state.wqBtn = wqBtn;
+      state.cronBtn = cronBtn;
+      state.timelineBtn = timelineBtn;
     }
 
     const positionMenu = () => {
