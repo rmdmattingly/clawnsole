@@ -1,0 +1,44 @@
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!--
+      Template: macOS LaunchAgent for recurring workqueue enqueue jobs.
+
+      Install:
+        cp scripts/workqueue-enqueue.launchagent.plist ~/Library/LaunchAgents/ai.openclaw.clawnsole-workqueue-enqueue.plist
+        launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/ai.openclaw.clawnsole-workqueue-enqueue.plist || true
+        launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.openclaw.clawnsole-workqueue-enqueue.plist
+        launchctl kickstart -k gui/$(id -u)/ai.openclaw.clawnsole-workqueue-enqueue
+
+      Logs:
+        tail -f /tmp/clawnsole-workqueue-enqueue.{out,err}.log
+
+      Notes:
+      - Launchd provides a minimal environment; use bash -lc so your PATH and node/npm setup are available.
+      - Prefer --dedupeKey so retries don’t spam duplicates.
+    -->
+
+    <key>Label</key>
+    <string>ai.openclaw.clawnsole-workqueue-enqueue</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Every hour (in seconds). Consider StartCalendarInterval if you need a specific time. -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/bash</string>
+      <string>-lc</string>
+      <string>clawnsole workqueue enqueue --queue dev-team --title "Review open PRs" --instructions "Review and ship any safe PRs. Leave comments if blocked." --priority 50 --dedupeKey "hourly-pr-review:$(date -u +%Y-%m-%dT%H)"</string>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/clawnsole-workqueue-enqueue.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/clawnsole-workqueue-enqueue.err.log</string>
+  </dict>
+</plist>
