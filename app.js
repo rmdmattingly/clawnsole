@@ -1415,6 +1415,8 @@ function paneStartThinking(pane) {
   pane.thinking.timer = setInterval(() => {
     triggerFiring(1.4, 2);
   }, 900);
+
+  paneRenderStopControl(pane);
 }
 
 function paneStopThinking(pane) {
@@ -1431,6 +1433,7 @@ function paneStopThinking(pane) {
     pane.thinking.bubble.remove();
     pane.thinking.bubble = null;
   }
+  paneRenderStopControl(pane);
 }
 
 function paneLoadChatHistory(pane) {
@@ -1820,13 +1823,91 @@ function paneSetChatEnabled(pane) {
 
   if (!uiState.authed) {
     pane.elements.input.placeholder = 'Sign in to continue';
+    paneRenderStopControl(pane);
     return;
   }
   if (!pane.connected) {
     pane.elements.input.placeholder = 'Reconnecting... (Drafting enabled)';
+    paneRenderStopControl(pane);
     return;
   }
   pane.elements.input.placeholder = `Message ${paneAssistantLabel(pane)}... (Press Enter to send)`;
+  paneRenderStopControl(pane);
+}
+
+function paneIsAbortable(pane) {
+  if (!pane) return false;
+  if (!uiState.authed) return false;
+  if (!pane.connected) return false;
+  if (pane.abortState && pane.abortState.active) return true;
+  return Boolean(pane.thinking?.active || (pane.chat?.runs && pane.chat.runs.size > 0));
+}
+
+function paneRenderStopControl(pane) {
+  const btn = pane?.elements?.stopBtn;
+  if (!btn) return;
+  const visible = Boolean(uiState.authed && pane.connected && (pane.thinking?.active || (pane.chat?.runs && pane.chat.runs.size > 0) || (pane.abortState && pane.abortState.active)));
+  btn.hidden = !visible;
+
+  const isCanceling = Boolean(pane.abortState && pane.abortState.active);
+  btn.disabled = !uiState.authed || !pane.connected || isCanceling;
+  btn.setAttribute('aria-label', isCanceling ? 'Canceling…' : 'Stop generating');
+}
+
+
+async function paneAbortRun(pane) {
+  if (!pane || !uiState.authed || !pane.connected) return;
+  if (pane.abortState && pane.abortState.active) return;
+
+  pane.abortState.active = true;
+  pane.abortState.requestedAt = Date.now();
+  paneRenderStopControl(pane);
+
+  const sessionKey = pane.sessionKey();
+  const runId = pane.activeRunId;
+
+  const finishLocalCanceled = () => {
+    const rid = pane.activeRunId || runId;
+    if (rid) {
+      try {
+        const entry = pane.chat?.runs?.get(rid);
+        const current = entry?.body?.textContent || '';
+        const nextText = current ? `${current}\n\n_(canceled)_` : '_(canceled)_';
+        paneUpdateChatRun(pane, rid, nextText, true);
+      } catch {}
+    } else {
+      paneAddChatMessage(pane, { role: 'assistant', text: '_Canceled._', persist: true, state: 'canceled', metaLabel: `${paneAssistantLabel(pane)} · Canceled` });
+    }
+    paneStopThinking(pane);
+    pane.activeRunId = null;
+  };
+
+  // Fallback: if we don't get a terminal event quickly, reset the session.
+  if (pane.abortState.timer) {
+    clearTimeout(pane.abortState.timer);
+    pane.abortState.timer = null;
+  }
+  pane.abortState.timer = setTimeout(() => {
+    try {
+      pane.client.request('sessions.reset', { key: sessionKey });
+    } catch {}
+    finishLocalCanceled();
+    pane.abortState.active = false;
+    paneRenderStopControl(pane);
+  }, 2000);
+
+  try {
+    await pane.client.request('chat.abort', { sessionKey, runId: runId || undefined });
+  } catch (err) {
+    addFeed('err', 'chat.abort', String(err));
+  } finally {
+    if (pane.abortState.timer) {
+      clearTimeout(pane.abortState.timer);
+      pane.abortState.timer = null;
+    }
+    pane.abortState.active = false;
+    paneRenderStopControl(pane);
+  }
 }
 
 function paneEnsureHiddenWelcome(pane) {
@@ -2115,11 +2196,15 @@ function handleGatewayFrame(pane, data) {
     const text = extractChatText(payload.message);
     if (payload.state === 'delta') {
       paneStopThinking(pane);
+      pane.activeRunId = runId || pane.activeRunId;
       paneUpdateChatRun(pane, runId, text, false);
+      paneRenderStopControl(pane);
       triggerFiring(2, 4);
     } else if (payload.state === 'final') {
       paneStopThinking(pane);
       paneUpdateChatRun(pane, runId, text, true);
+      pane.activeRunId = null;
+      paneRenderStopControl(pane);
       pane.pendingSend = null;
       pane.inFlight = null;
       panePumpOutbox(pane);
@@ -2127,6 +2212,8 @@ function handleGatewayFrame(pane, data) {
     } else if (payload.state === 'error') {
       paneStopThinking(pane);
       paneUpdateChatRun(pane, runId, payload.errorMessage || 'Chat error', true);
+      pane.activeRunId = null;
+      paneRenderStopControl(pane);
       pane.pendingSend = null;
       pane.inFlight = null;
       panePumpOutbox(pane);
@@ -2271,7 +2358,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
     attachBtn: root.querySelector('[data-pane-attach]'),
     attachmentStatus: root.querySelector('[data-pane-attachment-status]'),
     attachmentList: root.querySelector('[data-pane-attachment-list]'),
-    sendBtn: root.querySelector('[data-pane-send]')
+    sendBtn: root.querySelector('[data-pane-send]'),
+    stopBtn: root.querySelector('[data-pane-stop]')
   };
 
   const allowedKinds = new Set(['chat', 'workqueue', 'cron', 'timeline']);
@@ -2295,6 +2383,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
     chat: { runs: new Map(), history: [] },
     scroll: { pinned: true },
     thinking: { active: false, timer: null, dotsTimer: null, bubble: null },
+    activeRunId: null,
+    abortState: { active: false, requestedAt: 0, timer: null },
     attachments: { files: [] },
     pendingSend: null,
     catchUp: { active: false, attemptsLeft: 0, timer: null },
@@ -2311,6 +2401,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, cl
     elements.closeBtn.hidden = !closable;
     elements.closeBtn.addEventListener('click', () => {
       paneManager.removePane(pane.key);
+    });
+  }
+
+  if (elements.stopBtn) {
+    elements.stopBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      paneAbortRun(pane);
     });
   }
 

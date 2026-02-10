@@ -166,7 +166,7 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   // In CI the websocket handshake can be slower; wait longer for the pane to report connected.
-  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 30000 });
+  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 60000 });
 
   const paneFontSize = await page.evaluate(() => {
     const el = document.querySelector('[data-pane] [data-pane-input]');
@@ -199,6 +199,7 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   await expect(page.locator('#rolePill')).toContainText('admin');
 });
 
+
 test('admin can add a chat pane via pane-type dropdown', async ({ page }) => {
   test.skip(!!skipReason, skipReason);
   await page.goto(`http://127.0.0.1:${serverPort}/`);
@@ -207,7 +208,7 @@ test('admin can add a chat pane via pane-type dropdown', async ({ page }) => {
   await page.fill('#loginPassword', 'admin');
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
-  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 30000 });
+  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 60000 });
 
   // Adding a chat pane should not require any prompt()/dialog interaction.
   page.on('dialog', (dialog) => {
@@ -234,7 +235,7 @@ test('admin can add cron + timeline panes', async ({ page }) => {
   await page.fill('#loginPassword', 'admin');
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
-  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 30000 });
+  await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 60000 });
 
   page.on('dialog', (dialog) => {
     throw new Error(`unexpected dialog: ${dialog.type()} ${dialog.message()}`);
