@@ -513,6 +513,15 @@ button.secondary:hover {
   border-color: rgba(127, 209, 185, 0.6);
 }
 
+button.danger {
+  border-color: rgba(255, 107, 107, 0.45);
+  background: rgba(30, 12, 16, 0.55);
+}
+
+button.danger:hover {
+  border-color: rgba(255, 107, 107, 0.75);
+}
+
 button:hover {
   transform: translateY(-1px);
   border-color: rgba(255, 255, 255, 0.22);
@@ -2066,4 +2075,157 @@ button.send-btn .btn-icon {
   background: rgba(48, 20, 22, 0.9);
   border-color: rgba(255, 92, 92, 0.35);
   color: rgba(255, 230, 230, 0.95);
+}
+
+/* Cron + Timeline */
+.cron-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cron-job {
+  padding: 10px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  background: rgba(9, 12, 16, 0.45);
+}
+
+.cron-job__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cron-job__title {
+  font-weight: 650;
+}
+
+.cron-job__badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(9, 12, 16, 0.55);
+  color: var(--muted);
+}
+
+.pill--ok {
+  color: rgba(127, 209, 185, 0.95);
+  border-color: rgba(127, 209, 185, 0.35);
+  background: rgba(10, 24, 22, 0.55);
+}
+
+.pill--warn {
+  color: rgba(255, 179, 71, 0.95);
+  border-color: rgba(255, 179, 71, 0.35);
+  background: rgba(28, 20, 10, 0.55);
+}
+
+.pill--muted {
+  opacity: 0.9;
+}
+
+.cron-actions {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cron-actions button {
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+.cron-job__details {
+  margin-top: 10px;
+}
+
+.timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-left: 18px;
+}
+
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: linear-gradient(to bottom, rgba(127, 209, 185, 0.25), rgba(255, 179, 71, 0.22));
+}
+
+.timeline-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 10px;
+}
+
+.timeline-item__dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0 0 4px rgba(127, 209, 185, 0.1);
+  margin-top: 12px;
+}
+
+.timeline-item__card {
+  padding: 10px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  background: rgba(9, 12, 16, 0.45);
+}
+
+.timeline-item__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.timeline-item__title {
+  font-weight: 650;
+}
+
+.timeline-item__badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.code {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(8, 10, 14, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(230, 238, 246, 0.92);
 }
