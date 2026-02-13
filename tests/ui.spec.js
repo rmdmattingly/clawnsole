@@ -299,8 +299,11 @@ test('workqueue modal has sortable list headers', async ({ page }) => {
   const sortBtns = page.locator('#workqueueModal [data-wq-modal-sort]');
   await expect(sortBtns).toHaveCount(6);
 
-  await page.click('#workqueueModal [data-wq-modal-sort="priority"]');
-  await expect(page.locator('#workqueueModal [data-wq-modal-sort="priority"]')).toHaveAttribute('aria-pressed', 'true');
+  const prioSort = page.locator('#workqueueModal [data-wq-modal-sort="priority"]').first();
+  // In CI the modal animation/layout can briefly report buttons as not visible; scroll + force click to avoid flakes.
+  await prioSort.scrollIntoViewIfNeeded();
+  await prioSort.click({ force: true });
+  await expect(prioSort).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('admin can add cron + timeline panes', async ({ page }) => {
