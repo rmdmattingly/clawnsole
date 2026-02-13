@@ -785,10 +785,61 @@ async function fetchAndRenderWorkqueueItems() {
   }
 }
 
+function fmtAge(ts) {
+  if (!ts) return '';
+  const t = typeof ts === 'number' ? ts : Date.parse(String(ts));
+  if (!Number.isFinite(t)) return '';
+  const ms = Date.now() - t;
+  if (ms < 0) return '';
+  const min = Math.floor(ms / 60000);
+  const hr = Math.floor(min / 60);
+  const day = Math.floor(hr / 24);
+  if (day > 0) return `${day}d`;
+  if (hr > 0) return `${hr}h`;
+  if (min > 0) return `${min}m`;
+  return 'now';
+}
+
+async function workqueueUpdateItem(itemId, patch) {
+  if (!itemId) return null;
+  const res = await fetch('/api/workqueue/update', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ itemId, patch })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data?.ok) throw new Error(String(data?.error || res.status));
+  return data.item;
+}
+
+function getWorkqueueBoardColumns() {
+  // Kanban defaults; respect the status filters by only showing enabled columns.
+  const defs = [
+    { status: 'ready', label: 'Ready' },
+    { status: 'pending', label: 'Pending' },
+    { status: 'claimed', label: 'Claimed' },
+    { status: 'in_progress', label: 'In progress' },
+    { status: 'done', label: 'Done' },
+    { status: 'failed', label: 'Failed' }
+  ];
+  return defs.filter((d) => workqueueState.statusFilter.has(d.status));
+}
+
 function renderWorkqueueItems() {
   const body = globalElements.wqListBody;
   if (!body) return;
+
+  // Swap the list area into a Kanban board.
   body.innerHTML = '';
+  body.classList.remove('wq-list-body');
+  body.classList.add('wq-board');
+
+  const listRoot = body.closest('.wq-list');
+  if (listRoot) listRoot.classList.add('wq-list-kanban');
+
+  const header = listRoot?.querySelector('.wq-list-header');
+  if (header) header.style.display = 'none';
 
   if (!workqueueState.items.length) {
     globalElements.wqListEmpty.hidden = false;
@@ -796,33 +847,99 @@ function renderWorkqueueItems() {
     globalElements.wqListEmpty.hidden = true;
   }
 
+  const cols = getWorkqueueBoardColumns();
+  const itemsByStatus = workqueueState.items.reduce((acc, it) => {
+    const st = String(it?.status || 'ready');
+    if (!acc[st]) acc[st] = [];
+    acc[st].push(it);
+    return acc;
+  }, {});
+
   const now = Date.now();
-  for (const it of workqueueState.items) {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'wq-row';
-    if (it.id && it.id === workqueueState.selectedItemId) row.classList.add('selected');
+  for (const colDef of cols) {
+    const col = document.createElement('section');
+    col.className = 'wq-board-col';
+    col.setAttribute('data-wq-col', colDef.status);
 
-    const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
-    const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
-    const status = String(it.status || '');
+    const items = Array.isArray(itemsByStatus[colDef.status]) ? itemsByStatus[colDef.status] : [];
 
-    row.innerHTML = `
-      <div class="wq-col title">${escapeHtml(String(it.title || ''))}</div>
-      <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
-      <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
-      <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
-      <div class="wq-col claimedBy">${escapeHtml(String(it.claimedBy || ''))}</div>
-      <div class="wq-col lease mono" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
+    const head = document.createElement('div');
+    head.className = 'wq-board-col-header';
+    head.innerHTML = `
+      <div class="wq-board-col-title">${escapeHtml(colDef.label)}</div>
+      <div class="wq-board-col-count mono">${escapeHtml(String(items.length))}</div>
     `;
 
-    row.addEventListener('click', () => {
-      workqueueState.selectedItemId = it.id || null;
-      renderWorkqueueItems();
-      renderWorkqueueInspect(it);
+    const lane = document.createElement('div');
+    lane.className = 'wq-board-lane';
+
+    // Drag/drop: drop a card to change status.
+    lane.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      lane.classList.add('dragover');
+    });
+    lane.addEventListener('dragleave', () => lane.classList.remove('dragover'));
+    lane.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      lane.classList.remove('dragover');
+      const itemId = String(e.dataTransfer?.getData('text/plain') || '').trim();
+      if (!itemId) return;
+      try {
+        await workqueueUpdateItem(itemId, { status: colDef.status });
+        await fetchAndRenderWorkqueueItems();
+      } catch (err) {
+        setWorkqueueActionStatus(`Status change failed: ${String(err)}`, 'err');
+      }
     });
 
-    body.appendChild(row);
+    for (const it of items) {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'wq-card';
+      if (it.id && it.id === workqueueState.selectedItemId) card.classList.add('selected');
+      if (it.id) card.setAttribute('data-wq-item', it.id);
+
+      // Allow dragging the whole card.
+      card.draggable = true;
+      card.addEventListener('dragstart', (e) => {
+        if (!it.id) return;
+        e.dataTransfer?.setData('text/plain', String(it.id));
+        e.dataTransfer && (e.dataTransfer.effectAllowed = 'move');
+      });
+
+      const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
+      const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
+      const status = String(it.status || '');
+      const age = fmtAge(it.createdAt || it.updatedAt);
+      const next = String(it.lastNote || '').trim();
+
+      card.innerHTML = `
+        <div class="wq-card-title">${escapeHtml(String(it.title || ''))}</div>
+        <div class="wq-card-meta">
+          <span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span>
+          ${age ? `<span class="wq-card-chip mono">age ${escapeHtml(age)}</span>` : ''}
+          ${leaseLabel ? `<span class="wq-card-chip mono">lease ${escapeHtml(leaseLabel)}</span>` : ''}
+        </div>
+        <div class="wq-card-fields">
+          <div class="wq-card-field"><span class="k">prio</span> <span class="v mono">${escapeHtml(String(it.priority ?? ''))}</span></div>
+          <div class="wq-card-field"><span class="k">owner</span> <span class="v">${escapeHtml(String(it.claimedBy || ''))}</span></div>
+          <div class="wq-card-field"><span class="k">att</span> <span class="v mono">${escapeHtml(String(it.attempts ?? ''))}</span></div>
+        </div>
+        ${next ? `<div class="wq-card-next">${escapeHtml(next)}</div>` : ''}
+      `;
+
+      card.addEventListener('click', () => {
+        workqueueState.selectedItemId = it.id || null;
+        renderWorkqueueItems();
+        renderWorkqueueInspect(it);
+      });
+
+      lane.appendChild(card);
+    }
+
+    col.appendChild(head);
+    col.appendChild(lane);
+    body.appendChild(col);
   }
 }
 
