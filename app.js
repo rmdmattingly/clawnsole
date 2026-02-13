@@ -3407,6 +3407,108 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
     renderAgentFilterOptions();
 
+    const ensureCronActionsHook = () => {
+      if (!body) return;
+      if (body.dataset.cronActionsHooked === '1') return;
+      body.dataset.cronActionsHooked = '1';
+
+      body.addEventListener('click', async (event) => {
+        const btn = event.target?.closest?.('button[data-cron-action]');
+        if (!btn) return;
+        event.preventDefault();
+
+        const action = String(btn.dataset.cronAction || '').trim();
+        const jobId = String(btn.dataset.jobId || '').trim();
+        if (!jobId) return;
+
+        const job = pane.cronJobsById?.[jobId] || null;
+
+        const setBusy = (busy) => {
+          try {
+            btn.disabled = !!busy;
+            if (busy) btn.dataset._oldText = btn.textContent;
+            if (busy) btn.textContent = '…';
+            if (!busy && btn.dataset._oldText) btn.textContent = btn.dataset._oldText;
+          } catch {}
+        };
+
+        const safeReq = async (method, params) => {
+          const res = await pane.client.request(method, params);
+          if (!res?.ok) throw new Error(res?.error?.message || method + ' failed');
+          return res;
+        };
+
+        try {
+          setBusy(true);
+          if (action === 'view') {
+            const details = body.querySelector(`[data-cron-details-for="${CSS.escape(jobId)}"]`);
+            if (details) {
+              details.hidden = !details.hidden;
+              setBusy(false);
+              return;
+            }
+            // Fallback for timeline entries (no embedded details).
+            alert(JSON.stringify(job || { id: jobId }, null, 2));
+            setBusy(false);
+            return;
+          }
+
+          if (action === 'toggle') {
+            const enabled = job ? job.enabled !== false : true;
+            await safeReq('cron.update', { jobId, patch: { enabled: !enabled } });
+            await doRefresh();
+            setBusy(false);
+            return;
+          }
+
+          if (action === 'delete') {
+            const ok = confirm(`Delete cron job ${jobId}?`);
+            if (!ok) {
+              setBusy(false);
+              return;
+            }
+            await safeReq('cron.remove', { jobId });
+            await doRefresh();
+            setBusy(false);
+            return;
+          }
+
+          if (action === 'run') {
+            await safeReq('cron.run', { jobId });
+            await doRefresh();
+            setBusy(false);
+            return;
+          }
+
+          if (action === 'edit') {
+            const seed = job ? { name: job.name, enabled: job.enabled !== false, schedule: job.schedule, payload: job.payload } : { enabled: true };
+            const txt = prompt('Edit cron job via JSON patch (merged into job). Example: {"enabled":false} or {"schedule":{"kind":"cron","expr":"*/5 * * * *"}}', JSON.stringify(seed, null, 2));
+            if (!txt) {
+              setBusy(false);
+              return;
+            }
+            let patch;
+            try {
+              patch = JSON.parse(txt);
+            } catch {
+              throw new Error('Invalid JSON');
+            }
+            await safeReq('cron.update', { jobId, patch });
+            await doRefresh();
+            setBusy(false);
+            return;
+          }
+
+          setBusy(false);
+        } catch (err) {
+          setBusy(false);
+          alert(String(err || 'Failed'));
+        }
+      });
+    };
+
+    ensureCronActionsHook();
+
     const doRefresh = async () => {
       try {
         if (statusline) statusline.textContent = 'Loading…';
@@ -3433,18 +3535,39 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
         if (!body) return;
 
+        // Expose current jobs for click handlers.
+        pane.cronJobsById = Object.fromEntries(filtered.map((j) => [String(j.id), j]));
+
         if (!isTimeline) {
-          body.innerHTML = filtered
+          body.innerHTML = `<div class="cron-list">${filtered
             .map((job) => {
               const nextRun = fmtTime(job.state?.nextRunAtMs);
               const lastStatus = String(job.state?.lastStatus || '');
               const enabled = job.enabled !== false;
-              return `<div class="wq-item" style="padding: 8px; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin: 6px 0;">
-                <div style="font-weight:600">${escapeHtml(job.name || job.id)}</div>
-                <div class="hint">${escapeHtml(job.id)} · ${escapeHtml(job.agentId || 'main')} · ${enabled ? 'enabled' : 'disabled'} · next: ${escapeHtml(nextRun || '—')} · last: ${escapeHtml(lastStatus || '—')}</div>
+              const id = String(job.id || '');
+              return `<div class="cron-job" data-cron-job-card data-job-id="${escapeHtml(id)}">
+                <div class="cron-job__top">
+                  <div class="cron-job__title">${escapeHtml(job.name || job.id)}</div>
+                  <div class="cron-job__badges">
+                    <span class="pill pill--muted">${escapeHtml(job.agentId || 'main')}</span>
+                    <span class="pill ${enabled ? 'pill--ok' : 'pill--warn'}">${enabled ? 'enabled' : 'disabled'}</span>
+                  </div>
+                </div>
+                <div class="hint">${escapeHtml(id)} · next: ${escapeHtml(nextRun || '—')} · last: ${escapeHtml(lastStatus || '—')}</div>
+                <div class="cron-actions" role="group" aria-label="Cron job actions">
+                  <button type="button" class="secondary" data-cron-action="view" data-job-id="${escapeHtml(id)}">View</button>
+                  <button type="button" class="secondary" data-cron-action="edit" data-job-id="${escapeHtml(id)}">Edit</button>
+                  <button type="button" class="secondary" data-cron-action="toggle" data-job-id="${escapeHtml(id)}">${enabled ? 'Disable' : 'Enable'}</button>
+                  <button type="button" class="secondary" data-cron-action="run" data-job-id="${escapeHtml(id)}">Run</button>
+                  <button type="button" class="danger" data-cron-action="delete" data-job-id="${escapeHtml(id)}">Delete</button>
+                </div>
+                <details class="cron-job__details" data-cron-details-for="${escapeHtml(id)}" hidden>
+                  <summary class="hint">Details</summary>
+                  <pre class="code">${escapeHtml(JSON.stringify(job, null, 2))}</pre>
+                </details>
               </div>`;
             })
-            .join('');
+            .join('')}</div>`;
           return;
         }
 
@@ -3456,17 +3579,45 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
           const entries = Array.isArray(res.payload?.entries) ? res.payload.entries : [];
           entries.forEach((e) => {
             if (!e || typeof e.ts !== 'number') return;
-            events.push({ ts: e.ts, jobId: job.id, jobName: job.name || job.id, status: e.status || 'unknown' });
+            events.push({
+              ts: e.ts,
+              jobId: String(job.id),
+              jobName: job.name || job.id,
+              status: String(e.status || 'unknown')
+            });
           });
         }
         events.sort((a, b) => b.ts - a.ts);
-        body.innerHTML = events
+        body.innerHTML = `<div class="timeline">${events
           .slice(0, 50)
-          .map((ev) => `<div class="wq-item" style="padding: 8px; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin: 6px 0;">
-            <div style="font-weight:600">${escapeHtml(ev.jobName)}</div>
-            <div class="hint">${escapeHtml(fmtTime(ev.ts))} · ${escapeHtml(ev.status)} · ${escapeHtml(ev.jobId)}</div>
-          </div>`)
-          .join('');
+          .map((ev, idx) => {
+            const job = pane.cronJobsById?.[String(ev.jobId)] || null;
+            const enabled = job ? job.enabled !== false : true;
+            const nextRun = job ? fmtTime(job.state?.nextRunAtMs) : '';
+            const pillClass = ev.status === 'ok' || ev.status === 'success' ? 'pill--ok' : ev.status === 'error' || ev.status === 'fail' ? 'pill--warn' : 'pill--muted';
+            const id = String(ev.jobId);
+            return `<div class="timeline-item" data-job-id="${escapeHtml(id)}" style="--timeline-index:${idx}">
+              <div class="timeline-item__dot"></div>
+              <div class="timeline-item__card">
+                <div class="timeline-item__top">
+                  <div class="timeline-item__title">${escapeHtml(ev.jobName)}</div>
+                  <div class="timeline-item__badges">
+                    <span class="pill ${pillClass}">${escapeHtml(ev.status)}</span>
+                    <span class="pill ${enabled ? 'pill--ok' : 'pill--warn'}">${enabled ? 'enabled' : 'disabled'}</span>
+                  </div>
+                </div>
+                <div class="hint">${escapeHtml(fmtTime(ev.ts))} · ${escapeHtml(id)}${nextRun ? ` · next: ${escapeHtml(nextRun)}` : ''}</div>
+                <div class="cron-actions" role="group" aria-label="Cron job actions">
+                  <button type="button" class="secondary" data-cron-action="view" data-job-id="${escapeHtml(id)}">View</button>
+                  <button type="button" class="secondary" data-cron-action="edit" data-job-id="${escapeHtml(id)}">Edit</button>
+                  <button type="button" class="secondary" data-cron-action="toggle" data-job-id="${escapeHtml(id)}">${enabled ? 'Disable' : 'Enable'}</button>
+                  <button type="button" class="secondary" data-cron-action="run" data-job-id="${escapeHtml(id)}">Run</button>
+                  <button type="button" class="danger" data-cron-action="delete" data-job-id="${escapeHtml(id)}">Delete</button>
+                </div>
+              </div>
+            </div>`;
+          })
+          .join('')}</div>`;
       } catch (err) {
         if (statusline) statusline.textContent = err ? String(err) : 'Failed to load';
         if (body) body.innerHTML = `<div class="hint" style="padding: 10px 8px;">${escapeHtml(err ? String(err) : 'Failed to load')}</div>`;
