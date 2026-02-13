@@ -2725,6 +2725,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     client: null
   };
 
+  // Mark pane kind on root for CSS + debugging.
+  try {
+    elements.root.dataset.paneKind = pane.kind;
+    elements.root.classList.add(`pane-kind-${pane.kind}`);
+  } catch {}
+
   if (elements.closeBtn) {
     elements.closeBtn.hidden = !closable;
     elements.closeBtn.addEventListener('click', () => {

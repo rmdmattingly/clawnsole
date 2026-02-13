@@ -215,6 +215,17 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
 
   await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
 
+  // Workqueue pane should not render the chat composer UI.
+  await expect(page.locator('#addPaneBtn')).toBeVisible();
+  await page.click('#addPaneBtn');
+  await page.getByRole('button', { name: 'Workqueue pane' }).click();
+
+  const panes = page.locator('[data-pane]');
+  const wqPane = panes.last();
+  await expect(wqPane.locator('.wq-pane')).toHaveCount(1);
+  await expect(wqPane.locator('.chat-input-row')).toBeHidden();
+  await expect(wqPane.locator('[data-pane-input]')).toBeHidden();
+
   const paneFontSize = await page.evaluate(() => {
     const el = document.querySelector('[data-pane] [data-pane-input]');
     return el ? getComputedStyle(el).fontSize : '';
