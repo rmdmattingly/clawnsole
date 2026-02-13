@@ -136,6 +136,25 @@ function showToast(message, { kind = 'info', timeoutMs = 2600 } = {}) {
 
 let agentRefreshTimer = null;
 let agentRefreshInFlight = null;
+let agentAutoRefreshInterval = null;
+
+function startAgentAutoRefresh() {
+  if (roleState.role !== 'admin') return;
+  if (!uiState.authed) return;
+  if (agentAutoRefreshInterval) return;
+  // Low-frequency poll so new agents appear even if connectivity never fully drops.
+  agentAutoRefreshInterval = setInterval(() => {
+    if (document.hidden) return;
+    scheduleAgentRefresh('poll');
+  }, 30_000);
+}
+
+function stopAgentAutoRefresh() {
+  if (!agentAutoRefreshInterval) return;
+  clearInterval(agentAutoRefreshInterval);
+  agentAutoRefreshInterval = null;
+}
+
 async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {}) {
   if (roleState.role !== 'admin') return uiState.agents;
   if (!uiState.authed) return uiState.agents;
@@ -143,9 +162,19 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
   if (agentRefreshInFlight) return agentRefreshInFlight;
 
   const prev = Array.isArray(uiState.agents) ? uiState.agents : [];
+  if (globalElements.refreshAgentsBtn) {
+    globalElements.refreshAgentsBtn.disabled = true;
+    globalElements.refreshAgentsBtn.setAttribute('aria-busy', 'true');
+  }
+
   agentRefreshInFlight = (async () => {
     const next = await fetchAgents();
     agentRefreshInFlight = null;
+
+    if (globalElements.refreshAgentsBtn) {
+      globalElements.refreshAgentsBtn.disabled = roleState.role !== 'admin' || !uiState.authed;
+      globalElements.refreshAgentsBtn.removeAttribute('aria-busy');
+    }
 
     if (!Array.isArray(next) || next.length === 0) {
       if (prev.length > 0) {
@@ -526,6 +555,14 @@ function setAuthState(authed) {
   updateGlobalStatus();
   updateConnectionControls();
   paneManager.refreshChatEnabled();
+
+  if (authed && roleState.role === 'admin') {
+    startAgentAutoRefresh();
+  }
+  if (!authed) {
+    stopAgentAutoRefresh();
+  }
+
   if (globalElements.logoutBtn) {
     globalElements.logoutBtn.disabled = !authed;
     globalElements.logoutBtn.style.opacity = authed ? '1' : '0.5';
@@ -543,8 +580,14 @@ function setRole(role) {
 
   if (globalElements.refreshAgentsBtn) {
     globalElements.refreshAgentsBtn.hidden = role !== 'admin';
-    globalElements.refreshAgentsBtn.disabled = role !== 'admin';
+    globalElements.refreshAgentsBtn.disabled = role !== 'admin' || !uiState.authed;
     globalElements.refreshAgentsBtn.style.opacity = role === 'admin' ? '1' : '0.5';
+  }
+
+  if (role === 'admin') {
+    startAgentAutoRefresh();
+  } else {
+    stopAgentAutoRefresh();
   }
   if (role === 'guest') {
     roleState.guestPolicyInjected = false;
