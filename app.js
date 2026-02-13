@@ -3396,6 +3396,45 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     if (elements.scrollDownBtn) elements.scrollDownBtn.hidden = true;
 
     const isTimeline = pane.kind === 'timeline';
+    const extraControls = isTimeline
+      ? `
+          <label class="wq-field" style="min-width: 160px;">
+            <span class="wq-label">Range</span>
+            <select data-tl-range>
+              <option value="3600000">Last 1h</option>
+              <option value="21600000">Last 6h</option>
+              <option value="86400000" selected>Last 24h</option>
+              <option value="604800000">Last 7d</option>
+            </select>
+          </label>
+          <label class="wq-field" style="min-width: 160px;">
+            <span class="wq-label">Status</span>
+            <select data-tl-status>
+              <option value="all" selected>All</option>
+              <option value="success">Success</option>
+              <option value="fail">Failing</option>
+            </select>
+          </label>
+          <label class="wq-field" style="min-width: 220px;">
+            <span class="wq-label">Search</span>
+            <input data-tl-search type="text" placeholder="job name / id / text" />
+          </label>
+        `
+      : `
+          <label class="wq-field" style="min-width: 220px;">
+            <span class="wq-label">Search</span>
+            <input data-cron-search type="text" placeholder="job name / id" />
+          </label>
+          <label class="wq-field" style="min-width: 160px;">
+            <span class="wq-label">Filters</span>
+            <div style="display:flex; gap:10px; align-items:center; padding:6px 10px; border:1px solid rgba(255,255,255,0.06); border-radius:10px;">
+              <label style="display:flex; gap:6px; align-items:center;"><input type="checkbox" data-cron-only-failing /> failing</label>
+              <label style="display:flex; gap:6px; align-items:center;"><input type="checkbox" data-cron-only-disabled /> disabled</label>
+              <label style="display:flex; gap:6px; align-items:center;"><input type="checkbox" data-cron-due-soon /> due soon</label>
+            </div>
+          </label>
+        `;
+
     elements.thread.classList.add('cron-pane');
     elements.thread.innerHTML = `
       <div class="wq-toolbar">
@@ -3405,6 +3444,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
             <span class="wq-label">Agent</span>
             <select data-cron-agent></select>
           </label>
+          ${extraControls}
           <button data-cron-refresh class="secondary" type="button">Refresh</button>
         </div>
         <div class="hint" data-cron-statusline></div>
@@ -3420,6 +3460,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     const refreshBtn = elements.thread.querySelector('[data-cron-refresh]');
     const statusline = elements.thread.querySelector('[data-cron-statusline]');
     const body = elements.thread.querySelector('[data-cron-body]');
+    const cronSearchEl = elements.thread.querySelector('[data-cron-search]');
+    const cronOnlyFailingEl = elements.thread.querySelector('[data-cron-only-failing]');
+    const cronOnlyDisabledEl = elements.thread.querySelector('[data-cron-only-disabled]');
+    const cronDueSoonEl = elements.thread.querySelector('[data-cron-due-soon]');
+
+    const tlRangeEl = elements.thread.querySelector('[data-tl-range]');
+    const tlStatusEl = elements.thread.querySelector('[data-tl-status]');
+    const tlSearchEl = elements.thread.querySelector('[data-tl-search]');
 
     const renderAgentFilterOptions = () => {
       if (!agentSel) return;
@@ -3567,9 +3615,37 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         const took = Date.now() - startedAt;
 
         const agentFilter = String(agentSel?.value || 'all');
+        const search = String((isTimeline ? tlSearchEl?.value : cronSearchEl?.value) || '')
+          .trim()
+          .toLowerCase();
+        const onlyFailing = !isTimeline && Boolean(cronOnlyFailingEl?.checked);
+        const onlyDisabled = !isTimeline && Boolean(cronOnlyDisabledEl?.checked);
+        const dueSoon = !isTimeline && Boolean(cronDueSoonEl?.checked);
+        const dueSoonWindowMs = 15 * 60 * 1000;
+        const now = Date.now();
+
+        const isJobFailing = (job) => {
+          const last = String(job?.state?.lastStatus || '').toLowerCase();
+          return last.includes('fail') || last.includes('error');
+        };
+
+        const matchesSearch = (job) => {
+          if (!search) return true;
+          const hay = `${job?.name || ''} ${job?.id || ''} ${job?.agentId || ''}`.toLowerCase();
+          return hay.includes(search);
+        };
+
         const filtered = jobs.filter((job) => {
           const a = String(job.agentId || 'main').trim();
-          if (agentFilter !== 'all' && a !== agentFilter) return false;
+          if (agentFilter != 'all' && a != agentFilter) return false;
+          if (!matchesSearch(job)) return false;
+          if (onlyDisabled && job.enabled !== false) return false;
+          if (onlyFailing && !isJobFailing(job)) return false;
+          if (dueSoon) {
+            const n = Number(job?.state?.nextRunAtMs || 0);
+            if (!Number.isFinite(n) || n <= 0) return false;
+            if (n < now || n > now + dueSoonWindowMs) return false;
+          }
           return true;
         });
 
@@ -3585,8 +3661,16 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
           body.innerHTML = `<div class="cron-list">${filtered
             .map((job) => {
               const nextRun = fmtTime(job.state?.nextRunAtMs);
+              const lastRun = fmtTime(job.state?.lastRunAtMs || job.state?.lastRunAt || job.state?.lastRunTsMs);
               const lastStatus = String(job.state?.lastStatus || '');
               const enabled = job.enabled !== false;
+              const schedule = (() => {
+                const sch = job.schedule || {};
+                if (sch.kind === 'cron') return `cron:${sch.expr || ''}`;
+                if (sch.kind === 'every') return `every:${sch.everyMs || ''}ms`;
+                if (sch.kind === 'at') return `at:${sch.at || ''}`;
+                return sch.kind ? String(sch.kind) : '';
+              })();
               const id = String(job.id || '');
               return `<div class="cron-job" data-cron-job-card data-job-id="${escapeHtml(id)}">
                 <div class="cron-job__top">
@@ -3596,7 +3680,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
                     <span class="pill ${enabled ? 'pill--ok' : 'pill--warn'}">${enabled ? 'enabled' : 'disabled'}</span>
                   </div>
                 </div>
-                <div class="hint">${escapeHtml(id)} · next: ${escapeHtml(nextRun || '—')} · last: ${escapeHtml(lastStatus || '—')}</div>
+                <div class="hint">${escapeHtml(id)} · ${schedule ? escapeHtml(schedule) + ' · ' : ''}next: ${escapeHtml(nextRun || '—')} · last run: ${escapeHtml(lastRun || '—')} · last: ${escapeHtml(lastStatus || '—')}</div>
                 <div class="cron-actions" role="group" aria-label="Cron job actions">
                   <button type="button" class="secondary" data-cron-action="view" data-job-id="${escapeHtml(id)}">View</button>
                   <button type="button" class="secondary" data-cron-action="edit" data-job-id="${escapeHtml(id)}">Edit</button>
@@ -3615,30 +3699,71 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         }
 
         // Timeline: show recent runs (best-effort)
+        const rangeMs = Number(tlRangeEl?.value || 86400000);
+        const sinceMs = Number.isFinite(rangeMs) && rangeMs > 0 ? Date.now() - rangeMs : Date.now() - 86400000;
+        const wantStatus = String(tlStatusEl?.value || 'all');
+        const textFilter = String(tlSearchEl?.value || '').trim().toLowerCase();
+
+        const MAX_JOBS = 50;
+        const MAX_RUNS_PER_JOB = 50;
         const events = [];
-        for (const job of filtered.slice(0, 10)) {
-          const res = await pane.client.request('cron.runs', { id: job.id, limit: 10 });
+
+        const pickTs = (e) => {
+          if (e && typeof e.ts === 'number') return e.ts;
+          if (e && typeof e.endedAtMs === 'number') return e.endedAtMs;
+          if (e && typeof e.startedAtMs === 'number') return e.startedAtMs;
+          return 0;
+        };
+
+        for (const job of filtered.slice(0, MAX_JOBS)) {
+          const res = await pane.client.request('cron.runs', { id: job.id, limit: MAX_RUNS_PER_JOB });
           if (!res?.ok) continue;
           const entries = Array.isArray(res.payload?.entries) ? res.payload.entries : [];
-          entries.forEach((e) => {
-            if (!e || typeof e.ts !== 'number') return;
+          for (const e of entries) {
+            const ts = pickTs(e);
+            if (!ts || ts < sinceMs) continue;
+            const status = String(e?.status || e?.result || job?.state?.lastStatus || 'unknown');
+            const statusLc = status.toLowerCase();
+            const isFail = statusLc.includes('fail') || statusLc.includes('error');
+            const isOk = statusLc.includes('ok') || statusLc.includes('success');
+            if (wantStatus === 'fail' && !isFail) continue;
+            if (wantStatus === 'success' && !isOk) continue;
+
+            const summary = String(e?.summary || e?.message || e?.error || '').trim();
+            const hay = `${job?.name || ''} ${job?.id || ''} ${job?.agentId || ''} ${status} ${summary}`.toLowerCase();
+            if (textFilter && !hay.includes(textFilter)) continue;
+
             events.push({
-              ts: e.ts,
+              ts,
               jobId: String(job.id),
               jobName: job.name || job.id,
-              status: String(e.status || 'unknown')
+              agentId: job.agentId || 'main',
+              status,
+              summary
             });
-          });
+          }
         }
+
         events.sort((a, b) => b.ts - a.ts);
+        if (events.length === 0) {
+          body.innerHTML = `<div class="hint" style="padding: 10px 8px;">No events in range.</div>`;
+          return;
+        }
+
         body.innerHTML = `<div class="timeline">${events
-          .slice(0, 50)
+          .slice(0, 100)
           .map((ev, idx) => {
             const job = pane.cronJobsById?.[String(ev.jobId)] || null;
             const enabled = job ? job.enabled !== false : true;
             const nextRun = job ? fmtTime(job.state?.nextRunAtMs) : '';
-            const pillClass = ev.status === 'ok' || ev.status === 'success' ? 'pill--ok' : ev.status === 'error' || ev.status === 'fail' ? 'pill--warn' : 'pill--muted';
+            const pillClass = (() => {
+              const s = String(ev.status || '').toLowerCase();
+              if (s.includes('ok') || s.includes('success')) return 'pill--ok';
+              if (s.includes('fail') || s.includes('error')) return 'pill--warn';
+              return 'pill--muted';
+            })();
             const id = String(ev.jobId);
+            const summaryHtml = ev.summary ? `<div class="hint" style="margin-top:4px;">${escapeHtml(String(ev.summary))}</div>` : '';
             return `<div class="timeline-item" data-job-id="${escapeHtml(id)}" style="--timeline-index:${idx}">
               <div class="timeline-item__dot"></div>
               <div class="timeline-item__card">
@@ -3646,10 +3771,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
                   <div class="timeline-item__title">${escapeHtml(ev.jobName)}</div>
                   <div class="timeline-item__badges">
                     <span class="pill ${pillClass}">${escapeHtml(ev.status)}</span>
+                    <span class="pill pill--muted">${escapeHtml(ev.agentId || 'main')}</span>
                     <span class="pill ${enabled ? 'pill--ok' : 'pill--warn'}">${enabled ? 'enabled' : 'disabled'}</span>
                   </div>
                 </div>
                 <div class="hint">${escapeHtml(fmtTime(ev.ts))} · ${escapeHtml(id)}${nextRun ? ` · next: ${escapeHtml(nextRun)}` : ''}</div>
+                ${summaryHtml}
                 <div class="cron-actions" role="group" aria-label="Cron job actions">
                   <button type="button" class="secondary" data-cron-action="view" data-job-id="${escapeHtml(id)}">View</button>
                   <button type="button" class="secondary" data-cron-action="edit" data-job-id="${escapeHtml(id)}">Edit</button>
@@ -3669,6 +3796,15 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
     refreshBtn?.addEventListener('click', () => doRefresh());
     agentSel?.addEventListener('change', () => doRefresh());
+
+    cronSearchEl?.addEventListener('input', () => doRefresh());
+    cronOnlyFailingEl?.addEventListener('change', () => doRefresh());
+    cronOnlyDisabledEl?.addEventListener('change', () => doRefresh());
+    cronDueSoonEl?.addEventListener('change', () => doRefresh());
+
+    tlRangeEl?.addEventListener('change', () => doRefresh());
+    tlStatusEl?.addEventListener('change', () => doRefresh());
+    tlSearchEl?.addEventListener('input', () => doRefresh());
 
     pane.onConnectedHook = () => doRefresh();
 
