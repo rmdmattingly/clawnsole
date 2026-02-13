@@ -652,10 +652,13 @@ const workqueueState = {
   statusFilter: new Set(['ready', 'pending', 'claimed', 'in_progress']),
   items: [],
   selectedItemId: null,
+  sortKey: 'default',
+  sortDir: 'desc',
   leaseTicker: null,
   autoRefreshEnabled: true,
   autoRefreshIntervalMs: 15000,
-  autoRefreshTimer: null
+  autoRefreshTimer: null,
+  sortingBootstrapped: false
 };
 
 function openWorkqueue() {
@@ -702,6 +705,44 @@ function renderWorkqueueStatusFilters() {
   }
 }
 
+function ensureWorkqueueModalSorting() {
+  if (workqueueState.sortingBootstrapped) return;
+  workqueueState.sortingBootstrapped = true;
+
+  const btns = Array.from(document.querySelectorAll('[data-wq-modal-sort]'));
+  if (!btns.length) return;
+
+  const updateUi = () => {
+    btns.forEach((btn) => {
+      const key = btn.getAttribute('data-wq-modal-sort') || '';
+      const active = key && key === workqueueState.sortKey;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      btn.title = active ? (workqueueState.sortDir === 'asc' ? 'Sorted ascending' : 'Sorted descending') : '';
+    });
+  };
+
+  const setSort = (key) => {
+    const nextKey = String(key || 'default').trim() || 'default';
+    if (workqueueState.sortKey === nextKey) {
+      workqueueState.sortDir = workqueueState.sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      workqueueState.sortKey = nextKey;
+      // sensible initial directions
+      if (nextKey === 'title' || nextKey === 'claimedBy' || nextKey === 'status') workqueueState.sortDir = 'asc';
+      else workqueueState.sortDir = 'desc';
+    }
+    updateUi();
+    renderWorkqueueItems();
+  };
+
+  btns.forEach((btn) => {
+    btn.addEventListener('click', () => setSort(btn.getAttribute('data-wq-modal-sort')));
+  });
+
+  updateUi();
+}
+
 async function ensureWorkqueueBootstrapped() {
   // Load persisted UI prefs
   try {
@@ -721,6 +762,7 @@ async function ensureWorkqueueBootstrapped() {
   }
 
   renderWorkqueueStatusFilters();
+  ensureWorkqueueModalSorting();
   await fetchWorkqueueQueues();
   await fetchAndRenderWorkqueueItems();
   startWorkqueueLeaseTicker();
@@ -841,14 +883,17 @@ function renderWorkqueueItems() {
   const header = listRoot?.querySelector('.wq-list-header');
   if (header) header.style.display = 'none';
 
-  if (!workqueueState.items.length) {
+  const itemsRaw = Array.isArray(workqueueState.items) ? workqueueState.items : [];
+  const items = sortWorkqueueItems(itemsRaw, { sortKey: workqueueState.sortKey, sortDir: workqueueState.sortDir });
+
+  if (!items.length) {
     globalElements.wqListEmpty.hidden = false;
   } else {
     globalElements.wqListEmpty.hidden = true;
   }
 
   const cols = getWorkqueueBoardColumns();
-  const itemsByStatus = workqueueState.items.reduce((acc, it) => {
+  const itemsByStatus = items.reduce((acc, it) => {
     const st = String(it?.status || 'ready');
     if (!acc[st]) acc[st] = [];
     acc[st].push(it);
@@ -861,13 +906,13 @@ function renderWorkqueueItems() {
     col.className = 'wq-board-col';
     col.setAttribute('data-wq-col', colDef.status);
 
-    const items = Array.isArray(itemsByStatus[colDef.status]) ? itemsByStatus[colDef.status] : [];
+    const colItems = Array.isArray(itemsByStatus[colDef.status]) ? itemsByStatus[colDef.status] : [];
 
     const head = document.createElement('div');
     head.className = 'wq-board-col-header';
     head.innerHTML = `
       <div class="wq-board-col-title">${escapeHtml(colDef.label)}</div>
-      <div class="wq-board-col-count mono">${escapeHtml(String(items.length))}</div>
+      <div class="wq-board-col-count mono">${escapeHtml(String(colItems.length))}</div>
     `;
 
     const lane = document.createElement('div');
@@ -892,7 +937,7 @@ function renderWorkqueueItems() {
       }
     });
 
-    for (const it of items) {
+    for (const it of colItems) {
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'wq-card';
@@ -1210,7 +1255,7 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
   }
 }
 
-function sortWorkqueueItemsForPane(items, { sortKey = 'default', sortDir = 'desc' } = {}) {
+function sortWorkqueueItems(items, { sortKey = 'default', sortDir = 'desc' } = {}) {
   const dir = sortDir === 'asc' ? 1 : -1;
   const statusRank = (s) => {
     const v = String(s || '').trim();
@@ -1229,6 +1274,7 @@ function sortWorkqueueItemsForPane(items, { sortKey = 'default', sortDir = 'desc
     const n = Date.parse(String(v));
     return Number.isFinite(n) ? n : 0;
   };
+  const leaseOr0 = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
   return (Array.isArray(items) ? items : [])
     .map((it, idx) => ({ it, idx }))
@@ -1237,28 +1283,45 @@ function sortWorkqueueItemsForPane(items, { sortKey = 'default', sortDir = 'desc
       const B = b.it || {};
 
       // Default: status grouping (active first), then priority desc, then updatedAt desc, then createdAt desc.
-      if (sortKey === 'default' || sortKey === 'status') {
+      if (sortKey === 'default') {
         const sr = statusRank(A.status) - statusRank(B.status);
+        if (sr) return sr;
+        const pr = numOr0(B.priority) - numOr0(A.priority);
+        if (pr) return pr;
+        const ur = timeOr0(B.updatedAt) - timeOr0(A.updatedAt);
+        if (ur) return ur;
+        const cr = timeOr0(B.createdAt) - timeOr0(A.createdAt);
+        if (cr) return cr;
+        return a.idx - b.idx;
+      }
+
+      if (sortKey === 'status') {
+        const sr = (statusRank(A.status) - statusRank(B.status)) * dir;
         if (sr) return sr;
       }
 
-      if (sortKey === 'priority' || sortKey === 'default') {
-        const pr = (numOr0(B.priority) - numOr0(A.priority));
+      if (sortKey === 'priority') {
+        const pr = (numOr0(A.priority) - numOr0(B.priority)) * dir;
         if (pr) return pr;
       }
 
-      if (sortKey === 'updatedAt' || sortKey === 'default') {
-        const ur = (timeOr0(B.updatedAt) - timeOr0(A.updatedAt));
+      if (sortKey === 'updatedAt') {
+        const ur = (timeOr0(A.updatedAt) - timeOr0(B.updatedAt)) * dir;
         if (ur) return ur;
       }
 
-      if (sortKey === 'createdAt' || sortKey === 'default') {
-        const cr = (timeOr0(B.createdAt) - timeOr0(A.createdAt));
+      if (sortKey === 'createdAt') {
+        const cr = (timeOr0(A.createdAt) - timeOr0(B.createdAt)) * dir;
         if (cr) return cr;
       }
 
+      if (sortKey === 'leaseUntil') {
+        const lr = (leaseOr0(A.leaseUntil) - leaseOr0(B.leaseUntil)) * dir;
+        if (lr) return lr;
+      }
+
       if (sortKey === 'attempts') {
-        const ar = (numOr0(B.attempts) - numOr0(A.attempts));
+        const ar = (numOr0(A.attempts) - numOr0(B.attempts)) * dir;
         if (ar) return ar;
       }
 
@@ -1289,7 +1352,7 @@ function renderWorkqueuePaneItems(pane) {
   body.innerHTML = '';
 
   const itemsRaw = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
-  const items = sortWorkqueueItemsForPane(itemsRaw, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const items = sortWorkqueueItems(itemsRaw, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
   if (empty) empty.hidden = items.length > 0;
 
   const now = Date.now();

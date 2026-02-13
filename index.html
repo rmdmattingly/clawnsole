@@ -245,13 +245,13 @@
 
           <div class="wq-layout">
             <div class="wq-list" aria-label="Workqueue items">
-              <div class="wq-list-header">
-                <div class="wq-col title">Title</div>
-                <div class="wq-col status">Status</div>
-                <div class="wq-col prio">Prio</div>
-                <div class="wq-col attempts">Att</div>
-                <div class="wq-col claimedBy">Claimed By</div>
-                <div class="wq-col lease">Lease</div>
+              <div class="wq-list-header" role="group" aria-label="Sort workqueue items">
+                <button type="button" class="wq-list-sort" data-wq-modal-sort="title">Title</button>
+                <button type="button" class="wq-list-sort" data-wq-modal-sort="status">Status</button>
+                <button type="button" class="wq-list-sort" data-wq-modal-sort="priority">Prio</button>
+                <button type="button" class="wq-list-sort" data-wq-modal-sort="attempts">Att</button>
+                <button type="button" class="wq-list-sort" data-wq-modal-sort="claimedBy">Claimed By</button>
+                <button type="button" class="wq-list-sort" data-wq-modal-sort="leaseUntil">Lease</button>
               </div>
               <div id="wqListBody" class="wq-list-body"></div>
               <div id="wqListEmpty" class="hint" hidden>No items match.</div>
