@@ -390,6 +390,19 @@ body::before {
   display: none !important;
 }
 
+/* Cron/timeline panes are also full-height: they are data views, not chat panes. */
+.pane-kind-cron,
+.pane-kind-timeline {
+  --actions-height: 0px;
+}
+
+.pane-kind-cron .chat-input-row,
+.pane-kind-cron .scroll-down,
+.pane-kind-timeline .chat-input-row,
+.pane-kind-timeline .scroll-down {
+  display: none !important;
+}
+
 .pane-header {
   display: flex;
   align-items: center;

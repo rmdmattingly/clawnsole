@@ -306,13 +306,19 @@ test('admin can add cron + timeline panes', async ({ page }) => {
   await expect(page.locator('.pane-add-menu')).toBeVisible();
   await page.click('.pane-add-menu__item:text("Cron pane")');
   await expect(panes).toHaveCount(3);
-  await expect(panes.nth(2)).toContainText('Cron');
+  const cronPane = panes.nth(2);
+  await expect(cronPane).toContainText('Cron');
+  await expect(cronPane.locator('.chat-input-row')).toBeHidden();
+  await expect(cronPane.locator('[data-pane-input]')).toBeHidden();
 
   await page.click('#addPaneBtn');
   await expect(page.locator('.pane-add-menu')).toBeVisible();
   await page.click('.pane-add-menu__item:text("Timeline pane")');
   await expect(panes).toHaveCount(4);
-  await expect(panes.nth(3)).toContainText('Timeline');
+  const timelinePane = panes.nth(3);
+  await expect(timelinePane).toContainText('Timeline');
+  await expect(timelinePane.locator('.chat-input-row')).toBeHidden();
+  await expect(timelinePane.locator('[data-pane-input]')).toBeHidden();
 });
 
 
