@@ -282,6 +282,7 @@ test('add pane menu offers chat vs workqueue; workqueue pane has queue dropdown'
 
   const wqPane = page.locator('[data-pane] .wq-pane').first();
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
+  await expect(wqPane.locator('[data-wq-status-details]')).toBeVisible();
 });
 
 
