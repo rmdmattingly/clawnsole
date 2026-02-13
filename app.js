@@ -855,6 +855,95 @@ function renderWorkqueueInspect(item) {
     </div>
     ${item.lastError ? `<div class="wq-inspect-block"><div class="wq-inspect-label">Last error</div><pre class="wq-inspect-pre">${escapeHtml(String(item.lastError))}</pre></div>` : ''}
   `;
+
+  const actions = document.createElement('div');
+  actions.className = 'wq-inspect-actions';
+  actions.innerHTML = `
+    <button type="button" class="btn" data-wq-action="edit">Edit</button>
+    <button type="button" class="btn danger" data-wq-action="delete">Delete</button>
+  `;
+
+  const meta = root.querySelector('.wq-inspect-meta');
+  if (meta) meta.insertAdjacentElement('afterend', actions);
+  else root.prepend(actions);
+
+  const editBtn = actions.querySelector('[data-wq-action="edit"]');
+  const deleteBtn = actions.querySelector('[data-wq-action="delete"]');
+
+  editBtn?.addEventListener('click', () => workqueueEditItem(item));
+  deleteBtn?.addEventListener('click', () => workqueueDeleteItem(item));
+}
+
+async function workqueueEditItem(item) {
+  if (!item || !item.id) return;
+
+  const title = prompt('Edit title', String(item.title || ''));
+  if (title === null) return;
+
+  const instructions = prompt('Edit instructions', String(item.instructions || ''));
+  if (instructions === null) return;
+
+  const priorityRaw = prompt('Edit priority (number)', String(item.priority ?? '0'));
+  if (priorityRaw === null) return;
+  const priority = Number(priorityRaw);
+
+  const status = prompt('Edit status (ready|pending|claimed|in_progress|done|failed)', String(item.status || 'ready'));
+  if (status === null) return;
+
+  try {
+    const res = await fetch('/api/workqueue/update', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        itemId: item.id,
+        patch: {
+          title,
+          instructions,
+          priority: Number.isFinite(priority) ? priority : item.priority,
+          status
+        }
+      })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) throw new Error(data?.error || String(res.status));
+
+    addFeed('ok', 'workqueue', 'updated item');
+    // Refresh list + keep selection
+    await fetchAndRenderWorkqueueItems();
+    const updated = workqueueState.items.find((it) => it && it.id === item.id) || null;
+    if (updated) {
+      workqueueState.selectedItemId = updated.id;
+      renderWorkqueueItems();
+      renderWorkqueueInspect(updated);
+    }
+  } catch (err) {
+    addFeed('err', 'workqueue', 'failed to update item: ' + String(err));
+  }
+}
+
+async function workqueueDeleteItem(item) {
+  if (!item || !item.id) return;
+  const ok = confirm('Delete workqueue item?\n\n' + String(item.title || '') + '\n' + item.id);
+  if (!ok) return;
+
+  try {
+    const res = await fetch('/api/workqueue/delete', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId: item.id })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) throw new Error(data?.error || String(res.status));
+
+    addFeed('ok', 'workqueue', 'deleted item');
+    if (workqueueState.selectedItemId === item.id) workqueueState.selectedItemId = null;
+    await fetchAndRenderWorkqueueItems();
+    renderWorkqueueInspect(null);
+  } catch (err) {
+    addFeed('err', 'workqueue', 'failed to delete item: ' + String(err));
+  }
 }
 
 // --- Minimal Workqueue Pane (Issue #22c) ---

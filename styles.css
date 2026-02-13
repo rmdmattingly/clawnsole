@@ -1184,6 +1184,12 @@ button.send-btn .btn-icon {
   max-height: 520px;
 }
 
+.wq-inspect-actions {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 2px;
+}
+
 .wq-kv {
   display: grid;
   grid-template-columns: 110px 1fr;

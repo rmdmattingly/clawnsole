@@ -272,3 +272,23 @@ Errors:
 To keep the exposed API safe for remote admin UIs, the server intentionally does **not** expose mutation endpoints like delete/edit/transition.
 
 Server-side mutations beyond `enqueue` and `claim-next` should continue to happen via trusted local scripts/CLIs.
+
+### POST `/api/workqueue/update`
+
+Admin-only. Update a workqueue item.
+
+Body:
+
+```json
+{ "itemId": "...", "patch": { "title": "...", "instructions": "...", "priority": 50, "status": "pending" } }
+```
+
+### POST `/api/workqueue/delete`
+
+Admin-only. Delete a workqueue item.
+
+Body:
+
+```json
+{ "itemId": "..." }
+```
