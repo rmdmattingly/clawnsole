@@ -302,3 +302,30 @@ test('admin can add cron + timeline panes', async ({ page }) => {
   await expect(panes).toHaveCount(4);
   await expect(panes.nth(3)).toContainText('Timeline');
 });
+
+
+test('workqueue modal renders as kanban board and supports enqueue', async ({ page }) => {
+  test.skip(!!skipReason, skipReason);
+  await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await expect(page.locator('#workqueueBtn')).toBeVisible();
+  await page.click('#workqueueBtn');
+  await expect(page.locator('#workqueueModal')).toHaveClass(/open/);
+
+  // Select a queue (new installs may not have any items yet, so rely on defaults).
+  await page.selectOption('#wqQueueSelect', { label: 'dev-team' });
+
+  // Enqueue an item and ensure it appears in the Ready column.
+  await page.fill('#wqEnqueueTitle', 'kanban test item');
+  await page.fill('#wqEnqueueInstructions', 'do the thing');
+  await page.click('#wqEnqueueBtn');
+
+  const board = page.locator('#wqListBody.wq-board');
+  await expect(board).toBeVisible();
+  await expect(board.locator('.wq-board-col-title', { hasText: 'Ready' })).toHaveCount(1);
+  await expect(board.locator('.wq-card')).toContainText('kanban test item');
+});

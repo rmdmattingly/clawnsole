@@ -564,7 +564,12 @@ function createClawnsoleServer(options = {}) {
         const items = Array.isArray(state.items) ? state.items : [];
         const fromItems = items.map((it) => (it && it.queue ? String(it.queue).trim() : '')).filter(Boolean);
         const fromQueues = state.queues && typeof state.queues === 'object' ? Object.keys(state.queues) : [];
-        const set = new Set([...fromQueues, ...fromItems].map((q) => String(q).trim()).filter(Boolean));
+        const defaultQueues = String(process.env.CLAWNSOLE_DEFAULT_QUEUES ?? 'dev-team')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+
+        const set = new Set([...fromQueues, ...fromItems, ...defaultQueues].map((q) => String(q).trim()).filter(Boolean));
         const queues = Array.from(set).sort((a, b) => a.localeCompare(b));
         sendJson(res, 200, { ok: true, queues });
       } catch (err) {
