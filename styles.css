@@ -380,6 +380,16 @@ body::before {
   padding-bottom: 6px;
 }
 
+/* Workqueue pane should be full-height: never show chat composer UI in this pane. */
+.pane-kind-workqueue {
+  --actions-height: 0px;
+}
+
+.pane-kind-workqueue .chat-input-row,
+.pane-kind-workqueue .scroll-down {
+  display: none !important;
+}
+
 .pane-header {
   display: flex;
   align-items: center;
