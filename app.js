@@ -2758,10 +2758,25 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
             <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
           </label>
 
-          <label class="wq-field wq-status-field">
+          <div class="wq-field wq-status-field">
             <span class="wq-label">Status filter</span>
-            <input data-wq-status type="text" value="${escapeHtml(pane.workqueue.statusFilter.join(','))}" placeholder="ready,pending,claimed,in_progress" />
-          </label>
+            <div class="wq-status-multiselect" data-wq-status>
+              <div class="wq-status-selected" data-wq-status-selected aria-live="polite"></div>
+              <details class="wq-status-details" data-wq-status-details>
+                <summary type="button">Choose statuses…</summary>
+                <div class="wq-status-menu">
+                  <div class="wq-status-presets" role="group" aria-label="Status presets">
+                    <button type="button" class="secondary" data-wq-status-preset="default">Default</button>
+                    <button type="button" class="secondary" data-wq-status-preset="open">Open</button>
+                    <button type="button" class="secondary" data-wq-status-preset="active">Active</button>
+                    <button type="button" class="secondary" data-wq-status-preset="all">All</button>
+                    <button type="button" class="secondary" data-wq-status-clear>Clear</button>
+                  </div>
+                  <div class="wq-status-filters" data-wq-status-options></div>
+                </div>
+              </details>
+            </div>
+          </div>
 
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
 
@@ -2839,8 +2854,20 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
     const queueSelectEl = elements.thread.querySelector('[data-wq-queue-select]');
     const queueCustomEl = elements.thread.querySelector('[data-wq-queue-custom]');
-    const statusEl = elements.thread.querySelector('[data-wq-status]');
+    const statusRootEl = elements.thread.querySelector('[data-wq-status]');
+    const statusSelectedEl = elements.thread.querySelector('[data-wq-status-selected]');
+    const statusOptionsEl = elements.thread.querySelector('[data-wq-status-options]');
+    const statusDetailsEl = elements.thread.querySelector('[data-wq-status-details]');
+    const statusClearBtn = elements.thread.querySelector('[data-wq-status-clear]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
+
+    const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
+
+    const statusSet = new Set(
+      (Array.isArray(pane.workqueue?.statusFilter) && pane.workqueue.statusFilter.length ? pane.workqueue.statusFilter : DEFAULT_STATUSES)
+        .map((s) => String(s).trim())
+        .filter(Boolean)
+    );
 
     const getQueueValue = () => {
       const sel = String(queueSelectEl?.value || '').trim();
@@ -2848,16 +2875,61 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       return sel;
     };
 
+    const applyStatuses = async (next, { closeMenu = false } = {}) => {
+      statusSet.clear();
+      for (const s of next) statusSet.add(s);
+      pane.workqueue.statusFilter = Array.from(statusSet);
+      renderStatusMultiSelect();
+      if (closeMenu) statusDetailsEl?.removeAttribute('open');
+      await fetchAndRenderWorkqueueItemsForPane(pane);
+      paneManager.persistAdminPanes();
+    };
+
     const doRefresh = async () => {
       const q = getQueueValue() || 'dev-team';
       pane.workqueue.queue = q;
-      const statuses = (statusEl?.value || '')
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      pane.workqueue.statusFilter = statuses.length ? statuses : ['ready', 'pending', 'claimed', 'in_progress'];
+      if (!statusSet.size) {
+        for (const s of DEFAULT_STATUSES) statusSet.add(s);
+        pane.workqueue.statusFilter = Array.from(statusSet);
+        renderStatusMultiSelect();
+      }
       await fetchAndRenderWorkqueueItemsForPane(pane);
       paneManager.persistAdminPanes();
+    };
+
+    const renderStatusMultiSelect = () => {
+      if (!statusRootEl || !statusSelectedEl || !statusOptionsEl) return;
+
+      statusSelectedEl.innerHTML = '';
+      const selected = Array.from(statusSet);
+      if (selected.length) {
+        for (const s of selected) {
+          const chip = document.createElement('span');
+          chip.className = 'wq-pill';
+          chip.textContent = s;
+          statusSelectedEl.appendChild(chip);
+        }
+      } else {
+        const hint = document.createElement('span');
+        hint.className = 'hint';
+        hint.textContent = 'none (will show default on refresh)';
+        statusSelectedEl.appendChild(hint);
+      }
+
+      statusOptionsEl.innerHTML = '';
+      for (const s of WORKQUEUE_STATUSES) {
+        const id = `wq-pane-status-${pane.id}-${s}`;
+        const label = document.createElement('label');
+        label.className = 'wq-status-chip';
+        label.innerHTML = `<input type="checkbox" id="${id}" ${statusSet.has(s) ? 'checked' : ''} /> <span>${escapeHtml(s)}</span>`;
+        const checkbox = label.querySelector('input');
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked) statusSet.add(s);
+          else statusSet.delete(s);
+          applyStatuses(Array.from(statusSet));
+        });
+        statusOptionsEl.appendChild(label);
+      }
     };
 
     const populateQueueSelect = async () => {
@@ -2919,15 +2991,28 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       doRefresh();
     });
 
+    renderStatusMultiSelect();
     populateQueueSelect().then(() => doRefresh());
 
     refreshBtn?.addEventListener('click', () => doRefresh());
     queueCustomEl?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doRefresh();
     });
-    statusEl?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') doRefresh();
-    });
+
+    if (statusRootEl) {
+      const presetBtns = Array.from(statusRootEl.querySelectorAll('[data-wq-status-preset]'));
+      presetBtns.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const preset = String(btn.getAttribute('data-wq-status-preset') || 'default');
+          if (preset === 'open') return applyStatuses(['ready', 'pending'], { closeMenu: true });
+          if (preset === 'active') return applyStatuses(['claimed', 'in_progress'], { closeMenu: true });
+          if (preset === 'all') return applyStatuses(Array.from(WORKQUEUE_STATUSES), { closeMenu: true });
+          return applyStatuses(DEFAULT_STATUSES, { closeMenu: true });
+        });
+      });
+
+      statusClearBtn?.addEventListener('click', () => applyStatuses([]));
+    }
 
     // Sort controls (client-side): stable sorting with a status-grouping default.
     const sortBtns = Array.from(elements.thread.querySelectorAll('[data-wq-sort]'));
