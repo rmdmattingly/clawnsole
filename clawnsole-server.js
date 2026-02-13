@@ -742,6 +742,86 @@ function createClawnsoleServer(options = {}) {
       return;
     }
 
+
+    if (req.url === '/api/workqueue/update') {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      (async () => {
+        const payload = await readJsonBody(req, res);
+        if (!payload) return;
+        const itemId = String(payload.itemId || '').trim();
+        const patch = payload.patch && typeof payload.patch === 'object' ? payload.patch : {};
+
+        if (!itemId) {
+          sendJson(res, 400, { error: 'itemId_required' });
+          return;
+        }
+
+        try {
+          const { updateItem } = require('./lib/workqueue');
+          const item = updateItem(null, { itemId, patch });
+          sendJson(res, 200, { ok: true, item });
+        } catch (err) {
+          const code = err && err.code;
+          if (code === 'NOT_FOUND') {
+            sendJson(res, 404, { error: 'not_found' });
+            return;
+          }
+          if (code === 'INVALID_STATUS') {
+            sendJson(res, 400, { error: 'invalid_status' });
+            return;
+          }
+          sendJson(res, 500, { error: 'workqueue_error' });
+        }
+      })();
+      return;
+    }
+
+    if (req.url === '/api/workqueue/delete') {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      (async () => {
+        const payload = await readJsonBody(req, res);
+        if (!payload) return;
+        const itemId = String(payload.itemId || '').trim();
+
+        if (!itemId) {
+          sendJson(res, 400, { error: 'itemId_required' });
+          return;
+        }
+
+        try {
+          const { deleteItem } = require('./lib/workqueue');
+          const item = deleteItem(null, { itemId });
+          sendJson(res, 200, { ok: true, item });
+        } catch (err) {
+          const code = err && err.code;
+          if (code === 'NOT_FOUND') {
+            sendJson(res, 404, { error: 'not_found' });
+            return;
+          }
+          sendJson(res, 500, { error: 'workqueue_error' });
+        }
+      })();
+      return;
+    }
+
     if (req.url === '/api/workqueue/assignments') {
       if (!requireAuth(req, res)) return;
       if (req.clawnsoleRole !== 'admin') {

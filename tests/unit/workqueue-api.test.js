@@ -189,3 +189,57 @@ test('workqueue API: claim-next claims a ready item', async () => {
     server.close();
   }
 });
+
+test('workqueue API: update edits item fields', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  const it = enqueueItem(null, { queue: 'dev-team', title: 'old', instructions: 'old-i', priority: 1 });
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+    const res = await httpPostJson(
+      'http://127.0.0.1:' + port + '/api/workqueue/update',
+      { itemId: it.id, patch: { title: 'new', priority: 5, status: 'pending' } },
+      { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' }
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.json?.ok, true);
+    assert.equal(res.json?.item?.title, 'new');
+    assert.equal(res.json?.item?.priority, 5);
+    assert.equal(res.json?.item?.status, 'pending');
+  } finally {
+    server.close();
+  }
+});
+
+test('workqueue API: delete removes item', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  const it = enqueueItem(null, { queue: 'dev-team', title: 't1', instructions: 'do1', priority: 1 });
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+    const res = await httpPostJson(
+      'http://127.0.0.1:' + port + '/api/workqueue/delete',
+      { itemId: it.id },
+      { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' }
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.json?.ok, true);
+
+    const list = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/items?queue=dev-team`, {
+      Cookie: `clawnsole_auth=${cookie}; clawnsole_role=admin`
+    });
+    assert.equal(list.status, 200);
+    assert.equal(list.json?.ok, true);
+    assert.equal(list.json.items.length, 0);
+  } finally {
+    server.close();
+  }
+});
