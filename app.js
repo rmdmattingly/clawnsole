@@ -3087,6 +3087,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     const statusline = elements.thread.querySelector('[data-cron-statusline]');
     const body = elements.thread.querySelector('[data-cron-body]');
 
+    let cronJobsById = new Map();
+
     const renderAgentFilterOptions = () => {
       if (!agentSel) return;
       agentSel.innerHTML = '';
@@ -3127,6 +3129,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         if (!stRes?.ok) throw new Error(stRes?.error?.message || 'cron.status failed');
         if (!listRes?.ok) throw new Error(listRes?.error?.message || 'cron.list failed');
         const jobs = Array.isArray(listRes.payload?.jobs) ? listRes.payload.jobs : [];
+        cronJobsById = new Map(jobs.map((job) => [String(job?.id || ''), job]));
         const status = stRes.payload || {};
         const took = Date.now() - startedAt;
 
@@ -3148,8 +3151,16 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
               const nextRun = fmtTime(job.state?.nextRunAtMs);
               const lastStatus = String(job.state?.lastStatus || '');
               const enabled = job.enabled !== false;
+              const toggleLabel = enabled ? 'Disable' : 'Enable';
               return `<div class="wq-item" style="padding: 8px; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; margin: 6px 0;">
-                <div style="font-weight:600">${escapeHtml(job.name || job.id)}</div>
+                <div style="display:flex; gap: 10px; align-items:baseline; justify-content:space-between; flex-wrap:wrap;">
+                  <div style="font-weight:600">${escapeHtml(job.name || job.id)}</div>
+                  <div style="display:flex; gap: 6px; align-items:center; flex-wrap:wrap;">
+                    <button class="secondary" type="button" data-cron-action="toggle" data-cron-id="${escapeHtml(job.id)}">${escapeHtml(toggleLabel)}</button>
+                    <button class="secondary" type="button" data-cron-action="edit" data-cron-id="${escapeHtml(job.id)}">Edit</button>
+                    <button class="secondary" type="button" data-cron-action="delete" data-cron-id="${escapeHtml(job.id)}">Delete</button>
+                  </div>
+                </div>
                 <div class="hint">${escapeHtml(job.id)} · ${escapeHtml(job.agentId || 'main')} · ${enabled ? 'enabled' : 'disabled'} · next: ${escapeHtml(nextRun || '—')} · last: ${escapeHtml(lastStatus || '—')}</div>
               </div>`;
             })
@@ -3184,6 +3195,71 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
     refreshBtn?.addEventListener('click', () => doRefresh());
     agentSel?.addEventListener('change', () => doRefresh());
+
+    body?.addEventListener('click', async (event) => {
+      if (isTimeline) return;
+      const btn = event.target?.closest ? event.target.closest('button[data-cron-action]') : null;
+      if (!btn) return;
+      const action = String(btn.getAttribute('data-cron-action') || '').trim();
+      const id = String(btn.getAttribute('data-cron-id') || '').trim();
+      if (!action || !id) return;
+
+      const job = cronJobsById.get(id) || null;
+      if (!job) {
+        if (statusline) statusline.textContent = 'Unknown cron job: ' + id;
+        return;
+      }
+
+      try {
+        btn.disabled = true;
+        if (statusline) statusline.textContent = 'Working…';
+
+        if (action === 'toggle') {
+          const enabled = job.enabled !== false;
+          const res = await pane.client.request('cron.update', { id, patch: { enabled: !enabled } });
+          if (!res?.ok) throw new Error(res?.error?.message || 'cron.update failed');
+        } else if (action === 'delete') {
+          if (!window.confirm(`Delete cron job ${job.name || id}? This cannot be undone.`)) return;
+          const res = await pane.client.request('cron.remove', { id });
+          if (!res?.ok) throw new Error(res?.error?.message || 'cron.remove failed');
+        } else if (action === 'edit') {
+          const patchSeed = {
+            name: job.name || '',
+            enabled: job.enabled !== false,
+            schedule: job.schedule || null,
+            payload: job.payload || null,
+            sessionTarget: job.sessionTarget || null,
+            delivery: job.delivery || null
+          };
+          const raw = window.prompt(
+            'Edit this cron job by providing a JSON patch.\n\nFields typically include: name, enabled, schedule, payload, sessionTarget, delivery.\n\nBlank / Cancel = no change.',
+            JSON.stringify(patchSeed, null, 2)
+          );
+          if (raw === null) return;
+          const trimmed = String(raw || '').trim();
+          if (!trimmed) return;
+          let patch;
+          try {
+            patch = JSON.parse(trimmed);
+          } catch (err) {
+            throw new Error('Invalid JSON: ' + String(err?.message || err));
+          }
+          if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+            throw new Error('Patch must be a JSON object');
+          }
+          const res = await pane.client.request('cron.update', { id, patch });
+          if (!res?.ok) throw new Error(res?.error?.message || 'cron.update failed');
+        }
+
+        await doRefresh();
+      } catch (err) {
+        if (statusline) statusline.textContent = err ? String(err) : 'Action failed';
+      } finally {
+        try {
+          btn.disabled = false;
+        } catch {}
+      }
+    });
 
     pane.onConnectedHook = () => doRefresh();
 
