@@ -3881,15 +3881,21 @@ const paneManager = {
     if (this.panes.length >= this.maxPanes) return;
 
     const rawKind = String(kind || 'chat').trim().toLowerCase();
-    const normalizedKind = rawKind === 'workqueue' || rawKind === 'cron' || rawKind === 'timeline'
-      ? rawKind
-      : rawKind.startsWith('w')
-        ? 'workqueue'
-        : rawKind.startsWith('c')
-          ? 'cron'
-          : rawKind.startsWith('t')
-            ? 'timeline'
-            : 'chat';
+
+    // IMPORTANT: don't accidentally coerce "chat" -> "cron".
+    // ("chat" starts with "c"; we only want to treat "cron" as cron.)
+    const normalizedKind =
+      rawKind === 'chat'
+        ? 'chat'
+        : rawKind === 'workqueue' || rawKind === 'cron' || rawKind === 'timeline'
+          ? rawKind
+          : rawKind.startsWith('w')
+            ? 'workqueue'
+            : rawKind === 'c' || rawKind.startsWith('cr')
+              ? 'cron'
+              : rawKind === 't' || rawKind.startsWith('ti')
+                ? 'timeline'
+                : 'chat';
 
     if (normalizedKind === 'workqueue') {
       const pane = createPane({
