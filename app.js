@@ -665,6 +665,8 @@ function openWorkqueue() {
   if (roleState.role !== 'admin') return;
   globalElements.workqueueModal?.classList.add('open');
   globalElements.workqueueModal?.setAttribute('aria-hidden', 'false');
+  // Sorting wiring is synchronous; bootstrap it immediately so UI tests can click sort buttons deterministically.
+  ensureWorkqueueModalSorting();
   ensureWorkqueueBootstrapped();
   startWorkqueueAutoRefresh();
 }
@@ -707,10 +709,11 @@ function renderWorkqueueStatusFilters() {
 
 function ensureWorkqueueModalSorting() {
   if (workqueueState.sortingBootstrapped) return;
-  workqueueState.sortingBootstrapped = true;
 
   const btns = Array.from(document.querySelectorAll('[data-wq-modal-sort]'));
   if (!btns.length) return;
+
+  workqueueState.sortingBootstrapped = true;
 
   const updateUi = () => {
     btns.forEach((btn) => {
