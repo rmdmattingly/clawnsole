@@ -1,165 +1,10 @@
-const { test, expect } = require('@playwright/test');
-const { spawn } = require('child_process');
-const http = require('http');
+const { test, expect } = require('./ui/fixtures');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 
-function getFreePort(host = '127.0.0.1') {
-  return new Promise((resolve, reject) => {
-    const server = http.createServer();
-    server.listen(0, host, () => {
-      const addr = server.address();
-      const port = addr && typeof addr === 'object' ? addr.port : null;
-      server.close(() => resolve(port));
-    });
-    server.on('error', reject);
-  });
-}
-
-function waitForHttp(url, timeoutMs = 10000, proc, label) {
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const attempt = () => {
-      http
-        .get(url, (res) => {
-          res.resume();
-          resolve();
-        })
-        .on('error', () => {
-          if (Date.now() - start > timeoutMs) {
-            let details = '';
-            if (proc) {
-              const stdout = proc.__stdout || '';
-              const stderr = proc.__stderr || '';
-              if (stdout || stderr) {
-                details = `\n${label || 'process'} output:\n${stdout}${stderr}`;
-              }
-              if (proc.exitCode !== null && proc.exitCode !== undefined) {
-                details += `\n${label || 'process'} exit code: ${proc.exitCode}`;
-              }
-            }
-            reject(new Error(`timeout waiting for ${url}${details}`));
-            return;
-          }
-          setTimeout(attempt, 250);
-        });
-    };
-    attempt();
-  });
-}
-
-function captureOutput(proc) {
-  proc.__stdout = '';
-  proc.__stderr = '';
-  proc.stdout?.on('data', (chunk) => {
-    proc.__stdout += chunk.toString();
-  });
-  proc.stderr?.on('data', (chunk) => {
-    proc.__stderr += chunk.toString();
-  });
-  return proc;
-}
-
-let serverProc;
-let gatewayProc;
-let tempHome;
-let skipReason = '';
-let serverPort;
-let gatewayPort;
-
-test.beforeAll(async () => {
-  tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'clawnsole-test-'));
-  gatewayPort = await getFreePort();
-  serverPort = await getFreePort();
-
-  const openclawDir = path.join(tempHome, '.openclaw');
-  fs.mkdirSync(openclawDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(openclawDir, 'openclaw.json'),
-    JSON.stringify(
-      {
-        gateway: {
-          port: gatewayPort,
-          auth: { token: 'test-token', mode: 'token' }
-        }
-      },
-      null,
-      2
-    )
-  );
-  fs.writeFileSync(
-    path.join(openclawDir, 'clawnsole.json'),
-    JSON.stringify(
-      {
-        adminPassword: 'admin',
-        authVersion: 'test'
-      },
-      null,
-      2
-    )
-  );
-
-  try {
-    gatewayProc = captureOutput(
-      spawn('node', ['scripts/mock-gateway.js'], {
-        env: { ...process.env, HOME: tempHome, MOCK_GATEWAY_PORT: String(gatewayPort) },
-        stdio: ['ignore', 'pipe', 'pipe']
-      })
-    );
-    gatewayProc.on('exit', (code, signal) => {
-      // eslint-disable-next-line no-console
-      console.log(`mock-gateway exited code=${code} signal=${signal}`);
-      if (gatewayProc?.__stdout || gatewayProc?.__stderr) {
-        // eslint-disable-next-line no-console
-        console.log(`mock-gateway output:\n${gatewayProc.__stdout || ''}${gatewayProc.__stderr || ''}`);
-      }
-    });
-    await waitForHttp(`http://127.0.0.1:${gatewayPort}`, 10000, gatewayProc, 'mock-gateway');
-  } catch (err) {
-    const message = String(err);
-    if (message.includes('EPERM') || message.includes('operation not permitted')) {
-      skipReason = 'Local environment disallows binding to ports (EPERM).';
-      return;
-    }
-    throw err;
-  }
-
-  try {
-    serverProc = captureOutput(
-      spawn('node', ['server.js'], {
-        // Force IPv4 bind; some CI environments bind IPv6-only by default and 127.0.0.1 then refuses.
-        env: { ...process.env, HOME: tempHome, PORT: String(serverPort), HOST: '127.0.0.1' },
-        stdio: ['ignore', 'pipe', 'pipe']
-      })
-    );
-    serverProc.on('exit', (code, signal) => {
-      // eslint-disable-next-line no-console
-      console.log(`clawnsole server exited code=${code} signal=${signal}`);
-      if (serverProc?.__stdout || serverProc?.__stderr) {
-        // eslint-disable-next-line no-console
-        console.log(`clawnsole server output:\n${serverProc.__stdout || ''}${serverProc.__stderr || ''}`);
-      }
-    });
-    await waitForHttp(`http://127.0.0.1:${serverPort}/meta`, 10000, serverProc, 'clawnsole');
-  } catch (err) {
-    const message = String(err);
-    if (message.includes('EPERM') || message.includes('operation not permitted')) {
-      skipReason = 'Local environment disallows binding to ports (EPERM).';
-      return;
-    }
-    throw err;
-  }
-});
-
-test.afterAll(() => {
-  if (serverProc) serverProc.kill('SIGTERM');
-  if (gatewayProc) gatewayProc.kill('SIGTERM');
-});
-
-test('admin login persists, send/receive, upload attachment', async ({ page }, testInfo) => {
+test('admin login persists, send/receive, upload attachment', async ({ page, clawnsole }, testInfo) => {
   test.setTimeout(180000);
-  test.skip(!!skipReason, skipReason);
+  test.skip(!!clawnsole.skipReason, clawnsole.skipReason);
 
   // Surface browser-side failures in CI logs (helps diagnose ws connect issues).
   page.on('console', (msg) => {
@@ -173,7 +18,7 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
     } catch {}
   });
 
-  await page.goto(`http://127.0.0.1:${serverPort}/`);
+  await page.goto(`${clawnsole.serverUrl}/`);
 
   // iOS Safari will auto-zoom focused inputs when font-size < 16px.
   const fontSizes = await page.evaluate(() => {
@@ -199,7 +44,7 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
 
   // Agent list refresh should not require a full page reload.
   // Update the underlying openclaw.json and click refresh; the agent select should populate.
-  const openclawConfigPath = path.join(tempHome, '.openclaw', 'openclaw.json');
+  const openclawConfigPath = path.join(clawnsole.tempHome, '.openclaw', 'openclaw.json');
   const openclawCfg = JSON.parse(fs.readFileSync(openclawConfigPath, 'utf8'));
   openclawCfg.agents = {
     defaults: { workspace: '' },
@@ -256,16 +101,11 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   await expect(page.locator('#rolePill')).toContainText('signed in');
 });
 
-test('add pane menu offers chat vs workqueue; workqueue pane has queue dropdown', async ({ page }) => {
+test('add pane menu offers chat vs workqueue; workqueue pane has queue dropdown', async ({ page, clawnsole }) => {
   test.setTimeout(180000);
-  test.skip(!!skipReason, skipReason);
+  test.skip(!!clawnsole.skipReason, clawnsole.skipReason);
 
-  await page.goto(`http://127.0.0.1:${serverPort}/`);
-  await page.fill('#loginPassword', 'admin');
-  await page.click('#loginBtn');
-  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
-
-  await page.waitForSelector('[data-pane] [data-pane-input]', { timeout: 90000 });
+  await clawnsole.gotoAndLoginAdmin(page);
 
   const beforeCount = await page.locator('[data-pane]').count();
 
@@ -285,14 +125,11 @@ test('add pane menu offers chat vs workqueue; workqueue pane has queue dropdown'
   await expect(wqPane.locator('[data-wq-status-details]')).toBeVisible();
 });
 
-test('workqueue modal has sortable list headers', async ({ page }) => {
+test('workqueue modal has sortable list headers', async ({ page, clawnsole }) => {
   test.setTimeout(180000);
-  test.skip(!!skipReason, skipReason);
+  test.skip(!!clawnsole.skipReason, clawnsole.skipReason);
 
-  await page.goto(`http://127.0.0.1:${serverPort}/`);
-  await page.fill('#loginPassword', 'admin');
-  await page.click('#loginBtn');
-  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await clawnsole.gotoAndLoginAdmin(page);
 
   await page.click('#workqueueBtn');
   await expect(page.locator('#workqueueModal')).toHaveClass(/open/);
@@ -309,14 +146,10 @@ test('workqueue modal has sortable list headers', async ({ page }) => {
   await expect(prioSort).toHaveAttribute('data-wq-modal-sort', 'priority');
 });
 
-test('admin can add cron + timeline panes', async ({ page }) => {
-  test.skip(!!skipReason, skipReason);
-  await page.goto(`http://127.0.0.1:${serverPort}/`);
+test('admin can add cron + timeline panes', async ({ page, clawnsole }) => {
+  test.skip(!!clawnsole.skipReason, clawnsole.skipReason);
 
-  await page.fill('#loginPassword', 'admin');
-  await page.click('#loginBtn');
-  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
-  await page.waitForSelector('[data-pane] [data-pane-input]', { timeout: 90000 });
+  await clawnsole.gotoAndLoginAdmin(page);
 
   page.on('dialog', (dialog) => {
     throw new Error(`unexpected dialog: ${dialog.type()} ${dialog.message()}`);
@@ -344,14 +177,10 @@ test('admin can add cron + timeline panes', async ({ page }) => {
   await expect(timelinePane.locator('[data-pane-input]')).toBeHidden();
 });
 
+test('workqueue modal renders as kanban board and supports enqueue', async ({ page, clawnsole }) => {
+  test.skip(!!clawnsole.skipReason, clawnsole.skipReason);
 
-test('workqueue modal renders as kanban board and supports enqueue', async ({ page }) => {
-  test.skip(!!skipReason, skipReason);
-  await page.goto(`http://127.0.0.1:${serverPort}/`);
-
-  await page.fill('#loginPassword', 'admin');
-  await page.click('#loginBtn');
-  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await clawnsole.gotoAndLoginAdmin(page);
 
   await expect(page.locator('#workqueueBtn')).toBeVisible();
   await page.click('#workqueueBtn');
