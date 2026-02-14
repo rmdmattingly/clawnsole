@@ -11,12 +11,17 @@
 
 const { test, expect } = require('@playwright/test');
 
+const { installPageFailureAssertions } = require('./helpers/pw-assertions');
+
 test.describe('@deploy Clawnsole deploy e2e', () => {
   test('login as admin, connect, send prompt, receive assistant response, remain logged in', async ({ page }) => {
     const baseUrl = process.env.BASE_URL || process.env.CLAWNSOLE_BASE_URL || '';
     const adminPassword = process.env.ADMIN_PASSWORD || process.env.CLAWNSOLE_ADMIN_PASSWORD || 'admin';
 
     test.skip(!baseUrl, 'deploy e2e requires BASE_URL (or CLAWNSOLE_BASE_URL)');
+
+    const appOrigin = new URL(baseUrl).origin;
+    const guards = installPageFailureAssertions(page, { appOrigin });
 
     // Prefer /admin route for explicit role.
     await page.goto(`${baseUrl.replace(/\/$/, '')}/admin`, { waitUntil: 'domcontentloaded' });
@@ -54,5 +59,8 @@ test.describe('@deploy Clawnsole deploy e2e', () => {
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.locator('#loginOverlay')).not.toHaveClass(/open/, { timeout: 20000 });
     await expect(page.locator('#rolePill')).toContainText(/signed in/i, { timeout: 20000 });
+
+    await guards.assertNoFailures();
+    guards.dispose();
   });
 });
