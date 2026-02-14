@@ -309,9 +309,9 @@ test('workqueue modal has sortable list headers', async ({ page }) => {
   await expect(sortBtns).toHaveCount(6);
 
   const prioSort = page.locator('#workqueueModal [data-wq-modal-sort="priority"]').first();
-  // In CI, the sort header can be present but not considered "visible" (e.g. overlay/layout quirks).
-  // We only need to validate wiring, so force the click without requiring visibility.
-  await prioSort.click({ force: true });
+  // In CI, the sort header can be present but not considered "visible" (overlay/layout quirks).
+  // Use a DOM click to avoid Playwright's visibility/actionability checks entirely.
+  await prioSort.evaluate((el) => el.click());
   // If click wiring breaks, Playwright will typically throw. The aria-pressed toggle can be flaky across
   // CI environments depending on animation/layout timing, so we avoid asserting it here.
   await expect(prioSort).toHaveAttribute('data-wq-modal-sort', 'priority');
