@@ -109,6 +109,8 @@ function showToast(message, { kind = 'info', timeoutMs = 2600 } = {}) {
   el.textContent = text;
   const id = ++toastSeq;
   el.dataset.toastId = String(id);
+  el.setAttribute('data-testid', 'toast');
+  el.dataset.toastKind = kind;
 
   globalElements.toastHost.appendChild(el);
 

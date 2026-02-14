@@ -28,12 +28,16 @@ test('admin login persists, send/receive, upload attachment', async ({ page, cla
     expect(Math.round(size)).toBeGreaterThanOrEqual(16);
   }
 
-  await page.fill('#loginPassword', 'admin');
-  await page.click('#loginBtn');
+  await page.getByTestId('login-password').fill('admin');
+  await page.getByTestId('login-button').click();
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   // In CI the websocket handshake can be slower; wait longer for the pane to report connected.
-  await page.waitForSelector('[data-pane] [data-pane-input]', { timeout: 90000 });
+  await page
+    .getByTestId('pane')
+    .first()
+    .getByTestId('pane-input')
+    .waitFor({ state: 'visible', timeout: 90000 });
 
   // Agent list refresh should not require a full page reload.
   // Update the underlying openclaw.json and click refresh; the agent select should populate.
@@ -48,30 +52,30 @@ test('admin login persists, send/receive, upload attachment', async ({ page, cla
   await expect(page.locator('#refreshAgentsBtn')).toBeVisible();
   await page.click('#refreshAgentsBtn');
 
-  const pane = page.locator('[data-pane]').first();
-  await expect(pane.locator('[data-pane-agent-select] option[value="ops"]')).toHaveCount(1);
+  const pane = page.getByTestId('pane').first();
+  await expect(pane.getByTestId('pane-agent-select').locator('option[value="ops"]')).toHaveCount(1);
 
-  await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+  await expect(pane.getByTestId('pane-send')).toBeEnabled({ timeout: 90000 });
 
   // Workqueue pane should not render the chat composer UI.
   await expect(page.locator('#addPaneBtn')).toBeVisible();
   await page.click('#addPaneBtn');
   await page.getByRole('button', { name: 'Workqueue pane' }).click();
 
-  const panes = page.locator('[data-pane]');
+  const panes = page.getByTestId('pane');
   const wqPane = panes.last();
   await expect(wqPane.locator('.wq-pane')).toHaveCount(1);
   await expect(wqPane.locator('.chat-input-row')).toBeHidden();
-  await expect(wqPane.locator('[data-pane-input]')).toBeHidden();
+  await expect(wqPane.getByTestId('pane-input')).toBeHidden();
 
   const paneFontSize = await page.evaluate(() => {
-    const el = document.querySelector('[data-pane] [data-pane-input]');
+    const el = document.querySelector('[data-testid="pane"] [data-testid="pane-input"]');
     return el ? getComputedStyle(el).fontSize : '';
   });
   expect(Math.round(Number.parseFloat(paneFontSize))).toBeGreaterThanOrEqual(16);
 
-  await pane.locator('[data-pane-input]').fill('hello');
-  await pane.locator('[data-pane-send]').click();
+  await pane.getByTestId('pane-input').fill('hello');
+  await pane.getByTestId('pane-send').click();
 
   // Queued/sending indicator should be visible before we receive the assistant reply.
   await expect(pane.locator('[data-chat-role="user"]').last().locator('.chat-meta')).toContainText(
@@ -82,16 +86,16 @@ test('admin login persists, send/receive, upload attachment', async ({ page, cla
 
   const testFile = testInfo.outputPath('upload.txt');
   fs.writeFileSync(testFile, 'upload test');
-  await pane.locator('[data-pane-file-input]').setInputFiles(testFile);
-  await expect(pane.locator('[data-pane-attachment-list]')).toContainText('upload.txt');
+  await pane.getByTestId('pane-attachment-input').setInputFiles(testFile);
+  await expect(pane.getByTestId('pane-attachment-list')).toContainText('upload.txt');
 
-  await pane.locator('[data-pane-input]').fill('with file');
-  await pane.locator('[data-pane-send]').click();
+  await pane.getByTestId('pane-input').fill('with file');
+  await pane.getByTestId('pane-send').click();
   await expect(pane.locator('[data-chat-role="user"]').last()).toContainText('with file');
 
   await page.reload();
-  await expect(page.locator('#loginOverlay')).not.toHaveClass(/open/);
-  await expect(page.locator('#rolePill')).toContainText('signed in');
+  await expect(page.getByTestId('login-overlay')).not.toHaveClass(/open/);
+  await expect(page.getByTestId('role-pill')).toContainText('signed in');
 
   await guards.assertNoFailures();
   guards.dispose();
@@ -107,7 +111,7 @@ test('add pane menu offers chat vs workqueue; workqueue pane has queue dropdown'
 
   await clawnsole.gotoAndLoginAdmin(page);
 
-  const beforeCount = await page.locator('[data-pane]').count();
+  const beforeCount = await page.getByTestId('pane').count();
 
   await page.click('#addPaneBtn');
   await expect(page.locator('.pane-add-menu')).toBeVisible();
@@ -116,11 +120,11 @@ test('add pane menu offers chat vs workqueue; workqueue pane has queue dropdown'
 
   await page.click('.pane-add-menu__item:text("Workqueue pane")');
 
-  await expect(page.locator('[data-pane] .wq-pane')).toHaveCount(1);
-  const afterCount = await page.locator('[data-pane]').count();
+  await expect(page.getByTestId('pane').locator('.wq-pane')).toHaveCount(1);
+  const afterCount = await page.getByTestId('pane').count();
   expect(afterCount).toBe(beforeCount + 1);
 
-  const wqPane = page.locator('[data-pane] .wq-pane').first();
+  const wqPane = page.getByTestId('pane').locator('.wq-pane').first();
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
   await expect(wqPane.locator('[data-wq-status-details]')).toBeVisible();
 
@@ -169,7 +173,7 @@ test('admin can add cron + timeline panes', async ({ page, clawnsole }) => {
     throw new Error(`unexpected dialog: ${dialog.type()} ${dialog.message()}`);
   });
 
-  const panes = page.locator('[data-pane]');
+  const panes = page.getByTestId('pane');
   await expect(panes).toHaveCount(2);
 
   await page.click('#addPaneBtn');
@@ -179,7 +183,7 @@ test('admin can add cron + timeline panes', async ({ page, clawnsole }) => {
   const cronPane = panes.nth(2);
   await expect(cronPane).toContainText('Cron');
   await expect(cronPane.locator('.chat-input-row')).toBeHidden();
-  await expect(cronPane.locator('[data-pane-input]')).toBeHidden();
+  await expect(cronPane.getByTestId('pane-input')).toBeHidden();
 
   await page.click('#addPaneBtn');
   await expect(page.locator('.pane-add-menu')).toBeVisible();
@@ -188,7 +192,7 @@ test('admin can add cron + timeline panes', async ({ page, clawnsole }) => {
   const timelinePane = panes.nth(3);
   await expect(timelinePane).toContainText('Timeline');
   await expect(timelinePane.locator('.chat-input-row')).toBeHidden();
-  await expect(timelinePane.locator('[data-pane-input]')).toBeHidden();
+  await expect(timelinePane.getByTestId('pane-input')).toBeHidden();
 
   await guards.assertNoFailures();
   guards.dispose();
