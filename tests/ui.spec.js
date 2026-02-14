@@ -5,6 +5,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+const { installPageFailureAssertions } = require('./helpers/pw-assertions');
+
 function getFreePort(host = '127.0.0.1') {
   return new Promise((resolve, reject) => {
     const server = http.createServer();
@@ -161,16 +163,8 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   test.setTimeout(180000);
   test.skip(!!skipReason, skipReason);
 
-  // Surface browser-side failures in CI logs (helps diagnose ws connect issues).
-  page.on('console', (msg) => {
-    try {
-      console.log(`[ui-console:${msg.type()}] ${msg.text()}`);
-    } catch {}
-  });
-  page.on('pageerror', (err) => {
-    try {
-      console.log(`[ui-pageerror] ${String(err && err.stack ? err.stack : err)}`);
-    } catch {}
+  const guards = installPageFailureAssertions(page, {
+    appOrigin: `http://127.0.0.1:${serverPort}`
   });
 
   await page.goto(`http://127.0.0.1:${serverPort}/`);
@@ -254,11 +248,18 @@ test('admin login persists, send/receive, upload attachment', async ({ page }, t
   await page.reload();
   await expect(page.locator('#loginOverlay')).not.toHaveClass(/open/);
   await expect(page.locator('#rolePill')).toContainText('signed in');
+
+  await guards.assertNoFailures();
+  guards.dispose();
 });
 
 test('add pane menu offers chat vs workqueue; workqueue pane has queue dropdown', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!skipReason, skipReason);
+
+  const guards = installPageFailureAssertions(page, {
+    appOrigin: `http://127.0.0.1:${serverPort}`
+  });
 
   await page.goto(`http://127.0.0.1:${serverPort}/`);
   await page.fill('#loginPassword', 'admin');
@@ -283,11 +284,18 @@ test('add pane menu offers chat vs workqueue; workqueue pane has queue dropdown'
   const wqPane = page.locator('[data-pane] .wq-pane').first();
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
   await expect(wqPane.locator('[data-wq-status-details]')).toBeVisible();
+
+  await guards.assertNoFailures();
+  guards.dispose();
 });
 
 test('workqueue modal has sortable list headers', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!skipReason, skipReason);
+
+  const guards = installPageFailureAssertions(page, {
+    appOrigin: `http://127.0.0.1:${serverPort}`
+  });
 
   await page.goto(`http://127.0.0.1:${serverPort}/`);
   await page.fill('#loginPassword', 'admin');
@@ -301,16 +309,24 @@ test('workqueue modal has sortable list headers', async ({ page }) => {
   await expect(sortBtns).toHaveCount(6);
 
   const prioSort = page.locator('#workqueueModal [data-wq-modal-sort="priority"]').first();
-  // In CI, the sort header can be present but not considered "visible" (e.g. overlay/layout quirks).
-  // We only need to validate wiring, so force the click without requiring visibility.
-  await prioSort.click({ force: true });
+  // In CI, the sort header can be present but not considered "visible" (overlay/layout quirks).
+  // Use a DOM click to avoid Playwright's visibility/actionability checks entirely.
+  await prioSort.evaluate((el) => el.click());
   // If click wiring breaks, Playwright will typically throw. The aria-pressed toggle can be flaky across
   // CI environments depending on animation/layout timing, so we avoid asserting it here.
   await expect(prioSort).toHaveAttribute('data-wq-modal-sort', 'priority');
+
+  await guards.assertNoFailures();
+  guards.dispose();
 });
 
 test('admin can add cron + timeline panes', async ({ page }) => {
   test.skip(!!skipReason, skipReason);
+
+  const guards = installPageFailureAssertions(page, {
+    appOrigin: `http://127.0.0.1:${serverPort}`
+  });
+
   await page.goto(`http://127.0.0.1:${serverPort}/`);
 
   await page.fill('#loginPassword', 'admin');
@@ -342,11 +358,19 @@ test('admin can add cron + timeline panes', async ({ page }) => {
   await expect(timelinePane).toContainText('Timeline');
   await expect(timelinePane.locator('.chat-input-row')).toBeHidden();
   await expect(timelinePane.locator('[data-pane-input]')).toBeHidden();
+
+  await guards.assertNoFailures();
+  guards.dispose();
 });
 
 
 test('workqueue modal renders as kanban board and supports enqueue', async ({ page }) => {
   test.skip(!!skipReason, skipReason);
+
+  const guards = installPageFailureAssertions(page, {
+    appOrigin: `http://127.0.0.1:${serverPort}`
+  });
+
   await page.goto(`http://127.0.0.1:${serverPort}/`);
 
   await page.fill('#loginPassword', 'admin');
@@ -369,4 +393,7 @@ test('workqueue modal renders as kanban board and supports enqueue', async ({ pa
   await expect(board).toBeVisible();
   await expect(board.locator('.wq-board-col-title', { hasText: 'Ready' })).toHaveCount(1);
   await expect(board.locator('.wq-card')).toContainText('kanban test item');
+
+  await guards.assertNoFailures();
+  guards.dispose();
 });
