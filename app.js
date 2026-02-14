@@ -50,6 +50,7 @@ function getRouteRole() {
   try {
     const path = window.location.pathname || '/';
     if (path === '/admin' || path.startsWith('/admin/')) return 'admin';
+    if (path === '/guest' || path.startsWith('/guest/')) return 'guest';
   } catch {}
   return null;
 }
@@ -473,8 +474,16 @@ function resolveWsUrl(raw) {
   return raw;
 }
 
-function computeGatewayTarget(_kind) {
-  const proxyUrl = uiState.meta && uiState.meta.adminWsUrl ? uiState.meta.adminWsUrl : '';
+function computeGatewayTarget(kind) {
+  const k = typeof kind === 'string' ? kind.trim().toLowerCase() : '';
+  const proxyUrl =
+    k === 'guest'
+      ? uiState.meta && uiState.meta.guestWsUrl
+        ? uiState.meta.guestWsUrl
+        : ''
+      : uiState.meta && uiState.meta.adminWsUrl
+        ? uiState.meta.adminWsUrl
+        : '';
   const usingProxy = Boolean(proxyUrl);
   const rawUrl = proxyUrl || globalElements.wsUrl.value.trim();
   return { url: resolveWsUrl(rawUrl), usingProxy };
@@ -600,6 +609,18 @@ function setRole(role) {
   if (globalElements.paneControls) {
     globalElements.paneControls.hidden = role !== 'admin';
   }
+  if (globalElements.addPaneBtn) {
+    globalElements.addPaneBtn.hidden = role !== 'admin';
+    globalElements.addPaneBtn.disabled = role !== 'admin';
+  }
+  if (globalElements.addChatPaneBtn) {
+    globalElements.addChatPaneBtn.hidden = role !== 'admin';
+    globalElements.addChatPaneBtn.disabled = role !== 'admin';
+  }
+  if (globalElements.addQueuePaneBtn) {
+    globalElements.addQueuePaneBtn.hidden = role !== 'admin';
+    globalElements.addQueuePaneBtn.disabled = role !== 'admin';
+  }
   if (globalElements.workqueueBtn) {
     globalElements.workqueueBtn.hidden = role !== 'admin';
     globalElements.workqueueBtn.disabled = role !== 'admin';
@@ -637,6 +658,7 @@ function hideLogin() {
 }
 
 async function attemptLogin() {
+  const role = routeRole || 'admin';
   const password = globalElements.loginPassword.value.trim();
   if (!password) {
     showLogin('Password required.');
@@ -653,8 +675,11 @@ async function attemptLogin() {
       showLogin('Invalid password. Try again.');
       return;
     }
-    await res.json();
-    window.location.replace('/admin');
+
+    const data = await res.json().catch(() => ({}));
+    const nextRole = role === 'guest' ? 'guest' : data.role === 'guest' ? 'guest' : 'admin';
+    storage.set('clawnsole.auth.role', nextRole);
+    window.location.replace(nextRole === 'guest' ? '/guest' : '/admin');
   } catch {
     showLogin('Login failed. Please retry.');
   }
@@ -2791,13 +2816,14 @@ function buildClientForPane(pane) {
     },
     getUrl: () => computeGatewayTarget(pane.role).url,
     buildConnectParams: () => {
-      const scopes = ['operator.read', 'operator.write'];
+      const isGuest = pane.role === 'guest';
+      const scopes = isGuest ? ['operator.read'] : ['operator.read', 'operator.write'];
       const { usingProxy } = computeGatewayTarget(pane.role);
       return {
         minProtocol: 3,
         maxProtocol: 3,
         client: computeConnectClient({ role: pane.role, paneKey: pane.key }),
-        role: 'operator',
+        role: isGuest ? 'guest' : 'operator',
         scopes,
         caps: [],
         commands: [],

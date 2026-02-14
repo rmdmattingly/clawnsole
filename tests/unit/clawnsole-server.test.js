@@ -96,7 +96,7 @@ test('GET /meta returns gateway urls and port', async () => {
   assert.equal(data.wsUrl, 'ws://127.0.0.1:19999');
   assert.equal(data.adminWsUrl, '/admin-ws');
   assert.equal(data.port, 19999);
-  assert.equal(data.guestWsUrl, undefined);
+  assert.equal(data.guestWsUrl, '/guest-ws');
 });
 
 test('login sets cookies; /auth/role uses auth cookie', async () => {
@@ -297,7 +297,7 @@ test('/auth/logout clears auth cookies', async () => {
   assert.match(joined, /Max-Age=0/);
 });
 
-test('GET /admin serves the kiosk shell (index.html); /guest returns 404', async () => {
+test('GET /admin and /guest serve the kiosk shell (index.html)', async () => {
   const { homeDir, openclawDir } = makeTempHome();
   writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
   writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
@@ -310,7 +310,9 @@ test('GET /admin serves the kiosk shell (index.html); /guest returns 404', async
   assert.match(admin.body.toString('utf8'), /<title>Clawnsole<\/title>/);
 
   const guest = await invoke(handleRequest, { url: '/guest' });
-  assert.equal(guest.statusCode, 404);
+  assert.equal(guest.statusCode, 200);
+  assert.match(String(guest.headers['content-type'] || ''), /text\/html/);
+  assert.match(guest.body.toString('utf8'), /<title>Clawnsole<\/title>/);
 });
 
 test('GET /agents is admin-only and returns agent ids', async () => {

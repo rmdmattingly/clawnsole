@@ -266,7 +266,7 @@ function createClawnsoleServer(options = {}) {
     });
   }
 
-  const { handleAdminProxy } = createProxyHandlers({
+  const { handleAdminProxy, handleGuestProxy } = createProxyHandlers({
     WebSocket: WebSocketImpl,
     getRoleFromCookies,
     readToken,
@@ -308,6 +308,7 @@ function createClawnsoleServer(options = {}) {
       sendJson(res, 200, {
         wsUrl,
         adminWsUrl: '/admin-ws',
+        guestWsUrl: '/guest-ws',
         port: gatewayPort
       });
       return;
@@ -1108,15 +1109,13 @@ function createClawnsoleServer(options = {}) {
       });
       return;
     }
-    if (req.url === '/guest' || req.url === '/guest/') {
-      res.writeHead(404);
-      res.end('Not found');
-      return;
-    }
-
-
+// guest route is served by index.html
     const urlPath =
-      req.url === '/' || req.url === '/admin' || req.url === '/admin/'
+      req.url === '/' ||
+      req.url === '/admin' ||
+      req.url === '/admin/' ||
+      req.url === '/guest' ||
+      req.url === '/guest/'
         ? '/index.html'
         : req.url;
     const filePath = path.join(root, decodeURIComponent(urlPath));
@@ -1166,6 +1165,10 @@ function createClawnsoleServer(options = {}) {
   server.on('upgrade', (req, socket, head) => {
     if (req.url === '/admin-ws') {
       wss.handleUpgrade(req, socket, head, (ws) => handleAdminProxy(ws, req));
+      return;
+    }
+    if (req.url === '/guest-ws') {
+      wss.handleUpgrade(req, socket, head, (ws) => handleGuestProxy(ws, req));
       return;
     }
     socket.destroy();
