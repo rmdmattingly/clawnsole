@@ -30,3 +30,24 @@ jobs:
         timeout-minutes: 6
       - run: npm run test:ui
         timeout-minutes: 10
+
+      # Upload Playwright artifacts to make UI failures debuggable in CI.
+      - name: Upload Playwright report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/**
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload Playwright test results (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: |
+            test-results/**
+          if-no-files-found: ignore
+          retention-days: 14
