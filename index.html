@@ -31,7 +31,7 @@
         </div>
         <div class="topbar-actions">
           <div class="status compact">
-            <div class="status-pill" id="connectionStatus">disconnected</div>
+            <div class="status-pill" id="connectionStatus" data-testid="connection-status">disconnected</div>
             <div class="status-meta" id="statusMeta"></div>
           </div>
           <div id="paneControls" class="pane-controls" hidden>
@@ -46,7 +46,7 @@
               <option value="3">3-up</option>
             </select>
           </div>
-          <div class="role-pill" id="rolePill">signed out</div>
+          <div class="role-pill" id="rolePill" data-testid="role-pill">signed out</div>
           <button id="refreshAgentsBtn" class="icon-btn" type="button" aria-label="Refresh agent list" hidden>
             ⟳
           </button>
@@ -64,51 +64,51 @@
 
       <main class="chat-page">
         <canvas id="pulseCanvas" class="flux-canvas"></canvas>
-        <div id="paneGrid" class="pane-grid" aria-label="Chat panes"></div>
+        <div id="paneGrid" class="pane-grid" aria-label="Chat panes" data-testid="pane-grid"></div>
 
         <template id="paneTemplate">
-          <section class="chat-panel pane" data-pane>
+          <section class="chat-panel pane" data-pane data-testid="pane">
             <div class="pane-header">
               <div class="pane-header-left">
-                <div class="pane-name" data-pane-name>Pane</div>
+                <div class="pane-name" data-pane-name data-testid="pane-type-label">Pane</div>
                 <div class="pane-agent">
                   <span class="agent-label">Agent</span>
-                  <select data-pane-agent-select aria-label="Select agent"></select>
+                  <select data-pane-agent-select aria-label="Select agent" data-testid="pane-agent-select"></select>
                 </div>
               </div>
               <div class="pane-header-right">
-                <div class="status-pill pane-status" data-pane-status>disconnected</div>
-                <button class="icon-btn pane-close" data-pane-close type="button" aria-label="Close pane">
+                <div class="status-pill pane-status" data-pane-status data-testid="pane-connection-status">disconnected</div>
+                <button class="icon-btn pane-close" data-pane-close type="button" aria-label="Close pane" data-testid="pane-close">
                   ✕
                 </button>
               </div>
             </div>
 
-            <div class="chat-thread" data-pane-thread></div>
-            <button class="scroll-down" data-pane-scroll-down type="button" aria-label="Scroll to bottom">
+            <div class="chat-thread" data-pane-thread data-testid="pane-thread"></div>
+            <button class="scroll-down" data-pane-scroll-down type="button" aria-label="Scroll to bottom" data-testid="pane-scroll-down">
               ↓
             </button>
 
             <div class="chat-input-row">
               <div class="chat-input-stack">
-                <textarea data-pane-input placeholder="Message..."></textarea>
+                <textarea data-pane-input placeholder="Message..." data-testid="pane-input"></textarea>
                 <div data-pane-command-hints class="command-hints" aria-live="polite"></div>
                 <div class="attachment-row">
-                  <input class="file-input" data-pane-file-input type="file" multiple />
+                  <input class="file-input" data-pane-file-input type="file" multiple data-testid="pane-attachment-input" />
                   <div class="hint" data-pane-attachment-status></div>
                 </div>
-                <div class="attachment-list" data-pane-attachment-list></div>
+                <div class="attachment-list" data-pane-attachment-list data-testid="pane-attachment-list"></div>
               </div>
 
               <div class="chat-actions" aria-label="Pane actions">
-                <button class="secondary stop-btn" data-pane-stop type="button" aria-label="Stop generating" hidden>
+                <button class="secondary stop-btn" data-pane-stop type="button" aria-label="Stop generating" hidden data-testid="pane-stop">
                   <span class="visually-hidden">Stop</span>
                   <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M7 7h10v10H7z" fill="currentColor" />
                   </svg>
                 </button>
 
-                <button class="primary send-btn" data-pane-send type="button" aria-label="Send message">
+                <button class="primary send-btn" data-pane-send type="button" aria-label="Send message" data-testid="pane-send">
                   <span class="visually-hidden">Send</span>
                   <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
                     <path
@@ -142,7 +142,7 @@
       </main>
     </div>
 
-    <div id="loginOverlay" class="login-overlay" aria-hidden="true">
+    <div id="loginOverlay" class="login-overlay" aria-hidden="true" data-testid="login-overlay">
       <div class="login-card" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
         <div class="login-brand">
           <div class="brand-mark"></div>
@@ -154,14 +154,14 @@
         <p class="login-copy">Enter the admin password to continue.</p>
         <label>
           Password
-          <input id="loginPassword" type="password" placeholder="Enter password" />
+          <input id="loginPassword" type="password" placeholder="Enter password" data-testid="login-password" />
         </label>
-        <div id="loginError" class="login-error" role="alert"></div>
-        <button id="loginBtn" class="primary">Unlock</button>
+        <div id="loginError" class="login-error" role="alert" data-testid="login-error"></div>
+        <button id="loginBtn" class="primary" data-testid="login-button">Unlock</button>
       </div>
     </div>
 
-    <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
+    <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true" data-testid="toast-host"></div>
 
     <div id="workqueueModal" class="modal" aria-hidden="true">
       <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="workqueueTitle">
