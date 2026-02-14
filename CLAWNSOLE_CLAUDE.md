@@ -25,8 +25,8 @@ URLs:
 
 You sign in separately per instance because cookies are now suffixed:
 
-- Prod cookies: `clawnsole_auth_prod`, `clawnsole_role_prod`
-- QA cookies: `clawnsole_auth_qa`, `clawnsole_role_qa`
+- Prod cookies: `clawnsole_auth_prod`
+- QA cookies: `clawnsole_auth_qa`
 
 ## Architecture Snapshot
 

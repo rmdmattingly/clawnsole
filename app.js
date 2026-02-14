@@ -88,8 +88,7 @@ const storage = {
 };
 
 const roleState = {
-  role: null,
-  guestPolicyInjected: false
+  role: null
 };
 
 const uiState = {
@@ -378,7 +377,6 @@ async function fetchRoleState() {
     if (!res.ok) return { reachable: true, role: null };
     const data = await res.json();
     if (data.role === 'admin') return { reachable: true, role: 'admin' };
-    if (data.role === 'guest') return { reachable: true, role: 'guest' };
     return { reachable: true, role: null };
   } catch {
     return { reachable: false, role: null };
@@ -589,13 +587,12 @@ function setRole(role) {
   } else {
     stopAgentAutoRefresh();
   }
-  if (role === 'guest') {
-    roleState.guestPolicyInjected = false;
-    globalElements.settingsBtn?.setAttribute('disabled', 'disabled');
-    if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
-  } else {
+  if (role === 'admin') {
     globalElements.settingsBtn?.removeAttribute('disabled');
     if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '1';
+  } else {
+    globalElements.settingsBtn?.setAttribute('disabled', 'disabled');
+    if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
   }
 
   if (globalElements.paneControls) {
@@ -614,12 +611,7 @@ function showLogin(message = '') {
   globalElements.loginError.textContent = message;
   globalElements.loginPassword.value = '';
 
-  if (routeRole === 'admin') {
-  } else {
-    const savedRole = storage.get('clawnsole.auth.role', '');
-    if (savedRole === 'admin') {
-    }
-  }
+  // Guest role selection removed.
 
   setAuthState(false);
   if (globalElements.rolePill) {
@@ -643,7 +635,6 @@ function hideLogin() {
 }
 
 async function attemptLogin() {
-  const role = 'admin';
   const password = globalElements.loginPassword.value.trim();
   if (!password) {
     showLogin('Password required.');
@@ -653,16 +644,14 @@ async function attemptLogin() {
     const res = await fetch('/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role, password }),
+      body: JSON.stringify({ password }),
       credentials: 'include'
     });
     if (!res.ok) {
       showLogin('Invalid password. Try again.');
       return;
     }
-    const data = await res.json();
-    const nextRole = data.role === 'admin' ? 'admin' : 'admin';
-    storage.set('clawnsole.auth.role', 'admin');
+    await res.json();
     window.location.replace('/admin');
   } catch {
     showLogin('Login failed. Please retry.');
@@ -673,8 +662,7 @@ function openSettings() {
   globalElements.settingsModal.classList.add('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'false');
 
-  // Legacy guest prompt (server endpoints may be absent in some builds).
-  loadGuestPrompt();
+  // Guest mode removed.
 
   loadRecurringPromptAgents();
   loadRecurringPrompts();
@@ -1951,64 +1939,40 @@ function computeBaseDeviceLabel() {
   return TAB_ID ? `${base}-${TAB_ID}` : base;
 }
 
-function computeSessionKey({ role, agentId, paneKey }) {
+function computeSessionKey({ agentId, paneKey }) {
   const baseDeviceLabel = computeBaseDeviceLabel();
-  if (role === 'guest') {
-    const guestAgent = uiState.meta.guestAgentId || 'clawnsole-guest';
-    return `agent:${guestAgent}:guest:${baseDeviceLabel}`;
-  }
   const resolvedAgent = normalizeAgentId(agentId || 'main');
   const deviceLabel = paneKey ? `${baseDeviceLabel}-${paneKey}` : baseDeviceLabel;
   return `agent:${resolvedAgent}:admin:${deviceLabel}`;
 }
 
-function computeChatKey({ role, agentId }) {
-  if (role === 'guest') {
-    const guestAgent = uiState.meta.guestAgentId || 'clawnsole-guest';
-    return `agent:${guestAgent}:guest`;
-  }
+function computeChatKey({ agentId }) {
   const resolvedAgent = normalizeAgentId(agentId || 'main');
   return `agent:${resolvedAgent}:admin`;
 }
 
-function computeLegacySessionKey({ role, agentId }) {
+function computeLegacySessionKey({ agentId }) {
   const baseDeviceLabel = globalElements.deviceId.value.trim() || 'device';
-  if (role === 'guest') {
-    const guestAgent = uiState.meta.guestAgentId || 'clawnsole-guest';
-    return `agent:${guestAgent}:guest:${baseDeviceLabel}`;
-  }
   const resolvedAgent = normalizeAgentId(agentId || 'main');
   return `agent:${resolvedAgent}:admin:${baseDeviceLabel}`;
 }
 
-function computeConnectClient({ role, paneKey }) {
+function computeConnectClient({ paneKey }) {
   const baseDeviceLabel = computeBaseDeviceLabel();
   const baseClientId = globalElements.clientId.value.trim() || 'webchat-ui';
-  if (role === 'admin') {
-    const suffix = paneKey ? `-${paneKey}` : '';
-    return {
-      // OpenClaw validates client.id against a schema; keep it stable.
-      id: baseClientId,
-      version: '0.1.0',
-      platform: 'web',
-      mode: 'webchat',
-      instanceId: `${baseDeviceLabel}${suffix}`
-    };
-  }
+  const suffix = paneKey ? `-${paneKey}` : '';
   return {
+    // OpenClaw validates client.id against a schema; keep it stable.
     id: baseClientId,
     version: '0.1.0',
     platform: 'web',
     mode: 'webchat',
-    instanceId: baseDeviceLabel
+    instanceId: `${baseDeviceLabel}${suffix}`
   };
 }
 
 function paneAssistantLabel(pane) {
-  const id =
-    pane.role === 'guest'
-      ? uiState.meta.guestAgentId || 'clawnsole-guest'
-      : pane.agentId || 'main';
+  const id = pane.agentId || 'main';
   const record = getAgentRecord(id);
   return formatAgentLabel(record, { includeId: false });
 }
@@ -2552,40 +2516,10 @@ function paneEnsureHiddenWelcome(pane) {
   const sessionKey = pane.sessionKey();
   const storageKey = `clawnsole.welcome.${sessionKey}`;
   if (storage.get(storageKey)) return;
-  const message =
-    pane.role === 'guest'
-      ? 'Welcome! You are assisting a guest. Greet them as a guest, do not assume identity, and ask how you can help today.'
-      : 'Welcome! You are in Admin mode. You can assist with full OpenClaw capabilities.';
-  if (pane.role === 'guest') {
-    paneAddChatMessage(pane, { role: 'assistant', text: message, persist: false });
-    storage.set(storageKey, 'sent');
-    return;
-  }
+
+  const message = 'Welcome! You are in Admin mode. You can assist with full OpenClaw capabilities.';
   pane.client.request('chat.inject', { sessionKey, message, label: 'Welcome' });
   storage.set(storageKey, 'sent');
-}
-
-function paneEnsureGuestPolicy(pane) {
-  if (pane.role !== 'guest') return;
-  if (!pane.connected) return;
-  if (roleState.guestPolicyInjected) return;
-  roleState.guestPolicyInjected = true;
-
-  // When connected through the guest proxy, the server injects the guest policy.
-  if (uiState.meta.guestWsUrl) return;
-
-  const sessionKey = pane.sessionKey();
-  pane.client.request('sessions.resolve', { key: sessionKey }).then((res) => {
-    if (!res?.ok) {
-      pane.client.request('sessions.reset', { key: sessionKey });
-    }
-  });
-  pane.client.request('chat.inject', {
-    sessionKey,
-    message:
-      'Guest mode: read-only. Do not access or summarize emails or private data. Do not assume the guest is the admin. Ask for their name if needed. You may assist with general questions and basic home automation (lights, climate, scenes).',
-    label: 'Guest policy'
-  });
 }
 
 function paneEnqueueOutbound(pane, { message, sessionKey, idempotencyKey, bubble }) {
@@ -2697,19 +2631,7 @@ async function paneSendChat(pane) {
 
   const message = raw;
 
-  if (pane.role === 'guest') {
-    const lower = message.toLowerCase();
-    if (lower.includes('email') || lower.includes('gmail') || lower.includes('inbox')) {
-      paneAddChatMessage(pane, {
-        role: 'assistant',
-        text: 'Guest mode is read-only and cannot access emails. Try a home automation request instead.',
-        persist: false
-      });
-      pane.elements.input.value = '';
-      paneUpdateCommandHints(pane);
-      return;
-    }
-  }
+  // Guest mode removed.
 
   const command = message.toLowerCase();
   if (command === '/clear') {
@@ -3954,7 +3876,7 @@ function inferPaneCols(count) {
 const paneManager = {
   panes: [],
   maxPanes: 6,
-  init(role) {
+  init() {
     this.destroyAll();
 
     // Manual layout selection is deprecated; keep the control hidden if present.
@@ -3963,17 +3885,7 @@ const paneManager = {
       globalElements.layoutSelect.disabled = true;
     }
 
-    if (role === 'admin') {
-      this.initAdmin();
-      return;
-    }
-    this.initGuest();
-  },
-  initGuest() {
-    this.panes = [createPane({ key: 'guest', role: 'guest', closable: false })];
-    globalElements.paneGrid.appendChild(this.panes[0].elements.root);
-    this.updatePaneLabels();
-    this.applyInferredLayout();
+    this.initAdmin();
   },
   initAdmin() {
     const panes = this.loadAdminPanes();
@@ -4492,9 +4404,9 @@ window.addEventListener('load', () => {
         return;
       }
 
-      if (role !== routeRole) {
+      if (role !== 'admin') {
         roleState.role = null;
-        showLogin(`Signed in as ${role}. Sign in as ${routeRole} to continue.`);
+        showLogin('Please sign in to continue.');
         return;
       }
 
@@ -4508,7 +4420,7 @@ window.addEventListener('load', () => {
         }
       }
 
-      paneManager.init(role);
+      paneManager.init();
 
       // Update agent options now that we have a definitive list.
       if (role === 'admin') {

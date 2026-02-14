@@ -56,7 +56,7 @@ async function login(baseUrl, password) {
   const res = await fetch(`${baseUrl}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ role: 'admin', password })
+    body: JSON.stringify({ password })
   });
   const text = await res.text();
   if (!res.ok) {
@@ -66,9 +66,7 @@ async function login(baseUrl, password) {
   if (!cookies.some((c) => c.startsWith('clawnsole_auth'))) {
     throw new Error(`login did not set auth cookie (Set-Cookie missing clawnsole_auth*). got: ${JSON.stringify(cookies)}`);
   }
-  if (!cookies.some((c) => c.startsWith('clawnsole_role'))) {
-    throw new Error(`login did not set role cookie (Set-Cookie missing clawnsole_role*). got: ${JSON.stringify(cookies)}`);
-  }
+  // clawnsole_role cookie removed; auth is tracked solely via clawnsole_auth.
   let json;
   try {
     json = JSON.parse(text);

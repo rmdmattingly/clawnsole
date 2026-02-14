@@ -122,7 +122,7 @@ test('login sets cookies; /auth/role uses auth cookie', async () => {
     url: '/auth/login',
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ role: 'admin', password: 'wrong' })
+    body: JSON.stringify({ password: 'wrong' })
   });
   assert.equal(badLogin.statusCode, 401);
   assert.equal(JSON.parse(badLogin.body.toString('utf8')).error, 'invalid_credentials');
@@ -131,7 +131,7 @@ test('login sets cookies; /auth/role uses auth cookie', async () => {
     url: '/auth/login',
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ role: 'admin', password: 'admin' })
+    body: JSON.stringify({ password: 'admin' })
   });
   assert.equal(login.statusCode, 200);
   const setCookie = login.headers['set-cookie'];
@@ -154,14 +154,14 @@ test('login scopes cookies by instance name', async () => {
     url: '/auth/login',
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ role: 'admin', password: 'admin' })
+    body: JSON.stringify({ password: 'admin' })
   });
   assert.equal(login.statusCode, 200);
   const setCookie = login.headers['set-cookie'];
   assert.ok(Array.isArray(setCookie), 'expected Set-Cookie array');
   const cookieHeader = parseCookiesFromSetCookie(setCookie);
   assert.match(cookieHeader, /(?:^|;\s*)clawnsole_auth_qa=/);
-  assert.match(cookieHeader, /(?:^|;\s*)clawnsole_role_qa=/);
+  // role cookie removed
 
   const role1 = await invoke(handleRequest, { url: '/auth/role', headers: { cookie: cookieHeader } });
   assert.equal(JSON.parse(role1.body.toString('utf8')).role, 'admin');
@@ -181,7 +181,7 @@ test('/token requires admin auth', async () => {
     url: '/auth/login',
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ role: 'admin', password: 'admin' })
+    body: JSON.stringify({ password: 'admin' })
   });
   const adminCookie = parseCookiesFromSetCookie(adminLogin.headers['set-cookie']);
 
@@ -202,7 +202,7 @@ test('/token returns token_not_found when gateway token missing', async () => {
     url: '/auth/login',
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ role: 'admin', password: 'admin' })
+    body: JSON.stringify({ password: 'admin' })
   });
   const adminCookie = parseCookiesFromSetCookie(adminLogin.headers['set-cookie']);
   const res = await invoke(handleRequest, { url: '/token', headers: { cookie: adminCookie } });
@@ -238,7 +238,7 @@ test('/upload stores files and /uploads serves them (auth required)', async () =
     url: '/auth/login',
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ role: 'admin', password: 'admin' })
+    body: JSON.stringify({ password: 'admin' })
   });
   const adminCookie = parseCookiesFromSetCookie(adminLogin.headers['set-cookie']);
 
@@ -297,7 +297,7 @@ test('/auth/logout clears auth cookies', async () => {
   assert.match(joined, /Max-Age=0/);
 });
 
-test('GET /admin serves the kiosk shell (index.html); /guest redirects', async () => {
+test('GET /admin serves the kiosk shell (index.html); /guest returns 404', async () => {
   const { homeDir, openclawDir } = makeTempHome();
   writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
   writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
@@ -310,8 +310,7 @@ test('GET /admin serves the kiosk shell (index.html); /guest redirects', async (
   assert.match(admin.body.toString('utf8'), /<title>Clawnsole<\/title>/);
 
   const guest = await invoke(handleRequest, { url: '/guest' });
-  assert.equal(guest.statusCode, 302);
-  assert.equal(guest.headers.location, '/admin');
+  assert.equal(guest.statusCode, 404);
 });
 
 test('GET /agents is admin-only and returns agent ids', async () => {
@@ -342,7 +341,7 @@ test('GET /agents is admin-only and returns agent ids', async () => {
     url: '/auth/login',
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ role: 'admin', password: 'admin' })
+    body: JSON.stringify({ password: 'admin' })
   });
   const adminCookie = parseCookiesFromSetCookie(adminLogin.headers['set-cookie']);
   const res = await invoke(handleRequest, { url: '/agents', headers: { cookie: adminCookie } });

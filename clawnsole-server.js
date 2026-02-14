@@ -25,7 +25,6 @@ function createClawnsoleServer(options = {}) {
   const instanceSlug = instance.toLowerCase().replace(/[^a-z0-9_-]/g, '');
   const cookieSuffix = instanceSlug ? `_${instanceSlug}` : '';
   const authCookieName = `clawnsole_auth${cookieSuffix}`;
-  const roleCookieName = `clawnsole_role${cookieSuffix}`;
 
   const recurringPromptsPath =
     options.recurringPromptsPath ??
@@ -113,20 +112,11 @@ function createClawnsoleServer(options = {}) {
       const raw = fs.readFileSync(clawnsoleConfigPath, 'utf8');
       const cfg = JSON.parse(raw);
       const adminPassword = cfg?.adminPassword || 'admin';
-      const guestPassword = cfg?.guestPassword || 'guest';
-      const guestAgentId = cfg?.guestAgentId || 'clawnsole-guest';
-      const guestPrompt =
-        cfg?.guestPrompt ||
-        'Guest mode: You are assisting a guest. Do not access or summarize private data (email, calendar, files). Do not assume identity; ask how you can help. You may assist with general questions and basic home automation.';
       const authVersion = cfg?.authVersion || '';
-      return { adminPassword, guestPassword, guestAgentId, guestPrompt, authVersion };
+      return { adminPassword, authVersion };
     } catch (err) {
       return {
         adminPassword: 'admin',
-        guestPassword: 'guest',
-        guestAgentId: 'clawnsole-guest',
-        guestPrompt:
-          'Guest mode: You are assisting a guest. Do not access or summarize private data (email, calendar, files). Do not assume identity; ask how you can help. You may assist with general questions and basic home automation.',
         authVersion: ''
       };
     }
@@ -210,26 +200,20 @@ function createClawnsoleServer(options = {}) {
     return cookies[authCookieName] || '';
   }
 
-  function getRoleCookie(req) {
-    const cookies = parseCookies(req.headers.cookie || '');
-    return cookies[roleCookieName] || '';
-  }
+  // Guest role cookies removed.
 
   function encodeAuthCookie(password, version) {
     return Buffer.from(`${password}::${version || ''}`, 'utf8').toString('base64');
   }
 
   function getRoleFromCookies(req) {
-    const { adminPassword, guestPassword, authVersion } = readUiPasswords();
-    if (!adminPassword && !guestPassword) return 'admin';
+    const { adminPassword, authVersion } = readUiPasswords();
+    // If no admin password is configured, treat the UI as unlocked.
+    if (!adminPassword) return 'admin';
+
     const cookie = getAuthCookie(req);
-    if (cookie) {
-      if (adminPassword && cookie === encodeAuthCookie(adminPassword, authVersion)) {
-        return 'admin';
-      }
-      if (guestPassword && cookie === encodeAuthCookie(guestPassword, authVersion)) {
-        return 'guest';
-      }
+    if (cookie && cookie === encodeAuthCookie(adminPassword, authVersion)) {
+      return 'admin';
     }
     return null;
   }
@@ -527,22 +511,7 @@ function createClawnsoleServer(options = {}) {
       return;
     }
 
-    // Guest endpoints removed (admin-only server).
-
-
-    if (req.url.startsWith('/diag/guest')) {
-      const role = getRoleFromCookies(req);
-      if (role !== 'admin') {
-        sendJson(res, 403, { error: 'forbidden' });
-        return;
-      }
-      const { guestAgentId } = readUiPasswords();
-      sendJson(res, 200, {
-        guestAgentId,
-        lastGuestSessionKey
-      });
-      return;
-    }
+    // Guest endpoints removed.
 
     // Admin-only workqueue API (safe read/write from other devices).
     // Mutations are limited to enqueue + claim-next.
@@ -1086,10 +1055,7 @@ function createClawnsoleServer(options = {}) {
     }
 
     if (req.url.startsWith('/auth/logout')) {
-      res.setHeader('Set-Cookie', [
-        `${authCookieName}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`,
-        `${roleCookieName}=; Path=/; Max-Age=0; SameSite=Lax`
-      ]);
+      res.setHeader('Set-Cookie', [`${authCookieName}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`]);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -1102,22 +1068,18 @@ function createClawnsoleServer(options = {}) {
       req.on('end', () => {
         try {
           const payload = JSON.parse(body || '{}');
-          const role = payload.role === 'admin' ? 'admin' : 'guest';
           const password = String(payload.password || '');
-          const { adminPassword, guestPassword, authVersion } = readUiPasswords();
-          const ok =
-            (role === 'admin' && password === adminPassword) ||
-            (role === 'guest' && password === guestPassword);
-          if (!ok) {
+          const { adminPassword, authVersion } = readUiPasswords();
+
+          // If adminPassword is unset, the UI is unlocked (no login required).
+          if (adminPassword && password !== adminPassword) {
             sendJson(res, 401, { error: 'invalid_credentials' });
             return;
           }
-          const token = encodeAuthCookie(role === 'admin' ? adminPassword : guestPassword, authVersion);
-          res.setHeader('Set-Cookie', [
-            `${authCookieName}=${token}; Path=/; HttpOnly; SameSite=Lax`,
-            `${roleCookieName}=${role}; Path=/; SameSite=Lax`
-          ]);
-          sendJson(res, 200, { ok: true, role });
+
+          const token = encodeAuthCookie(adminPassword, authVersion);
+          res.setHeader('Set-Cookie', [`${authCookieName}=${token}; Path=/; HttpOnly; SameSite=Lax`]);
+          sendJson(res, 200, { ok: true, role: 'admin' });
         } catch (err) {
           sendJson(res, 400, { error: 'invalid_request' });
         }
@@ -1146,9 +1108,9 @@ function createClawnsoleServer(options = {}) {
       });
       return;
     }
-    if (req.url === "/guest" || req.url === "/guest/") {
-      res.writeHead(302, { Location: "/admin" });
-      res.end();
+    if (req.url === '/guest' || req.url === '/guest/') {
+      res.writeHead(404);
+      res.end('Not found');
       return;
     }
 
@@ -1189,10 +1151,6 @@ function createClawnsoleServer(options = {}) {
           sendJson(res, 404, { error: 'token_not_found', mode });
           return;
         }
-        if (req.clawnsoleRole === 'guest') {
-          sendJson(res, 403, { error: 'forbidden' });
-          return;
-        }
         sendJson(res, 200, { token, mode });
       } catch (err) {
         sendJson(res, 500, { error: 'token_read_failed', message: String(err) });
@@ -1219,7 +1177,7 @@ function createClawnsoleServer(options = {}) {
     host,
     handleRequest,
     getAuthCookie,
-    getRoleCookie,
+    // getRoleCookie removed
     encodeAuthCookie
   };
 }
