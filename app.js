@@ -213,12 +213,17 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
 
     // Preserve UI state (selected agent per pane).
     paneManager.panes.forEach((pane) => {
-      if (!pane?.elements?.agentSelect) return;
+      if (!pane) return;
       const prior = pane.agentId;
       pane.agentId = normalizeAgentId(prior);
-      renderAgentOptions(pane.elements.agentSelect, pane.agentId);
+      if (pane?.elements?.agentSelect) {
+        renderAgentOptions(pane.elements.agentSelect, pane.agentId);
+        try {
+          pane.elements.agentSelect.value = pane.agentId;
+        } catch {}
+      }
       try {
-        pane.elements.agentSelect.value = pane.agentId;
+        renderPaneAgentIdentity(pane);
       } catch {}
     });
 
@@ -2787,13 +2792,158 @@ function buildClientForPane(pane) {
   });
 }
 
+function agentIdExists(agentId) {
+  const id = normalizeAgentId(agentId || 'main');
+  return uiState.agents.some((a) => String(a?.id || '').trim() === id);
+}
+
+function renderPaneAgentIdentity(pane) {
+  if (!pane || pane.role !== 'admin') return;
+  const elements = pane.elements;
+  if (!elements) return;
+
+  const agentId = normalizeAgentId(pane.agentId || 'main');
+  const known = uiState.agents.length === 0 ? true : agentIdExists(agentId);
+  const agent = getAgentRecord(agentId);
+
+  if (elements.agentLabel) {
+    // Keep this short; the chooser shows full labels/ids.
+    const emoji = typeof agent?.emoji === 'string' ? agent.emoji.trim() : '';
+    const name = (typeof agent?.displayName === 'string' && agent.displayName.trim()) ||
+      (typeof agent?.name === 'string' && agent.name.trim()) ||
+      agentId;
+    elements.agentLabel.textContent = `${emoji ? `${emoji} ` : ''}${name}`;
+  }
+
+  if (elements.root) {
+    elements.root.dataset.agentMissing = known ? 'false' : 'true';
+  }
+
+  if (elements.agentWarning) {
+    if (known) {
+      elements.agentWarning.hidden = true;
+      elements.agentWarning.textContent = '';
+    } else {
+      elements.agentWarning.hidden = false;
+      elements.agentWarning.textContent = `Selected agent “${agentId}” is unavailable — choose a replacement.`;
+    }
+  }
+}
+
+let agentChooserState = { openForPaneKey: null, el: null };
+
+function closeAgentChooser() {
+  try {
+    agentChooserState.el?.remove();
+  } catch {}
+  agentChooserState = { openForPaneKey: null, el: null };
+}
+
+function openAgentChooser(pane) {
+  if (!pane || pane.role !== 'admin') return;
+  closeAgentChooser();
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'agent-chooser-backdrop';
+  backdrop.setAttribute('role', 'presentation');
+
+  const dialog = document.createElement('div');
+  dialog.className = 'agent-chooser';
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-label', 'Choose agent');
+
+  const header = document.createElement('div');
+  header.className = 'agent-chooser-header';
+
+  const title = document.createElement('div');
+  title.className = 'agent-chooser-title';
+  title.textContent = 'Choose agent for this pane';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'icon-btn';
+  closeBtn.type = 'button';
+  closeBtn.textContent = '✕';
+  closeBtn.setAttribute('aria-label', 'Close agent chooser');
+  closeBtn.addEventListener('click', () => closeAgentChooser());
+
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+
+  const list = document.createElement('div');
+  list.className = 'agent-chooser-list';
+
+  const agents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', displayName: 'main', name: 'main', emoji: '' }];
+  const current = normalizeAgentId(pane.agentId || 'main');
+
+  for (const agent of agents) {
+    const id = normalizeAgentId(agent?.id || 'main');
+    const item = document.createElement('button');
+    item.className = 'agent-chooser-item';
+    item.type = 'button';
+    item.setAttribute('aria-current', id === current ? 'true' : 'false');
+
+    const left = document.createElement('div');
+    left.style.minWidth = '0';
+
+    const label = document.createElement('div');
+    label.textContent = formatAgentLabel(agent, { includeId: false });
+
+    const meta = document.createElement('div');
+    meta.className = 'agent-chooser-meta';
+    meta.textContent = id;
+
+    left.appendChild(label);
+    left.appendChild(meta);
+
+    const right = document.createElement('div');
+    right.className = 'agent-chooser-meta';
+    right.textContent = id === current ? 'selected' : 'switch';
+
+    item.appendChild(left);
+    item.appendChild(right);
+
+    item.addEventListener('click', () => {
+      paneSetAgent(pane, id);
+      closeAgentChooser();
+    });
+
+    list.appendChild(item);
+  }
+
+  dialog.appendChild(header);
+  dialog.appendChild(list);
+  backdrop.appendChild(dialog);
+
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) closeAgentChooser();
+  });
+
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeAgentChooser();
+      }
+    },
+    { once: true }
+  );
+
+  document.body.appendChild(backdrop);
+  agentChooserState = { openForPaneKey: pane.key, el: backdrop };
+}
+
 function paneSetAgent(pane, nextAgentId) {
   if (pane.role !== 'admin') return;
   const next = normalizeAgentId(nextAgentId);
   if (next === pane.agentId) return;
   pane.agentId = next;
   storage.set(ADMIN_DEFAULT_AGENT_KEY, next);
-  pane.elements.agentSelect.value = next;
+  try {
+    if (pane.elements.agentSelect) pane.elements.agentSelect.value = next;
+  } catch {}
+  renderPaneAgentIdentity(pane);
 
   pane.attachments.files = [];
   paneRenderAttachments(pane);
@@ -2831,7 +2981,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     root,
     name: root.querySelector('[data-pane-name]'),
     agentSelect: root.querySelector('[data-pane-agent-select]'),
-    agentWrap: root.querySelector('.pane-agent'),
+    agentWrap: root.querySelector('[data-pane-agent-wrap]') || root.querySelector('.pane-agent'),
+    agentButton: root.querySelector('[data-pane-agent-button]'),
+    agentLabel: root.querySelector('[data-pane-agent-label]'),
+    agentWarning: root.querySelector('[data-pane-agent-warning]'),
     status: root.querySelector('[data-pane-status]'),
     closeBtn: root.querySelector('[data-pane-close]'),
     thread: root.querySelector('[data-pane-thread]'),
@@ -3757,7 +3910,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
   if (pane.role === 'admin') {
     renderAgentOptions(elements.agentSelect, pane.agentId);
-    elements.agentSelect.addEventListener('change', (event) => {
+    renderPaneAgentIdentity(pane);
+
+    // Explicit switching: a single clear button opens a chooser.
+    elements.agentButton?.addEventListener('click', () => openAgentChooser(pane));
+
+    // Keep select handler for accessibility/debug (even though the select is hidden by default).
+    elements.agentSelect?.addEventListener('change', (event) => {
       paneSetAgent(pane, String(event.target.value || '').trim());
     });
   } else {
