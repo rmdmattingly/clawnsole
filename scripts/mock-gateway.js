@@ -269,6 +269,11 @@ wss.on('connection', (socket) => {
     }
 
     if (frame.method === 'cron.run') {
+      const jobId = String(frame.params?.jobId || frame.params?.id || '').trim();
+      if (jobId === 'job-2') {
+        socket.send(JSON.stringify({ type: 'res', id, ok: false, error: { message: 'cron.run failed (mock: job-2)' } }));
+        return;
+      }
       socket.send(JSON.stringify({ type: 'res', id, ok: true, payload: { ok: true } }));
       return;
     }
