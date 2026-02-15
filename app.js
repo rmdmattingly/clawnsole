@@ -3,6 +3,7 @@ const globalElements = {
   clientId: document.getElementById('clientId'),
   deviceId: document.getElementById('deviceId'),
   disconnectBtn: document.getElementById('disconnectBtn'),
+  resetLayoutBtn: document.getElementById('resetLayoutBtn'),
   status: document.getElementById('connectionStatus'),
   statusMeta: document.getElementById('statusMeta'),
   pulseCanvas: document.getElementById('pulseCanvas'),
@@ -4028,6 +4029,8 @@ const paneManager = {
         agentId: cfg.agentId,
         queue: cfg.queue,
         statusFilter: cfg.statusFilter,
+        sortKey: cfg.sortKey,
+        sortDir: cfg.sortDir,
         closable: true
       })
     );
@@ -4092,11 +4095,16 @@ const paneManager = {
       }
     } catch {}
 
-    // Default: two chat panes.
-    const secondary =
-      uiState.agents.find((agent) => agent.id && agent.id !== defaultAgent)?.id || defaultAgent || 'main';
+    // Default: Chat + Workqueue.
     const paneA = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: defaultAgent };
-    const paneB = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: normalizeAgentId(secondary) };
+    const paneB = {
+      key: `p${randomId().slice(0, 8)}`,
+      kind: 'workqueue',
+      queue: 'dev-team',
+      statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+      sortKey: 'default',
+      sortDir: 'desc'
+    };
     const list = [paneA, paneB].slice(0, this.maxPanes);
     storage.set(ADMIN_PANES_KEY, JSON.stringify(list));
     return list;
@@ -4120,6 +4128,36 @@ const paneManager = {
       return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
+  },
+  resetAdminLayoutToDefault({ confirm = true } = {}) {
+    if (roleState.role !== 'admin') return;
+    if (confirm) {
+      const ok = window.confirm('Reset layout to default (Chat + Workqueue)?');
+      if (!ok) return;
+    }
+
+    const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
+    const defaultAgent = normalizeAgentId(storedDefault || 'main');
+    const paneA = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: defaultAgent };
+    const paneB = {
+      key: `p${randomId().slice(0, 8)}`,
+      kind: 'workqueue',
+      queue: 'dev-team',
+      statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+      sortKey: 'default',
+      sortDir: 'desc'
+    };
+    storage.set(ADMIN_PANES_KEY, JSON.stringify([paneA, paneB]));
+
+    this.init();
+
+    // If authed, make sure panes reconnect after reset.
+    this.connectAll();
+
+    try {
+      const firstPane = this.panes[0];
+      firstPane?.elements?.input?.focus?.();
+    } catch {}
   },
   addPane(kind = 'chat') {
     if (roleState.role !== 'admin') return;
@@ -4456,6 +4494,10 @@ globalElements.disconnectBtn?.addEventListener('click', () => {
     pane.client.manualDisconnect = false;
   });
   paneManager.connectAll();
+});
+
+globalElements.resetLayoutBtn?.addEventListener('click', () => {
+  paneManager.resetAdminLayoutToDefault({ confirm: true });
 });
 
 globalElements.status?.addEventListener('click', () => {
