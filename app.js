@@ -4137,7 +4137,8 @@ const paneManager = {
       this.updateCloseButtons();
       this.applyInferredLayout();
       this.persistAdminPanes();
-      return;
+      this.focusPanePrimary(pane);
+      return pane;
     }
 
     if (normalizedKind === 'cron' || normalizedKind === 'timeline') {
@@ -4156,7 +4157,8 @@ const paneManager = {
       if (uiState.authed) {
         pane.client.connect();
       }
-      return;
+      this.focusPanePrimary(pane);
+      return pane;
     }
 
     const agentId = normalizeAgentId(storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
@@ -4170,6 +4172,41 @@ const paneManager = {
     if (uiState.authed) {
       pane.client.connect();
     }
+    this.focusPanePrimary(pane);
+    return pane;
+  },
+  focusPanePrimary(pane) {
+    if (!pane?.elements?.root) return;
+
+    // Defer until DOM has painted.
+    setTimeout(() => {
+      try {
+        if (pane.kind === 'chat') {
+          pane.elements.input?.focus?.();
+          return;
+        }
+
+        if (pane.kind === 'workqueue') {
+          const queueSel = pane.elements.thread?.querySelector?.('[data-wq-queue-select]');
+          (queueSel || pane.elements.thread)?.focus?.();
+          return;
+        }
+
+        if (pane.kind === 'cron') {
+          const search = pane.elements.thread?.querySelector?.('[data-cron-search]');
+          const agentSel = pane.elements.thread?.querySelector?.('[data-cron-agent]');
+          (search || agentSel || pane.elements.thread)?.focus?.();
+          return;
+        }
+
+        if (pane.kind === 'timeline') {
+          const search = pane.elements.thread?.querySelector?.('[data-tl-search]');
+          const range = pane.elements.thread?.querySelector?.('[data-tl-range]');
+          (search || range || pane.elements.thread)?.focus?.();
+          return;
+        }
+      } catch {}
+    }, 0);
   },
   openAddPaneMenu(anchorEl) {
     if (roleState.role !== 'admin') return;
@@ -4186,28 +4223,37 @@ const paneManager = {
     if (!state.menuEl) {
       const menu = document.createElement('div');
       menu.className = 'pane-add-menu';
+      menu.dataset.testid = 'pane-add-menu';
       menu.setAttribute('role', 'menu');
       menu.setAttribute('aria-label', 'Add pane');
 
       const chatBtn = document.createElement('button');
       chatBtn.type = 'button';
       chatBtn.className = 'pane-add-menu__item';
-      chatBtn.textContent = 'Chat pane';
+      chatBtn.textContent = 'New Chat pane';
+      chatBtn.dataset.testid = 'pane-add-menu-chat';
+      chatBtn.title = 'Shortcut: Ctrl/Cmd+Shift+C';
 
       const wqBtn = document.createElement('button');
       wqBtn.type = 'button';
       wqBtn.className = 'pane-add-menu__item';
-      wqBtn.textContent = 'Workqueue pane';
+      wqBtn.textContent = 'New Workqueue pane';
+      wqBtn.dataset.testid = 'pane-add-menu-workqueue';
+      wqBtn.title = 'Shortcut: Ctrl/Cmd+Shift+W';
 
       const cronBtn = document.createElement('button');
       cronBtn.type = 'button';
       cronBtn.className = 'pane-add-menu__item';
-      cronBtn.textContent = 'Cron pane';
+      cronBtn.textContent = 'New Cron pane';
+      cronBtn.dataset.testid = 'pane-add-menu-cron';
+      cronBtn.title = 'Shortcut: Ctrl/Cmd+Shift+R';
 
       const timelineBtn = document.createElement('button');
       timelineBtn.type = 'button';
       timelineBtn.className = 'pane-add-menu__item';
-      timelineBtn.textContent = 'Timeline pane';
+      timelineBtn.textContent = 'New Timeline pane';
+      timelineBtn.dataset.testid = 'pane-add-menu-timeline';
+      timelineBtn.title = 'Shortcut: Ctrl/Cmd+Shift+T';
 
       menu.appendChild(chatBtn);
       menu.appendChild(wqBtn);
@@ -4259,12 +4305,22 @@ const paneManager = {
 
     state.positionMenu = positionMenu;
     state.closeIfOutside = closeIfOutside;
+    state.anchorEl = anchorEl;
 
     document.body.appendChild(state.menuEl);
     state.menuEl.style.display = 'block';
     state.open = true;
 
+    try {
+      anchorEl.setAttribute('aria-expanded', 'true');
+    } catch {}
+
     positionMenu();
+
+    // Default focus for keyboard users.
+    try {
+      (state.chatBtn || state.menuEl.querySelector('button'))?.focus?.();
+    } catch {}
 
     document.addEventListener('mousedown', closeIfOutside);
     window.addEventListener('resize', positionMenu);
@@ -4273,6 +4329,8 @@ const paneManager = {
     const atMax = this.panes.length >= this.maxPanes;
     state.chatBtn.disabled = atMax;
     state.wqBtn.disabled = atMax;
+    state.cronBtn.disabled = atMax;
+    state.timelineBtn.disabled = atMax;
 
     this._addPaneMenuState = state;
   },
@@ -4281,6 +4339,12 @@ const paneManager = {
     if (!state?.open) return;
 
     state.open = false;
+
+    try {
+      state.anchorEl?.setAttribute?.('aria-expanded', 'false');
+      state.anchorEl?.focus?.();
+    } catch {}
+
     try {
       document.removeEventListener('mousedown', state.closeIfOutside);
       window.removeEventListener('resize', state.positionMenu);
@@ -4417,10 +4481,41 @@ globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFro
 globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFromUi());
 
 window.addEventListener('keydown', (event) => {
+  const isEditableTarget = (() => {
+    const el = event.target;
+    if (!el) return false;
+    if (el.isContentEditable) return true;
+    const tag = String(el.tagName || '').toUpperCase();
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+  })();
+
+  // Add-pane shortcuts (admin-only)
+  // Ctrl/Cmd+Shift+C → new chat
+  // Ctrl/Cmd+Shift+W → new workqueue
+  // Ctrl/Cmd+Shift+R → new cron
+  // Ctrl/Cmd+Shift+T → new timeline
+  const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey;
+  if (isAccel && roleState.role === 'admin') {
+    const key = String(event.key || '').toLowerCase();
+    const map = { c: 'chat', w: 'workqueue', r: 'cron', t: 'timeline' };
+    const kind = map[key];
+    if (kind) {
+      // Don't hijack while typing unless it's a true accelerator.
+      // (We still allow it when focused in an input, but only with Ctrl/Cmd+Shift.)
+      event.preventDefault();
+      paneManager.closeAddPaneMenu();
+      paneManager.addPane(kind);
+      return;
+    }
+  }
+
   if (event.key === 'Escape') {
     closeSettings();
     closeWorkqueue();
     paneManager.closeAddPaneMenu();
+    if (!isEditableTarget) {
+      event.preventDefault();
+    }
   }
 });
 
