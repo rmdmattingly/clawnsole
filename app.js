@@ -3782,7 +3782,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       : `
           <label class="wq-field" style="min-width: 220px;">
             <span class="wq-label">Search</span>
-            <input data-cron-search type="text" placeholder="job name / id" />
+            <input data-cron-search data-testid="cron-search" type="text" placeholder="job name / id" />
           </label>
           <label class="wq-field" style="min-width: 160px;">
             <span class="wq-label">Filters</span>
@@ -3810,7 +3810,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       </div>
       <div class="wq-layout" style="grid-template-columns: 1fr;">
         <section class="wq-list" aria-label="${isTimeline ? 'Timeline' : 'Cron'} data">
-          <div class="wq-list-body" data-cron-body></div>
+          <div class="wq-list-body" data-cron-body data-testid="cron-body"></div>
         </section>
       </div>
     `;
@@ -4054,9 +4054,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
                 return sch.kind ? String(sch.kind) : '';
               })();
               const id = String(job.id || '');
-              return `<div class="cron-job" data-cron-job-card data-job-id="${escapeHtml(id)}">
+              return `<div class="cron-job" data-cron-job-card data-testid="cron-job-card" data-job-id="${escapeHtml(id)}">
                 <div class="cron-job__top">
-                  <div class="cron-job__title">${escapeHtml(job.name || job.id)}</div>
+                  <div class="cron-job__title" data-testid="cron-job-title">${escapeHtml(job.name || job.id)}</div>
                   <div class="cron-job__badges">
                     <span class="pill pill--muted">${escapeHtml(job.agentId || 'main')}</span>
                     <span class="pill ${enabled ? 'pill--ok' : 'pill--warn'}">${enabled ? 'enabled' : 'disabled'}</span>

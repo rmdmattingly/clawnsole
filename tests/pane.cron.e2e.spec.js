@@ -32,16 +32,17 @@ test('pane: cron admin golden path (toggle/run/edit/delete)', async ({ page }) =
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await expect(page.locator('#addPaneBtn')).toBeVisible();
-  await page.click('#addPaneBtn');
+  await expect(page.getByTestId('add-pane-btn')).toBeVisible();
+  await page.getByTestId('add-pane-btn').click();
   await page.getByRole('button', { name: 'Cron pane' }).click();
 
   const panes = page.locator('[data-pane]');
   const cronPane = panes.last();
 
   await expect(cronPane.locator('.cron-pane')).toHaveCount(1);
-  await expect(cronPane.locator('.cron-job__title', { hasText: 'Nightly report' })).toBeVisible({ timeout: 20000 });
-  await expect(cronPane.locator('.cron-job__title', { hasText: 'PR sweep' })).toBeVisible();
+  await expect(cronPane.getByTestId('cron-body')).toBeVisible();
+  await expect(cronPane.getByTestId('cron-job-title').filter({ hasText: 'Nightly report' })).toBeVisible({ timeout: 20000 });
+  await expect(cronPane.getByTestId('cron-job-title').filter({ hasText: 'PR sweep' })).toBeVisible();
 
   // Toggle enabled -> disabled for job-1.
   const job1 = cronPane.locator('[data-cron-job-card][data-job-id="job-1"]');
