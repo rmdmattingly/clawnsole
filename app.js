@@ -1052,7 +1052,7 @@ function renderWorkqueueInspect(item) {
     root.innerHTML = '<div class="hint">Select an item to inspect.</div>';
     return;
   }
-  const kv = (k, v) => `<div class="wq-kv"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(String(v ?? ''))}</div></div>`;
+  const kv = (k, v) => `<div class="wq-kv" data-wq-kv="${escapeHtml(k)}"><div class="k">${escapeHtml(k)}</div><div class="v" data-wq-kv-val="${escapeHtml(k)}">${escapeHtml(String(v ?? ''))}</div></div>`;
   root.innerHTML = `
     <div class="wq-inspect-meta">
       ${kv('id', item.id)}
@@ -1078,22 +1078,49 @@ function renderWorkqueueInspect(item) {
   const actions = document.createElement('div');
   actions.className = 'wq-inspect-actions';
   actions.innerHTML = `
-    <button type="button" class="btn" data-wq-action="edit">Edit</button>
-    <button type="button" class="btn danger" data-wq-action="delete">Delete</button>
+    <div class="wq-inspect-action-row">
+      <label class="wq-inline">
+        <span class="k">Status</span>
+        <select data-wq-action="status" class="input" aria-label="Work item status">
+          <option value="ready">ready</option>
+          <option value="pending">pending</option>
+          <option value="claimed">claimed</option>
+          <option value="in_progress">in_progress</option>
+          <option value="done">done</option>
+          <option value="failed">failed</option>
+        </select>
+      </label>
+      <button type="button" class="btn" data-wq-action="apply-status">Apply</button>
+    </div>
+    <div class="wq-inspect-action-row">
+      <button type="button" class="btn" data-wq-action="edit">Edit</button>
+      <button type="button" class="btn danger" data-wq-action="delete">Delete</button>
+    </div>
   `;
 
   const meta = root.querySelector('.wq-inspect-meta');
   if (meta) meta.insertAdjacentElement('afterend', actions);
   else root.prepend(actions);
 
-  const editBtn = actions.querySelector('[data-wq-action="edit"]');
-  const deleteBtn = actions.querySelector('[data-wq-action="delete"]');
+  const statusSel = actions.querySelector('[data-wq-action="status"]');
+  if (statusSel) statusSel.value = String(item.status || 'ready');
 
-  editBtn?.addEventListener('click', () => workqueueEditItem(item));
-  deleteBtn?.addEventListener('click', () => workqueueDeleteItem(item));
+  actions.querySelector('[data-wq-action="apply-status"]')?.addEventListener('click', async () => {
+    try {
+      const nextStatus = String(statusSel?.value || '').trim();
+      if (!nextStatus || !item?.id) return;
+      await workqueueUpdateItem(item.id, { status: nextStatus });
+      await fetchAndRenderWorkqueueItems();
+    } catch (err) {
+      addFeed('err', 'workqueue', 'status change failed: ' + String(err));
+    }
+  });
+
+  actions.querySelector('[data-wq-action="edit"]')?.addEventListener('click', () => workqueueEditItem(item));
+  actions.querySelector('[data-wq-action="delete"]')?.addEventListener('click', () => workqueueDeleteItem(item));
 }
 
-async function workqueueEditItem(item) {
+async function workqueueEditItem(item, opts = {}) {
   if (!item || !item.id) return;
 
   const title = prompt('Edit title', String(item.title || ''));
@@ -1129,7 +1156,8 @@ async function workqueueEditItem(item) {
 
     addFeed('ok', 'workqueue', 'updated item');
     // Refresh list + keep selection
-    await fetchAndRenderWorkqueueItems();
+    if (typeof opts.afterUpdate === 'function') await opts.afterUpdate();
+    else await fetchAndRenderWorkqueueItems();
     const updated = workqueueState.items.find((it) => it && it.id === item.id) || null;
     if (updated) {
       workqueueState.selectedItemId = updated.id;
@@ -1141,7 +1169,7 @@ async function workqueueEditItem(item) {
   }
 }
 
-async function workqueueDeleteItem(item) {
+async function workqueueDeleteItem(item, opts = {}) {
   if (!item || !item.id) return;
   const ok = confirm('Delete workqueue item?\n\n' + String(item.title || '') + '\n' + item.id);
   if (!ok) return;
@@ -1158,7 +1186,8 @@ async function workqueueDeleteItem(item) {
 
     addFeed('ok', 'workqueue', 'deleted item');
     if (workqueueState.selectedItemId === item.id) workqueueState.selectedItemId = null;
-    await fetchAndRenderWorkqueueItems();
+    if (typeof opts.afterDelete === 'function') await opts.afterDelete();
+    else await fetchAndRenderWorkqueueItems();
     renderWorkqueueInspect(null);
   } catch (err) {
     addFeed('err', 'workqueue', 'failed to delete item: ' + String(err));
@@ -1316,39 +1345,125 @@ function renderWorkqueuePaneItems(pane) {
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
   const empty = pane.elements?.thread?.querySelector('[data-wq-empty]');
   if (!body) return;
+
+  // Render the list area as a Kanban board (mirrors the admin modal UX).
   body.innerHTML = '';
+  body.classList.remove('wq-list-body');
+  body.classList.add('wq-board');
+
+  const listRoot = body.closest('.wq-list');
+  if (listRoot) listRoot.classList.add('wq-list-kanban');
+
+  const header = listRoot?.querySelector('.wq-list-header');
+  if (header) header.style.display = 'none';
 
   const itemsRaw = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
   const items = sortWorkqueueItems(itemsRaw, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
   if (empty) empty.hidden = items.length > 0;
 
+  const defs = [
+    { status: 'ready', label: 'Ready' },
+    { status: 'pending', label: 'Pending' },
+    { status: 'claimed', label: 'Claimed' },
+    { status: 'in_progress', label: 'In progress' },
+    { status: 'done', label: 'Done' },
+    { status: 'failed', label: 'Failed' }
+  ];
+
+  const enabled = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
+  const enabledSet = new Set(enabled.map((s) => String(s)));
+  const cols = enabledSet.size ? defs.filter((d) => enabledSet.has(d.status)) : defs;
+
+  const itemsByStatus = items.reduce((acc, it) => {
+    const st = String(it?.status || 'ready');
+    if (!acc[st]) acc[st] = [];
+    acc[st].push(it);
+    return acc;
+  }, {});
+
   const now = Date.now();
-  for (const it of items) {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'wq-row';
-    if (it.id && it.id === pane.workqueue.selectedItemId) row.classList.add('selected');
+  for (const colDef of cols) {
+    const col = document.createElement('section');
+    col.className = 'wq-board-col';
+    col.setAttribute('data-wq-col', colDef.status);
 
-    const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
-    const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
-    const status = String(it.status || '');
+    const colItems = Array.isArray(itemsByStatus[colDef.status]) ? itemsByStatus[colDef.status] : [];
 
-    row.innerHTML = `
-      <div class="wq-col title">${escapeHtml(String(it.title || ''))}</div>
-      <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
-      <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
-      <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
-      <div class="wq-col claimedBy">${escapeHtml(String(it.claimedBy || ''))}</div>
-      <div class="wq-col lease mono" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
+    const head = document.createElement('div');
+    head.className = 'wq-board-col-header';
+    head.innerHTML = `
+      <div class="wq-board-col-title">${escapeHtml(colDef.label)}</div>
+      <div class="wq-board-col-count mono">${escapeHtml(String(colItems.length))}</div>
     `;
 
-    row.addEventListener('click', () => {
-      pane.workqueue.selectedItemId = it.id || null;
-      renderWorkqueuePaneItems(pane);
-      renderWorkqueuePaneInspect(pane, it);
+    const lane = document.createElement('div');
+    lane.className = 'wq-board-lane';
+
+    lane.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      lane.classList.add('dragover');
+    });
+    lane.addEventListener('dragleave', () => lane.classList.remove('dragover'));
+    lane.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      lane.classList.remove('dragover');
+      const itemId = String(e.dataTransfer?.getData('text/plain') || '').trim();
+      if (!itemId) return;
+      try {
+        await workqueueUpdateItem(itemId, { status: colDef.status });
+        await fetchAndRenderWorkqueueItemsForPane(pane);
+      } catch (err) {
+        addFeed('err', 'workqueue', 'status change failed: ' + String(err));
+      }
     });
 
-    body.appendChild(row);
+    for (const it of colItems) {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'wq-card';
+      if (it.id && it.id === pane.workqueue.selectedItemId) card.classList.add('selected');
+      if (it.id) card.setAttribute('data-wq-item', it.id);
+
+      card.draggable = true;
+      card.addEventListener('dragstart', (e) => {
+        if (!it.id) return;
+        e.dataTransfer?.setData('text/plain', String(it.id));
+        e.dataTransfer && (e.dataTransfer.effectAllowed = 'move');
+      });
+
+      const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
+      const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
+      const status = String(it.status || '');
+      const age = fmtAge(it.createdAt || it.updatedAt);
+      const next = String(it.lastNote || '').trim();
+
+      card.innerHTML = `
+        <div class="wq-card-title">${escapeHtml(String(it.title || ''))}</div>
+        <div class="wq-card-meta">
+          <span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span>
+          ${age ? `<span class="wq-card-chip mono">age ${escapeHtml(age)}</span>` : ''}
+          ${leaseLabel ? `<span class="wq-card-chip mono">lease ${escapeHtml(leaseLabel)}</span>` : ''}
+        </div>
+        <div class="wq-card-fields">
+          <div class="wq-card-field"><span class="k">prio</span> <span class="v mono">${escapeHtml(String(it.priority ?? ''))}</span></div>
+          <div class="wq-card-field"><span class="k">owner</span> <span class="v">${escapeHtml(String(it.claimedBy || ''))}</span></div>
+          <div class="wq-card-field"><span class="k">att</span> <span class="v mono">${escapeHtml(String(it.attempts ?? ''))}</span></div>
+        </div>
+        ${next ? `<div class="wq-card-next">${escapeHtml(next)}</div>` : ''}
+      `;
+
+      card.addEventListener('click', () => {
+        pane.workqueue.selectedItemId = it.id || null;
+        renderWorkqueuePaneItems(pane);
+        renderWorkqueuePaneInspect(pane, it);
+      });
+
+      lane.appendChild(card);
+    }
+
+    col.appendChild(head);
+    col.appendChild(lane);
+    body.appendChild(col);
   }
 
   // Keep inspect in sync if selection vanished.
@@ -1365,7 +1480,7 @@ function renderWorkqueuePaneInspect(pane, item) {
     root.innerHTML = '<div class="hint">Select an item to inspect.</div>';
     return;
   }
-  const kv = (k, v) => `<div class="wq-kv"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(String(v ?? ''))}</div></div>`;
+  const kv = (k, v) => `<div class="wq-kv" data-wq-kv="${escapeHtml(k)}"><div class="k">${escapeHtml(k)}</div><div class="v" data-wq-kv-val="${escapeHtml(k)}">${escapeHtml(String(v ?? ''))}</div></div>`;
   root.innerHTML = `
     <div class="wq-inspect-meta">
       ${kv('id', item.id)}
@@ -1387,6 +1502,70 @@ function renderWorkqueuePaneInspect(pane, item) {
     </div>
     ${item.lastError ? `<div class="wq-inspect-block"><div class="wq-inspect-label">Last error</div><pre class="wq-inspect-pre">${escapeHtml(String(item.lastError))}</pre></div>` : ''}
   `;
+
+  const actions = document.createElement('div');
+  actions.className = 'wq-inspect-actions';
+  actions.innerHTML = `
+    <div class="wq-inspect-action-row">
+      <label class="wq-inline">
+        <span class="k">Status</span>
+        <select data-wq-action="status" class="input" aria-label="Work item status">
+          <option value="ready">ready</option>
+          <option value="pending">pending</option>
+          <option value="claimed">claimed</option>
+          <option value="in_progress">in_progress</option>
+          <option value="done">done</option>
+          <option value="failed">failed</option>
+        </select>
+      </label>
+      <button type="button" class="btn" data-wq-action="apply-status">Apply</button>
+    </div>
+    <div class="wq-inspect-action-row">
+      <button type="button" class="btn" data-wq-action="edit">Edit</button>
+      <button type="button" class="btn danger" data-wq-action="delete">Delete</button>
+    </div>
+  `;
+
+  const meta = root.querySelector('.wq-inspect-meta');
+  if (meta) meta.insertAdjacentElement('afterend', actions);
+  else root.prepend(actions);
+
+  const statusSel = actions.querySelector('[data-wq-action="status"]');
+  if (statusSel) statusSel.value = String(item.status || 'ready');
+
+  actions.querySelector('[data-wq-action="apply-status"]')?.addEventListener('click', async () => {
+    try {
+      const nextStatus = String(statusSel?.value || '').trim();
+      if (!nextStatus || !item?.id) return;
+      await workqueueUpdateItem(item.id, { status: nextStatus });
+      await fetchAndRenderWorkqueueItemsForPane(pane);
+    } catch (err) {
+      addFeed('err', 'workqueue', 'status change failed: ' + String(err));
+    }
+  });
+
+  actions.querySelector('[data-wq-action="edit"]')?.addEventListener('click', () =>
+    workqueueEditItem(item, {
+      afterUpdate: async () => {
+        await fetchAndRenderWorkqueueItemsForPane(pane);
+        const updated = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items.find((it) => it?.id === item.id) : null;
+        if (updated) {
+          pane.workqueue.selectedItemId = updated.id;
+          renderWorkqueuePaneItems(pane);
+          renderWorkqueuePaneInspect(pane, updated);
+        }
+      }
+    })
+  );
+  actions.querySelector('[data-wq-action="delete"]')?.addEventListener('click', () =>
+    workqueueDeleteItem(item, {
+      afterDelete: async () => {
+        await fetchAndRenderWorkqueueItemsForPane(pane);
+        pane.workqueue.selectedItemId = null;
+        renderWorkqueuePaneInspect(pane, null);
+      }
+    })
+  );
 }
 
 function startWorkqueueLeaseTicker() {
