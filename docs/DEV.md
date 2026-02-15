@@ -8,15 +8,13 @@ Goal: **make it hard to ship a broken login**, and easy to catch it *before* cut
 
 These are the basics we must never break:
 
-1. `POST /auth/login` accepts `{ role, password }` and returns `{ ok:true, role }` on success.
+1. `POST /auth/login` accepts `{ password }` and returns `{ ok:true, role:"admin" }` on success.
 2. Successful login **sets** cookies:
    - `clawnsole_auth[_<instance>]` (HttpOnly)
-   - `clawnsole_role[_<instance>]`
-3. `GET /auth/role` returns `{ role: "admin"|"guest" }` when cookies are present; `{ role:null }` otherwise.
-4. `GET /token` is **admin-only**:
+3. `GET /auth/role` returns `{ role: "admin" }` when cookies are present; `{ role:null }` otherwise.
+4. `GET /token` is **auth-required**:
    - 401 when not logged in
-   - 403 for guest
-   - 200 with `{ token, mode }` for admin
+   - 200 with `{ token, mode }` when logged in
 5. `GET /auth/logout` clears cookies.
 
 If you change anything that touches cookie names/scoping, auth versioning, or these endpoints: **you must update tests**.
@@ -41,8 +39,7 @@ If you’re debugging a machine in the field:
 ```bash
 # replace port with whichever you’re testing
 node ~/.openclaw/apps/clawnsole/scripts/verify-login.js \
-  --base-url http://127.0.0.1:5175 \
-  --role admin
+  --base-url http://127.0.0.1:5175
 ```
 
 ## Local dev checklist (before pushing)

@@ -11,11 +11,9 @@ It’s intended for:
 
 All `/api/workqueue/*` endpoints:
 - require being **logged in** (cookie auth)
-- require **admin** role
 
 Behavior:
 - **401** `{ "error": "unauthorized" }` if not logged in (`requireAuth` fails)
-- **403** `{ "error": "forbidden" }` if logged in as `guest`
 - **405** `{ "error": "method_not_allowed" }` when the HTTP method is wrong
 
 To obtain cookies, use the standard login endpoint:
@@ -24,7 +22,7 @@ To obtain cookies, use the standard login endpoint:
 # 1) login, store cookies
 curl -sS -c /tmp/clawnsole.cookies \
   -H 'content-type: application/json' \
-  -d '{"role":"admin","password":"..."}' \
+  -d '{"password":"..."}' \
   http://127.0.0.1:5174/auth/login
 
 # 2) call workqueue endpoints with cookies
