@@ -163,6 +163,45 @@
 
     <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true" data-testid="toast-host"></div>
 
+    <div id="shortcutsModal" class="modal" aria-hidden="true" data-testid="shortcuts-modal">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="shortcutsTitle">
+        <div class="modal-header">
+          <h2 id="shortcutsTitle">Keyboard shortcuts</h2>
+          <button id="shortcutsCloseBtn" class="icon-btn" type="button" aria-label="Close shortcuts">
+            ✕
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="hint" style="margin-bottom: 10px;">
+            Shortcuts work when youre not typing in a text field.
+          </div>
+
+          <div class="shortcut-group">
+            <h3 class="shortcut-group-title">Help</h3>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>?</kbd></div><div class="shortcut-desc">Open this help overlay</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Esc</kbd></div><div class="shortcut-desc">Close overlay / menus</div></div>
+          </div>
+
+          <div class="shortcut-group">
+            <h3 class="shortcut-group-title">Panes</h3>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>4</kbd></div><div class="shortcut-desc">Focus pane 14</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Pane switcher (cycle focus)</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="shortcut-desc">Add pane</div></div>
+          </div>
+
+          <div class="shortcut-group">
+            <h3 class="shortcut-group-title">Workqueue</h3>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>w</kbd></div><div class="shortcut-desc">Open Workqueue modal</div></div>
+          </div>
+
+          <div class="shortcut-group">
+            <h3 class="shortcut-group-title">Agents</h3>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>R</kbd></div><div class="shortcut-desc">Refresh agent list</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="workqueueModal" class="modal" aria-hidden="true">
       <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="workqueueTitle">
         <div class="modal-header">
