@@ -3,12 +3,15 @@ const globalElements = {
   clientId: document.getElementById('clientId'),
   deviceId: document.getElementById('deviceId'),
   disconnectBtn: document.getElementById('disconnectBtn'),
+  resetLayoutBtn: document.getElementById('resetLayoutBtn'),
   status: document.getElementById('connectionStatus'),
   statusMeta: document.getElementById('statusMeta'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
   refreshAgentsBtn: document.getElementById('refreshAgentsBtn'),
   toastHost: document.getElementById('toastHost'),
+  shortcutsModal: document.getElementById('shortcutsModal'),
+  shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
   workqueueModal: document.getElementById('workqueueModal'),
   workqueueCloseBtn: document.getElementById('workqueueCloseBtn'),
   wqQueueSelect: document.getElementById('wqQueueSelect'),
@@ -741,6 +744,16 @@ function openSettings() {
 function closeSettings() {
   globalElements.settingsModal.classList.remove('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'true');
+}
+
+function openShortcuts() {
+  globalElements.shortcutsModal?.classList.add('open');
+  globalElements.shortcutsModal?.setAttribute('aria-hidden', 'false');
+}
+
+function closeShortcuts() {
+  globalElements.shortcutsModal?.classList.remove('open');
+  globalElements.shortcutsModal?.setAttribute('aria-hidden', 'true');
 }
 
 // Workqueue (admin-only)
@@ -4322,6 +4335,8 @@ const paneManager = {
         agentId: cfg.agentId,
         queue: cfg.queue,
         statusFilter: cfg.statusFilter,
+        sortKey: cfg.sortKey,
+        sortDir: cfg.sortDir,
         closable: true
       })
     );
@@ -4386,11 +4401,16 @@ const paneManager = {
       }
     } catch {}
 
-    // Default: two chat panes.
-    const secondary =
-      uiState.agents.find((agent) => agent.id && agent.id !== defaultAgent)?.id || defaultAgent || 'main';
+    // Default: Chat + Workqueue.
     const paneA = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: defaultAgent };
-    const paneB = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: normalizeAgentId(secondary) };
+    const paneB = {
+      key: `p${randomId().slice(0, 8)}`,
+      kind: 'workqueue',
+      queue: 'dev-team',
+      statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+      sortKey: 'default',
+      sortDir: 'desc'
+    };
     const list = [paneA, paneB].slice(0, this.maxPanes);
     storage.set(ADMIN_PANES_KEY, JSON.stringify(list));
     return list;
@@ -4414,6 +4434,36 @@ const paneManager = {
       return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
+  },
+  resetAdminLayoutToDefault({ confirm = true } = {}) {
+    if (roleState.role !== 'admin') return;
+    if (confirm) {
+      const ok = window.confirm('Reset layout to default (Chat + Workqueue)?');
+      if (!ok) return;
+    }
+
+    const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
+    const defaultAgent = normalizeAgentId(storedDefault || 'main');
+    const paneA = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: defaultAgent };
+    const paneB = {
+      key: `p${randomId().slice(0, 8)}`,
+      kind: 'workqueue',
+      queue: 'dev-team',
+      statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+      sortKey: 'default',
+      sortDir: 'desc'
+    };
+    storage.set(ADMIN_PANES_KEY, JSON.stringify([paneA, paneB]));
+
+    this.init();
+
+    // If authed, make sure panes reconnect after reset.
+    this.connectAll();
+
+    try {
+      const firstPane = this.panes[0];
+      firstPane?.elements?.input?.focus?.();
+    } catch {}
   },
   addPane(kind = 'chat') {
     if (roleState.role !== 'admin') return;
@@ -4690,6 +4740,11 @@ globalElements.settingsCloseBtn?.addEventListener('click', () => closeSettings()
 globalElements.settingsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.settingsModal) closeSettings();
 });
+
+globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
+globalElements.shortcutsModal?.addEventListener('click', (event) => {
+  if (event.target === globalElements.shortcutsModal) closeShortcuts();
+});
 globalElements.saveGuestPromptBtn?.addEventListener('click', () => saveGuestPrompt());
 globalElements.recurringPromptCreateBtn?.addEventListener('click', () => createRecurringPromptFromUi());
 globalElements.recurringPromptRefreshBtn?.addEventListener('click', () => loadRecurringPrompts());
@@ -4730,11 +4785,119 @@ globalElements.wqRefreshBtn?.addEventListener('click', () => {
 globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFromUi());
 globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFromUi());
 
+let shortcutState = { lastGAtMs: 0 };
+
+function isTypingContext(target) {
+  const el = target || document.activeElement;
+  if (!el) return false;
+  const tag = String(el.tagName || '').toUpperCase();
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (el.isContentEditable) return true;
+  return false;
+}
+
+function focusPaneIndex(idx) {
+  const pane = paneManager.panes[idx];
+  if (!pane) return;
+
+  try {
+    pane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  } catch {}
+
+  // Prefer focusing the chat input when available.
+  const input = pane.elements?.input;
+  if (input && typeof input.focus === 'function') {
+    input.focus();
+    return;
+  }
+
+  // Fallback: focus first focusable control inside the pane.
+  const root = pane.elements?.root;
+  const focusable =
+    root &&
+    root.querySelector &&
+    root.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+  if (focusable && typeof focusable.focus === 'function') {
+    focusable.focus();
+  }
+}
+
+function cyclePaneFocus() {
+  const panes = paneManager.panes;
+  if (!panes || panes.length === 0) return;
+
+  const active = document.activeElement;
+  const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
+  const next = idx >= 0 ? (idx + 1) % panes.length : 0;
+  focusPaneIndex(next);
+}
+
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
+    closeShortcuts();
     closeSettings();
     closeWorkqueue();
     paneManager.closeAddPaneMenu();
+    return;
+  }
+
+  // Never steal focus / override browser shortcuts while typing.
+  if (isTypingContext(event.target)) return;
+
+  const key = String(event.key || '');
+
+  const isQuestion = key === '?' || (key === '/' && event.shiftKey);
+  if (isQuestion && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault();
+    openShortcuts();
+    return;
+  }
+
+  // Cmd/Ctrl+1..4 focuses a pane.
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
+    const n = Number.parseInt(key, 10);
+    if (Number.isFinite(n) && n >= 1 && n <= 4) {
+      event.preventDefault();
+      focusPaneIndex(n - 1);
+      return;
+    }
+  }
+
+  // Cmd/Ctrl+K cycles focus across panes.
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && key.toLowerCase() === 'k') {
+    event.preventDefault();
+    cyclePaneFocus();
+    return;
+  }
+
+  // Cmd/Ctrl+Shift+N opens Add pane menu.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'n') {
+    event.preventDefault();
+    paneManager.openAddPaneMenu(globalElements.addPaneBtn);
+    return;
+  }
+
+  // Cmd/Ctrl+R refreshes agent list (instead of page reload).
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && key.toLowerCase() === 'r') {
+    event.preventDefault();
+    globalElements.refreshAgentsBtn?.click?.();
+    toast('Refreshed agents.', 'info');
+    return;
+  }
+
+  // 'g w' opens Workqueue modal.
+  const now = Date.now();
+  if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+    if (key.toLowerCase() === 'g') {
+      shortcutState.lastGAtMs = now;
+      return;
+    }
+    if (key.toLowerCase() === 'w' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
+      shortcutState.lastGAtMs = 0;
+      event.preventDefault();
+      openWorkqueue();
+      return;
+    }
   }
 });
 
@@ -4750,6 +4913,10 @@ globalElements.disconnectBtn?.addEventListener('click', () => {
     pane.client.manualDisconnect = false;
   });
   paneManager.connectAll();
+});
+
+globalElements.resetLayoutBtn?.addEventListener('click', () => {
+  paneManager.resetAdminLayoutToDefault({ confirm: true });
 });
 
 globalElements.status?.addEventListener('click', () => {
