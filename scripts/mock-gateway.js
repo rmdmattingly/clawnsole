@@ -4,7 +4,43 @@ const WebSocket = require('ws');
 const port = Number.parseInt(process.env.MOCK_GATEWAY_PORT || '18789', 10);
 const host = process.env.MOCK_GATEWAY_HOST || '127.0.0.1';
 
+function parseQuery(url) {
+  const idx = url.indexOf('?');
+  if (idx === -1) return {};
+  return url
+    .slice(idx + 1)
+    .split('&')
+    .filter(Boolean)
+    .reduce((acc, pair) => {
+      const [k, v] = pair.split('=');
+      if (!k) return acc;
+      acc[decodeURIComponent(k)] = decodeURIComponent(v || '');
+      return acc;
+    }, {});
+}
+
 const server = http.createServer((req, res) => {
+  const url = String(req.url || '/');
+
+  // Test-only endpoints so Playwright can simulate gateway disconnect/auth-expiry.
+  // Example: /__test__/close?code=4401&reason=unauthorized
+  if (url.startsWith('/__test__/close')) {
+    const q = parseQuery(url);
+    const codeRaw = Number.parseInt(q.code || '1001', 10);
+    const code = Number.isFinite(codeRaw) ? codeRaw : 1001;
+    const reason = q.reason || 'test-close';
+
+    for (const client of wss.clients) {
+      try {
+        client.close(code, reason);
+      } catch {}
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, code, reason, clients: wss.clients.size }));
+    return;
+  }
+
   res.writeHead(200);
   res.end('ok');
 });
