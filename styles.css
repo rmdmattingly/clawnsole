@@ -410,8 +410,9 @@ body::before {
   gap: 12px;
   padding: 8px 10px;
   border-radius: 16px;
-  background: rgba(9, 12, 16, 0.18);
+  background: linear-gradient(90deg, var(--pane-header-tint, rgba(9, 12, 16, 0.18)), rgba(9, 12, 16, 0.12));
   border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 4px solid var(--pane-accent, rgba(255, 179, 71, 0.55));
   position: relative;
   z-index: 2;
 }
@@ -429,6 +430,72 @@ body::before {
   letter-spacing: 0.14em;
   color: var(--muted);
   white-space: nowrap;
+}
+
+.pane-type-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  user-select: none;
+}
+
+.pane-type-icon {
+  font-size: 12px;
+  opacity: 0.95;
+}
+
+.pane-type-text {
+  font-weight: 650;
+}
+
+/* Per-pane subtle treatment */
+.pane-kind-chat {
+  --pane-accent: rgba(127, 209, 185, 0.75);
+  --pane-header-tint: rgba(127, 209, 185, 0.08);
+}
+
+.pane-kind-workqueue {
+  --pane-accent: rgba(255, 179, 71, 0.8);
+  --pane-header-tint: rgba(255, 179, 71, 0.09);
+}
+
+.pane-kind-cron {
+  --pane-accent: rgba(162, 155, 254, 0.8);
+  --pane-header-tint: rgba(162, 155, 254, 0.09);
+}
+
+.pane-kind-timeline {
+  --pane-accent: rgba(86, 204, 242, 0.78);
+  --pane-header-tint: rgba(86, 204, 242, 0.08);
+}
+
+.pane-type-chat {
+  border-color: rgba(127, 209, 185, 0.45);
+  background: rgba(127, 209, 185, 0.12);
+}
+
+.pane-type-workqueue {
+  border-color: rgba(255, 179, 71, 0.55);
+  background: rgba(255, 179, 71, 0.12);
+}
+
+.pane-type-cron {
+  border-color: rgba(162, 155, 254, 0.55);
+  background: rgba(162, 155, 254, 0.12);
+}
+
+.pane-type-timeline {
+  border-color: rgba(86, 204, 242, 0.55);
+  background: rgba(86, 204, 242, 0.12);
 }
 
 .pane-agent {

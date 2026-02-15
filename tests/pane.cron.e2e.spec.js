@@ -30,6 +30,7 @@ test('pane: cron renders + lists jobs from gateway', async ({ page }) => {
   const panes = page.locator('[data-pane]');
   const cronPane = panes.last();
 
+  await expect(cronPane.locator('[data-testid="pane-type-pill"]')).toContainText('CRON');
   await expect(cronPane.locator('.cron-pane')).toHaveCount(1);
   await expect(cronPane.locator('.cron-job__title', { hasText: 'Nightly report' })).toBeVisible({ timeout: 20000 });
   await expect(cronPane.locator('.cron-job__title', { hasText: 'PR sweep' })).toBeVisible();

@@ -30,6 +30,7 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   const panes = page.locator('[data-pane]');
   const wqPane = panes.last();
 
+  await expect(wqPane.locator('[data-testid="pane-type-pill"]')).toContainText('WORKQUEUE');
   await expect(wqPane.locator('.wq-pane')).toHaveCount(1);
   await expect(wqPane.locator('[data-wq-refresh]')).toBeVisible();
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();

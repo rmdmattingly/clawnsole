@@ -2830,6 +2830,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
   const elements = {
     root,
     name: root.querySelector('[data-pane-name]'),
+    typePill: root.querySelector('[data-pane-type-pill]'),
+    typeIcon: root.querySelector('[data-pane-type-icon]'),
+    typeText: root.querySelector('[data-pane-type-text]'),
     agentSelect: root.querySelector('[data-pane-agent-select]'),
     agentWrap: root.querySelector('.pane-agent'),
     status: root.querySelector('[data-pane-status]'),
@@ -2885,10 +2888,26 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     client: null
   };
 
-  // Mark pane kind on root for CSS + debugging.
+  const paneKindMeta = (kind) => {
+    const k = String(kind || 'chat');
+    if (k === 'workqueue') return { label: 'WORKQUEUE', icon: '🧰' };
+    if (k === 'cron') return { label: 'CRON', icon: '⏱' };
+    if (k === 'timeline') return { label: 'TIMELINE', icon: '🕒' };
+    return { label: 'CHAT', icon: '💬' };
+  };
+
+  // Mark pane kind on root for CSS + debugging + type pill.
   try {
     elements.root.dataset.paneKind = pane.kind;
     elements.root.classList.add(`pane-kind-${pane.kind}`);
+
+    const meta = paneKindMeta(pane.kind);
+    if (elements.typeText) elements.typeText.textContent = meta.label;
+    if (elements.typeIcon) elements.typeIcon.textContent = meta.icon;
+    if (elements.typePill) {
+      elements.typePill.classList.remove('pane-type-chat', 'pane-type-workqueue', 'pane-type-cron', 'pane-type-timeline');
+      elements.typePill.classList.add(`pane-type-${pane.kind}`);
+    }
   } catch {}
 
   if (elements.closeBtn) {
