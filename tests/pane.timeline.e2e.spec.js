@@ -30,7 +30,36 @@ test('pane: timeline renders + shows recent cron run events', async ({ page }) =
   const panes = page.locator('[data-pane]');
   const timelinePane = panes.last();
 
-  await expect(timelinePane.locator('.cron-pane')).toHaveCount(1);
+  const cronPane = timelinePane.locator('.cron-pane');
+  await expect(cronPane).toHaveCount(1);
+
+  // Layout regression: toolbar + list should consume full thread height (no dead space below).
+  const toolbar = cronPane.locator('.wq-toolbar');
+  const layout = cronPane.locator('.wq-layout');
+  await expect(toolbar).toBeVisible();
+  await expect(layout).toBeVisible();
+
+  const [threadBox, toolbarBox, layoutBox] = await Promise.all([
+    cronPane.boundingBox(),
+    toolbar.boundingBox(),
+    layout.boundingBox()
+  ]);
+  expect(threadBox).toBeTruthy();
+  expect(toolbarBox).toBeTruthy();
+  expect(layoutBox).toBeTruthy();
+
+  // Allow for padding/gap inside the thread; main invariant is that layout reaches the bottom.
+  const threadTop = threadBox.y;
+  const threadBottom = threadBox.y + threadBox.height;
+  const toolbarTop = toolbarBox.y;
+  const layoutBottom = layoutBox.y + layoutBox.height;
+  expect(Math.abs(toolbarTop - threadTop)).toBeLessThan(20);
+  expect(Math.abs(layoutBottom - threadBottom)).toBeLessThan(20);
+
+  const listBody = cronPane.locator('.wq-list-body').first();
+  await expect(listBody).toBeVisible();
+  const listOverflowY = await listBody.evaluate((el) => getComputedStyle(el).overflowY);
+  expect(listOverflowY).toBe('auto');
 
   // Timeline fetches cron.list then cron.runs; assert at least one event rendered.
   await expect(timelinePane.locator('.timeline-item').first()).toBeVisible({ timeout: 60000 });

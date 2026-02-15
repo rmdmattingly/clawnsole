@@ -961,8 +961,9 @@ button.send-btn .btn-icon {
   }
 }
 
-/* Workqueue pane (Issue #70): keep controls visible and make list scroll within viewport. */
-.wq-pane {
+/* Workqueue/Cron/Timeline panes: keep controls visible and make list scroll within viewport. */
+.wq-pane,
+.cron-pane {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -970,7 +971,8 @@ button.send-btn .btn-icon {
   padding: 0;
 }
 
-.wq-pane .wq-toolbar {
+.wq-pane .wq-toolbar,
+.cron-pane .wq-toolbar {
   position: sticky;
   top: 0;
   z-index: 3;
@@ -1111,33 +1113,39 @@ button.send-btn .btn-icon {
   flex-wrap: wrap;
 }
 
-.wq-pane .wq-layout {
+.wq-pane .wq-layout,
+.cron-pane .wq-layout {
   flex: 1;
   min-height: 0;
   padding: 10px;
 }
 
-.wq-pane .wq-list {
+.wq-pane .wq-list,
+.cron-pane .wq-list {
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-.wq-pane .wq-list-body {
+.wq-pane .wq-list-body,
+.cron-pane .wq-list-body {
   flex: 1;
   max-height: none;
 }
 
-.wq-pane .wq-inspect {
+.wq-pane .wq-inspect,
+.cron-pane .wq-inspect {
   min-height: 0;
 }
 
-.wq-pane .wq-inspect-body {
+.wq-pane .wq-inspect-body,
+.cron-pane .wq-inspect-body {
   flex: 1;
   max-height: none;
 }
 
-.wq-pane .wq-list-header button {
+.wq-pane .wq-list-header button,
+.cron-pane .wq-list-header button {
   text-align: left;
 }
 
