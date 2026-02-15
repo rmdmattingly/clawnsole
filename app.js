@@ -4949,7 +4949,6 @@ globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts
 globalElements.shortcutsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.shortcutsModal) closeShortcuts();
 });
-
 globalElements.commandPaletteCloseBtn?.addEventListener('click', () => closeCommandPalette());
 globalElements.commandPaletteModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.commandPaletteModal) closeCommandPalette();
@@ -5145,7 +5144,6 @@ window.addEventListener('keydown', (event) => {
       return;
     }
   }
-
 
   // Cmd/Ctrl+Shift+K cycles focus across panes.
   if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'k') {
