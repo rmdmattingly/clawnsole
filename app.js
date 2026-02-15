@@ -2713,7 +2713,7 @@ function buildClientForPane(pane) {
     },
     getUrl: () => computeGatewayTarget(pane.role).url,
     buildConnectParams: () => {
-      const scopes = ['operator.read', 'operator.write'];
+      const scopes = ['operator.read', 'operator.write', 'operator.admin'];
       const { usingProxy } = computeGatewayTarget(pane.role);
       return {
         minProtocol: 3,

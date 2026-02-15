@@ -116,7 +116,7 @@ async function connectGateway({ wsUrl, token }) {
       instanceId: 'recurring-prompt-scheduler'
     },
     role: 'operator',
-    scopes: ['operator.read', 'operator.write'],
+    scopes: ['operator.read', 'operator.write', 'operator.admin'],
     caps: [],
     commands: [],
     permissions: {},

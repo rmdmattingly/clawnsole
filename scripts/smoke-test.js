@@ -89,7 +89,7 @@ async function wsChat({ baseUrl, wsPath, cookieHeader }) {
             maxProtocol: 3,
             client: { id: 'smoke', version: '0.0.1', platform: 'node', mode: 'test', instanceId: 'smoke' },
             role: 'operator',
-            scopes: ['operator.read', 'operator.write'],
+            scopes: ['operator.read', 'operator.write', 'operator.admin'],
             caps: [],
             commands: [],
             permissions: {}

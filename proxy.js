@@ -106,7 +106,7 @@ function createProxyHandlers({ WebSocket, getRoleFromCookies, readToken, gateway
         adminState.sessionKey = `agent:main:admin:${suffix}`;
         frame.params = frame.params || {};
         frame.params.auth = { token };
-        frame.params.scopes = frame.params.scopes || ['operator.read', 'operator.write'];
+        frame.params.scopes = frame.params.scopes || ['operator.read', 'operator.write', 'operator.admin'];
         frame.params.role = frame.params.role || 'operator';
       }
       try {

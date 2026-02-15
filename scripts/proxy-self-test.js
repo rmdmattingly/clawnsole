@@ -104,6 +104,7 @@ async function run() {
   assert.equal(connect.method, 'connect');
   assert.equal(connect.params.auth.token, tokenValue);
   assert.ok(connect.params.scopes.includes('operator.write'));
+  assert.ok(connect.params.scopes.includes('operator.admin'));
 
   // Heartbeat should emit activity events.
   await delay(30);
