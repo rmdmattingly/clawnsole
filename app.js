@@ -67,6 +67,39 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   if (min > 0) return `${min}m ${sec % 60}s`;
   return `${sec}s`;
 });
+function fmtAge(msAgo) {
+  if (!Number.isFinite(msAgo) || msAgo < 0) return '';
+  const sec = Math.floor(msAgo / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  const day = Math.floor(hr / 24);
+  return `${day}d`;
+}
+
+function getAgentActivity(agentId) {
+  const id = typeof agentId === 'string' && agentId.trim() ? agentId.trim() : 'main';
+  const raw = uiState.agentActivity && typeof uiState.agentActivity === 'object' ? uiState.agentActivity[id] : null;
+  if (!raw || typeof raw !== 'object') return { lastActiveAt: 0, statusText: '' };
+  return {
+    lastActiveAt: Number(raw.lastActiveAt) || 0,
+    statusText: typeof raw.statusText === 'string' ? raw.statusText : ''
+  };
+}
+
+function setAgentActivity(agentId, patch = {}) {
+  const id = typeof agentId === 'string' && agentId.trim() ? agentId.trim() : 'main';
+  const prev = getAgentActivity(id);
+  const next = {
+    lastActiveAt: Number.isFinite(patch.lastActiveAt) ? patch.lastActiveAt : prev.lastActiveAt,
+    statusText: typeof patch.statusText === 'string' ? patch.statusText : prev.statusText
+  };
+  if (!uiState.agentActivity || typeof uiState.agentActivity !== 'object') uiState.agentActivity = {};
+  uiState.agentActivity[id] = next;
+}
+
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
 
 function getRouteRole() {
@@ -117,7 +150,10 @@ const roleState = {
 const uiState = {
   authed: false,
   meta: {},
-  agents: []
+  agents: [],
+  // Per-agent UI activity cache (best-effort). Used for sorting + status snippets.
+  // Shape: { [agentId]: { lastActiveAt: number, statusText: string } }
+  agentActivity: {}
 };
 
 let toastSeq = 0;
@@ -2678,6 +2714,7 @@ function handleGatewayFrame(pane, data) {
     }
     const runId = payload.runId;
     const text = extractChatText(payload.message);
+    setAgentActivity(pane.agentId, { lastActiveAt: Date.now(), statusText: text ? text.slice(0, 80) : '' });
     if (payload.state === 'delta') {
       paneStopThinking(pane);
       pane.activeRunId = runId || pane.activeRunId;
@@ -2751,6 +2788,7 @@ function buildClientForPane(pane) {
       updateConnectionControls();
       paneEnsureHiddenWelcome(pane);
       pane.client.request('sessions.resolve', { key: pane.sessionKey() });
+      setAgentActivity(pane.agentId, { lastActiveAt: Date.now(), statusText: 'connected' });
 
       // Refresh the agent list when we regain connectivity (debounced) so new agents appear
       // without forcing a full page reload.
@@ -2770,6 +2808,7 @@ function buildClientForPane(pane) {
       paneStopThinking(pane);
       pane.connected = false;
       if (pane.elements.root) pane.elements.root.dataset.connected = 'false';
+      setAgentActivity(pane.agentId, { lastActiveAt: Date.now(), statusText: 'disconnected' });
       paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();
@@ -2794,6 +2833,10 @@ function paneSetAgent(pane, nextAgentId) {
   pane.agentId = next;
   storage.set(ADMIN_DEFAULT_AGENT_KEY, next);
   pane.elements.agentSelect.value = next;
+  try {
+    pane._updateAgentPickerLabel?.();
+  } catch {}
+  setAgentActivity(next, { lastActiveAt: Date.now() });
 
   pane.attachments.files = [];
   paneRenderAttachments(pane);
@@ -2822,6 +2865,232 @@ function renderAgentOptions(selectEl, agentId) {
     selectEl.appendChild(opt);
   });
   selectEl.value = normalizeAgentId(agentId || 'main');
+}
+
+function installAgentPicker(pane) {
+  if (!pane?.elements?.agentSelect) return;
+  if (pane._agentPickerInstalled) return;
+  pane._agentPickerInstalled = true;
+
+  const selectEl = pane.elements.agentSelect;
+  const wrapEl = pane.elements.agentWrap;
+  if (!wrapEl) return;
+
+  // Hide native select (kept for legacy + form semantics) and replace with a small popover picker.
+  selectEl.hidden = true;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'agent-picker-btn';
+  btn.setAttribute('data-testid', 'agent-picker-button');
+  btn.setAttribute('aria-haspopup', 'dialog');
+  btn.setAttribute('aria-expanded', 'false');
+
+  const updateBtnLabel = () => {
+    const agent = getAgentRecord(pane.agentId);
+    btn.textContent = formatAgentLabel(agent, { includeId: true });
+  };
+  updateBtnLabel();
+
+  const state = {
+    open: false,
+    filter: '',
+    sort: storage.get('clawnsole.agentPicker.sort', 'agentId') === 'lastActive' ? 'lastActive' : 'agentId',
+    rootEl: null,
+    inputEl: null,
+    listEl: null,
+    sortBtn: null,
+    closeIfOutside: null
+  };
+
+  const getFilteredSortedAgents = () => {
+    const q = String(state.filter || '').trim().toLowerCase();
+    const agents = Array.isArray(uiState.agents) ? uiState.agents.slice() : [];
+
+    const matches = (a) => {
+      if (!q) return true;
+      const id = String(a?.id || '').toLowerCase();
+      const name = String(a?.displayName || a?.name || '').toLowerCase();
+      const status = String(getAgentActivity(a?.id).statusText || '').toLowerCase();
+      return id.includes(q) || name.includes(q) || status.includes(q);
+    };
+
+    const out = agents.filter(matches);
+
+    out.sort((a, b) => {
+      if (state.sort === 'lastActive') {
+        const ta = getAgentActivity(a.id).lastActiveAt || 0;
+        const tb = getAgentActivity(b.id).lastActiveAt || 0;
+        if (tb !== ta) return tb - ta;
+      }
+      return String(a.id || '').localeCompare(String(b.id || ''));
+    });
+
+    return out;
+  };
+
+  const renderList = () => {
+    if (!state.listEl) return;
+    const now = Date.now();
+    const agents = getFilteredSortedAgents();
+    state.listEl.innerHTML = '';
+
+    agents.forEach((a) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'agent-picker-item';
+      item.setAttribute('data-testid', 'agent-picker-item');
+      item.dataset.agentId = a.id;
+
+      const act = getAgentActivity(a.id);
+      const age = act.lastActiveAt ? fmtAge(now - act.lastActiveAt) : '';
+      const statusText = act.statusText ? act.statusText : '';
+
+      item.innerHTML = `
+        <span class="agent-picker-item__label">${escapeHtml(formatAgentLabel(a, { includeId: true }))}</span>
+        <span class="agent-picker-item__meta">
+          <span class="agent-picker-item__badge">${escapeHtml(age || '—')}</span>
+          ${statusText ? `<span class="agent-picker-item__status">${escapeHtml(statusText)}</span>` : ''}
+        </span>
+      `;
+
+      if (a.id === pane.agentId) {
+        item.classList.add('active');
+        item.setAttribute('aria-current', 'true');
+      }
+
+      item.addEventListener('click', () => {
+        paneSetAgent(pane, a.id);
+        updateBtnLabel();
+        close();
+      });
+
+      state.listEl.appendChild(item);
+    });
+
+    if (agents.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'agent-picker-empty';
+      empty.textContent = 'No matches.';
+      state.listEl.appendChild(empty);
+    }
+  };
+
+  const position = () => {
+    if (!state.rootEl) return;
+    const rect = btn.getBoundingClientRect();
+    const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - 340));
+    const top = Math.min(Math.max(8, rect.bottom + 8), Math.max(8, window.innerHeight - 320));
+    state.rootEl.style.left = `${Math.round(left)}px`;
+    state.rootEl.style.top = `${Math.round(top)}px`;
+  };
+
+  const open = () => {
+    if (state.open) return;
+    state.open = true;
+    btn.setAttribute('aria-expanded', 'true');
+
+    const root = document.createElement('div');
+    root.className = 'agent-picker';
+    root.setAttribute('role', 'dialog');
+    root.setAttribute('aria-label', 'Agent list');
+    root.setAttribute('data-testid', 'agent-picker');
+
+    root.innerHTML = `
+      <div class="agent-picker__header">
+        <input class="agent-picker__filter" type="text" placeholder="Filter agents…" aria-label="Filter agents" data-testid="agent-filter-input" />
+        <button type="button" class="agent-picker__sort" data-testid="agent-sort-toggle" aria-label="Toggle sort">Sort: ${escapeHtml(state.sort === 'lastActive' ? 'Last active' : 'Agent id')}</button>
+      </div>
+      <div class="agent-picker__list" data-testid="agent-picker-list"></div>
+    `;
+
+    state.rootEl = root;
+    state.inputEl = root.querySelector('[data-testid="agent-filter-input"]');
+    state.listEl = root.querySelector('[data-testid="agent-picker-list"]');
+    state.sortBtn = root.querySelector('[data-testid="agent-sort-toggle"]');
+
+    state.inputEl.value = state.filter;
+    state.inputEl.addEventListener('input', () => {
+      state.filter = state.inputEl.value;
+      renderList();
+    });
+
+    state.inputEl.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (state.inputEl.value) {
+          state.inputEl.value = '';
+          state.filter = '';
+          renderList();
+          state.inputEl.focus();
+        } else {
+          close();
+          btn.focus();
+        }
+      }
+    });
+
+    state.sortBtn?.addEventListener('click', () => {
+      state.sort = state.sort === 'lastActive' ? 'agentId' : 'lastActive';
+      storage.set('clawnsole.agentPicker.sort', state.sort);
+      state.sortBtn.textContent = `Sort: ${state.sort === 'lastActive' ? 'Last active' : 'Agent id'}`;
+      renderList();
+    });
+
+    state.closeIfOutside = (event) => {
+      if (!state.open) return;
+      if (event.target === btn) return;
+      if (state.rootEl && state.rootEl.contains(event.target)) return;
+      close();
+    };
+
+    document.body.appendChild(root);
+    position();
+    renderList();
+
+    document.addEventListener('mousedown', state.closeIfOutside);
+    window.addEventListener('resize', position);
+    window.addEventListener('scroll', position, true);
+
+    setTimeout(() => {
+      try {
+        state.inputEl?.focus();
+        state.inputEl?.select();
+      } catch {}
+    }, 0);
+  };
+
+  const close = () => {
+    if (!state.open) return;
+    state.open = false;
+    btn.setAttribute('aria-expanded', 'false');
+    try {
+      document.removeEventListener('mousedown', state.closeIfOutside);
+      window.removeEventListener('resize', position);
+      window.removeEventListener('scroll', position, true);
+    } catch {}
+    try {
+      state.rootEl?.remove();
+    } catch {}
+    state.rootEl = null;
+    state.inputEl = null;
+    state.listEl = null;
+    state.sortBtn = null;
+  };
+
+  btn.addEventListener('click', () => {
+    if (state.open) {
+      close();
+      return;
+    }
+    open();
+  });
+
+  // Best-effort: keep label in sync even when agent changes via other paths.
+  pane._updateAgentPickerLabel = updateBtnLabel;
+
+  wrapEl.appendChild(btn);
 }
 
 function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sortKey, sortDir, closable = true } = {}) {
@@ -3803,6 +4072,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       scrollToBottom(pane, true);
       elements.scrollDownBtn.classList.remove('visible');
     });
+  }
+
+  if (pane.role === 'admin' && pane.kind === 'chat') {
+    try {
+      installAgentPicker(pane);
+    } catch {}
   }
 
   paneRestoreChatHistory(pane);
