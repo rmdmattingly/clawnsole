@@ -50,6 +50,67 @@ const wss = new WebSocket.Server({ server });
 // sessionKey -> { runId, timer }
 const activeRuns = new Map();
 
+// In-memory cron job store so Playwright can validate timeline + actions deterministically.
+const cronJobStore = (() => {
+  const now = Date.now();
+  /** @type {Record<string, any>} */
+  const byId = {
+    'job-1': {
+      id: 'job-1',
+      agentId: 'main',
+      name: 'Nightly report',
+      enabled: true,
+      createdAtMs: now - 10_000,
+      updatedAtMs: now - 10_000,
+      schedule: { kind: 'cron', expr: '0 2 * * *', tz: 'UTC' },
+      sessionTarget: 'isolated',
+      wakeMode: 'next-heartbeat',
+      payload: { kind: 'agentTurn', message: 'do thing' },
+      state: { nextRunAtMs: now + 5 * 60_000, lastRunAtMs: now - 60 * 60_000, lastStatus: 'ok', lastDurationMs: 1200 }
+    },
+    'job-2': {
+      id: 'job-2',
+      agentId: 'dev',
+      name: 'PR sweep',
+      enabled: false,
+      createdAtMs: now - 20_000,
+      updatedAtMs: now - 20_000,
+      schedule: { kind: 'every', everyMs: 900_000 },
+      sessionTarget: 'isolated',
+      wakeMode: 'next-heartbeat',
+      payload: { kind: 'agentTurn', message: 'run worker' },
+      state: { nextRunAtMs: now + 2 * 60_000, lastRunAtMs: now - 2 * 60 * 60_000, lastStatus: 'error', lastError: 'mock failure', lastDurationMs: 500 }
+    }
+  };
+
+  const list = () => Object.values(byId);
+
+  const update = (jobId, patch) => {
+    const job = byId[jobId];
+    if (!job) return null;
+    const p = patch && typeof patch === 'object' ? patch : {};
+
+    // Shallow-merge supported fields; keep it predictable for tests.
+    if (typeof p.name === 'string') job.name = p.name;
+    if (typeof p.enabled === 'boolean') job.enabled = p.enabled;
+    if (p.schedule && typeof p.schedule === 'object') job.schedule = { ...job.schedule, ...p.schedule };
+    if (p.payload && typeof p.payload === 'object') job.payload = { ...job.payload, ...p.payload };
+    if (p.sessionTarget && typeof p.sessionTarget === 'string') job.sessionTarget = p.sessionTarget;
+
+    job.updatedAtMs = Date.now();
+    return job;
+  };
+
+  const remove = (jobId) => {
+    const job = byId[jobId];
+    if (!job) return false;
+    delete byId[jobId];
+    return true;
+  };
+
+  return { list, update, remove };
+})();
+
 wss.on('connection', (socket) => {
   socket.on('message', (data) => {
     let frame;
@@ -140,53 +201,26 @@ wss.on('connection', (socket) => {
       return;
     }
     if (frame.method === 'cron.status') {
+      const jobs = cronJobStore.list();
       socket.send(
         JSON.stringify({
           type: 'res',
           id,
           ok: true,
-          payload: { enabled: true, storePath: '/tmp/cron/jobs.json', jobs: 2, nextWakeAtMs: Date.now() + 60_000 }
+          payload: { enabled: true, storePath: '/tmp/cron/jobs.json', jobs: jobs.length, nextWakeAtMs: Date.now() + 60_000 }
         })
       );
       return;
     }
 
     if (frame.method === 'cron.list') {
-      const now = Date.now();
       socket.send(
         JSON.stringify({
           type: 'res',
           id,
           ok: true,
           payload: {
-            jobs: [
-              {
-                id: 'job-1',
-                agentId: 'main',
-                name: 'Nightly report',
-                enabled: true,
-                createdAtMs: now - 10_000,
-                updatedAtMs: now - 10_000,
-                schedule: { kind: 'cron', expr: '0 2 * * *', tz: 'UTC' },
-                sessionTarget: 'isolated',
-                wakeMode: 'next-heartbeat',
-                payload: { kind: 'agentTurn', message: 'do thing' },
-                state: { nextRunAtMs: now + 5 * 60_000, lastRunAtMs: now - 60 * 60_000, lastStatus: 'ok', lastDurationMs: 1200 }
-              },
-              {
-                id: 'job-2',
-                agentId: 'dev',
-                name: 'PR sweep',
-                enabled: false,
-                createdAtMs: now - 20_000,
-                updatedAtMs: now - 20_000,
-                schedule: { kind: 'every', everyMs: 900_000 },
-                sessionTarget: 'isolated',
-                wakeMode: 'next-heartbeat',
-                payload: { kind: 'agentTurn', message: 'run worker' },
-                state: { nextRunAtMs: now + 2 * 60_000, lastRunAtMs: now - 2 * 60 * 60_000, lastStatus: 'error', lastError: 'mock failure', lastDurationMs: 500 }
-              }
-            ]
+            jobs: cronJobStore.list()
           }
         })
       );
@@ -208,6 +242,29 @@ wss.on('connection', (socket) => {
           }
         })
       );
+      return;
+    }
+
+    if (frame.method === 'cron.update') {
+      const jobId = String(frame.params?.jobId || frame.params?.id || '').trim();
+      const patch = frame.params?.patch;
+      const job = cronJobStore.update(jobId, patch);
+      if (!job) {
+        socket.send(JSON.stringify({ type: 'res', id, ok: false, error: { message: 'job not found' } }));
+        return;
+      }
+      socket.send(JSON.stringify({ type: 'res', id, ok: true, payload: { ok: true, job } }));
+      return;
+    }
+
+    if (frame.method === 'cron.remove') {
+      const jobId = String(frame.params?.jobId || frame.params?.id || '').trim();
+      const ok = cronJobStore.remove(jobId);
+      if (!ok) {
+        socket.send(JSON.stringify({ type: 'res', id, ok: false, error: { message: 'job not found' } }));
+        return;
+      }
+      socket.send(JSON.stringify({ type: 'res', id, ok: true, payload: { ok: true } }));
       return;
     }
 
