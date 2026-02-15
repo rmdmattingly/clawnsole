@@ -506,11 +506,117 @@ body::before {
 }
 
 .pane-agent select {
-  padding: 6px 10px;
+  /* Keep in DOM for a11y/tests, but don't make switching a subtle bumpable dropdown. */
+  display: none;
+}
+
+.agent-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
   border-radius: 999px;
   min-height: 32px;
+  max-width: 260px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(11, 14, 19, 0.55);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.agent-pill-btn:hover {
+  background: rgba(11, 14, 19, 0.75);
+}
+
+.agent-pill-btn:focus-visible {
+  outline: 2px solid rgba(125, 211, 252, 0.65);
+  outline-offset: 2px;
+}
+
+.agent-pill-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
-  max-width: 220px;
+}
+
+.pane[data-agent-missing="true"] .agent-pill-btn {
+  border-color: rgba(248, 113, 113, 0.65);
+}
+
+.agent-warning {
+  font-size: 11px;
+  color: rgba(248, 113, 113, 0.95);
+  margin-left: 8px;
+  max-width: 320px;
+}
+
+.agent-chooser-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 88px 14px 14px;
+}
+
+.agent-chooser {
+  width: min(720px, calc(100vw - 28px));
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(9, 11, 14, 0.96);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.agent-chooser-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px;
+  gap: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.agent-chooser-title {
+  font-size: 13px;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+
+.agent-chooser-list {
+  padding: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.agent-chooser-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(11, 14, 19, 0.55);
+  cursor: pointer;
+  color: var(--text);
+}
+
+.agent-chooser-item:hover {
+  background: rgba(11, 14, 19, 0.82);
+}
+
+.agent-chooser-item[aria-current="true"] {
+  border-color: rgba(125, 211, 252, 0.65);
+}
+
+.agent-chooser-meta {
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .pane-header-right {

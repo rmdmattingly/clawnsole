@@ -67,39 +67,6 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   if (min > 0) return `${min}m ${sec % 60}s`;
   return `${sec}s`;
 });
-function fmtAge(msAgo) {
-  if (!Number.isFinite(msAgo) || msAgo < 0) return '';
-  const sec = Math.floor(msAgo / 1000);
-  if (sec < 60) return `${sec}s`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h`;
-  const day = Math.floor(hr / 24);
-  return `${day}d`;
-}
-
-function getAgentActivity(agentId) {
-  const id = typeof agentId === 'string' && agentId.trim() ? agentId.trim() : 'main';
-  const raw = uiState.agentActivity && typeof uiState.agentActivity === 'object' ? uiState.agentActivity[id] : null;
-  if (!raw || typeof raw !== 'object') return { lastActiveAt: 0, statusText: '' };
-  return {
-    lastActiveAt: Number(raw.lastActiveAt) || 0,
-    statusText: typeof raw.statusText === 'string' ? raw.statusText : ''
-  };
-}
-
-function setAgentActivity(agentId, patch = {}) {
-  const id = typeof agentId === 'string' && agentId.trim() ? agentId.trim() : 'main';
-  const prev = getAgentActivity(id);
-  const next = {
-    lastActiveAt: Number.isFinite(patch.lastActiveAt) ? patch.lastActiveAt : prev.lastActiveAt,
-    statusText: typeof patch.statusText === 'string' ? patch.statusText : prev.statusText
-  };
-  if (!uiState.agentActivity || typeof uiState.agentActivity !== 'object') uiState.agentActivity = {};
-  uiState.agentActivity[id] = next;
-}
-
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
 
 function getRouteRole() {
@@ -150,10 +117,7 @@ const roleState = {
 const uiState = {
   authed: false,
   meta: {},
-  agents: [],
-  // Per-agent UI activity cache (best-effort). Used for sorting + status snippets.
-  // Shape: { [agentId]: { lastActiveAt: number, statusText: string } }
-  agentActivity: {}
+  agents: []
 };
 
 let toastSeq = 0;
@@ -249,12 +213,17 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
 
     // Preserve UI state (selected agent per pane).
     paneManager.panes.forEach((pane) => {
-      if (!pane?.elements?.agentSelect) return;
+      if (!pane) return;
       const prior = pane.agentId;
       pane.agentId = normalizeAgentId(prior);
-      renderAgentOptions(pane.elements.agentSelect, pane.agentId);
+      if (pane?.elements?.agentSelect) {
+        renderAgentOptions(pane.elements.agentSelect, pane.agentId);
+        try {
+          pane.elements.agentSelect.value = pane.agentId;
+        } catch {}
+      }
       try {
-        pane.elements.agentSelect.value = pane.agentId;
+        renderPaneAgentIdentity(pane);
       } catch {}
     });
 
@@ -1088,7 +1057,7 @@ function renderWorkqueueInspect(item) {
     root.innerHTML = '<div class="hint">Select an item to inspect.</div>';
     return;
   }
-  const kv = (k, v) => `<div class="wq-kv" data-wq-kv="${escapeHtml(k)}"><div class="k">${escapeHtml(k)}</div><div class="v" data-wq-kv-val="${escapeHtml(k)}">${escapeHtml(String(v ?? ''))}</div></div>`;
+  const kv = (k, v) => `<div class="wq-kv"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(String(v ?? ''))}</div></div>`;
   root.innerHTML = `
     <div class="wq-inspect-meta">
       ${kv('id', item.id)}
@@ -1114,49 +1083,22 @@ function renderWorkqueueInspect(item) {
   const actions = document.createElement('div');
   actions.className = 'wq-inspect-actions';
   actions.innerHTML = `
-    <div class="wq-inspect-action-row">
-      <label class="wq-inline">
-        <span class="k">Status</span>
-        <select data-wq-action="status" class="input" aria-label="Work item status">
-          <option value="ready">ready</option>
-          <option value="pending">pending</option>
-          <option value="claimed">claimed</option>
-          <option value="in_progress">in_progress</option>
-          <option value="done">done</option>
-          <option value="failed">failed</option>
-        </select>
-      </label>
-      <button type="button" class="btn" data-wq-action="apply-status">Apply</button>
-    </div>
-    <div class="wq-inspect-action-row">
-      <button type="button" class="btn" data-wq-action="edit">Edit</button>
-      <button type="button" class="btn danger" data-wq-action="delete">Delete</button>
-    </div>
+    <button type="button" class="btn" data-wq-action="edit">Edit</button>
+    <button type="button" class="btn danger" data-wq-action="delete">Delete</button>
   `;
 
   const meta = root.querySelector('.wq-inspect-meta');
   if (meta) meta.insertAdjacentElement('afterend', actions);
   else root.prepend(actions);
 
-  const statusSel = actions.querySelector('[data-wq-action="status"]');
-  if (statusSel) statusSel.value = String(item.status || 'ready');
+  const editBtn = actions.querySelector('[data-wq-action="edit"]');
+  const deleteBtn = actions.querySelector('[data-wq-action="delete"]');
 
-  actions.querySelector('[data-wq-action="apply-status"]')?.addEventListener('click', async () => {
-    try {
-      const nextStatus = String(statusSel?.value || '').trim();
-      if (!nextStatus || !item?.id) return;
-      await workqueueUpdateItem(item.id, { status: nextStatus });
-      await fetchAndRenderWorkqueueItems();
-    } catch (err) {
-      addFeed('err', 'workqueue', 'status change failed: ' + String(err));
-    }
-  });
-
-  actions.querySelector('[data-wq-action="edit"]')?.addEventListener('click', () => workqueueEditItem(item));
-  actions.querySelector('[data-wq-action="delete"]')?.addEventListener('click', () => workqueueDeleteItem(item));
+  editBtn?.addEventListener('click', () => workqueueEditItem(item));
+  deleteBtn?.addEventListener('click', () => workqueueDeleteItem(item));
 }
 
-async function workqueueEditItem(item, opts = {}) {
+async function workqueueEditItem(item) {
   if (!item || !item.id) return;
 
   const title = prompt('Edit title', String(item.title || ''));
@@ -1192,8 +1134,7 @@ async function workqueueEditItem(item, opts = {}) {
 
     addFeed('ok', 'workqueue', 'updated item');
     // Refresh list + keep selection
-    if (typeof opts.afterUpdate === 'function') await opts.afterUpdate();
-    else await fetchAndRenderWorkqueueItems();
+    await fetchAndRenderWorkqueueItems();
     const updated = workqueueState.items.find((it) => it && it.id === item.id) || null;
     if (updated) {
       workqueueState.selectedItemId = updated.id;
@@ -1205,7 +1146,7 @@ async function workqueueEditItem(item, opts = {}) {
   }
 }
 
-async function workqueueDeleteItem(item, opts = {}) {
+async function workqueueDeleteItem(item) {
   if (!item || !item.id) return;
   const ok = confirm('Delete workqueue item?\n\n' + String(item.title || '') + '\n' + item.id);
   if (!ok) return;
@@ -1222,8 +1163,7 @@ async function workqueueDeleteItem(item, opts = {}) {
 
     addFeed('ok', 'workqueue', 'deleted item');
     if (workqueueState.selectedItemId === item.id) workqueueState.selectedItemId = null;
-    if (typeof opts.afterDelete === 'function') await opts.afterDelete();
-    else await fetchAndRenderWorkqueueItems();
+    await fetchAndRenderWorkqueueItems();
     renderWorkqueueInspect(null);
   } catch (err) {
     addFeed('err', 'workqueue', 'failed to delete item: ' + String(err));
@@ -1381,125 +1321,39 @@ function renderWorkqueuePaneItems(pane) {
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
   const empty = pane.elements?.thread?.querySelector('[data-wq-empty]');
   if (!body) return;
-
-  // Render the list area as a Kanban board (mirrors the admin modal UX).
   body.innerHTML = '';
-  body.classList.remove('wq-list-body');
-  body.classList.add('wq-board');
-
-  const listRoot = body.closest('.wq-list');
-  if (listRoot) listRoot.classList.add('wq-list-kanban');
-
-  const header = listRoot?.querySelector('.wq-list-header');
-  if (header) header.style.display = 'none';
 
   const itemsRaw = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
   const items = sortWorkqueueItems(itemsRaw, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
   if (empty) empty.hidden = items.length > 0;
 
-  const defs = [
-    { status: 'ready', label: 'Ready' },
-    { status: 'pending', label: 'Pending' },
-    { status: 'claimed', label: 'Claimed' },
-    { status: 'in_progress', label: 'In progress' },
-    { status: 'done', label: 'Done' },
-    { status: 'failed', label: 'Failed' }
-  ];
-
-  const enabled = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
-  const enabledSet = new Set(enabled.map((s) => String(s)));
-  const cols = enabledSet.size ? defs.filter((d) => enabledSet.has(d.status)) : defs;
-
-  const itemsByStatus = items.reduce((acc, it) => {
-    const st = String(it?.status || 'ready');
-    if (!acc[st]) acc[st] = [];
-    acc[st].push(it);
-    return acc;
-  }, {});
-
   const now = Date.now();
-  for (const colDef of cols) {
-    const col = document.createElement('section');
-    col.className = 'wq-board-col';
-    col.setAttribute('data-wq-col', colDef.status);
+  for (const it of items) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'wq-row';
+    if (it.id && it.id === pane.workqueue.selectedItemId) row.classList.add('selected');
 
-    const colItems = Array.isArray(itemsByStatus[colDef.status]) ? itemsByStatus[colDef.status] : [];
+    const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
+    const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
+    const status = String(it.status || '');
 
-    const head = document.createElement('div');
-    head.className = 'wq-board-col-header';
-    head.innerHTML = `
-      <div class="wq-board-col-title">${escapeHtml(colDef.label)}</div>
-      <div class="wq-board-col-count mono">${escapeHtml(String(colItems.length))}</div>
+    row.innerHTML = `
+      <div class="wq-col title">${escapeHtml(String(it.title || ''))}</div>
+      <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
+      <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
+      <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
+      <div class="wq-col claimedBy">${escapeHtml(String(it.claimedBy || ''))}</div>
+      <div class="wq-col lease mono" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
     `;
 
-    const lane = document.createElement('div');
-    lane.className = 'wq-board-lane';
-
-    lane.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      lane.classList.add('dragover');
-    });
-    lane.addEventListener('dragleave', () => lane.classList.remove('dragover'));
-    lane.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      lane.classList.remove('dragover');
-      const itemId = String(e.dataTransfer?.getData('text/plain') || '').trim();
-      if (!itemId) return;
-      try {
-        await workqueueUpdateItem(itemId, { status: colDef.status });
-        await fetchAndRenderWorkqueueItemsForPane(pane);
-      } catch (err) {
-        addFeed('err', 'workqueue', 'status change failed: ' + String(err));
-      }
+    row.addEventListener('click', () => {
+      pane.workqueue.selectedItemId = it.id || null;
+      renderWorkqueuePaneItems(pane);
+      renderWorkqueuePaneInspect(pane, it);
     });
 
-    for (const it of colItems) {
-      const card = document.createElement('button');
-      card.type = 'button';
-      card.className = 'wq-card';
-      if (it.id && it.id === pane.workqueue.selectedItemId) card.classList.add('selected');
-      if (it.id) card.setAttribute('data-wq-item', it.id);
-
-      card.draggable = true;
-      card.addEventListener('dragstart', (e) => {
-        if (!it.id) return;
-        e.dataTransfer?.setData('text/plain', String(it.id));
-        e.dataTransfer && (e.dataTransfer.effectAllowed = 'move');
-      });
-
-      const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
-      const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
-      const status = String(it.status || '');
-      const age = fmtAge(it.createdAt || it.updatedAt);
-      const next = String(it.lastNote || '').trim();
-
-      card.innerHTML = `
-        <div class="wq-card-title">${escapeHtml(String(it.title || ''))}</div>
-        <div class="wq-card-meta">
-          <span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span>
-          ${age ? `<span class="wq-card-chip mono">age ${escapeHtml(age)}</span>` : ''}
-          ${leaseLabel ? `<span class="wq-card-chip mono">lease ${escapeHtml(leaseLabel)}</span>` : ''}
-        </div>
-        <div class="wq-card-fields">
-          <div class="wq-card-field"><span class="k">prio</span> <span class="v mono">${escapeHtml(String(it.priority ?? ''))}</span></div>
-          <div class="wq-card-field"><span class="k">owner</span> <span class="v">${escapeHtml(String(it.claimedBy || ''))}</span></div>
-          <div class="wq-card-field"><span class="k">att</span> <span class="v mono">${escapeHtml(String(it.attempts ?? ''))}</span></div>
-        </div>
-        ${next ? `<div class="wq-card-next">${escapeHtml(next)}</div>` : ''}
-      `;
-
-      card.addEventListener('click', () => {
-        pane.workqueue.selectedItemId = it.id || null;
-        renderWorkqueuePaneItems(pane);
-        renderWorkqueuePaneInspect(pane, it);
-      });
-
-      lane.appendChild(card);
-    }
-
-    col.appendChild(head);
-    col.appendChild(lane);
-    body.appendChild(col);
+    body.appendChild(row);
   }
 
   // Keep inspect in sync if selection vanished.
@@ -1516,7 +1370,7 @@ function renderWorkqueuePaneInspect(pane, item) {
     root.innerHTML = '<div class="hint">Select an item to inspect.</div>';
     return;
   }
-  const kv = (k, v) => `<div class="wq-kv" data-wq-kv="${escapeHtml(k)}"><div class="k">${escapeHtml(k)}</div><div class="v" data-wq-kv-val="${escapeHtml(k)}">${escapeHtml(String(v ?? ''))}</div></div>`;
+  const kv = (k, v) => `<div class="wq-kv"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(String(v ?? ''))}</div></div>`;
   root.innerHTML = `
     <div class="wq-inspect-meta">
       ${kv('id', item.id)}
@@ -1538,70 +1392,6 @@ function renderWorkqueuePaneInspect(pane, item) {
     </div>
     ${item.lastError ? `<div class="wq-inspect-block"><div class="wq-inspect-label">Last error</div><pre class="wq-inspect-pre">${escapeHtml(String(item.lastError))}</pre></div>` : ''}
   `;
-
-  const actions = document.createElement('div');
-  actions.className = 'wq-inspect-actions';
-  actions.innerHTML = `
-    <div class="wq-inspect-action-row">
-      <label class="wq-inline">
-        <span class="k">Status</span>
-        <select data-wq-action="status" class="input" aria-label="Work item status">
-          <option value="ready">ready</option>
-          <option value="pending">pending</option>
-          <option value="claimed">claimed</option>
-          <option value="in_progress">in_progress</option>
-          <option value="done">done</option>
-          <option value="failed">failed</option>
-        </select>
-      </label>
-      <button type="button" class="btn" data-wq-action="apply-status">Apply</button>
-    </div>
-    <div class="wq-inspect-action-row">
-      <button type="button" class="btn" data-wq-action="edit">Edit</button>
-      <button type="button" class="btn danger" data-wq-action="delete">Delete</button>
-    </div>
-  `;
-
-  const meta = root.querySelector('.wq-inspect-meta');
-  if (meta) meta.insertAdjacentElement('afterend', actions);
-  else root.prepend(actions);
-
-  const statusSel = actions.querySelector('[data-wq-action="status"]');
-  if (statusSel) statusSel.value = String(item.status || 'ready');
-
-  actions.querySelector('[data-wq-action="apply-status"]')?.addEventListener('click', async () => {
-    try {
-      const nextStatus = String(statusSel?.value || '').trim();
-      if (!nextStatus || !item?.id) return;
-      await workqueueUpdateItem(item.id, { status: nextStatus });
-      await fetchAndRenderWorkqueueItemsForPane(pane);
-    } catch (err) {
-      addFeed('err', 'workqueue', 'status change failed: ' + String(err));
-    }
-  });
-
-  actions.querySelector('[data-wq-action="edit"]')?.addEventListener('click', () =>
-    workqueueEditItem(item, {
-      afterUpdate: async () => {
-        await fetchAndRenderWorkqueueItemsForPane(pane);
-        const updated = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items.find((it) => it?.id === item.id) : null;
-        if (updated) {
-          pane.workqueue.selectedItemId = updated.id;
-          renderWorkqueuePaneItems(pane);
-          renderWorkqueuePaneInspect(pane, updated);
-        }
-      }
-    })
-  );
-  actions.querySelector('[data-wq-action="delete"]')?.addEventListener('click', () =>
-    workqueueDeleteItem(item, {
-      afterDelete: async () => {
-        await fetchAndRenderWorkqueueItemsForPane(pane);
-        pane.workqueue.selectedItemId = null;
-        renderWorkqueuePaneInspect(pane, null);
-      }
-    })
-  );
 }
 
 function startWorkqueueLeaseTicker() {
@@ -2893,7 +2683,6 @@ function handleGatewayFrame(pane, data) {
     }
     const runId = payload.runId;
     const text = extractChatText(payload.message);
-    setAgentActivity(pane.agentId, { lastActiveAt: Date.now(), statusText: text ? text.slice(0, 80) : '' });
     if (payload.state === 'delta') {
       paneStopThinking(pane);
       pane.activeRunId = runId || pane.activeRunId;
@@ -2967,7 +2756,6 @@ function buildClientForPane(pane) {
       updateConnectionControls();
       paneEnsureHiddenWelcome(pane);
       pane.client.request('sessions.resolve', { key: pane.sessionKey() });
-      setAgentActivity(pane.agentId, { lastActiveAt: Date.now(), statusText: 'connected' });
 
       // Refresh the agent list when we regain connectivity (debounced) so new agents appear
       // without forcing a full page reload.
@@ -2987,7 +2775,6 @@ function buildClientForPane(pane) {
       paneStopThinking(pane);
       pane.connected = false;
       if (pane.elements.root) pane.elements.root.dataset.connected = 'false';
-      setAgentActivity(pane.agentId, { lastActiveAt: Date.now(), statusText: 'disconnected' });
       paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();
@@ -3005,17 +2792,158 @@ function buildClientForPane(pane) {
   });
 }
 
+function agentIdExists(agentId) {
+  const id = normalizeAgentId(agentId || 'main');
+  return uiState.agents.some((a) => String(a?.id || '').trim() === id);
+}
+
+function renderPaneAgentIdentity(pane) {
+  if (!pane || pane.role !== 'admin') return;
+  const elements = pane.elements;
+  if (!elements) return;
+
+  const agentId = normalizeAgentId(pane.agentId || 'main');
+  const known = uiState.agents.length === 0 ? true : agentIdExists(agentId);
+  const agent = getAgentRecord(agentId);
+
+  if (elements.agentLabel) {
+    // Keep this short; the chooser shows full labels/ids.
+    const emoji = typeof agent?.emoji === 'string' ? agent.emoji.trim() : '';
+    const name = (typeof agent?.displayName === 'string' && agent.displayName.trim()) ||
+      (typeof agent?.name === 'string' && agent.name.trim()) ||
+      agentId;
+    elements.agentLabel.textContent = `${emoji ? `${emoji} ` : ''}${name}`;
+  }
+
+  if (elements.root) {
+    elements.root.dataset.agentMissing = known ? 'false' : 'true';
+  }
+
+  if (elements.agentWarning) {
+    if (known) {
+      elements.agentWarning.hidden = true;
+      elements.agentWarning.textContent = '';
+    } else {
+      elements.agentWarning.hidden = false;
+      elements.agentWarning.textContent = `Selected agent “${agentId}” is unavailable — choose a replacement.`;
+    }
+  }
+}
+
+let agentChooserState = { openForPaneKey: null, el: null };
+
+function closeAgentChooser() {
+  try {
+    agentChooserState.el?.remove();
+  } catch {}
+  agentChooserState = { openForPaneKey: null, el: null };
+}
+
+function openAgentChooser(pane) {
+  if (!pane || pane.role !== 'admin') return;
+  closeAgentChooser();
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'agent-chooser-backdrop';
+  backdrop.setAttribute('role', 'presentation');
+
+  const dialog = document.createElement('div');
+  dialog.className = 'agent-chooser';
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-label', 'Choose agent');
+
+  const header = document.createElement('div');
+  header.className = 'agent-chooser-header';
+
+  const title = document.createElement('div');
+  title.className = 'agent-chooser-title';
+  title.textContent = 'Choose agent for this pane';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'icon-btn';
+  closeBtn.type = 'button';
+  closeBtn.textContent = '✕';
+  closeBtn.setAttribute('aria-label', 'Close agent chooser');
+  closeBtn.addEventListener('click', () => closeAgentChooser());
+
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+
+  const list = document.createElement('div');
+  list.className = 'agent-chooser-list';
+
+  const agents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', displayName: 'main', name: 'main', emoji: '' }];
+  const current = normalizeAgentId(pane.agentId || 'main');
+
+  for (const agent of agents) {
+    const id = normalizeAgentId(agent?.id || 'main');
+    const item = document.createElement('button');
+    item.className = 'agent-chooser-item';
+    item.type = 'button';
+    item.setAttribute('aria-current', id === current ? 'true' : 'false');
+
+    const left = document.createElement('div');
+    left.style.minWidth = '0';
+
+    const label = document.createElement('div');
+    label.textContent = formatAgentLabel(agent, { includeId: false });
+
+    const meta = document.createElement('div');
+    meta.className = 'agent-chooser-meta';
+    meta.textContent = id;
+
+    left.appendChild(label);
+    left.appendChild(meta);
+
+    const right = document.createElement('div');
+    right.className = 'agent-chooser-meta';
+    right.textContent = id === current ? 'selected' : 'switch';
+
+    item.appendChild(left);
+    item.appendChild(right);
+
+    item.addEventListener('click', () => {
+      paneSetAgent(pane, id);
+      closeAgentChooser();
+    });
+
+    list.appendChild(item);
+  }
+
+  dialog.appendChild(header);
+  dialog.appendChild(list);
+  backdrop.appendChild(dialog);
+
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) closeAgentChooser();
+  });
+
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeAgentChooser();
+      }
+    },
+    { once: true }
+  );
+
+  document.body.appendChild(backdrop);
+  agentChooserState = { openForPaneKey: pane.key, el: backdrop };
+}
+
 function paneSetAgent(pane, nextAgentId) {
   if (pane.role !== 'admin') return;
   const next = normalizeAgentId(nextAgentId);
   if (next === pane.agentId) return;
   pane.agentId = next;
   storage.set(ADMIN_DEFAULT_AGENT_KEY, next);
-  pane.elements.agentSelect.value = next;
   try {
-    pane._updateAgentPickerLabel?.();
+    if (pane.elements.agentSelect) pane.elements.agentSelect.value = next;
   } catch {}
-  setAgentActivity(next, { lastActiveAt: Date.now() });
+  renderPaneAgentIdentity(pane);
 
   pane.attachments.files = [];
   paneRenderAttachments(pane);
@@ -3046,243 +2974,17 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function installAgentPicker(pane) {
-  if (!pane?.elements?.agentSelect) return;
-  if (pane._agentPickerInstalled) return;
-  pane._agentPickerInstalled = true;
-
-  const selectEl = pane.elements.agentSelect;
-  const wrapEl = pane.elements.agentWrap;
-  if (!wrapEl) return;
-
-  // Hide native select (kept for legacy + form semantics) and replace with a small popover picker.
-  selectEl.hidden = true;
-
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'agent-picker-btn';
-  btn.setAttribute('data-testid', 'agent-picker-button');
-  btn.setAttribute('aria-haspopup', 'dialog');
-  btn.setAttribute('aria-expanded', 'false');
-
-  const updateBtnLabel = () => {
-    const agent = getAgentRecord(pane.agentId);
-    btn.textContent = formatAgentLabel(agent, { includeId: true });
-  };
-  updateBtnLabel();
-
-  const state = {
-    open: false,
-    filter: '',
-    sort: storage.get('clawnsole.agentPicker.sort', 'agentId') === 'lastActive' ? 'lastActive' : 'agentId',
-    rootEl: null,
-    inputEl: null,
-    listEl: null,
-    sortBtn: null,
-    closeIfOutside: null
-  };
-
-  const getFilteredSortedAgents = () => {
-    const q = String(state.filter || '').trim().toLowerCase();
-    const agents = Array.isArray(uiState.agents) ? uiState.agents.slice() : [];
-
-    const matches = (a) => {
-      if (!q) return true;
-      const id = String(a?.id || '').toLowerCase();
-      const name = String(a?.displayName || a?.name || '').toLowerCase();
-      const status = String(getAgentActivity(a?.id).statusText || '').toLowerCase();
-      return id.includes(q) || name.includes(q) || status.includes(q);
-    };
-
-    const out = agents.filter(matches);
-
-    out.sort((a, b) => {
-      if (state.sort === 'lastActive') {
-        const ta = getAgentActivity(a.id).lastActiveAt || 0;
-        const tb = getAgentActivity(b.id).lastActiveAt || 0;
-        if (tb !== ta) return tb - ta;
-      }
-      return String(a.id || '').localeCompare(String(b.id || ''));
-    });
-
-    return out;
-  };
-
-  const renderList = () => {
-    if (!state.listEl) return;
-    const now = Date.now();
-    const agents = getFilteredSortedAgents();
-    state.listEl.innerHTML = '';
-
-    agents.forEach((a) => {
-      const item = document.createElement('button');
-      item.type = 'button';
-      item.className = 'agent-picker-item';
-      item.setAttribute('data-testid', 'agent-picker-item');
-      item.dataset.agentId = a.id;
-
-      const act = getAgentActivity(a.id);
-      const age = act.lastActiveAt ? fmtAge(now - act.lastActiveAt) : '';
-      const statusText = act.statusText ? act.statusText : '';
-
-      item.innerHTML = `
-        <span class="agent-picker-item__label">${escapeHtml(formatAgentLabel(a, { includeId: true }))}</span>
-        <span class="agent-picker-item__meta">
-          <span class="agent-picker-item__badge">${escapeHtml(age || '—')}</span>
-          ${statusText ? `<span class="agent-picker-item__status">${escapeHtml(statusText)}</span>` : ''}
-        </span>
-      `;
-
-      if (a.id === pane.agentId) {
-        item.classList.add('active');
-        item.setAttribute('aria-current', 'true');
-      }
-
-      item.addEventListener('click', () => {
-        paneSetAgent(pane, a.id);
-        updateBtnLabel();
-        close();
-      });
-
-      state.listEl.appendChild(item);
-    });
-
-    if (agents.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'agent-picker-empty';
-      empty.textContent = 'No matches.';
-      state.listEl.appendChild(empty);
-    }
-  };
-
-  const position = () => {
-    if (!state.rootEl) return;
-    const rect = btn.getBoundingClientRect();
-    const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - 340));
-    const top = Math.min(Math.max(8, rect.bottom + 8), Math.max(8, window.innerHeight - 320));
-    state.rootEl.style.left = `${Math.round(left)}px`;
-    state.rootEl.style.top = `${Math.round(top)}px`;
-  };
-
-  const open = () => {
-    if (state.open) return;
-    state.open = true;
-    btn.setAttribute('aria-expanded', 'true');
-
-    const root = document.createElement('div');
-    root.className = 'agent-picker';
-    root.setAttribute('role', 'dialog');
-    root.setAttribute('aria-label', 'Agent list');
-    root.setAttribute('data-testid', 'agent-picker');
-
-    root.innerHTML = `
-      <div class="agent-picker__header">
-        <input class="agent-picker__filter" type="text" placeholder="Filter agents…" aria-label="Filter agents" data-testid="agent-filter-input" />
-        <button type="button" class="agent-picker__sort" data-testid="agent-sort-toggle" aria-label="Toggle sort">Sort: ${escapeHtml(state.sort === 'lastActive' ? 'Last active' : 'Agent id')}</button>
-      </div>
-      <div class="agent-picker__list" data-testid="agent-picker-list"></div>
-    `;
-
-    state.rootEl = root;
-    state.inputEl = root.querySelector('[data-testid="agent-filter-input"]');
-    state.listEl = root.querySelector('[data-testid="agent-picker-list"]');
-    state.sortBtn = root.querySelector('[data-testid="agent-sort-toggle"]');
-
-    state.inputEl.value = state.filter;
-    state.inputEl.addEventListener('input', () => {
-      state.filter = state.inputEl.value;
-      renderList();
-    });
-
-    state.inputEl.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        if (state.inputEl.value) {
-          state.inputEl.value = '';
-          state.filter = '';
-          renderList();
-          state.inputEl.focus();
-        } else {
-          close();
-          btn.focus();
-        }
-      }
-    });
-
-    state.sortBtn?.addEventListener('click', () => {
-      state.sort = state.sort === 'lastActive' ? 'agentId' : 'lastActive';
-      storage.set('clawnsole.agentPicker.sort', state.sort);
-      state.sortBtn.textContent = `Sort: ${state.sort === 'lastActive' ? 'Last active' : 'Agent id'}`;
-      renderList();
-    });
-
-    state.closeIfOutside = (event) => {
-      if (!state.open) return;
-      if (event.target === btn) return;
-      if (state.rootEl && state.rootEl.contains(event.target)) return;
-      close();
-    };
-
-    document.body.appendChild(root);
-    position();
-    renderList();
-
-    document.addEventListener('mousedown', state.closeIfOutside);
-    window.addEventListener('resize', position);
-    window.addEventListener('scroll', position, true);
-
-    setTimeout(() => {
-      try {
-        state.inputEl?.focus();
-        state.inputEl?.select();
-      } catch {}
-    }, 0);
-  };
-
-  const close = () => {
-    if (!state.open) return;
-    state.open = false;
-    btn.setAttribute('aria-expanded', 'false');
-    try {
-      document.removeEventListener('mousedown', state.closeIfOutside);
-      window.removeEventListener('resize', position);
-      window.removeEventListener('scroll', position, true);
-    } catch {}
-    try {
-      state.rootEl?.remove();
-    } catch {}
-    state.rootEl = null;
-    state.inputEl = null;
-    state.listEl = null;
-    state.sortBtn = null;
-  };
-
-  btn.addEventListener('click', () => {
-    if (state.open) {
-      close();
-      return;
-    }
-    open();
-  });
-
-  // Best-effort: keep label in sync even when agent changes via other paths.
-  pane._updateAgentPickerLabel = updateBtnLabel;
-
-  wrapEl.appendChild(btn);
-}
-
 function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sortKey, sortDir, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
     root,
     name: root.querySelector('[data-pane-name]'),
-    typePill: root.querySelector('[data-pane-type-pill]'),
-    typeIcon: root.querySelector('[data-pane-type-icon]'),
-    typeText: root.querySelector('[data-pane-type-text]'),
     agentSelect: root.querySelector('[data-pane-agent-select]'),
-    agentWrap: root.querySelector('.pane-agent'),
+    agentWrap: root.querySelector('[data-pane-agent-wrap]') || root.querySelector('.pane-agent'),
+    agentButton: root.querySelector('[data-pane-agent-button]'),
+    agentLabel: root.querySelector('[data-pane-agent-label]'),
+    agentWarning: root.querySelector('[data-pane-agent-warning]'),
     status: root.querySelector('[data-pane-status]'),
     closeBtn: root.querySelector('[data-pane-close]'),
     thread: root.querySelector('[data-pane-thread]'),
@@ -3336,26 +3038,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     client: null
   };
 
-  const paneKindMeta = (kind) => {
-    const k = String(kind || 'chat');
-    if (k === 'workqueue') return { label: 'WORKQUEUE', icon: '🧰' };
-    if (k === 'cron') return { label: 'CRON', icon: '⏱' };
-    if (k === 'timeline') return { label: 'TIMELINE', icon: '🕒' };
-    return { label: 'CHAT', icon: '💬' };
-  };
-
-  // Mark pane kind on root for CSS + debugging + type pill.
+  // Mark pane kind on root for CSS + debugging.
   try {
     elements.root.dataset.paneKind = pane.kind;
     elements.root.classList.add(`pane-kind-${pane.kind}`);
-
-    const meta = paneKindMeta(pane.kind);
-    if (elements.typeText) elements.typeText.textContent = meta.label;
-    if (elements.typeIcon) elements.typeIcon.textContent = meta.icon;
-    if (elements.typePill) {
-      elements.typePill.classList.remove('pane-type-chat', 'pane-type-workqueue', 'pane-type-cron', 'pane-type-timeline');
-      elements.typePill.classList.add(`pane-type-${pane.kind}`);
-    }
   } catch {}
 
   if (elements.closeBtn) {
@@ -3801,7 +3487,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       : `
           <label class="wq-field" style="min-width: 220px;">
             <span class="wq-label">Search</span>
-            <input data-cron-search data-testid="cron-search" type="text" placeholder="job name / id" />
+            <input data-cron-search type="text" placeholder="job name / id" />
           </label>
           <label class="wq-field" style="min-width: 160px;">
             <span class="wq-label">Filters</span>
@@ -3829,7 +3515,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       </div>
       <div class="wq-layout" style="grid-template-columns: 1fr;">
         <section class="wq-list" aria-label="${isTimeline ? 'Timeline' : 'Cron'} data">
-          <div class="wq-list-body" data-cron-body data-testid="cron-body"></div>
+          <div class="wq-list-body" data-cron-body></div>
         </section>
       </div>
     `;
@@ -4073,9 +3759,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
                 return sch.kind ? String(sch.kind) : '';
               })();
               const id = String(job.id || '');
-              return `<div class="cron-job" data-cron-job-card data-testid="cron-job-card" data-job-id="${escapeHtml(id)}">
+              return `<div class="cron-job" data-cron-job-card data-job-id="${escapeHtml(id)}">
                 <div class="cron-job__top">
-                  <div class="cron-job__title" data-testid="cron-job-title">${escapeHtml(job.name || job.id)}</div>
+                  <div class="cron-job__title">${escapeHtml(job.name || job.id)}</div>
                   <div class="cron-job__badges">
                     <span class="pill pill--muted">${escapeHtml(job.agentId || 'main')}</span>
                     <span class="pill ${enabled ? 'pill--ok' : 'pill--warn'}">${enabled ? 'enabled' : 'disabled'}</span>
@@ -4224,7 +3910,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
   if (pane.role === 'admin') {
     renderAgentOptions(elements.agentSelect, pane.agentId);
-    elements.agentSelect.addEventListener('change', (event) => {
+    renderPaneAgentIdentity(pane);
+
+    // Explicit switching: a single clear button opens a chooser.
+    elements.agentButton?.addEventListener('click', () => openAgentChooser(pane));
+
+    // Keep select handler for accessibility/debug (even though the select is hidden by default).
+    elements.agentSelect?.addEventListener('change', (event) => {
       paneSetAgent(pane, String(event.target.value || '').trim());
     });
   } else {
@@ -4270,12 +3962,6 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       scrollToBottom(pane, true);
       elements.scrollDownBtn.classList.remove('visible');
     });
-  }
-
-  if (pane.role === 'admin' && pane.kind === 'chat') {
-    try {
-      installAgentPicker(pane);
-    } catch {}
   }
 
   paneRestoreChatHistory(pane);

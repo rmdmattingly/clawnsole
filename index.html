@@ -75,9 +75,13 @@
                   <span class="pane-type-icon" data-pane-type-icon aria-hidden="true">💬</span>
                   <span class="pane-type-text" data-pane-type-text>CHAT</span>
                 </div>
-                <div class="pane-agent">
+                <div class="pane-agent" data-pane-agent-wrap>
                   <span class="agent-label">Agent</span>
+                  <button class="agent-pill-btn" type="button" data-pane-agent-button aria-label="Change agent" data-testid="pane-agent-button">
+                    <span class="agent-pill-label" data-pane-agent-label>main</span>
+                  </button>
                   <select data-pane-agent-select aria-label="Select agent" data-testid="pane-agent-select"></select>
+                  <div class="agent-warning" data-pane-agent-warning role="status" aria-live="polite" hidden></div>
                 </div>
               </div>
               <div class="pane-header-right">
