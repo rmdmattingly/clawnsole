@@ -336,14 +336,16 @@ function createClawnsoleServer(options = {}) {
 	          const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
 	          if (!id) return;
           const name = typeof entry?.name === 'string' && entry.name.trim() ? entry.name.trim() : id;
-          const workspace =
-            typeof entry?.workspace === 'string' && entry.workspace.trim()
-              ? entry.workspace.trim()
-              : defaultWorkspace;
+          const workspaceExplicit = typeof entry?.workspace === 'string' && entry.workspace.trim();
+          const workspace = workspaceExplicit ? entry.workspace.trim() : defaultWorkspace;
           const inlineIdentity = entry?.identity && typeof entry.identity === 'object' ? entry.identity : {};
-          const mdIdentity = workspace ? readWorkspaceIdentity(workspace) : { name: '', emoji: '' };
-          const displayName =
-            cleanIdentityField(inlineIdentity?.name) || mdIdentity.name || name || id;
+
+          // Only read workspace identity when the agent explicitly sets a workspace.
+          // Otherwise, when many agents share agents.defaults.workspace, we'd incorrectly
+          // apply the same IDENTITY.md (e.g. the machine name) to *every* agent.
+          const mdIdentity = (workspaceExplicit || id === 'main') && workspace ? readWorkspaceIdentity(workspace) : { name: '', emoji: '' };
+
+          const displayName = cleanIdentityField(inlineIdentity?.name) || mdIdentity.name || name || id;
           const emoji = cleanIdentityField(inlineIdentity?.emoji) || mdIdentity.emoji || '';
           if (!seen.has(id)) {
             seen.set(id, { id, name, displayName, emoji });

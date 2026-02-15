@@ -357,3 +357,50 @@ test('GET /agents is admin-only and returns agent ids', async () => {
   assert.equal(ops.displayName, 'Ops Bot');
   assert.equal(ops.emoji, '🛠️');
 });
+
+test('GET /agents does not apply default workspace IDENTITY.md to all agents', async () => {
+  const { homeDir, openclawDir } = makeTempHome();
+  const mainWorkspace = path.join(homeDir, 'main-workspace');
+  fs.mkdirSync(mainWorkspace, { recursive: true });
+  fs.writeFileSync(
+    path.join(mainWorkspace, 'IDENTITY.md'),
+    '# IDENTITY.md - Who Am I?\n\n- **Name:** Hop\n- **Emoji:** 📌\n',
+    'utf8'
+  );
+
+  // Note: dev/ops do not explicitly set workspace. They should keep their own names/ids,
+  // not inherit the default workspace identity.
+  writeJson(path.join(openclawDir, 'openclaw.json'), {
+    gateway: { port: 18789, auth: { mode: 'token', token: 't' } },
+    agents: {
+      defaults: { workspace: mainWorkspace },
+      list: [{ id: 'main' }, { id: 'dev' }, { id: 'ops' }]
+    }
+  });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
+
+  const { handleRequest } = createClawnsoleServer({ homeDir });
+  const adminLogin = await invoke(handleRequest, {
+    url: '/auth/login',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: 'admin' })
+  });
+  const adminCookie = parseCookiesFromSetCookie(adminLogin.headers['set-cookie']);
+
+  const res = await invoke(handleRequest, { url: '/agents', headers: { cookie: adminCookie } });
+  assert.equal(res.statusCode, 200);
+  const payload = JSON.parse(res.body.toString('utf8'));
+
+  const main = payload.agents.find((a) => a.id === 'main');
+  assert.equal(main.displayName, 'Hop');
+  assert.equal(main.emoji, '📌');
+
+  const dev = payload.agents.find((a) => a.id === 'dev');
+  assert.equal(dev.displayName, 'dev');
+  assert.equal(dev.emoji, '');
+
+  const ops = payload.agents.find((a) => a.id === 'ops');
+  assert.equal(ops.displayName, 'ops');
+  assert.equal(ops.emoji, '');
+});
