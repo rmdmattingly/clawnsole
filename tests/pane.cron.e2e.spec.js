@@ -39,6 +39,7 @@ test('pane: cron admin golden path (toggle/run/edit/delete)', async ({ page }) =
   const panes = page.locator('[data-pane]');
   const cronPane = panes.last();
 
+  await expect(cronPane.locator('[data-testid="pane-type-pill"]')).toContainText('CRON');
   await expect(cronPane.locator('.cron-pane')).toHaveCount(1);
   await expect(cronPane.getByTestId('cron-body')).toBeVisible();
   await expect(cronPane.getByTestId('cron-job-title').filter({ hasText: 'Nightly report' })).toBeVisible({ timeout: 20000 });
