@@ -74,6 +74,12 @@ async function startClawnsoleTestApp() {
         gateway: {
           port: gatewayPort,
           auth: { token: 'test-token', mode: 'token' }
+        },
+        agents: {
+          list: [
+            { id: 'dev', name: 'dev' },
+            { id: 'main', name: 'main' }
+          ]
         }
       },
       null,
