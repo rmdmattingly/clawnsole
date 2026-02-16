@@ -30,7 +30,7 @@ test('pane: timeline renders + shows recent cron run events', async ({ page }) =
   const panes = page.locator('[data-pane]');
   const timelinePane = panes.last();
 
-  await expect(timelinePane.locator('[data-testid="pane-type-pill"]')).toContainText('TIMELINE');
+  await expect(timelinePane).toHaveAttribute('data-pane-kind', 'timeline');
 
   const cronPane = timelinePane.locator('.cron-pane');
   await expect(cronPane).toHaveCount(1);
@@ -90,7 +90,7 @@ test('pane: timeline filters + range + actions', async ({ page }) => {
   const panes = page.locator('[data-pane]');
   const timelinePane = panes.last();
 
-  await expect(timelinePane.locator('[data-testid="pane-type-pill"]')).toContainText('TIMELINE');
+  await expect(timelinePane).toHaveAttribute('data-pane-kind', 'timeline');
 
   // Baseline: fixture should render timeline items.
   await expect(timelinePane.getByTestId('timeline-item').first()).toBeVisible({ timeout: 60000 });

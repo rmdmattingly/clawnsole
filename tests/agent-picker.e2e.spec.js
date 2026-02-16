@@ -12,7 +12,7 @@ test.afterAll(() => {
   app?.stop?.();
 });
 
-test('agent picker: filter reduces list; Esc clears', async ({ page }) => {
+test('agent chooser: opens, shows agents, Esc closes', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
 
@@ -24,18 +24,17 @@ test('agent picker: filter reduces list; Esc clears', async ({ page }) => {
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   const pane = page.locator('[data-pane]').first();
-  const btn = pane.locator('[data-testid="agent-picker-button"]');
+  const btn = pane.getByTestId('pane-agent-button');
   await expect(btn).toBeVisible({ timeout: 20000 });
 
   await btn.click();
 
-  const listItems = page.locator('[data-testid="agent-picker-item"]');
-  await expect(listItems).toHaveCount(2);
+  const chooser = page.getByRole('dialog', { name: 'Choose agent' });
+  await expect(chooser).toBeVisible();
 
-  const filter = page.locator('[data-testid="agent-filter-input"]');
-  await filter.fill('dev');
-  await expect(listItems).toHaveCount(1);
+  const items = chooser.locator('.agent-chooser-item');
+  await expect(items).toHaveCount(2);
 
-  await filter.press('Escape');
-  await expect(listItems).toHaveCount(2);
+  await page.keyboard.press('Escape');
+  await expect(chooser).toHaveCount(0);
 });
