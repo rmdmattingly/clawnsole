@@ -23,9 +23,9 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await expect(page.locator('#addPaneBtn')).toBeVisible();
-  await page.click('#addPaneBtn');
-  await page.getByRole('button', { name: 'Workqueue pane' }).click();
+  await expect(page.getByTestId('add-pane-btn')).toBeVisible();
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue').click();
 
   const panes = page.locator('[data-pane]');
   const wqPane = panes.last();
@@ -61,7 +61,13 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   expect(Math.abs(layoutBottom - threadBottom)).toBeLessThan(20);
 
   const listBody = wqPane.locator('.wq-pane [data-wq-list-body]').first();
-  await expect(listBody).toBeVisible();
+  // List body exists even when empty; after refresh it should be scrollable.
+  await expect(listBody).toHaveCount(1);
+
+  const itemsResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
+  await wqPane.locator('[data-wq-refresh]').click();
+  await itemsResP;
+
   const listOverflowY = await listBody.evaluate((el) => getComputedStyle(el).overflowY);
   expect(listOverflowY).toBe('auto');
 
@@ -80,8 +86,8 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.click('#addPaneBtn');
-  await page.getByRole('button', { name: 'Workqueue pane' }).click();
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue').click();
 
   const wqPane = page.locator('[data-pane]').last();
   await expect(wqPane).toHaveAttribute('data-pane-kind', 'workqueue');
