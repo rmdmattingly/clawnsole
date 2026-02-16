@@ -259,6 +259,12 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
       try {
         pane.elements.agentSelect.value = pane.agentId;
       } catch {}
+      try {
+        pane._updateAgentPickerLabel?.();
+      } catch {}
+      try {
+        renderPaneAgentIdentity(pane);
+      } catch {}
     });
 
     // Cron/Timeline panes use their own Agent filter select; refresh those options too.
@@ -3018,6 +3024,38 @@ function buildClientForPane(pane) {
   });
 }
 
+function renderPaneAgentIdentity(pane) {
+  if (!pane?.elements) return;
+  const pill = pane.elements.agentPill;
+  const warning = pane.elements.agentWarning;
+
+  if (pane.role !== 'admin' || pane.kind !== 'chat') {
+    if (pill) pill.hidden = true;
+    if (warning) warning.hidden = true;
+    return;
+  }
+
+  const agent = getAgentRecord(pane.agentId);
+  if (pill) {
+    pill.hidden = false;
+    pill.textContent = formatAgentLabel(agent, { includeId: true });
+    pill.setAttribute('role', 'status');
+    pill.setAttribute('aria-label', 'Selected agent');
+  }
+
+  // If agents list is empty, we can't validate; otherwise warn if selected agent is missing.
+  const known = uiState.agents.length === 0 ? true : uiState.agents.some((a) => a.id === pane.agentId);
+  if (warning) {
+    if (known) {
+      warning.hidden = true;
+      warning.textContent = '';
+    } else {
+      warning.hidden = false;
+      warning.textContent = `Selected agent “${pane.agentId}” is unavailable — choose a replacement.`;
+    }
+  }
+}
+
 function paneSetAgent(pane, nextAgentId) {
   if (pane.role !== 'admin') return;
   const next = normalizeAgentId(nextAgentId);
@@ -3029,6 +3067,8 @@ function paneSetAgent(pane, nextAgentId) {
     pane._updateAgentPickerLabel?.();
   } catch {}
   setAgentActivity(next, { lastActiveAt: Date.now() });
+
+  renderPaneAgentIdentity(pane);
 
   pane.attachments.files = [];
   paneRenderAttachments(pane);
@@ -3296,6 +3336,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     typeText: root.querySelector('[data-pane-type-text]'),
     agentSelect: root.querySelector('[data-pane-agent-select]'),
     agentWrap: root.querySelector('.pane-agent'),
+    agentPill: root.querySelector('[data-pane-agent-pill]'),
+    agentWarning: root.querySelector('[data-pane-agent-warning]'),
     status: root.querySelector('[data-pane-status]'),
     closeBtn: root.querySelector('[data-pane-close]'),
     thread: root.querySelector('[data-pane-thread]'),
@@ -4288,6 +4330,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
   if (pane.role === 'admin' && pane.kind === 'chat') {
     try {
       installAgentPicker(pane);
+    } catch {}
+    try {
+      renderPaneAgentIdentity(pane);
+    } catch {}
+  } else {
+    try {
+      renderPaneAgentIdentity(pane);
     } catch {}
   }
 
