@@ -519,6 +519,53 @@ body::before {
   gap: 10px;
 }
 
+.pane-help {
+  position: relative;
+}
+
+.pane-help > summary {
+  list-style: none;
+}
+
+.pane-help > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pane-help[open] > summary {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.pane-help-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 320px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(12, 14, 18, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  z-index: 50;
+}
+
+.pane-help-popover .title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.pane-help-popover .hint {
+  margin-top: 6px;
+}
+
+.pane-help-popover ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.pane-help-popover li {
+  margin: 3px 0;
+}
+
 .pane-agent-pill {
   padding: 5px 12px;
   border-radius: 999px;

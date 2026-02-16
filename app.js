@@ -1414,7 +1414,38 @@ function renderWorkqueuePaneItems(pane) {
 
   const itemsRaw = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
   const items = sortWorkqueueItems(itemsRaw, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
-  if (empty) empty.hidden = items.length > 0;
+
+  if (empty) {
+    const hasItems = items.length > 0;
+    empty.hidden = hasItems;
+    if (!hasItems) {
+      const queue = String(pane.workqueue?.queue || '').trim() || 'dev-team';
+      const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
+      const statusLabel = statuses.length ? statuses.join(', ') : 'default';
+      empty.innerHTML = `
+        <div class="empty-state">
+          <div style="font-weight:700; margin-bottom:6px;">No items in this queue.</div>
+          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span></div>
+          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
+            <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
+          </div>
+          <div class="hint" style="margin-top:8px;">Tip: use “Enqueue new item” above, or configure queues on the server.</div>
+        </div>
+      `;
+
+      const refreshBtn = pane.elements?.thread?.querySelector('[data-wq-refresh]');
+      const enqueueDetails = pane.elements?.thread?.querySelector('details.wq-enqueue');
+      empty.querySelector('[data-wq-empty-refresh]')?.addEventListener('click', () => refreshBtn?.click());
+      empty.querySelector('[data-wq-empty-enqueue]')?.addEventListener('click', () => {
+        try {
+          enqueueDetails?.setAttribute('open', '');
+          enqueueDetails?.scrollIntoView({ block: 'nearest' });
+          pane.elements?.thread?.querySelector('[data-wq-enqueue-title]')?.focus();
+        } catch {}
+      });
+    }
+  }
 
   const defs = [
     { status: 'ready', label: 'Ready' },
@@ -2273,6 +2304,8 @@ function paneRestoreChatHistory(pane) {
     paneAddChatMessage(pane, { role: entry.role, text: entry.text, persist: false });
   });
 
+  paneRenderChatEmptyState(pane);
+
   // When a pane is restored during startup, it may not be attached to the DOM yet,
   // so scrollHeight can be wrong (0) and we end up stuck at the top after refresh.
   // Do an immediate scroll + a couple deferred passes after layout.
@@ -2305,7 +2338,53 @@ function paneClearChatHistory(pane, { wipeStorage = false } = {}) {
   }
 }
 
+function paneRenderChatEmptyState(pane) {
+  if (!pane || pane.kind !== 'chat') return;
+  const thread = pane.elements?.thread;
+  if (!thread) return;
+
+  // Only show when the thread is otherwise empty.
+  const hasHistory = Array.isArray(pane.chat?.history) && pane.chat.history.length > 0;
+  const existing = thread.querySelector('[data-pane-empty-state]');
+  if (hasHistory) {
+    existing?.remove();
+    return;
+  }
+
+  if (existing) return;
+
+  const wrap = document.createElement('div');
+  wrap.setAttribute('data-pane-empty-state', '1');
+  wrap.className = 'hint';
+  wrap.style.padding = '10px 8px';
+
+  const agent = paneAssistantLabel(pane);
+  const hasAgent = Boolean(pane.role !== 'admin' || (pane.agentId && String(pane.agentId).trim()));
+
+  wrap.innerHTML = `
+    <div style="font-weight:700; margin-bottom:6px;">${hasAgent ? 'Ready to chat.' : 'Select an agent to chat with.'}</div>
+    <div class="hint">Target: <span class="mono">${escapeHtml(agent || '—')}</span></div>
+    ${pane.role === 'admin' ? '<div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;"><button type="button" class="secondary" data-pane-empty-pick-agent>Pick agent…</button></div>' : ''}
+  `;
+
+  wrap.querySelector('[data-pane-empty-pick-agent]')?.addEventListener('click', () => {
+    try {
+      pane._agentPickerBtn?.click?.();
+    } catch {}
+    try {
+      pane.elements?.agentSelect?.focus?.();
+    } catch {}
+  });
+
+  thread.appendChild(wrap);
+}
+
 function paneAddChatMessage(pane, { role, text, runId, streaming = false, persist = true, metaLabel = null, state = null, actions = null } = {}) {
+  // If we're adding content, ensure any empty-state copy is gone.
+  try {
+    pane.elements?.thread?.querySelector('[data-pane-empty-state]')?.remove();
+  } catch {}
+
   const shouldPin = pane.scroll.pinned || isNearBottom(pane.elements.thread);
   const bubble = document.createElement('div');
   bubble.className = `chat-bubble ${role}${streaming ? ' streaming' : ''}`;
@@ -3321,6 +3400,7 @@ function installAgentPicker(pane) {
 
   // Best-effort: keep label in sync even when agent changes via other paths.
   pane._updateAgentPickerLabel = updateBtnLabel;
+  pane._agentPickerBtn = btn;
 
   wrapEl.appendChild(btn);
 }
@@ -3339,6 +3419,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     agentPill: root.querySelector('[data-pane-agent-pill]'),
     agentWarning: root.querySelector('[data-pane-agent-warning]'),
     status: root.querySelector('[data-pane-status]'),
+    helpDetails: root.querySelector('[data-pane-help]'),
+    helpPopover: root.querySelector('[data-pane-help-popover]'),
     closeBtn: root.querySelector('[data-pane-close]'),
     thread: root.querySelector('[data-pane-thread]'),
     scrollDownBtn: root.querySelector('[data-pane-scroll-down]'),
@@ -3410,6 +3492,76 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     if (elements.typePill) {
       elements.typePill.classList.remove('pane-type-chat', 'pane-type-workqueue', 'pane-type-cron', 'pane-type-timeline');
       elements.typePill.classList.add(`pane-type-${pane.kind}`);
+    }
+  } catch {}
+
+  // Per-pane inline help popover ("What is this pane?")
+  try {
+    if (elements.helpPopover) {
+      const shortcut = (keys, desc) => `<li><span class="mono">${escapeHtml(keys)}</span> — ${escapeHtml(desc)}</li>`;
+      const help = (() => {
+        if (pane.kind === 'workqueue') {
+          return {
+            title: 'Workqueue',
+            lines: ['Shows queued work items, grouped by status.', 'Drag cards between columns to change status.', 'Use Refresh when another worker updates the queue.'],
+            shortcuts: [
+              ['g w', 'open Workqueue modal'],
+              ['Cmd/Ctrl+K', 'cycle focus between panes']
+            ]
+          };
+        }
+        if (pane.kind === 'cron') {
+          return {
+            title: 'Cron',
+            lines: ['Shows scheduled jobs in the Gateway cron scheduler.', 'Use filters to find failing/disabled jobs.', 'Use Run/Edit/Disable for quick ops.'],
+            shortcuts: [
+              ['?', 'keyboard shortcuts overlay'],
+              ['Cmd/Ctrl+K', 'cycle focus between panes']
+            ]
+          };
+        }
+        if (pane.kind === 'timeline') {
+          return {
+            title: 'Timeline',
+            lines: ['Shows recent cron run history (best-effort).', 'Adjust range/status/search to find events.', 'Click View to inspect the underlying job.'],
+            shortcuts: [
+              ['?', 'keyboard shortcuts overlay'],
+              ['Cmd/Ctrl+K', 'cycle focus between panes']
+            ]
+          };
+        }
+        return {
+          title: 'Chat',
+          lines: ['Chat with an agent/session.', 'Pick an agent target, then send messages/files.', 'Use Stop to cancel a long response.'],
+          shortcuts: [
+            ['Cmd/Ctrl+1..4', 'focus a pane'],
+            ['Cmd/Ctrl+K', 'cycle focus between panes']
+          ]
+        };
+      })();
+
+      const linesHtml = help.lines.map((t) => `<div>${escapeHtml(t)}</div>`).join('');
+      const shortcutsHtml = help.shortcuts.map(([k, d]) => shortcut(k, d)).join('');
+
+      elements.helpPopover.innerHTML = `
+        <div class="title">${escapeHtml(help.title)}</div>
+        <div>${linesHtml}</div>
+        <div class="hint" style="margin-top:8px;">Shortcuts:</div>
+        <ul>${shortcutsHtml}</ul>
+      `;
+
+      // Close on Escape (details doesn't do this by default)
+      if (elements.helpDetails) {
+        elements.helpDetails.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') {
+            try {
+              elements.helpDetails.removeAttribute('open');
+              e.stopPropagation();
+              e.preventDefault();
+            } catch {}
+          }
+        });
+      }
     }
   } catch {}
 
@@ -4114,6 +4266,28 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         pane.cronJobsById = Object.fromEntries(filtered.map((j) => [String(j.id), j]));
 
         if (!isTimeline) {
+          if (filtered.length === 0) {
+            const agentFilterLabel = String(agentSel?.value || 'all');
+            const searchLabel = String(cronSearchEl?.value || '').trim();
+            const flags = [
+              cronOnlyFailingEl?.checked ? 'failing' : '',
+              cronOnlyDisabledEl?.checked ? 'disabled' : '',
+              cronDueSoonEl?.checked ? 'due soon' : ''
+            ].filter(Boolean);
+            body.innerHTML = `
+              <div class="hint" style="padding: 10px 8px;">
+                <div style="font-weight:700; margin-bottom:6px;">No scheduled jobs.</div>
+                <div class="hint">Agent: <span class="mono">${escapeHtml(agentFilterLabel)}</span>${searchLabel ? ` · Search: <span class="mono">${escapeHtml(searchLabel)}</span>` : ''}${flags.length ? ` · Filters: <span class="mono">${escapeHtml(flags.join(', '))}</span>` : ''}</div>
+                <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+                  <button type="button" class="secondary" data-cron-empty-refresh>Refresh</button>
+                </div>
+                <div class="hint" style="margin-top:8px;">Tip: cron jobs are configured in your Gateway cron config (and can be created/edited via the cron API/CLI).</div>
+              </div>
+            `;
+            body.querySelector('[data-cron-empty-refresh]')?.addEventListener('click', () => refreshBtn?.click());
+            return;
+          }
+
           body.innerHTML = `<div class="cron-list">${filtered
             .map((job) => {
               const nextRun = fmtTime(job.state?.nextRunAtMs);
@@ -4202,7 +4376,16 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
         events.sort((a, b) => b.ts - a.ts);
         if (events.length === 0) {
-          body.innerHTML = `<div class="hint" style="padding: 10px 8px;">No events in range.</div>`;
+          const rangeLabel = tlRangeEl ? tlRangeEl.options?.[tlRangeEl.selectedIndex]?.textContent || '' : '';
+          const statusLabel = String(tlStatusEl?.value || 'all');
+          const searchLabel = String(tlSearchEl?.value || '').trim();
+          body.innerHTML = `
+            <div class="hint" style="padding: 10px 8px;">
+              <div style="font-weight:700; margin-bottom:6px;">No activity in range.</div>
+              <div class="hint">Range: <span class="mono">${escapeHtml(rangeLabel || String(rangeMs))}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span>${searchLabel ? ` · Search: <span class="mono">${escapeHtml(searchLabel)}</span>` : ''}</div>
+              <div class="hint" style="margin-top:8px;">Tip: broaden the range or clear filters to find older runs.</div>
+            </div>
+          `;
           return;
         }
 
