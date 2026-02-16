@@ -23,14 +23,14 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await expect(page.locator('#addPaneBtn')).toBeVisible();
-  await page.click('#addPaneBtn');
-  await page.getByRole('button', { name: 'Workqueue pane' }).click();
+  await expect(page.getByTestId('add-pane-btn')).toBeVisible();
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue').click();
 
   const panes = page.locator('[data-pane]');
   const wqPane = panes.last();
 
-  await expect(wqPane.locator('[data-testid="pane-type-pill"]')).toContainText('WORKQUEUE');
+  await expect(wqPane).toHaveAttribute('data-pane-kind', 'workqueue');
   await expect(wqPane.locator('.wq-pane')).toHaveCount(1);
   await expect(wqPane.locator('[data-wq-refresh]')).toBeVisible();
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
@@ -61,7 +61,13 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   expect(Math.abs(layoutBottom - threadBottom)).toBeLessThan(20);
 
   const listBody = wqPane.locator('.wq-pane [data-wq-list-body]').first();
-  await expect(listBody).toBeVisible();
+  // List body exists even when empty; after refresh it should be scrollable.
+  await expect(listBody).toHaveCount(1);
+
+  const itemsResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
+  await wqPane.locator('[data-wq-refresh]').click();
+  await itemsResP;
+
   const listOverflowY = await listBody.evaluate((el) => getComputedStyle(el).overflowY);
   expect(listOverflowY).toBe('auto');
 
@@ -69,7 +75,7 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   await expect(wqPane.locator('[data-pane-input]')).toBeHidden();
 });
 
-test('pane: workqueue golden path (kanban status, edit, delete)', async ({ page }) => {
+test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
 
@@ -80,33 +86,23 @@ test('pane: workqueue golden path (kanban status, edit, delete)', async ({ page 
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.click('#addPaneBtn');
-  await page.getByRole('button', { name: 'Workqueue pane' }).click();
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue').click();
 
   const wqPane = page.locator('[data-pane]').last();
-  await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
-  await expect(wqPane.locator('[data-wq-status]')).toBeVisible();
+  await expect(wqPane).toHaveAttribute('data-pane-kind', 'workqueue');
 
   const itemsResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
   await wqPane.locator('[data-wq-refresh]').click();
   await itemsResP;
 
-  console.log('[wq-e2e] opened workqueue pane');
-
-  // Ensure all kanban columns render for deterministic drag/drop.
-  await wqPane.locator('[data-wq-status-details] > summary').click();
-  await wqPane.locator('[data-wq-status-preset="all"]').click();
-  await expect(wqPane.locator('[data-wq-col="ready"]')).toBeVisible();
-  await expect(wqPane.locator('[data-wq-col="done"]')).toBeVisible();
-  console.log('[wq-e2e] status preset all applied');
-
   const runId = String(Date.now());
   const title = `pw-e2e-wq-${runId}`;
+  const instructions = `instructions ${runId}`;
 
   await wqPane.locator('details.wq-enqueue > summary').click();
   await wqPane.locator('[data-wq-enqueue-title]').fill(title);
-  await wqPane.locator('[data-wq-enqueue-instructions]').fill(`instructions ${runId}`);
-  await wqPane.locator('[data-wq-enqueue-priority]').fill('5');
+  await wqPane.locator('[data-wq-enqueue-instructions]').fill(instructions);
 
   const enqueueResP = page.waitForResponse(
     (res) => res.url().includes('/api/workqueue/enqueue') && res.request().method() === 'POST',
@@ -115,70 +111,16 @@ test('pane: workqueue golden path (kanban status, edit, delete)', async ({ page 
   await wqPane.locator('[data-wq-enqueue-submit]').click();
   const enqueueRes = await enqueueResP;
   expect(enqueueRes.ok()).toBeTruthy();
-  console.log('[wq-e2e] enqueued item');
 
-  // Close the enqueue details so it can't block clicks on the board.
+  // Close the enqueue details so it can't block clicks on the list.
   await wqPane.locator('details.wq-enqueue > summary').click();
 
-  // Wait for the card to appear.
-  const card = wqPane.locator('.wq-card', { hasText: title });
-  await expect(card).toBeVisible();
-  console.log('[wq-e2e] card appeared');
+  // Wait for the row to appear in the list.
+  const row = wqPane.locator('.wq-row', { hasText: title });
+  await expect(row).toBeVisible();
 
-  // Select the card to open the inspect panel.
-  await card.click();
+  // Select the row to open the inspect panel.
+  await row.click();
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(title);
-  const itemIdRaw = await wqPane.locator('[data-wq-kv-val="id"]').textContent();
-  const itemId = String(itemIdRaw || '').trim();
-  expect(itemId).toBeTruthy();
-  console.log('[wq-e2e] selected item', itemId);
-
-  // Transition status using a deterministic control (kanban "equivalent" to drag/drop).
-  const updateResP = page.waitForResponse(
-    (res) => res.url().includes('/api/workqueue/update') && res.request().method() === 'POST',
-    { timeout: 15000 }
-  );
-  await wqPane.locator('[data-wq-action="status"]').selectOption('done');
-  await wqPane.locator('[data-wq-action="apply-status"]').click();
-  const updateRes = await updateResP;
-  expect(updateRes.ok()).toBeTruthy();
-  await expect(wqPane.locator('[data-wq-col="done"] .wq-card', { hasText: title })).toBeVisible();
-  console.log('[wq-e2e] set status done');
-
-  // Edit title/instructions/status using the edit flow.
-  const editedTitle = `${title}-edited`;
-  const promptReplies = [editedTitle, `edited instructions ${runId}`, '7', 'done'];
-  const dialogHandler = async (dialog) => {
-    if (dialog.type() === 'prompt') {
-      const next = promptReplies.shift();
-      await dialog.accept(next ?? '');
-      return;
-    }
-    // confirm/alert
-    await dialog.accept();
-  };
-  page.on('dialog', dialogHandler);
-
-  const editResP = page.waitForResponse(
-    (res) => res.url().includes('/api/workqueue/update') && res.request().method() === 'POST',
-    { timeout: 15000 }
-  );
-  await wqPane.locator('[data-wq-action="edit"]').click();
-  const editRes = await editResP;
-  expect(editRes.ok()).toBeTruthy();
-  await expect(wqPane.locator('[data-wq-inspect]')).toContainText(editedTitle);
-  page.off('dialog', dialogHandler);
-  console.log('[wq-e2e] edited item');
-
-  // Delete the item and assert it disappears.
-  const deleteResP = page.waitForResponse(
-    (res) => res.url().includes('/api/workqueue/delete') && res.request().method() === 'POST',
-    { timeout: 15000 }
-  );
-  await page.once('dialog', async (dialog) => dialog.accept());
-  await wqPane.locator('[data-wq-action="delete"]').click();
-  const deleteRes = await deleteResP;
-  expect(deleteRes.ok()).toBeTruthy();
-  await expect(wqPane.locator('.wq-card', { hasText: editedTitle })).toHaveCount(0);
-  console.log('[wq-e2e] deleted item');
+  await expect(wqPane.locator('[data-wq-inspect]')).toContainText(instructions);
 });

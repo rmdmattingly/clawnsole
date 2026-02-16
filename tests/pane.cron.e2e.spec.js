@@ -39,11 +39,11 @@ test('pane: cron admin golden path (toggle/run/edit/delete)', async ({ page }) =
   const panes = page.locator('[data-pane]');
   const cronPane = panes.last();
 
-  await expect(cronPane.locator('[data-testid="pane-type-pill"]')).toContainText('CRON');
+  await expect(cronPane).toHaveAttribute('data-pane-kind', 'cron');
   await expect(cronPane.locator('.cron-pane')).toHaveCount(1);
-  await expect(cronPane.getByTestId('cron-body')).toBeVisible();
-  await expect(cronPane.getByTestId('cron-job-title').filter({ hasText: 'Nightly report' })).toBeVisible({ timeout: 20000 });
-  await expect(cronPane.getByTestId('cron-job-title').filter({ hasText: 'PR sweep' })).toBeVisible();
+  await expect(cronPane.locator('[data-cron-body]')).toBeVisible();
+  await expect(cronPane.locator('.cron-job__title', { hasText: 'Nightly report' })).toBeVisible({ timeout: 20000 });
+  await expect(cronPane.locator('.cron-job__title', { hasText: 'PR sweep' })).toBeVisible();
 
   // Toggle enabled -> disabled for job-1.
   const job1 = cronPane.locator('[data-cron-job-card][data-job-id="job-1"]');
