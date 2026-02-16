@@ -3,12 +3,15 @@ const globalElements = {
   clientId: document.getElementById('clientId'),
   deviceId: document.getElementById('deviceId'),
   disconnectBtn: document.getElementById('disconnectBtn'),
+  resetLayoutBtn: document.getElementById('resetLayoutBtn'),
   status: document.getElementById('connectionStatus'),
   statusMeta: document.getElementById('statusMeta'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
   refreshAgentsBtn: document.getElementById('refreshAgentsBtn'),
   toastHost: document.getElementById('toastHost'),
+  shortcutsModal: document.getElementById('shortcutsModal'),
+  shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
   workqueueModal: document.getElementById('workqueueModal'),
   workqueueCloseBtn: document.getElementById('workqueueCloseBtn'),
   wqQueueSelect: document.getElementById('wqQueueSelect'),
@@ -222,6 +225,12 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
           pane.elements.agentSelect.value = pane.agentId;
         } catch {}
       }
+      try {
+        renderPaneAgentIdentity(pane);
+      } catch {}
+      try {
+        pane._updateAgentPickerLabel?.();
+      } catch {}
       try {
         renderPaneAgentIdentity(pane);
       } catch {}
@@ -710,6 +719,16 @@ function openSettings() {
 function closeSettings() {
   globalElements.settingsModal.classList.remove('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'true');
+}
+
+function openShortcuts() {
+  globalElements.shortcutsModal?.classList.add('open');
+  globalElements.shortcutsModal?.setAttribute('aria-hidden', 'false');
+}
+
+function closeShortcuts() {
+  globalElements.shortcutsModal?.classList.remove('open');
+  globalElements.shortcutsModal?.setAttribute('aria-hidden', 'true');
 }
 
 // Workqueue (admin-only)
@@ -1325,7 +1344,38 @@ function renderWorkqueuePaneItems(pane) {
 
   const itemsRaw = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
   const items = sortWorkqueueItems(itemsRaw, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
-  if (empty) empty.hidden = items.length > 0;
+
+  if (empty) {
+    const hasItems = items.length > 0;
+    empty.hidden = hasItems;
+    if (!hasItems) {
+      const queue = String(pane.workqueue?.queue || '').trim() || 'dev-team';
+      const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
+      const statusLabel = statuses.length ? statuses.join(', ') : 'default';
+      empty.innerHTML = `
+        <div class="empty-state">
+          <div style="font-weight:700; margin-bottom:6px;">No items in this queue.</div>
+          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span></div>
+          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
+            <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
+          </div>
+          <div class="hint" style="margin-top:8px;">Tip: use “Enqueue new item” above, or configure queues on the server.</div>
+        </div>
+      `;
+
+      const refreshBtn = pane.elements?.thread?.querySelector('[data-wq-refresh]');
+      const enqueueDetails = pane.elements?.thread?.querySelector('details.wq-enqueue');
+      empty.querySelector('[data-wq-empty-refresh]')?.addEventListener('click', () => refreshBtn?.click());
+      empty.querySelector('[data-wq-empty-enqueue]')?.addEventListener('click', () => {
+        try {
+          enqueueDetails?.setAttribute('open', '');
+          enqueueDetails?.scrollIntoView({ block: 'nearest' });
+          pane.elements?.thread?.querySelector('[data-wq-enqueue-title]')?.focus();
+        } catch {}
+      });
+    }
+  }
 
   const now = Date.now();
   for (const it of items) {
@@ -2044,6 +2094,8 @@ function paneRestoreChatHistory(pane) {
     paneAddChatMessage(pane, { role: entry.role, text: entry.text, persist: false });
   });
 
+  paneRenderChatEmptyState(pane);
+
   // When a pane is restored during startup, it may not be attached to the DOM yet,
   // so scrollHeight can be wrong (0) and we end up stuck at the top after refresh.
   // Do an immediate scroll + a couple deferred passes after layout.
@@ -2076,7 +2128,53 @@ function paneClearChatHistory(pane, { wipeStorage = false } = {}) {
   }
 }
 
+function paneRenderChatEmptyState(pane) {
+  if (!pane || pane.kind !== 'chat') return;
+  const thread = pane.elements?.thread;
+  if (!thread) return;
+
+  // Only show when the thread is otherwise empty.
+  const hasHistory = Array.isArray(pane.chat?.history) && pane.chat.history.length > 0;
+  const existing = thread.querySelector('[data-pane-empty-state]');
+  if (hasHistory) {
+    existing?.remove();
+    return;
+  }
+
+  if (existing) return;
+
+  const wrap = document.createElement('div');
+  wrap.setAttribute('data-pane-empty-state', '1');
+  wrap.className = 'hint';
+  wrap.style.padding = '10px 8px';
+
+  const agent = paneAssistantLabel(pane);
+  const hasAgent = Boolean(pane.role !== 'admin' || (pane.agentId && String(pane.agentId).trim()));
+
+  wrap.innerHTML = `
+    <div style="font-weight:700; margin-bottom:6px;">${hasAgent ? 'Ready to chat.' : 'Select an agent to chat with.'}</div>
+    <div class="hint">Target: <span class="mono">${escapeHtml(agent || '—')}</span></div>
+    ${pane.role === 'admin' ? '<div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;"><button type="button" class="secondary" data-pane-empty-pick-agent>Pick agent…</button></div>' : ''}
+  `;
+
+  wrap.querySelector('[data-pane-empty-pick-agent]')?.addEventListener('click', () => {
+    try {
+      pane._agentPickerBtn?.click?.();
+    } catch {}
+    try {
+      pane.elements?.agentSelect?.focus?.();
+    } catch {}
+  });
+
+  thread.appendChild(wrap);
+}
+
 function paneAddChatMessage(pane, { role, text, runId, streaming = false, persist = true, metaLabel = null, state = null, actions = null } = {}) {
+  // If we're adding content, ensure any empty-state copy is gone.
+  try {
+    pane.elements?.thread?.querySelector('[data-pane-empty-state]')?.remove();
+  } catch {}
+
   const shouldPin = pane.scroll.pinned || isNearBottom(pane.elements.thread);
   const bubble = document.createElement('div');
   bubble.className = `chat-bubble ${role}${streaming ? ' streaming' : ''}`;
@@ -2809,7 +2907,8 @@ function renderPaneAgentIdentity(pane) {
   if (elements.agentLabel) {
     // Keep this short; the chooser shows full labels/ids.
     const emoji = typeof agent?.emoji === 'string' ? agent.emoji.trim() : '';
-    const name = (typeof agent?.displayName === 'string' && agent.displayName.trim()) ||
+    const name =
+      (typeof agent?.displayName === 'string' && agent.displayName.trim()) ||
       (typeof agent?.name === 'string' && agent.name.trim()) ||
       agentId;
     elements.agentLabel.textContent = `${emoji ? `${emoji} ` : ''}${name}`;
@@ -2986,6 +3085,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     agentLabel: root.querySelector('[data-pane-agent-label]'),
     agentWarning: root.querySelector('[data-pane-agent-warning]'),
     status: root.querySelector('[data-pane-status]'),
+    helpDetails: root.querySelector('[data-pane-help]'),
+    helpPopover: root.querySelector('[data-pane-help-popover]'),
     closeBtn: root.querySelector('[data-pane-close]'),
     thread: root.querySelector('[data-pane-thread]'),
     scrollDownBtn: root.querySelector('[data-pane-scroll-down]'),
@@ -3042,6 +3143,76 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
   try {
     elements.root.dataset.paneKind = pane.kind;
     elements.root.classList.add(`pane-kind-${pane.kind}`);
+  } catch {}
+
+  // Per-pane inline help popover ("What is this pane?")
+  try {
+    if (elements.helpPopover) {
+      const shortcut = (keys, desc) => `<li><span class="mono">${escapeHtml(keys)}</span> — ${escapeHtml(desc)}</li>`;
+      const help = (() => {
+        if (pane.kind === 'workqueue') {
+          return {
+            title: 'Workqueue',
+            lines: ['Shows queued work items, grouped by status.', 'Drag cards between columns to change status.', 'Use Refresh when another worker updates the queue.'],
+            shortcuts: [
+              ['g w', 'open Workqueue modal'],
+              ['Cmd/Ctrl+K', 'cycle focus between panes']
+            ]
+          };
+        }
+        if (pane.kind === 'cron') {
+          return {
+            title: 'Cron',
+            lines: ['Shows scheduled jobs in the Gateway cron scheduler.', 'Use filters to find failing/disabled jobs.', 'Use Run/Edit/Disable for quick ops.'],
+            shortcuts: [
+              ['?', 'keyboard shortcuts overlay'],
+              ['Cmd/Ctrl+K', 'cycle focus between panes']
+            ]
+          };
+        }
+        if (pane.kind === 'timeline') {
+          return {
+            title: 'Timeline',
+            lines: ['Shows recent cron run history (best-effort).', 'Adjust range/status/search to find events.', 'Click View to inspect the underlying job.'],
+            shortcuts: [
+              ['?', 'keyboard shortcuts overlay'],
+              ['Cmd/Ctrl+K', 'cycle focus between panes']
+            ]
+          };
+        }
+        return {
+          title: 'Chat',
+          lines: ['Chat with an agent/session.', 'Pick an agent target, then send messages/files.', 'Use Stop to cancel a long response.'],
+          shortcuts: [
+            ['Cmd/Ctrl+1..4', 'focus a pane'],
+            ['Cmd/Ctrl+K', 'cycle focus between panes']
+          ]
+        };
+      })();
+
+      const linesHtml = help.lines.map((t) => `<div>${escapeHtml(t)}</div>`).join('');
+      const shortcutsHtml = help.shortcuts.map(([k, d]) => shortcut(k, d)).join('');
+
+      elements.helpPopover.innerHTML = `
+        <div class="title">${escapeHtml(help.title)}</div>
+        <div>${linesHtml}</div>
+        <div class="hint" style="margin-top:8px;">Shortcuts:</div>
+        <ul>${shortcutsHtml}</ul>
+      `;
+
+      // Close on Escape (details doesn't do this by default)
+      if (elements.helpDetails) {
+        elements.helpDetails.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') {
+            try {
+              elements.helpDetails.removeAttribute('open');
+              e.stopPropagation();
+              e.preventDefault();
+            } catch {}
+          }
+        });
+      }
+    }
   } catch {}
 
   if (elements.closeBtn) {
@@ -3745,6 +3916,28 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         pane.cronJobsById = Object.fromEntries(filtered.map((j) => [String(j.id), j]));
 
         if (!isTimeline) {
+          if (filtered.length === 0) {
+            const agentFilterLabel = String(agentSel?.value || 'all');
+            const searchLabel = String(cronSearchEl?.value || '').trim();
+            const flags = [
+              cronOnlyFailingEl?.checked ? 'failing' : '',
+              cronOnlyDisabledEl?.checked ? 'disabled' : '',
+              cronDueSoonEl?.checked ? 'due soon' : ''
+            ].filter(Boolean);
+            body.innerHTML = `
+              <div class="hint" style="padding: 10px 8px;">
+                <div style="font-weight:700; margin-bottom:6px;">No scheduled jobs.</div>
+                <div class="hint">Agent: <span class="mono">${escapeHtml(agentFilterLabel)}</span>${searchLabel ? ` · Search: <span class="mono">${escapeHtml(searchLabel)}</span>` : ''}${flags.length ? ` · Filters: <span class="mono">${escapeHtml(flags.join(', '))}</span>` : ''}</div>
+                <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+                  <button type="button" class="secondary" data-cron-empty-refresh>Refresh</button>
+                </div>
+                <div class="hint" style="margin-top:8px;">Tip: cron jobs are configured in your Gateway cron config (and can be created/edited via the cron API/CLI).</div>
+              </div>
+            `;
+            body.querySelector('[data-cron-empty-refresh]')?.addEventListener('click', () => refreshBtn?.click());
+            return;
+          }
+
           body.innerHTML = `<div class="cron-list">${filtered
             .map((job) => {
               const nextRun = fmtTime(job.state?.nextRunAtMs);
@@ -3833,7 +4026,16 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
         events.sort((a, b) => b.ts - a.ts);
         if (events.length === 0) {
-          body.innerHTML = `<div class="hint" style="padding: 10px 8px;">No events in range.</div>`;
+          const rangeLabel = tlRangeEl ? tlRangeEl.options?.[tlRangeEl.selectedIndex]?.textContent || '' : '';
+          const statusLabel = String(tlStatusEl?.value || 'all');
+          const searchLabel = String(tlSearchEl?.value || '').trim();
+          body.innerHTML = `
+            <div class="hint" style="padding: 10px 8px;">
+              <div style="font-weight:700; margin-bottom:6px;">No activity in range.</div>
+              <div class="hint">Range: <span class="mono">${escapeHtml(rangeLabel || String(rangeMs))}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span>${searchLabel ? ` · Search: <span class="mono">${escapeHtml(searchLabel)}</span>` : ''}</div>
+              <div class="hint" style="margin-top:8px;">Tip: broaden the range or clear filters to find older runs.</div>
+            </div>
+          `;
           return;
         }
 
@@ -4008,6 +4210,8 @@ const paneManager = {
         agentId: cfg.agentId,
         queue: cfg.queue,
         statusFilter: cfg.statusFilter,
+        sortKey: cfg.sortKey,
+        sortDir: cfg.sortDir,
         closable: true
       })
     );
@@ -4072,11 +4276,16 @@ const paneManager = {
       }
     } catch {}
 
-    // Default: two chat panes.
-    const secondary =
-      uiState.agents.find((agent) => agent.id && agent.id !== defaultAgent)?.id || defaultAgent || 'main';
+    // Default: Chat + Workqueue.
     const paneA = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: defaultAgent };
-    const paneB = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: normalizeAgentId(secondary) };
+    const paneB = {
+      key: `p${randomId().slice(0, 8)}`,
+      kind: 'workqueue',
+      queue: 'dev-team',
+      statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+      sortKey: 'default',
+      sortDir: 'desc'
+    };
     const list = [paneA, paneB].slice(0, this.maxPanes);
     storage.set(ADMIN_PANES_KEY, JSON.stringify(list));
     return list;
@@ -4100,6 +4309,36 @@ const paneManager = {
       return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
+  },
+  resetAdminLayoutToDefault({ confirm = true } = {}) {
+    if (roleState.role !== 'admin') return;
+    if (confirm) {
+      const ok = window.confirm('Reset layout to default (Chat + Workqueue)?');
+      if (!ok) return;
+    }
+
+    const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
+    const defaultAgent = normalizeAgentId(storedDefault || 'main');
+    const paneA = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: defaultAgent };
+    const paneB = {
+      key: `p${randomId().slice(0, 8)}`,
+      kind: 'workqueue',
+      queue: 'dev-team',
+      statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+      sortKey: 'default',
+      sortDir: 'desc'
+    };
+    storage.set(ADMIN_PANES_KEY, JSON.stringify([paneA, paneB]));
+
+    this.init();
+
+    // If authed, make sure panes reconnect after reset.
+    this.connectAll();
+
+    try {
+      const firstPane = this.panes[0];
+      firstPane?.elements?.input?.focus?.();
+    } catch {}
   },
   addPane(kind = 'chat') {
     if (roleState.role !== 'admin') return;
@@ -4440,6 +4679,11 @@ globalElements.settingsCloseBtn?.addEventListener('click', () => closeSettings()
 globalElements.settingsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.settingsModal) closeSettings();
 });
+
+globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
+globalElements.shortcutsModal?.addEventListener('click', (event) => {
+  if (event.target === globalElements.shortcutsModal) closeShortcuts();
+});
 globalElements.saveGuestPromptBtn?.addEventListener('click', () => saveGuestPrompt());
 globalElements.recurringPromptCreateBtn?.addEventListener('click', () => createRecurringPromptFromUi());
 globalElements.recurringPromptRefreshBtn?.addEventListener('click', () => loadRecurringPrompts());
@@ -4480,6 +4724,53 @@ globalElements.wqRefreshBtn?.addEventListener('click', () => {
 globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFromUi());
 globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFromUi());
 
+let shortcutState = { lastGAtMs: 0 };
+
+function isTypingContext(target) {
+  const el = target || document.activeElement;
+  if (!el) return false;
+  const tag = String(el.tagName || '').toUpperCase();
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (el.isContentEditable) return true;
+  return false;
+}
+
+function focusPaneIndex(idx) {
+  const pane = paneManager.panes[idx];
+  if (!pane) return;
+
+  try {
+    pane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  } catch {}
+
+  // Prefer focusing the chat input when available.
+  const input = pane.elements?.input;
+  if (input && typeof input.focus === 'function') {
+    input.focus();
+    return;
+  }
+
+  // Fallback: focus first focusable control inside the pane.
+  const root = pane.elements?.root;
+  const focusable =
+    root &&
+    root.querySelector &&
+    root.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+  if (focusable && typeof focusable.focus === 'function') {
+    focusable.focus();
+  }
+}
+
+function cyclePaneFocus() {
+  const panes = paneManager.panes;
+  if (!panes || panes.length === 0) return;
+
+  const active = document.activeElement;
+  const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
+  const next = idx >= 0 ? (idx + 1) % panes.length : 0;
+  focusPaneIndex(next);
+}
+
 window.addEventListener('keydown', (event) => {
   const isEditableTarget = (() => {
     const el = event.target;
@@ -4510,11 +4801,72 @@ window.addEventListener('keydown', (event) => {
   }
 
   if (event.key === 'Escape') {
+    closeShortcuts();
     closeSettings();
     closeWorkqueue();
     paneManager.closeAddPaneMenu();
     if (!isEditableTarget) {
       event.preventDefault();
+    }
+    return;
+  }
+
+  // Never steal focus / override browser shortcuts while typing.
+  if (isTypingContext(event.target)) return;
+
+  const key = String(event.key || '');
+
+  const isQuestion = key === '?' || (key === '/' && event.shiftKey);
+  if (isQuestion && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault();
+    openShortcuts();
+    return;
+  }
+
+  // Cmd/Ctrl+1..4 focuses a pane.
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
+    const n = Number.parseInt(key, 10);
+    if (Number.isFinite(n) && n >= 1 && n <= 4) {
+      event.preventDefault();
+      focusPaneIndex(n - 1);
+      return;
+    }
+  }
+
+  // Cmd/Ctrl+K cycles focus across panes.
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && key.toLowerCase() === 'k') {
+    event.preventDefault();
+    cyclePaneFocus();
+    return;
+  }
+
+  // Cmd/Ctrl+Shift+N opens Add pane menu.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'n') {
+    event.preventDefault();
+    paneManager.openAddPaneMenu(globalElements.addPaneBtn);
+    return;
+  }
+
+  // Cmd/Ctrl+R refreshes agent list (instead of page reload).
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && key.toLowerCase() === 'r') {
+    event.preventDefault();
+    globalElements.refreshAgentsBtn?.click?.();
+    toast('Refreshed agents.', 'info');
+    return;
+  }
+
+  // 'g w' opens Workqueue modal.
+  const now = Date.now();
+  if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+    if (key.toLowerCase() === 'g') {
+      shortcutState.lastGAtMs = now;
+      return;
+    }
+    if (key.toLowerCase() === 'w' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
+      shortcutState.lastGAtMs = 0;
+      event.preventDefault();
+      openWorkqueue();
+      return;
     }
   }
 });
@@ -4531,6 +4883,10 @@ globalElements.disconnectBtn?.addEventListener('click', () => {
     pane.client.manualDisconnect = false;
   });
   paneManager.connectAll();
+});
+
+globalElements.resetLayoutBtn?.addEventListener('click', () => {
+  paneManager.resetAdminLayoutToDefault({ confirm: true });
 });
 
 globalElements.status?.addEventListener('click', () => {

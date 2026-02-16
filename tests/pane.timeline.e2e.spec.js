@@ -122,5 +122,5 @@ test('pane: timeline filters + range + actions', async ({ page }) => {
 
   // Delete should remove the job (confirm dialog) and timeline should become empty for dev.
   await timelinePane.getByTestId('cron-action-delete').first().click();
-  await expect(timelinePane.getByText('No events in range.')).toBeVisible();
+  await expect(timelinePane.getByText('No activity in range.')).toBeVisible();
 });

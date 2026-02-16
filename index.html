@@ -85,6 +85,14 @@
                 </div>
               </div>
               <div class="pane-header-right">
+                <div class="pane-agent-pill" data-pane-agent-pill data-testid="pane-agent-pill" hidden></div>
+                <div class="pane-agent-warning" data-pane-agent-warning hidden></div>
+
+                <details class="pane-help" data-pane-help>
+                  <summary class="icon-btn" type="button" aria-label="What is this pane?" data-testid="pane-help">?</summary>
+                  <div class="pane-help-popover" data-pane-help-popover></div>
+                </details>
+
                 <div class="status-pill pane-status" data-pane-status data-testid="pane-connection-status">disconnected</div>
                 <button class="icon-btn pane-close" data-pane-close type="button" aria-label="Close pane" data-testid="pane-close">
                   ✕
@@ -170,6 +178,45 @@
     </div>
 
     <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true" data-testid="toast-host"></div>
+
+    <div id="shortcutsModal" class="modal" aria-hidden="true" data-testid="shortcuts-modal">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="shortcutsTitle">
+        <div class="modal-header">
+          <h2 id="shortcutsTitle">Keyboard shortcuts</h2>
+          <button id="shortcutsCloseBtn" class="icon-btn" type="button" aria-label="Close shortcuts">
+            ✕
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="hint" style="margin-bottom: 10px;">
+            Shortcuts work when youre not typing in a text field.
+          </div>
+
+          <div class="shortcut-group">
+            <h3 class="shortcut-group-title">Help</h3>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>?</kbd></div><div class="shortcut-desc">Open this help overlay</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Esc</kbd></div><div class="shortcut-desc">Close overlay / menus</div></div>
+          </div>
+
+          <div class="shortcut-group">
+            <h3 class="shortcut-group-title">Panes</h3>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>4</kbd></div><div class="shortcut-desc">Focus pane 14</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Pane switcher (cycle focus)</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="shortcut-desc">Add pane</div></div>
+          </div>
+
+          <div class="shortcut-group">
+            <h3 class="shortcut-group-title">Workqueue</h3>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>w</kbd></div><div class="shortcut-desc">Open Workqueue modal</div></div>
+          </div>
+
+          <div class="shortcut-group">
+            <h3 class="shortcut-group-title">Agents</h3>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>R</kbd></div><div class="shortcut-desc">Refresh agent list</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <div id="workqueueModal" class="modal" aria-hidden="true">
       <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="workqueueTitle">
@@ -299,6 +346,7 @@
           </label>
           <div class="button-row">
             <button id="disconnectBtn">Disconnect</button>
+            <button id="resetLayoutBtn" type="button" class="secondary">Reset layout</button>
           </div>
           <div class="hint">
             Auto-connecting with the gateway token from your local OpenClaw config.
