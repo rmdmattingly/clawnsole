@@ -9,6 +9,14 @@ const globalElements = {
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
   refreshAgentsBtn: document.getElementById('refreshAgentsBtn'),
+  agentsBtn: document.getElementById('agentsBtn'),
+  agentsModal: document.getElementById('agentsModal'),
+  agentsCloseBtn: document.getElementById('agentsCloseBtn'),
+  agentsSearch: document.getElementById('agentsSearch'),
+  agentsActiveOnly: document.getElementById('agentsActiveOnly'),
+  agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
+  agentsList: document.getElementById('agentsList'),
+  agentsEmpty: document.getElementById('agentsEmpty'),
   toastHost: document.getElementById('toastHost'),
   commandPaletteModal: document.getElementById('commandPaletteModal'),
   commandPaletteCloseBtn: document.getElementById('commandPaletteCloseBtn'),
@@ -117,6 +125,84 @@ const storage = {
     localStorage.removeItem(key);
   }
 };
+
+// Agent list UX (pins + active-only)
+const ADMIN_AGENT_PINS_KEY = 'clawnsole.admin.agentPins';
+const ADMIN_AGENT_LAST_SEEN_KEY = 'clawnsole.admin.agentLastSeenAtMs';
+const ADMIN_AGENT_ACTIVE_ONLY_KEY = 'clawnsole.admin.agents.activeOnly';
+const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
+
+function readJsonFromStorage(key, fallback) {
+  try {
+    const raw = storage.get(key, '');
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonToStorage(key, value) {
+  try {
+    storage.set(key, JSON.stringify(value));
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function getPinnedAgentIds() {
+  const list = readJsonFromStorage(ADMIN_AGENT_PINS_KEY, []);
+  return new Set(Array.isArray(list) ? list.map((v) => String(v || '').trim()).filter(Boolean) : []);
+}
+
+function setPinnedAgentIds(ids) {
+  const out = Array.from(ids || []).map((v) => String(v || '').trim()).filter(Boolean);
+  out.sort();
+  writeJsonToStorage(ADMIN_AGENT_PINS_KEY, out);
+}
+
+function togglePinnedAgentId(id) {
+  const trimmed = String(id || '').trim();
+  if (!trimmed) return;
+  const set = getPinnedAgentIds();
+  if (set.has(trimmed)) set.delete(trimmed);
+  else set.add(trimmed);
+  setPinnedAgentIds(set);
+}
+
+function getAgentLastSeenMap() {
+  const obj = readJsonFromStorage(ADMIN_AGENT_LAST_SEEN_KEY, {});
+  if (!obj || typeof obj !== 'object') return {};
+  return obj;
+}
+
+function markAgentSeen(agentId) {
+  const id = String(agentId || '').trim();
+  if (!id) return;
+  const map = getAgentLastSeenMap();
+  map[id] = Date.now();
+  writeJsonToStorage(ADMIN_AGENT_LAST_SEEN_KEY, map);
+}
+
+function isAgentActive(agentId, { withinMinutes = 10 } = {}) {
+  const id = String(agentId || '').trim();
+  if (!id) return false;
+  const map = getAgentLastSeenMap();
+  const ts = Number(map[id]) || 0;
+  if (!ts) return false;
+  const windowMs = Math.max(1, Number(withinMinutes) || 10) * 60_000;
+  return Date.now() - ts <= windowMs;
+}
+
+function sortAgentsByLastSeen(agents) {
+  const map = getAgentLastSeenMap();
+  const ts = (a) => Number(map[String(a?.id || '').trim()]) || 0;
+  return (Array.isArray(agents) ? agents : []).slice().sort((a, b) => {
+    const dt = ts(b) - ts(a);
+    if (dt) return dt;
+    return formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true }));
+  });
+}
 
 const roleState = {
   role: null
@@ -252,6 +338,13 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
 
     // Refresh workqueue agent claim selectors (modal + item cards) if present.
     refreshWorkqueueAgentSelects();
+
+    // If the Agents modal is open, refresh its list.
+    try {
+      if (globalElements.agentsModal?.classList?.contains('open')) {
+        renderAgentsModalList();
+      }
+    } catch {}
 
     if (showSuccessToast) {
       showToast(`Agents refreshed (${reason}).`, { kind: 'info', timeoutMs: 1800 });
@@ -651,6 +744,12 @@ function setRole(role) {
   if (globalElements.paneControls) {
     globalElements.paneControls.hidden = role !== 'admin';
   }
+  if (globalElements.agentsBtn) {
+    globalElements.agentsBtn.hidden = role !== 'admin';
+    globalElements.agentsBtn.disabled = role !== 'admin';
+    globalElements.agentsBtn.style.opacity = role === 'admin' ? '1' : '0.5';
+  }
+
   if (globalElements.workqueueBtn) {
     globalElements.workqueueBtn.hidden = role !== 'admin';
     globalElements.workqueueBtn.disabled = role !== 'admin';
@@ -994,6 +1093,108 @@ function openCommandPalette() {
   }
 
   filterCommandPalette('');
+}
+
+// Agents (admin-only)
+
+function openAgentsModal() {
+  if (roleState.role !== 'admin') return;
+  globalElements.agentsModal?.classList.add('open');
+  globalElements.agentsModal?.setAttribute('aria-hidden', 'false');
+
+  // Bootstrap persisted controls.
+  if (globalElements.agentsActiveOnly) {
+    globalElements.agentsActiveOnly.checked = storage.get(ADMIN_AGENT_ACTIVE_ONLY_KEY, 'false') === 'true';
+  }
+  if (globalElements.agentsActiveMinutes) {
+    const minutes = Number(storage.get(ADMIN_AGENT_ACTIVE_MINUTES_KEY, '10')) || 10;
+    globalElements.agentsActiveMinutes.value = String(Math.max(1, minutes));
+  }
+
+  renderAgentsModalList();
+
+  // Focus search by default for fast filtering.
+  try {
+    globalElements.agentsSearch?.focus?.();
+  } catch {}
+}
+
+function closeAgentsModal() {
+  globalElements.agentsModal?.classList.remove('open');
+  globalElements.agentsModal?.setAttribute('aria-hidden', 'true');
+}
+
+function renderAgentsModalList() {
+  const root = globalElements.agentsList;
+  if (!root) return;
+
+  const search = String(globalElements.agentsSearch?.value || '').trim().toLowerCase();
+  const activeOnly = !!globalElements.agentsActiveOnly?.checked;
+  const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
+
+  const pins = getPinnedAgentIds();
+  const baseAgents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
+
+  const matches = (agent) => {
+    const label = formatAgentLabel(agent, { includeId: true }).toLowerCase();
+    if (search && !label.includes(search)) return false;
+    if (activeOnly && !isAgentActive(agent.id, { withinMinutes })) return false;
+    return true;
+  };
+
+  const filtered = baseAgents.filter(matches);
+  const pinned = sortAgentsByLastSeen(filtered.filter((a) => pins.has(String(a?.id || '').trim())));
+  const rest = sortAgentsByLastSeen(filtered.filter((a) => !pins.has(String(a?.id || '').trim())));
+
+  root.innerHTML = '';
+
+  const renderSection = (title, agents) => {
+    if (!agents || agents.length === 0) return;
+    const section = document.createElement('div');
+    section.className = 'agents-section';
+    section.innerHTML = `<div class="agents-section-title">${escapeHtml(title)}</div>`;
+
+    const list = document.createElement('div');
+    list.className = 'agents-rows';
+
+    for (const agent of agents) {
+      const id = String(agent?.id || '').trim();
+      const row = document.createElement('div');
+      row.className = 'agents-row';
+
+      const label = formatAgentLabel(agent, { includeId: true });
+      const pinnedNow = pins.has(id);
+
+      row.innerHTML = `
+        <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
+        <div class="agents-row-main">
+          <div class="agents-row-title">${escapeHtml(label)}</div>
+          <div class="agents-row-meta">${escapeHtml(id)}${isAgentActive(id, { withinMinutes }) ? ' · active' : ''}</div>
+        </div>
+      `;
+
+      const pinBtn = row.querySelector('[data-agent-pin]');
+      pinBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        togglePinnedAgentId(id);
+        // Refresh both the modal list and any agent <select>s.
+        paneManager.panes.forEach((p) => renderAgentOptions(p.elements?.agentSelect, p.agentId));
+        renderAgentsModalList();
+      });
+
+      list.appendChild(row);
+    }
+
+    section.appendChild(list);
+    root.appendChild(section);
+  };
+
+  renderSection('Pinned', pinned);
+  renderSection('Agents', rest);
+
+  const empty = pinned.length === 0 && rest.length === 0;
+  if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
 }
 
 // Workqueue (admin-only)
@@ -3303,6 +3504,7 @@ function paneSetAgent(pane, nextAgentId) {
   const next = normalizeAgentId(nextAgentId);
   if (next === pane.agentId) return;
   pane.agentId = next;
+  markAgentSeen(next);
   storage.set(ADMIN_DEFAULT_AGENT_KEY, next);
   try {
     if (pane.elements.agentSelect) pane.elements.agentSelect.value = next;
@@ -3325,16 +3527,35 @@ function paneSetAgent(pane, nextAgentId) {
 function renderAgentOptions(selectEl, agentId) {
   if (!selectEl) return;
   selectEl.innerHTML = '';
-  const agents =
+
+  const baseAgents =
     uiState.agents.length > 0
       ? uiState.agents
       : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
-  agents.forEach((agent) => {
+
+  const pins = getPinnedAgentIds();
+  const pinned = sortAgentsByLastSeen(baseAgents.filter((a) => pins.has(String(a?.id || '').trim())));
+  const rest = sortAgentsByLastSeen(baseAgents.filter((a) => !pins.has(String(a?.id || '').trim())));
+
+  const appendAgentOption = (parent, agent) => {
     const opt = document.createElement('option');
     opt.value = agent.id;
     opt.textContent = formatAgentLabel(agent, { includeId: true });
-    selectEl.appendChild(opt);
-  });
+    parent.appendChild(opt);
+  };
+
+  if (pinned.length > 0) {
+    const og = document.createElement('optgroup');
+    og.label = 'Pinned';
+    pinned.forEach((a) => appendAgentOption(og, a));
+    selectEl.appendChild(og);
+  }
+
+  const ogAll = document.createElement('optgroup');
+  ogAll.label = pinned.length > 0 ? 'All agents' : 'Agents';
+  rest.forEach((a) => appendAgentOption(ogAll, a));
+  selectEl.appendChild(ogAll);
+
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
@@ -4996,6 +5217,26 @@ globalElements.refreshAgentsBtn?.addEventListener('click', () => {
   refreshAgents({ reason: 'manual', showSuccessToast: true }).catch(() => {
     showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
   });
+});
+
+globalElements.agentsBtn?.addEventListener('click', () => openAgentsModal());
+globalElements.agentsCloseBtn?.addEventListener('click', () => closeAgentsModal());
+globalElements.agentsModal?.addEventListener('click', (event) => {
+  if (event.target === globalElements.agentsModal) closeAgentsModal();
+});
+
+globalElements.agentsSearch?.addEventListener('input', () => renderAgentsModalList());
+
+globalElements.agentsActiveOnly?.addEventListener('change', () => {
+  storage.set(ADMIN_AGENT_ACTIVE_ONLY_KEY, !!globalElements.agentsActiveOnly.checked);
+  renderAgentsModalList();
+});
+
+globalElements.agentsActiveMinutes?.addEventListener('change', () => {
+  const minutes = Math.max(1, Number(globalElements.agentsActiveMinutes.value) || 10);
+  globalElements.agentsActiveMinutes.value = String(minutes);
+  storage.set(ADMIN_AGENT_ACTIVE_MINUTES_KEY, minutes);
+  renderAgentsModalList();
 });
 
 globalElements.workqueueBtn?.addEventListener('click', () => openWorkqueue());

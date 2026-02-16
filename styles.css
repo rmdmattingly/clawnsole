@@ -1126,6 +1126,105 @@ button.send-btn .btn-icon {
   color: var(--muted);
 }
 
+/* Agents modal */
+
+.agents-toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.agents-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agents-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted);
+}
+
+.agents-active-controls {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.agents-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.agents-active-controls input[type="number"] {
+  width: 72px;
+}
+
+.agents-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agents-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.agents-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agents-row {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.agents-pin {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(9, 12, 16, 0.35);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.agents-pin[aria-pressed="true"] {
+  border-color: rgba(255, 179, 71, 0.55);
+  background: rgba(255, 179, 71, 0.12);
+}
+
+.agents-row-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.agents-row-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* Shortcuts modal */
 
 .shortcut-group {

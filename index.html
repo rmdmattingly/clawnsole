@@ -50,6 +50,9 @@
           <button id="refreshAgentsBtn" class="icon-btn" type="button" aria-label="Refresh agent list" hidden>
             ⟳
           </button>
+          <button id="agentsBtn" class="icon-btn" type="button" aria-label="Open agents" hidden>
+            ★
+          </button>
           <button id="workqueueBtn" class="icon-btn" type="button" aria-label="Open workqueue" hidden>
             WQ
           </button>
@@ -341,6 +344,36 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="agentsModal" class="modal" aria-hidden="true">
+      <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="agentsTitle">
+        <div class="modal-header">
+          <h2 id="agentsTitle">Agents</h2>
+          <button id="agentsCloseBtn" class="icon-btn" type="button" aria-label="Close agents">
+            ✕
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="agents-toolbar">
+            <label class="agents-field">
+              <span class="agents-label">Search</span>
+              <input id="agentsSearch" type="text" placeholder="Filter agents…" />
+            </label>
+            <label class="agents-field agents-active-only">
+              <span class="agents-label">Active only</span>
+              <div class="agents-active-controls">
+                <label class="agents-toggle"><input id="agentsActiveOnly" type="checkbox" /> <span>On</span></label>
+                <input id="agentsActiveMinutes" type="number" min="1" step="1" value="10" aria-label="Active within minutes" />
+                <span class="hint">min</span>
+              </div>
+            </label>
+          </div>
+
+          <div id="agentsList" class="agents-list" aria-label="Agent list"></div>
+          <div id="agentsEmpty" class="hint" hidden>No agents match.</div>
         </div>
       </div>
     </div>
