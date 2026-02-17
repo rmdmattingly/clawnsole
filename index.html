@@ -32,7 +32,13 @@
         <div class="topbar-actions">
           <div class="status compact">
             <div class="status-pill" id="connectionStatus" data-testid="connection-status">disconnected</div>
-            <div class="status-meta" id="statusMeta"></div>
+            <button
+              class="status-meta status-meta-btn"
+              id="paneManagerBtn"
+              type="button"
+              aria-label="Open pane manager"
+              data-testid="panes-indicator"
+            ></button>
           </div>
           <div id="paneControls" class="pane-controls" hidden>
             <div class="pane-add-wrap">
@@ -225,6 +231,7 @@
           <div class="shortcut-group">
             <h3 class="shortcut-group-title">Panes</h3>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>4</kbd></div><div class="shortcut-desc">Focus pane 14</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>P</kbd></div><div class="shortcut-desc">Open Pane Manager</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Open command palette</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Pane switcher (cycle focus)</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="shortcut-desc">Add pane</div></div>
@@ -239,6 +246,22 @@
             <h3 class="shortcut-group-title">Agents</h3>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>R</kbd></div><div class="shortcut-desc">Refresh agent list</div></div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="paneManagerModal" class="modal" aria-hidden="true" data-testid="pane-manager-modal" tabindex="-1">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="paneManagerTitle">
+        <div class="modal-header">
+          <h2 id="paneManagerTitle">Panes</h2>
+          <button id="paneManagerCloseBtn" class="icon-btn" type="button" aria-label="Close pane manager">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="hint" style="margin-bottom: 10px;">
+            Arrow keys to navigate • Enter to focus • Esc to close
+          </div>
+          <div id="paneManagerList" class="pane-manager-list" role="listbox" aria-label="Open panes" data-testid="pane-manager-list"></div>
+          <div id="paneManagerEmpty" class="hint" hidden>No panes.</div>
         </div>
       </div>
     </div>
