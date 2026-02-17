@@ -590,6 +590,36 @@ function createClawnsoleServer(options = {}) {
       return;
     }
 
+    if (req.url.startsWith('/api/workqueue/item/')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      try {
+        const parts = req.url.split('?')[0].split('/').filter(Boolean);
+        const id = parts[3] || '';
+        if (!id) {
+          sendJson(res, 400, { error: 'invalid_request' });
+          return;
+        }
+
+        const { loadState } = require('./lib/workqueue');
+        const state = loadState(null);
+        const items = Array.isArray(state.items) ? state.items : [];
+        const item = items.find((it) => it && it.id === id) || null;
+        sendJson(res, 200, { ok: true, item });
+      } catch (err) {
+        sendJson(res, 500, { error: 'workqueue_error' });
+      }
+      return;
+    }
+
     if (req.url.startsWith('/api/workqueue/summary')) {
       if (!requireAuth(req, res)) return;
       if (req.clawnsoleRole !== 'admin') {
@@ -841,6 +871,81 @@ function createClawnsoleServer(options = {}) {
       }
 
       sendJson(res, 405, { error: 'method_not_allowed' });
+      return;
+    }
+
+    if (req.url === '/api/workqueue/transition') {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      (async () => {
+        const payload = await readJsonBody(req, res);
+        if (!payload) return;
+        const itemId = String(payload.itemId || '').trim();
+        const agentId = String(payload.agentId || '').trim();
+        const status = String(payload.status || '').trim();
+        const note = String(payload.note || '').trim();
+        const error = String(payload.error || '').trim();
+        const result = payload.result;
+        const leaseMsRaw = payload.leaseMs;
+        const leaseMs = Number.isFinite(leaseMsRaw) ? leaseMsRaw : Number.parseInt(String(leaseMsRaw ?? ''), 10);
+
+        if (!itemId) {
+          sendJson(res, 400, { error: 'itemId_required' });
+          return;
+        }
+        if (!agentId) {
+          sendJson(res, 400, { error: 'agentId_required' });
+          return;
+        }
+
+        const allowed = new Set(['in_progress', 'done', 'failed']);
+        if (!allowed.has(status)) {
+          sendJson(res, 400, { error: 'invalid_status' });
+          return;
+        }
+
+        if (status === 'failed' && !error) {
+          sendJson(res, 400, { error: 'error_required' });
+          return;
+        }
+
+        try {
+          const { transitionItem } = require('./lib/workqueue');
+          const item = transitionItem(null, {
+            itemId,
+            agentId,
+            status,
+            error: status === 'failed' ? error : undefined,
+            result: status === 'done' ? result : undefined,
+            note: note || undefined,
+            leaseMs: Number.isFinite(leaseMs) ? leaseMs : undefined
+          });
+          sendJson(res, 200, { ok: true, item });
+        } catch (err) {
+          const code = err && err.code;
+          if (code === 'NOT_FOUND') {
+            sendJson(res, 404, { error: 'not_found' });
+            return;
+          }
+          if (code === 'NOT_CLAIMED') {
+            sendJson(res, 409, { error: 'not_claimed' });
+            return;
+          }
+          if (code === 'CLAIMED_BY_OTHER') {
+            sendJson(res, 409, { error: 'claimed_by_other' });
+            return;
+          }
+          sendJson(res, 500, { error: 'workqueue_error' });
+        }
+      })();
       return;
     }
 
