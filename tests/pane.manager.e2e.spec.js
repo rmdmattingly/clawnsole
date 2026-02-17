@@ -79,3 +79,53 @@ test('pane header: target label matches pane kind (agent vs queue vs jobs vs tim
   const timelinePane = page.locator('[data-pane][data-pane-kind="timeline"]').last();
   await expect(timelinePane.getByTestId('pane-target-label')).toHaveText('Timeline');
 });
+
+test('pane manager: supports reordering panes', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-chat').click();
+
+  await page.keyboard.press('Control+P');
+  const modal = page.locator('#paneManagerModal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  const rows = page.locator('.pane-manager-row');
+  await expect(rows).toHaveCount(3);
+  const firstRowMoveUp = rows.nth(0).getByTestId('pane-manager-move-up');
+  const secondRowMoveDown = rows.nth(1).getByTestId('pane-manager-move-down');
+
+  await expect(firstRowMoveUp).toBeDisabled();
+
+  const rowKeys = async () => {
+    return page.locator('.pane-manager-row').evaluateAll((rows) => rows.map((row) => row.dataset.paneKey));
+  };
+
+  const before = await rowKeys();
+  expect(before.length).toBe(3);
+
+  await rows.nth(1).evaluate((row) => {
+    const moveDown = row.querySelector('[data-action="move-down"]');
+    moveDown?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+
+  const after = await rowKeys();
+  expect(after).toEqual([before[0], before[2], before[1]]);
+
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+
+  await page.keyboard.press('Control+P');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  const persisted = await rowKeys();
+  expect(persisted).toEqual(after);
+});
