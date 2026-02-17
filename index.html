@@ -179,6 +179,27 @@
 
     <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true" data-testid="toast-host"></div>
 
+    <div id="commandPaletteModal" class="modal" aria-hidden="true" data-testid="command-palette-modal">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="commandPaletteTitle">
+        <div class="modal-header">
+          <h2 id="commandPaletteTitle">Command palette</h2>
+          <button id="commandPaletteCloseBtn" class="icon-btn" type="button" aria-label="Close command palette">✕</button>
+        </div>
+        <div class="modal-body">
+          <input
+            id="commandPaletteInput"
+            class="command-palette-input"
+            type="text"
+            placeholder="Type to search (agents, panes, actions)…"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <div id="commandPaletteList" class="command-palette-list" role="listbox" aria-label="Commands"></div>
+          <div id="commandPaletteEmpty" class="hint" hidden>No matches.</div>
+        </div>
+      </div>
+    </div>
+
     <div id="shortcutsModal" class="modal" aria-hidden="true" data-testid="shortcuts-modal">
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="shortcutsTitle">
         <div class="modal-header">
@@ -201,7 +222,8 @@
           <div class="shortcut-group">
             <h3 class="shortcut-group-title">Panes</h3>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>4</kbd></div><div class="shortcut-desc">Focus pane 14</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Pane switcher (cycle focus)</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Open command palette</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Pane switcher (cycle focus)</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="shortcut-desc">Add pane</div></div>
           </div>
 

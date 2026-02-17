@@ -10,6 +10,11 @@ const globalElements = {
   workqueueBtn: document.getElementById('workqueueBtn'),
   refreshAgentsBtn: document.getElementById('refreshAgentsBtn'),
   toastHost: document.getElementById('toastHost'),
+  commandPaletteModal: document.getElementById('commandPaletteModal'),
+  commandPaletteCloseBtn: document.getElementById('commandPaletteCloseBtn'),
+  commandPaletteInput: document.getElementById('commandPaletteInput'),
+  commandPaletteList: document.getElementById('commandPaletteList'),
+  commandPaletteEmpty: document.getElementById('commandPaletteEmpty'),
   shortcutsModal: document.getElementById('shortcutsModal'),
   shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
   workqueueModal: document.getElementById('workqueueModal'),
@@ -729,6 +734,266 @@ function openShortcuts() {
 function closeShortcuts() {
   globalElements.shortcutsModal?.classList.remove('open');
   globalElements.shortcutsModal?.setAttribute('aria-hidden', 'true');
+}
+
+// Command palette (admin-only)
+
+const commandPaletteState = {
+  open: false,
+  query: '',
+  items: [],
+  filtered: [],
+  selectedIndex: 0
+};
+
+function isCommandPaletteOpen() {
+  return !!globalElements.commandPaletteModal?.classList.contains('open');
+}
+
+function closeCommandPalette({ restoreFocus = true } = {}) {
+  if (!globalElements.commandPaletteModal) return;
+  commandPaletteState.open = false;
+  globalElements.commandPaletteModal.classList.remove('open');
+  globalElements.commandPaletteModal.setAttribute('aria-hidden', 'true');
+  if (restoreFocus) {
+    try {
+      const pane = paneManager?.panes?.[0];
+      pane?.elements?.input?.focus?.();
+    } catch {}
+  }
+}
+
+function scoreFuzzy(hay, needle) {
+  const h = String(hay || '').toLowerCase();
+  const n = String(needle || '').toLowerCase().trim();
+  if (!n) return 1;
+  // Very small, fast fuzzy: all tokens must appear; prefer earlier + tighter matches.
+  const tokens = n.split(/\s+/g).filter(Boolean);
+  let score = 0;
+  let lastIdx = -1;
+  for (const t of tokens) {
+    const idx = h.indexOf(t);
+    if (idx < 0) return 0;
+    score += 100 - Math.min(99, idx);
+    if (lastIdx >= 0) score += 25 - Math.min(24, Math.max(0, idx - lastIdx));
+    lastIdx = idx;
+  }
+  return Math.max(1, score);
+}
+
+function buildCommandPaletteItems() {
+  const items = [];
+
+  // Core commands
+  items.push(
+    {
+      id: 'cmd:add-chat',
+      label: 'Add pane: Chat',
+      detail: 'Create a new Chat pane',
+      run: () => paneManager.addPane('chat')
+    },
+    {
+      id: 'cmd:add-workqueue',
+      label: 'Add pane: Workqueue',
+      detail: 'Create a new Workqueue pane',
+      run: () => paneManager.addPane('workqueue')
+    },
+    {
+      id: 'cmd:add-cron',
+      label: 'Add pane: Cron',
+      detail: 'Create a new Cron pane',
+      run: () => paneManager.addPane('cron')
+    },
+    {
+      id: 'cmd:add-timeline',
+      label: 'Add pane: Timeline',
+      detail: 'Create a new Timeline pane',
+      run: () => paneManager.addPane('timeline')
+    },
+    {
+      id: 'cmd:reset-layout',
+      label: 'Layout: Reset panes',
+      detail: 'Reset admin layout to default',
+      run: () => paneManager.resetAdminLayoutToDefault({ confirm: true })
+    },
+    {
+      id: 'cmd:toggle-shortcuts',
+      label: 'Help: Toggle shortcuts overlay',
+      detail: 'Show/hide keyboard shortcuts',
+      run: () => {
+        if (globalElements.shortcutsModal?.classList.contains('open')) closeShortcuts();
+        else openShortcuts();
+      }
+    },
+    {
+      id: 'cmd:open-workqueue',
+      label: 'Workqueue: Open modal',
+      detail: 'Open the Workqueue modal (g w)',
+      run: () => openWorkqueue()
+    },
+    {
+      id: 'cmd:refresh-agents',
+      label: 'Agents: Refresh',
+      detail: 'Refresh agent list',
+      run: () => globalElements.refreshAgentsBtn?.click?.()
+    },
+    {
+      id: 'cmd:pane-cycle',
+      label: 'Panes: Cycle focus',
+      detail: 'Move focus to next pane',
+      run: () => cyclePaneFocus()
+    },
+    {
+      id: 'cmd:focus-pane-1',
+      label: 'Panes: Focus pane 1',
+      detail: 'Focus the first pane',
+      run: () => focusPaneIndex(0)
+    },
+    {
+      id: 'cmd:focus-pane-2',
+      label: 'Panes: Focus pane 2',
+      detail: 'Focus the second pane',
+      run: () => focusPaneIndex(1)
+    },
+    {
+      id: 'cmd:focus-pane-3',
+      label: 'Panes: Focus pane 3',
+      detail: 'Focus the third pane',
+      run: () => focusPaneIndex(2)
+    },
+    {
+      id: 'cmd:focus-pane-4',
+      label: 'Panes: Focus pane 4',
+      detail: 'Focus the fourth pane',
+      run: () => focusPaneIndex(3)
+    }
+  );
+
+  // Agents (admin-only)
+  const agents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
+  for (const agent of agents) {
+    const agentId = normalizeAgentId(agent?.id || 'main');
+    const label = `Agent: ${formatAgentLabel(agent, { includeId: false })}`;
+    items.push({
+      id: `agent:${agentId}`,
+      label,
+      detail: agentId,
+      run: () => {
+        // Focus an existing chat pane if possible; otherwise create one.
+        let pane = paneManager.panes.find((p) => p.kind === 'chat');
+        if (!pane) pane = paneManager.addPane('chat');
+        if (pane) {
+          paneSetAgent(pane, agentId);
+          paneManager.focusPanePrimary(pane);
+        }
+      }
+    });
+  }
+
+  return items;
+}
+
+function renderCommandPalette() {
+  const list = globalElements.commandPaletteList;
+  const empty = globalElements.commandPaletteEmpty;
+  if (!list) return;
+
+  list.innerHTML = '';
+
+  const items = commandPaletteState.filtered;
+  if (!items.length) {
+    if (empty) empty.hidden = false;
+    return;
+  }
+  if (empty) empty.hidden = true;
+
+  const selected = Math.max(0, Math.min(items.length - 1, commandPaletteState.selectedIndex));
+  commandPaletteState.selectedIndex = selected;
+
+  items.forEach((item, idx) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'command-palette-item';
+    btn.setAttribute('role', 'option');
+    btn.setAttribute('aria-selected', idx === selected ? 'true' : 'false');
+    btn.dataset.commandPaletteId = item.id;
+    btn.innerHTML = `
+      <div class="command-palette-item-main">
+        <div class="command-palette-item-label">${escapeHtml(item.label)}</div>
+        <div class="command-palette-item-detail">${escapeHtml(item.detail || '')}</div>
+      </div>
+      <div class="command-palette-item-meta">${idx === selected ? '↵' : ''}</div>
+    `;
+
+    btn.addEventListener('mouseenter', () => {
+      commandPaletteState.selectedIndex = idx;
+      renderCommandPalette();
+    });
+
+    btn.addEventListener('click', () => {
+      try {
+        item.run?.();
+      } finally {
+        closeCommandPalette({ restoreFocus: false });
+      }
+    });
+
+    list.appendChild(btn);
+  });
+
+  try {
+    const active = list.querySelector('[aria-selected="true"]');
+    active?.scrollIntoView?.({ block: 'nearest' });
+  } catch {}
+}
+
+function filterCommandPalette(query) {
+  commandPaletteState.query = String(query || '');
+  const q = commandPaletteState.query.trim();
+  const scored = commandPaletteState.items
+    .map((item) => {
+      const hay = `${item.label || ''} ${item.detail || ''} ${item.id || ''}`;
+      return { item, score: scoreFuzzy(hay, q) };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((x) => x.item);
+
+  commandPaletteState.filtered = scored;
+  commandPaletteState.selectedIndex = 0;
+  renderCommandPalette();
+}
+
+function openCommandPalette() {
+  if (roleState.role !== 'admin') return;
+  if (!uiState.authed) return;
+  if (!globalElements.commandPaletteModal) return;
+
+  commandPaletteState.open = true;
+  commandPaletteState.items = buildCommandPaletteItems();
+  commandPaletteState.filtered = commandPaletteState.items.slice();
+  commandPaletteState.selectedIndex = 0;
+
+  globalElements.commandPaletteModal.classList.add('open');
+  globalElements.commandPaletteModal.setAttribute('aria-hidden', 'false');
+
+  if (globalElements.commandPaletteInput) {
+    globalElements.commandPaletteInput.value = '';
+    // Defer focus until after the modal is painted so browsers reliably move focus.
+    const focus = () => {
+      try {
+        globalElements.commandPaletteInput?.focus?.({ preventScroll: true });
+        globalElements.commandPaletteInput?.select?.();
+      } catch {}
+    };
+    try {
+      requestAnimationFrame(() => requestAnimationFrame(focus));
+    } catch {
+      setTimeout(focus, 0);
+    }
+  }
+
+  filterCommandPalette('');
 }
 
 // Workqueue (admin-only)
@@ -4684,6 +4949,46 @@ globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts
 globalElements.shortcutsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.shortcutsModal) closeShortcuts();
 });
+
+globalElements.commandPaletteCloseBtn?.addEventListener('click', () => closeCommandPalette());
+globalElements.commandPaletteModal?.addEventListener('click', (event) => {
+  if (event.target === globalElements.commandPaletteModal) closeCommandPalette();
+});
+globalElements.commandPaletteInput?.addEventListener('input', () => {
+  filterCommandPalette(globalElements.commandPaletteInput.value);
+});
+globalElements.commandPaletteInput?.addEventListener('keydown', (event) => {
+  if (!isCommandPaletteOpen()) return;
+  const key = String(event.key || '');
+  if (key === 'Escape') {
+    event.preventDefault();
+    closeCommandPalette();
+    return;
+  }
+  if (key === 'ArrowDown') {
+    event.preventDefault();
+    commandPaletteState.selectedIndex = Math.min(commandPaletteState.filtered.length - 1, commandPaletteState.selectedIndex + 1);
+    renderCommandPalette();
+    return;
+  }
+  if (key === 'ArrowUp') {
+    event.preventDefault();
+    commandPaletteState.selectedIndex = Math.max(0, commandPaletteState.selectedIndex - 1);
+    renderCommandPalette();
+    return;
+  }
+  if (key === 'Enter') {
+    event.preventDefault();
+    const item = commandPaletteState.filtered[commandPaletteState.selectedIndex];
+    if (!item) return;
+    try {
+      item.run?.();
+    } finally {
+      closeCommandPalette({ restoreFocus: false });
+    }
+  }
+});
+
 globalElements.saveGuestPromptBtn?.addEventListener('click', () => saveGuestPrompt());
 globalElements.recurringPromptCreateBtn?.addEventListener('click', () => createRecurringPromptFromUi());
 globalElements.recurringPromptRefreshBtn?.addEventListener('click', () => loadRecurringPrompts());
@@ -4800,7 +5105,15 @@ window.addEventListener('keydown', (event) => {
     }
   }
 
+  // Cmd/Ctrl+K opens command palette (even while typing).
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'k') {
+    event.preventDefault();
+    openCommandPalette();
+    return;
+  }
+
   if (event.key === 'Escape') {
+    closeCommandPalette();
     closeShortcuts();
     closeSettings();
     closeWorkqueue();
@@ -4833,8 +5146,9 @@ window.addEventListener('keydown', (event) => {
     }
   }
 
-  // Cmd/Ctrl+K cycles focus across panes.
-  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && key.toLowerCase() === 'k') {
+
+  // Cmd/Ctrl+Shift+K cycles focus across panes.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'k') {
     event.preventDefault();
     cyclePaneFocus();
     return;
