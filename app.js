@@ -3772,6 +3772,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
   const elements = {
     root,
     name: root.querySelector('[data-pane-name]'),
+    typePill: root.querySelector('[data-pane-type-pill]'),
+    typeIcon: root.querySelector('[data-pane-type-icon]'),
+    typeText: root.querySelector('[data-pane-type-text]'),
     agentSelect: root.querySelector('[data-pane-agent-select]'),
     agentWrap: root.querySelector('[data-pane-agent-wrap]') || root.querySelector('.pane-agent'),
     targetLabel: root.querySelector('[data-pane-target-label]') || root.querySelector('.agent-label'),
@@ -3837,6 +3840,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
   try {
     elements.root.dataset.paneKind = pane.kind;
     elements.root.classList.add(`pane-kind-${pane.kind}`);
+  } catch {}
+
+  // Pane header: kind label + type pill (icon + text)
+  try {
+    if (elements.name) elements.name.textContent = paneLabel(pane);
+    if (elements.typeIcon) elements.typeIcon.textContent = paneIcon(pane);
+    if (elements.typeText) elements.typeText.textContent = String(paneLabel(pane) || pane.kind || 'chat').toUpperCase();
+    if (elements.typePill) elements.typePill.setAttribute('aria-label', `Pane type: ${paneLabel(pane)}`);
   } catch {}
 
   // Per-pane inline help popover ("What is this pane?")
