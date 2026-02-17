@@ -99,6 +99,28 @@ test('GET /meta returns gateway urls and port', async () => {
   assert.equal(data.guestWsUrl, undefined);
 });
 
+test('createClawnsoleServer refuses non-localhost ws:// gatewayWsUrl by default', () => {
+  const { homeDir, openclawDir } = makeTempHome();
+  writeJson(path.join(openclawDir, 'openclaw.json'), {
+    gateway: { port: 19999, auth: { mode: 'token', token: 't' } }
+  });
+
+  const prev = process.env.CLAWNSOLE_ALLOW_INSECURE_TRANSPORT;
+  delete process.env.CLAWNSOLE_ALLOW_INSECURE_TRANSPORT;
+  try {
+    assert.throws(
+      () => createClawnsoleServer({ homeDir, gatewayWsUrl: 'ws://example.com:1234' }),
+      (err) => err && err.code === 'INSECURE_TRANSPORT'
+    );
+  } finally {
+    if (prev === undefined) {
+      delete process.env.CLAWNSOLE_ALLOW_INSECURE_TRANSPORT;
+    } else {
+      process.env.CLAWNSOLE_ALLOW_INSECURE_TRANSPORT = prev;
+    }
+  }
+});
+
 test('login sets cookies; /auth/role uses auth cookie', async () => {
   const { homeDir, openclawDir } = makeTempHome();
   writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
