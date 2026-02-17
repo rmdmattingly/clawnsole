@@ -49,6 +49,27 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
   await expect(queueSelect).toBeFocused();
 });
 
+test('pane add menu: single click on item adds exactly one pane', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  const addBtn = page.locator('#addPaneBtn');
+  await expect(addBtn).toBeVisible();
+
+  const countBefore = await page.locator('[data-pane]').count();
+  await addBtn.click();
+  const menu = page.locator('[data-testid="pane-add-menu"]');
+  await expect(menu).toBeVisible();
+
+  await menu.locator('[data-testid="pane-add-menu-workqueue"]').click();
+  const countAfter = await page.locator('[data-pane]').count();
+  expect(countAfter).toBe(countBefore + 1);
+});
+
 test('pane add shortcuts: Ctrl/Cmd+Shift+T adds a timeline pane', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);

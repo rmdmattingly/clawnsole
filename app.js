@@ -5284,25 +5284,27 @@ const paneManager = {
       menu.appendChild(cronBtn);
       menu.appendChild(timelineBtn);
 
-      chatBtn.addEventListener('click', () => {
-        this.closeAddPaneMenu();
-        this.addPane('chat');
-      });
+      const onMenuAdd = (kind) => (event) => {
+        if (state.menuActionInFlight) return;
+        state.menuActionInFlight = true;
+        if (event?.preventDefault) event.preventDefault();
+        if (event?.stopPropagation) event.stopPropagation();
 
-      wqBtn.addEventListener('click', () => {
         this.closeAddPaneMenu();
-        this.addPane('workqueue');
-      });
+        this.addPane(kind);
 
-      cronBtn.addEventListener('click', () => {
-        this.closeAddPaneMenu();
-        this.addPane('cron');
-      });
+        queueMicrotask(() => {
+          state.menuActionInFlight = false;
+        });
+      };
 
-      timelineBtn.addEventListener('click', () => {
-        this.closeAddPaneMenu();
-        this.addPane('timeline');
-      });
+      chatBtn.addEventListener('click', onMenuAdd('chat'));
+
+      wqBtn.addEventListener('click', onMenuAdd('workqueue'));
+
+      cronBtn.addEventListener('click', onMenuAdd('cron'));
+
+      timelineBtn.addEventListener('click', onMenuAdd('timeline'));
 
       state.menuEl = menu;
       state.chatBtn = chatBtn;
