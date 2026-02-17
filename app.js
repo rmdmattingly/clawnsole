@@ -5099,7 +5099,12 @@ const paneManager = {
       if (item && typeof item === 'object') {
         const key = typeof item.key === 'string' && item.key ? item.key : '';
         const rawKind = typeof item.kind === 'string' ? item.kind.trim().toLowerCase() : '';
-        const kind = rawKind === 'workqueue' || rawKind === 'cron' || rawKind === 'timeline' ? rawKind : 'chat';
+        const rawMode = typeof item.mode === 'string' ? item.mode.trim().toLowerCase() : '';
+        const kind = rawKind === 'workqueue' || rawKind === 'cron' || rawKind === 'timeline'
+          ? rawKind
+          : rawMode === 'workqueue' || rawMode === 'cron' || rawMode === 'timeline'
+            ? rawMode
+            : 'chat';
         if (!key) return null;
         if (kind === 'workqueue') {
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
