@@ -2,7 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');
-const { createProxyHandlers } = require('./proxy');
+const { createProxyHandlers, assertSecureWsUrl } = require('./proxy');
 
 function createClawnsoleServer(options = {}) {
   const root = options.root || __dirname;
@@ -103,9 +103,15 @@ function createClawnsoleServer(options = {}) {
 
   function gatewayWsUrl() {
     const override = options.gatewayWsUrl ?? process.env.CLAWNSOLE_GATEWAY_WS_URL;
-    if (typeof override === 'string' && override.trim()) return override.trim();
-    return `ws://127.0.0.1:${readGatewayPort()}`;
+    const allowInsecure = process.env.CLAWNSOLE_ALLOW_INSECURE_TRANSPORT === '1';
+    const value = typeof override === 'string' && override.trim() ? override.trim() : `ws://127.0.0.1:${readGatewayPort()}`;
+    assertSecureWsUrl(value, { allowInsecure });
+    return value;
   }
+
+  // Fail fast at startup if a non-localhost ws:// transport is configured.
+  // (The proxy enforces this too, but this catches misconfig before serving /meta.)
+  gatewayWsUrl();
 
   function readUiPasswords() {
     try {

@@ -181,5 +181,7 @@ function createProxyHandlers({ WebSocket, getRoleFromCookies, readToken, gateway
 }
 
 module.exports = {
-  createProxyHandlers
+  createProxyHandlers,
+  assertSecureWsUrl,
+  isLocalhostHost
 };
