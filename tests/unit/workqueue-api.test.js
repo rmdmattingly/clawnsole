@@ -243,3 +243,70 @@ test('workqueue API: delete removes item', async () => {
     server.close();
   }
 });
+
+test('workqueue API: item endpoint returns one item', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  const it = enqueueItem(null, { queue: 'dev-team', title: 't1', instructions: 'do1', priority: 1 });
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+    const res = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/item/${it.id}`, {
+      Cookie: `clawnsole_auth=${cookie}; clawnsole_role=admin`
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json?.ok, true);
+    assert.equal(res.json?.item?.id, it.id);
+  } finally {
+    server.close();
+  }
+});
+
+test('workqueue API: transition updates status', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  enqueueItem(null, { queue: 'dev-team', title: 't1', instructions: 'do1', priority: 1 });
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+
+    const claim = await httpPostJson(
+      'http://127.0.0.1:' + port + '/api/workqueue/claim-next',
+      { agentId: 'agent-1', queues: ['dev-team'], leaseMs: 60000 },
+      { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' }
+    );
+    assert.equal(claim.status, 200);
+    assert.equal(claim.json?.ok, true);
+    assert.equal(claim.json?.item?.claimedBy, 'agent-1');
+
+    const itemId = claim.json.item.id;
+
+    const progress = await httpPostJson(
+      'http://127.0.0.1:' + port + '/api/workqueue/transition',
+      { itemId, agentId: 'agent-1', status: 'in_progress', note: 'working', leaseMs: 60000 },
+      { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' }
+    );
+    assert.equal(progress.status, 200);
+    assert.equal(progress.json?.ok, true);
+    assert.equal(progress.json?.item?.status, 'in_progress');
+    assert.equal(progress.json?.item?.lastNote, 'working');
+
+    const done = await httpPostJson(
+      'http://127.0.0.1:' + port + '/api/workqueue/transition',
+      { itemId, agentId: 'agent-1', status: 'done', result: { ok: true } },
+      { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' }
+    );
+    assert.equal(done.status, 200);
+    assert.equal(done.json?.ok, true);
+    assert.equal(done.json?.item?.status, 'done');
+    assert.deepEqual(done.json?.item?.result, { ok: true });
+  } finally {
+    server.close();
+  }
+});

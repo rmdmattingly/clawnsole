@@ -197,7 +197,7 @@ List items.
 ```
 
 Sorting:
-- currently sorted ascending by `createdAt` string.
+- currently sorted **newest-first** by `createdAt` string.
 
 ---
 
@@ -265,17 +265,39 @@ Summarize counts by status and list active (claimed/in_progress) items.
 Errors:
 - **500** `{ "error": "workqueue_error" }` on unexpected server errors.
 
-## Non-goals / intentionally unsupported
+## Admin mutation endpoints
 
-To keep the exposed API safe for remote admin UIs, the server intentionally does **not** expose mutation endpoints like delete/edit/transition.
+All endpoints in this document are **admin-only**.
 
-Server-side mutations beyond `enqueue` and `claim-next` should continue to happen via trusted local scripts/CLIs.
+In addition to `enqueue` and `claim-next`, Clawnsole currently exposes a small set of admin mutation endpoints to support UI integration.
+
+### POST `/api/workqueue/transition`
+
+Transition an item to `in_progress`, `done`, or `failed`.
+
+Body:
+
+```json
+{
+  "itemId": "...",
+  "agentId": "dev",
+  "status": "in_progress",
+  "note": "optional",
+  "leaseMs": 900000
+}
+```
+
+- When `status="failed"`, include `error`.
+- When `status="done"`, you may include `result`.
+
+Errors:
+- **404** `{ "error": "not_found" }`
+- **409** `{ "error": "not_claimed" }` if the item isn’t claimed yet
+- **409** `{ "error": "claimed_by_other" }` if it’s claimed by another agent
 
 ### POST `/api/workqueue/update`
 
-Admin-only. Update a workqueue item.
-
-Body:
+Update a workqueue item (admin override).
 
 ```json
 { "itemId": "...", "patch": { "title": "...", "instructions": "...", "priority": 50, "status": "pending" } }
@@ -283,9 +305,7 @@ Body:
 
 ### POST `/api/workqueue/delete`
 
-Admin-only. Delete a workqueue item.
-
-Body:
+Delete a workqueue item.
 
 ```json
 { "itemId": "..." }
