@@ -3526,6 +3526,39 @@ function agentIdExists(agentId) {
   return uiState.agents.some((a) => String(a?.id || '').trim() === id);
 }
 
+function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
+  if (!pane?.elements) return;
+  const { targetLabel, agentButton, agentLabel, agentSelect, agentWarning } = pane.elements;
+
+  if (targetLabel && typeof label === 'string') targetLabel.textContent = label;
+  if (agentLabel && typeof value === 'string') agentLabel.textContent = value;
+
+  // Non-chat panes use the pill button as a "focus/chooser" affordance.
+  if (agentSelect) agentSelect.hidden = true;
+  if (agentWarning) agentWarning.hidden = true;
+
+  if (agentButton) {
+    if (typeof ariaLabel === 'string' && ariaLabel.trim()) agentButton.setAttribute('aria-label', ariaLabel);
+
+    // Replace prior handler (chat panes attach a chooser later).
+    try {
+      if (agentButton._paneTargetHandler) agentButton.removeEventListener('click', agentButton._paneTargetHandler);
+    } catch {}
+
+    if (typeof onClick === 'function') {
+      const handler = (e) => {
+        try {
+          e.preventDefault();
+          e.stopPropagation();
+        } catch {}
+        onClick();
+      };
+      agentButton._paneTargetHandler = handler;
+      agentButton.addEventListener('click', handler);
+    }
+  }
+}
+
 function renderPaneAgentIdentity(pane) {
   if (!pane || pane.role !== 'admin') return;
   const elements = pane.elements;
@@ -3540,6 +3573,10 @@ function renderPaneAgentIdentity(pane) {
 
   // Keep this short; the chooser shows full labels/ids.
   const displayText = hasSelection ? formatAgentLabel(agent, { includeId: false }) : 'Pick agent…';
+
+  if (elements.targetLabel) {
+    elements.targetLabel.textContent = 'Agent';
+  }
 
   if (elements.agentLabel) {
     elements.agentLabel.textContent = displayText;
@@ -3737,6 +3774,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     name: root.querySelector('[data-pane-name]'),
     agentSelect: root.querySelector('[data-pane-agent-select]'),
     agentWrap: root.querySelector('[data-pane-agent-wrap]') || root.querySelector('.pane-agent'),
+    targetLabel: root.querySelector('[data-pane-target-label]') || root.querySelector('.agent-label'),
     agentButton: root.querySelector('[data-pane-agent-button]'),
     agentLabel: root.querySelector('[data-pane-agent-label]'),
     agentWarning: root.querySelector('[data-pane-agent-warning]'),
@@ -3888,10 +3926,16 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
   // WORKQUEUE PANE
   if (pane.role === 'admin' && pane.kind === 'workqueue') {
-    if (elements.agentWrap) elements.agentWrap.hidden = true;
+    if (elements.agentWrap) elements.agentWrap.hidden = false;
     if (elements.inputRow) elements.inputRow.hidden = true;
     if (elements.scrollDownBtn) elements.scrollDownBtn.hidden = true;
 
+    // Header should describe the pane's primary target (queue), not an agent.
+    paneSetHeaderTarget(pane, {
+      label: 'Queue',
+      value: String(pane.workqueue.queue || 'dev-team'),
+      ariaLabel: `Change queue (current: ${String(pane.workqueue.queue || 'dev-team')})`
+    });
 
     // Replace thread with workqueue list + inspect.
     elements.thread.classList.add('wq-pane');
@@ -4000,6 +4044,19 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
     const queueSelectEl = elements.thread.querySelector('[data-wq-queue-select]');
     const queueCustomEl = elements.thread.querySelector('[data-wq-queue-custom]');
+
+    // Make header pill focus the queue selector in the body (no duplicated selector state).
+    paneSetHeaderTarget(pane, {
+      label: 'Queue',
+      value: String(pane.workqueue.queue || 'dev-team'),
+      ariaLabel: `Change queue (current: ${String(pane.workqueue.queue || 'dev-team')})`,
+      onClick: () => {
+        try {
+          queueSelectEl?.focus?.();
+          queueSelectEl?.click?.();
+        } catch {}
+      }
+    });
     const statusRootEl = elements.thread.querySelector('[data-wq-status]');
     const statusSelectedEl = elements.thread.querySelector('[data-wq-status-selected]');
     const statusOptionsEl = elements.thread.querySelector('[data-wq-status-options]');
@@ -4034,6 +4091,17 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     const doRefresh = async () => {
       const q = getQueueValue() || 'dev-team';
       pane.workqueue.queue = q;
+      paneSetHeaderTarget(pane, {
+        label: 'Queue',
+        value: String(q),
+        ariaLabel: `Change queue (current: ${String(q)})`,
+        onClick: () => {
+          try {
+            queueSelectEl?.focus?.();
+            queueSelectEl?.click?.();
+          } catch {}
+        }
+      });
       if (!statusSet.size) {
         for (const s of DEFAULT_STATUSES) statusSet.add(s);
         pane.workqueue.statusFilter = Array.from(statusSet);
@@ -4282,11 +4350,18 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
   // CRON + TIMELINE PANES (admin-only)
   if (pane.role === 'admin' && (pane.kind === 'cron' || pane.kind === 'timeline')) {
-    if (elements.agentWrap) elements.agentWrap.hidden = true;
+    if (elements.agentWrap) elements.agentWrap.hidden = false;
     if (elements.inputRow) elements.inputRow.hidden = true;
     if (elements.scrollDownBtn) elements.scrollDownBtn.hidden = true;
 
     const isTimeline = pane.kind === 'timeline';
+
+    // Header should describe the pane's context (jobs/timeline), not an agent target.
+    paneSetHeaderTarget(pane, {
+      label: isTimeline ? 'Timeline' : 'Jobs',
+      value: isTimeline ? 'Last 24h' : 'Cron',
+      ariaLabel: isTimeline ? 'Timeline filters' : 'Cron job filters'
+    });
     const extraControls = isTimeline
       ? `
           <label class="wq-field" style="min-width: 160px;">
@@ -4359,6 +4434,19 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     const tlRangeEl = elements.thread.querySelector('[data-tl-range]');
     const tlStatusEl = elements.thread.querySelector('[data-tl-status]');
     const tlSearchEl = elements.thread.querySelector('[data-tl-search]');
+
+    // Header target pill should jump to the primary filter control.
+    paneSetHeaderTarget(pane, {
+      label: isTimeline ? 'Timeline' : 'Jobs',
+      value: isTimeline ? 'Last 24h' : 'Cron',
+      ariaLabel: isTimeline ? 'Timeline filters' : 'Cron job filters',
+      onClick: () => {
+        try {
+          if (isTimeline) (tlRangeEl || agentSel || tlSearchEl)?.focus?.();
+          else (agentSel || cronSearchEl)?.focus?.();
+        } catch {}
+      }
+    });
 
     const renderAgentFilterOptions = () => {
       if (!agentSel) return;
@@ -4537,6 +4625,47 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         const dueSoon = !isTimeline && Boolean(cronDueSoonEl?.checked);
         const dueSoonWindowMs = 15 * 60 * 1000;
         const now = Date.now();
+
+        // Keep the pane header context in sync with the active filters.
+        try {
+          const agentLabel = agentFilter === 'all' ? 'All agents' : agentFilter;
+          if (isTimeline) {
+            const rangeMs = Number(tlRangeEl?.value || 86400000);
+            const rangeLabel = rangeMs === 3600000 ? 'Last 1h' : rangeMs === 21600000 ? 'Last 6h' : rangeMs === 604800000 ? 'Last 7d' : 'Last 24h';
+            const statusLabel = String(tlStatusEl?.value || 'all');
+            const parts = [agentLabel, rangeLabel];
+            if (statusLabel !== 'all') parts.push(statusLabel);
+            if (search) parts.push(`search:${search}`);
+            paneSetHeaderTarget(pane, {
+              label: 'Timeline',
+              value: parts.join(' · '),
+              ariaLabel: 'Timeline filters',
+              onClick: () => {
+                try {
+                  (tlRangeEl || agentSel || tlSearchEl)?.focus?.();
+                } catch {}
+              }
+            });
+          } else {
+            const flags = [];
+            if (onlyFailing) flags.push('failing');
+            if (onlyDisabled) flags.push('disabled');
+            if (dueSoon) flags.push('due soon');
+            const parts = [agentLabel];
+            if (flags.length) parts.push(flags.join(','));
+            if (search) parts.push(`search:${search}`);
+            paneSetHeaderTarget(pane, {
+              label: 'Jobs',
+              value: parts.join(' · '),
+              ariaLabel: 'Cron job filters',
+              onClick: () => {
+                try {
+                  (agentSel || cronSearchEl)?.focus?.();
+                } catch {}
+              }
+            });
+          }
+        } catch {}
 
         const isJobFailing = (job) => {
           const last = String(job?.state?.lastStatus || '').toLowerCase();
