@@ -938,12 +938,14 @@ function renderPaneManager() {
         <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
       </div>
       <div class="pane-manager-actions">
+        <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="Move pane up" aria-label="Move pane up" ${idx === 0 ? 'disabled' : ''}>↑</button>
+        <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="Move pane down" aria-label="Move pane down" ${idx === panes.length - 1 ? 'disabled' : ''}>↓</button>
         <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
         <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
       </div>
     `;
 
-    row.addEventListener('mousemove', () => {
+    row.addEventListener('mouseenter', () => {
       paneManagerUiState.selectedIndex = idx;
       renderPaneManager();
     });
@@ -956,6 +958,22 @@ function renderPaneManager() {
           paneManager.removePane(pane.key);
         } catch {}
         renderPaneManager();
+        return;
+      }
+      if (action === 'move-up') {
+        const moved = paneManager.movePane(pane.key, -1);
+        if (moved) {
+          paneManagerUiState.selectedIndex = Math.max(0, idx - 1);
+          renderPaneManager();
+        }
+        return;
+      }
+      if (action === 'move-down') {
+        const moved = paneManager.movePane(pane.key, 1);
+        if (moved) {
+          paneManagerUiState.selectedIndex = Math.min(paneManager.panes.length - 1, idx + 1);
+          renderPaneManager();
+        }
         return;
       }
       // Default: focus
@@ -5491,6 +5509,29 @@ const paneManager = {
     this.persistAdminPanes();
     updateGlobalStatus();
     updateConnectionControls();
+  },
+  movePane(key, delta = 0) {
+    if (roleState.role !== 'admin') return false;
+    const idx = this.panes.findIndex((pane) => pane.key === key);
+    if (idx < 0) return false;
+
+    const nextIdx = idx + Number(delta || 0);
+    if (nextIdx < 0 || nextIdx >= this.panes.length) return false;
+
+    const [pane] = this.panes.splice(idx, 1);
+    this.panes.splice(nextIdx, 0, pane);
+
+    if (globalElements.paneGrid) {
+      this.panes.forEach((next) => {
+        if (!next.elements?.root) return;
+        globalElements.paneGrid.appendChild(next.elements.root);
+      });
+    }
+
+    this.updatePaneLabels();
+    this.persistAdminPanes();
+    updateGlobalStatus();
+    return true;
   },
   updatePaneLabels() {
     this.panes.forEach((pane, index) => {
