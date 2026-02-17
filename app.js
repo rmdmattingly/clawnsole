@@ -3106,7 +3106,12 @@ function paneIsAbortable(pane) {
 function paneRenderStopControl(pane) {
   const btn = pane?.elements?.stopBtn;
   if (!btn) return;
-  const visible = Boolean(uiState.authed && pane.connected && (pane.thinking?.active || (pane.chat?.runs && pane.chat.runs.size > 0) || (pane.abortState && pane.abortState.active)));
+  const visible = Boolean(
+    uiState.authed &&
+      pane.connected &&
+      (pane.thinking?.active || (pane.chat?.runs && pane.chat.runs.size > 0) || (pane.abortState && pane.abortState.active)
+    )
+  );
   btn.hidden = !visible;
 
   const isCanceling = Boolean(pane.abortState && pane.abortState.active);
@@ -3114,59 +3119,105 @@ function paneRenderStopControl(pane) {
   btn.setAttribute('aria-label', isCanceling ? 'Canceling…' : 'Stop generating');
 }
 
+function paneRecentRunId(pane) {
+  if (!pane?.chat?.runs) return null;
+  let latest = null;
+  for (const key of pane.chat.runs.keys()) {
+    latest = key;
+  }
+  return latest;
+}
+
+function paneFinishCanceledRun(pane, { runId = null, resetSession = false, fallbackText = '' } = {}) {
+  if (!pane?.abortState) return;
+  if (pane.abortState.finished) return;
+  pane.abortState.finished = true;
+
+  if (pane.abortState.timer) {
+    clearTimeout(pane.abortState.timer);
+    pane.abortState.timer = null;
+  }
+
+  const targetRunId = runId || pane.abortState.targetRunId || pane.activeRunId;
+  const rid = targetRunId;
+  if (rid) {
+    try {
+      const entry = pane.chat?.runs?.get(rid);
+      const current = entry?.body?.textContent || '';
+      const nextText = current ? `${current}\n\n${fallbackText || '_(canceled)_'}` : `${fallbackText || '_(canceled)_'}`;
+      paneUpdateChatRun(pane, rid, nextText, true);
+    } catch {
+      paneAddChatMessage(pane, {
+        role: 'assistant',
+        text: fallbackText || '_Canceled._',
+        persist: true,
+        state: 'canceled',
+        metaLabel: `${paneAssistantLabel(pane)} · Canceled`
+      });
+    }
+    pane.abortState.canceledRunIds.add(String(rid));
+  } else {
+    paneAddChatMessage(pane, {
+      role: 'assistant',
+      text: fallbackText || '_Canceled._',
+      persist: true,
+      state: 'canceled',
+      metaLabel: `${paneAssistantLabel(pane)} · Canceled`
+    });
+  }
+
+  paneStopThinking(pane);
+  pane.activeRunId = null;
+
+  // Stop processing the active queue item and allow next messages to flow.
+  pane.pendingSend = null;
+  pane.inFlight = null;
+  panePumpOutbox(pane);
+
+  pane.abortState.targetRunId = null;
+  pane.abortState.active = false;
+  if (resetSession) {
+    try {
+      pane.client.request('sessions.reset', { key: pane.sessionKey() });
+    } catch {}
+  }
+  paneRenderStopControl(pane);
+}
+
+function paneIsAbortCanceledEvent(payload = {}) {
+  const state = String(payload.state || '').toLowerCase();
+  if (state !== 'error') return false;
+  const text = String(payload.errorMessage || '').toLowerCase();
+  return ['cancel', 'canceled', 'cancelled', 'aborted', 'interrupt'].some((needle) => text.includes(needle));
+}
 
 async function paneAbortRun(pane) {
   if (!pane || !uiState.authed || !pane.connected) return;
   if (pane.abortState && pane.abortState.active) return;
 
   pane.abortState.active = true;
+  pane.abortState.finished = false;
   pane.abortState.requestedAt = Date.now();
+  pane.abortState.targetRunId = pane.activeRunId || paneRecentRunId(pane) || null;
   paneRenderStopControl(pane);
 
   const sessionKey = pane.sessionKey();
-  const runId = pane.activeRunId;
+  const runId = pane.abortState.targetRunId;
 
-  const finishLocalCanceled = () => {
-    const rid = pane.activeRunId || runId;
-    if (rid) {
-      try {
-        const entry = pane.chat?.runs?.get(rid);
-        const current = entry?.body?.textContent || '';
-        const nextText = current ? `${current}\n\n_(canceled)_` : '_(canceled)_';
-        paneUpdateChatRun(pane, rid, nextText, true);
-      } catch {}
-    } else {
-      paneAddChatMessage(pane, { role: 'assistant', text: '_Canceled._', persist: true, state: 'canceled', metaLabel: `${paneAssistantLabel(pane)} · Canceled` });
-    }
-    paneStopThinking(pane);
-    pane.activeRunId = null;
-  };
-
-  // Fallback: if we don't get a terminal event quickly, reset the session.
+  // If we don't get a terminal event quickly, reset the session and force a canceled marker locally.
   if (pane.abortState.timer) {
     clearTimeout(pane.abortState.timer);
     pane.abortState.timer = null;
   }
   pane.abortState.timer = setTimeout(() => {
-    try {
-      pane.client.request('sessions.reset', { key: sessionKey });
-    } catch {}
-    finishLocalCanceled();
-    pane.abortState.active = false;
-    paneRenderStopControl(pane);
+    paneFinishCanceledRun(pane, { runId, resetSession: true, fallbackText: '_(canceled)_' });
   }, 2000);
 
   try {
     await pane.client.request('chat.abort', { sessionKey, runId: runId || undefined });
   } catch (err) {
     addFeed('err', 'chat.abort', String(err));
-  } finally {
-    if (pane.abortState.timer) {
-      clearTimeout(pane.abortState.timer);
-      pane.abortState.timer = null;
-    }
-    pane.abortState.active = false;
-    paneRenderStopControl(pane);
+    paneFinishCanceledRun(pane, { runId, resetSession: true, fallbackText: '_(canceled)_' });
   }
 }
 
@@ -3412,6 +3463,15 @@ function handleGatewayFrame(pane, data) {
     }
     const runId = payload.runId;
     const text = extractChatText(payload.message);
+    const abortedRun = runId && pane.abortState?.canceledRunIds?.has(String(runId));
+    if (abortedRun) {
+      pane.pendingSend = null;
+      pane.inFlight = null;
+      panePumpOutbox(pane);
+      paneStopThinking(pane);
+      paneRenderStopControl(pane);
+      return;
+    }
     if (payload.state === 'delta') {
       paneStopThinking(pane);
       pane.activeRunId = runId || pane.activeRunId;
@@ -3428,6 +3488,19 @@ function handleGatewayFrame(pane, data) {
       panePumpOutbox(pane);
       triggerFiring(1.2, 2);
     } else if (payload.state === 'error') {
+      const shouldMarkCanceled =
+        pane.abortState?.active &&
+        (Boolean(!pane.abortState.targetRunId || !runId || String(pane.abortState.targetRunId) === String(runId)) && paneIsAbortCanceledEvent(payload));
+
+      if (shouldMarkCanceled) {
+        paneFinishCanceledRun(pane, {
+          runId,
+          resetSession: false,
+          fallbackText: '_(canceled)_'
+        });
+        return;
+      }
+
       paneStopThinking(pane);
       paneUpdateChatRun(pane, runId, payload.errorMessage || 'Chat error', true);
       pane.activeRunId = null;
@@ -3823,7 +3896,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     scroll: { pinned: true },
     thinking: { active: false, timer: null, dotsTimer: null, bubble: null },
     activeRunId: null,
-    abortState: { active: false, requestedAt: 0, timer: null },
+    abortState: { active: false, requestedAt: 0, targetRunId: null, timer: null, finished: false, canceledRunIds: new Set() },
     attachments: { files: [] },
     pendingSend: null,
     catchUp: { active: false, attemptsLeft: 0, timer: null },
@@ -5037,7 +5110,12 @@ const paneManager = {
       if (item && typeof item === 'object') {
         const key = typeof item.key === 'string' && item.key ? item.key : '';
         const rawKind = typeof item.kind === 'string' ? item.kind.trim().toLowerCase() : '';
-        const kind = rawKind === 'workqueue' || rawKind === 'cron' || rawKind === 'timeline' ? rawKind : 'chat';
+        const rawMode = typeof item.mode === 'string' ? item.mode.trim().toLowerCase() : '';
+        const kind = rawKind === 'workqueue' || rawKind === 'cron' || rawKind === 'timeline'
+          ? rawKind
+          : rawMode === 'workqueue' || rawMode === 'cron' || rawMode === 'timeline'
+            ? rawMode
+            : 'chat';
         if (!key) return null;
         if (kind === 'workqueue') {
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
@@ -5295,25 +5373,27 @@ const paneManager = {
       menu.appendChild(cronBtn);
       menu.appendChild(timelineBtn);
 
-      chatBtn.addEventListener('click', () => {
-        this.closeAddPaneMenu();
-        this.addPane('chat');
-      });
+      const onMenuAdd = (kind) => (event) => {
+        if (state.menuActionInFlight) return;
+        state.menuActionInFlight = true;
+        if (event?.preventDefault) event.preventDefault();
+        if (event?.stopPropagation) event.stopPropagation();
 
-      wqBtn.addEventListener('click', () => {
         this.closeAddPaneMenu();
-        this.addPane('workqueue');
-      });
+        this.addPane(kind);
 
-      cronBtn.addEventListener('click', () => {
-        this.closeAddPaneMenu();
-        this.addPane('cron');
-      });
+        queueMicrotask(() => {
+          state.menuActionInFlight = false;
+        });
+      };
 
-      timelineBtn.addEventListener('click', () => {
-        this.closeAddPaneMenu();
-        this.addPane('timeline');
-      });
+      chatBtn.addEventListener('click', onMenuAdd('chat'));
+
+      wqBtn.addEventListener('click', onMenuAdd('workqueue'));
+
+      cronBtn.addEventListener('click', onMenuAdd('cron'));
+
+      timelineBtn.addEventListener('click', onMenuAdd('timeline'));
 
       state.menuEl = menu;
       state.chatBtn = chatBtn;
