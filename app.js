@@ -5,7 +5,7 @@ const globalElements = {
   disconnectBtn: document.getElementById('disconnectBtn'),
   resetLayoutBtn: document.getElementById('resetLayoutBtn'),
   status: document.getElementById('connectionStatus'),
-  statusMeta: document.getElementById('statusMeta'),
+  paneManagerBtn: document.getElementById('paneManagerBtn'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
   refreshAgentsBtn: document.getElementById('refreshAgentsBtn'),
@@ -25,6 +25,10 @@ const globalElements = {
   commandPaletteEmpty: document.getElementById('commandPaletteEmpty'),
   shortcutsModal: document.getElementById('shortcutsModal'),
   shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
+  paneManagerModal: document.getElementById('paneManagerModal'),
+  paneManagerCloseBtn: document.getElementById('paneManagerCloseBtn'),
+  paneManagerList: document.getElementById('paneManagerList'),
+  paneManagerEmpty: document.getElementById('paneManagerEmpty'),
   workqueueModal: document.getElementById('workqueueModal'),
   workqueueCloseBtn: document.getElementById('workqueueCloseBtn'),
   wqQueueSelect: document.getElementById('wqQueueSelect'),
@@ -649,12 +653,12 @@ function updateGlobalStatus() {
   const panes = paneManager.panes;
   if (!uiState.authed) {
     setStatusPill(globalElements.status, 'disconnected', 'sign in required');
-    if (globalElements.statusMeta) globalElements.statusMeta.textContent = 'sign in required';
+    if (globalElements.paneManagerBtn) globalElements.paneManagerBtn.textContent = 'sign in required';
     return;
   }
   if (panes.length === 0) {
     setStatusPill(globalElements.status, 'disconnected', '');
-    if (globalElements.statusMeta) globalElements.statusMeta.textContent = '';
+    if (globalElements.paneManagerBtn) globalElements.paneManagerBtn.textContent = '';
     return;
   }
 
@@ -678,7 +682,7 @@ function updateGlobalStatus() {
       ? firstError.statusMeta
       : `panes: ${connectedCount}/${total} connected`;
   setStatusPill(globalElements.status, state, meta);
-  if (globalElements.statusMeta) globalElements.statusMeta.textContent = meta;
+  if (globalElements.paneManagerBtn) globalElements.paneManagerBtn.textContent = meta;
 }
 
 function updateConnectionControls() {
@@ -833,6 +837,167 @@ function openShortcuts() {
 function closeShortcuts() {
   globalElements.shortcutsModal?.classList.remove('open');
   globalElements.shortcutsModal?.setAttribute('aria-hidden', 'true');
+}
+
+// Pane Manager (admin-only)
+
+const paneManagerUiState = {
+  open: false,
+  selectedIndex: 0
+};
+
+function isPaneManagerOpen() {
+  return !!globalElements.paneManagerModal?.classList.contains('open');
+}
+
+function paneLabel(pane) {
+  const kind = pane?.kind || 'chat';
+  if (kind === 'workqueue') return 'Workqueue';
+  if (kind === 'cron') return 'Cron';
+  if (kind === 'timeline') return 'Timeline';
+  return 'Chat';
+}
+
+function paneIcon(pane) {
+  const kind = pane?.kind || 'chat';
+  if (kind === 'workqueue') return 'WQ';
+  if (kind === 'cron') return '⏰';
+  if (kind === 'timeline') return '🕒';
+  return '💬';
+}
+
+function paneTargetLabel(pane) {
+  if (!pane) return '';
+  if (pane.kind === 'workqueue') return String(pane.workqueue?.queue || 'dev-team');
+  if (pane.kind === 'cron' || pane.kind === 'timeline') return 'gateway';
+  return String(pane.agentId || 'main');
+}
+
+function renderPaneManager() {
+  const panes = paneManager?.panes || [];
+  const list = globalElements.paneManagerList;
+  const empty = globalElements.paneManagerEmpty;
+  if (!list || !empty) return;
+
+  list.innerHTML = '';
+  empty.hidden = panes.length > 0;
+
+  const selected = Math.max(0, Math.min(paneManagerUiState.selectedIndex, panes.length - 1));
+  paneManagerUiState.selectedIndex = selected;
+
+  panes.forEach((pane, idx) => {
+    const row = document.createElement('div');
+    row.className = 'pane-manager-row';
+    row.setAttribute('role', 'option');
+    row.dataset.index = String(idx);
+    row.dataset.paneKey = String(pane.key || '');
+    row.setAttribute('aria-selected', idx === selected ? 'true' : 'false');
+
+    const state = String(pane.statusState || (pane.connected ? 'connected' : 'disconnected'));
+
+    row.innerHTML = `
+      <div class="pane-manager-main">
+        <div class="pane-manager-kind" title="${escapeHtml(paneLabel(pane))}">
+          <span class="pane-manager-icon" aria-hidden="true">${escapeHtml(paneIcon(pane))}</span>
+          <span class="pane-manager-kind-label">${escapeHtml(paneLabel(pane))}</span>
+        </div>
+        <div class="pane-manager-target" title="${escapeHtml(paneTargetLabel(pane))}">${escapeHtml(paneTargetLabel(pane))}</div>
+        <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
+      </div>
+      <div class="pane-manager-actions">
+        <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
+        <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
+      </div>
+    `;
+
+    row.addEventListener('mousemove', () => {
+      paneManagerUiState.selectedIndex = idx;
+      renderPaneManager();
+    });
+
+    row.addEventListener('click', (event) => {
+      const action = event?.target?.dataset?.action;
+      paneManagerUiState.selectedIndex = idx;
+      if (action === 'close') {
+        try {
+          paneManager.removePane(pane.key);
+        } catch {}
+        renderPaneManager();
+        return;
+      }
+      // Default: focus
+      closePaneManager();
+      focusPaneIndex(idx);
+    });
+
+    list.appendChild(row);
+  });
+}
+
+function openPaneManager() {
+  if (roleState.role !== 'admin') return;
+  if (!uiState.authed) {
+    showLogin('Please sign in to continue.');
+    return;
+  }
+  if (!globalElements.paneManagerModal) return;
+
+  paneManagerUiState.open = true;
+  paneManagerUiState.selectedIndex = 0;
+
+  globalElements.paneManagerModal.classList.add('open');
+  globalElements.paneManagerModal.setAttribute('aria-hidden', 'false');
+  renderPaneManager();
+
+  // Ensure keydown events go somewhere stable.
+  try {
+    globalElements.paneManagerModal.focus?.();
+  } catch {}
+}
+
+function closePaneManager({ restoreFocus = true } = {}) {
+  if (!globalElements.paneManagerModal) return;
+  paneManagerUiState.open = false;
+  globalElements.paneManagerModal.classList.remove('open');
+  globalElements.paneManagerModal.setAttribute('aria-hidden', 'true');
+  if (restoreFocus) {
+    try {
+      const pane = paneManager?.panes?.[0];
+      pane?.elements?.input?.focus?.();
+    } catch {}
+  }
+}
+
+function paneManagerHandleKeydown(event) {
+  if (!isPaneManagerOpen()) return false;
+  const panes = paneManager?.panes || [];
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closePaneManager();
+    return true;
+  }
+  if (panes.length === 0) return false;
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    paneManagerUiState.selectedIndex = Math.min(panes.length - 1, paneManagerUiState.selectedIndex + 1);
+    renderPaneManager();
+    return true;
+  }
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    paneManagerUiState.selectedIndex = Math.max(0, paneManagerUiState.selectedIndex - 1);
+    renderPaneManager();
+    return true;
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    const idx = Math.max(0, Math.min(panes.length - 1, paneManagerUiState.selectedIndex));
+    closePaneManager();
+    focusPaneIndex(idx);
+    return true;
+  }
+  return false;
 }
 
 // Command palette (admin-only)
@@ -5293,11 +5458,23 @@ function focusPaneIndex(idx) {
     pane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   } catch {}
 
-  // Prefer focusing the chat input when available.
+  // Prefer focusing the chat input when available (and visible).
   const input = pane.elements?.input;
   if (input && typeof input.focus === 'function') {
-    input.focus();
-    return;
+    const isVisible = (() => {
+      try {
+        if (input.disabled) return false;
+        if (input.hidden) return false;
+        if (input.getClientRects && input.getClientRects().length === 0) return false;
+        return true;
+      } catch {
+        return true;
+      }
+    })();
+    if (isVisible) {
+      input.focus();
+      return;
+    }
   }
 
   // Fallback: focus first focusable control inside the pane.
@@ -5330,6 +5507,9 @@ window.addEventListener('keydown', (event) => {
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
   })();
 
+  // If Pane Manager is open, it gets first dibs on keys.
+  if (paneManagerHandleKeydown(event)) return;
+
   // Add-pane shortcuts (admin-only)
   // Ctrl/Cmd+Shift+C → new chat
   // Ctrl/Cmd+Shift+W → new workqueue
@@ -5350,6 +5530,13 @@ window.addEventListener('keydown', (event) => {
     }
   }
 
+  // Cmd/Ctrl+P opens Pane Manager (even while typing).
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'p') {
+    event.preventDefault();
+    openPaneManager();
+    return;
+  }
+
   // Cmd/Ctrl+K opens command palette (even while typing).
   if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'k') {
     event.preventDefault();
@@ -5359,6 +5546,7 @@ window.addEventListener('keydown', (event) => {
 
   if (event.key === 'Escape') {
     closeCommandPalette();
+    closePaneManager();
     closeShortcuts();
     closeSettings();
     closeWorkqueue();
@@ -5445,6 +5633,17 @@ globalElements.disconnectBtn?.addEventListener('click', () => {
 
 globalElements.resetLayoutBtn?.addEventListener('click', () => {
   paneManager.resetAdminLayoutToDefault({ confirm: true });
+});
+
+globalElements.paneManagerBtn?.addEventListener('click', (event) => {
+  event?.preventDefault?.();
+  openPaneManager();
+});
+
+globalElements.paneManagerCloseBtn?.addEventListener('click', () => closePaneManager());
+
+globalElements.paneManagerModal?.addEventListener('click', (event) => {
+  if (event.target === globalElements.paneManagerModal) closePaneManager();
 });
 
 globalElements.status?.addEventListener('click', () => {
