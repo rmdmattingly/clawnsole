@@ -3366,18 +3366,23 @@ function renderPaneAgentIdentity(pane) {
   const elements = pane.elements;
   if (!elements) return;
 
-  const agentId = normalizeAgentId(pane.agentId || 'main');
-  const known = uiState.agents.length === 0 ? true : agentIdExists(agentId);
-  const agent = getAgentRecord(agentId);
+  const raw = typeof pane.agentId === 'string' ? pane.agentId.trim() : '';
+  const hasSelection = Boolean(raw);
+
+  const agentId = hasSelection ? normalizeAgentId(raw) : '';
+  const known = !hasSelection ? true : uiState.agents.length === 0 ? true : agentIdExists(agentId);
+  const agent = hasSelection ? getAgentRecord(agentId) : null;
+
+  // Keep this short; the chooser shows full labels/ids.
+  const displayText = hasSelection ? formatAgentLabel(agent, { includeId: false }) : 'Pick agent…';
 
   if (elements.agentLabel) {
-    // Keep this short; the chooser shows full labels/ids.
-    const emoji = typeof agent?.emoji === 'string' ? agent.emoji.trim() : '';
-    const name =
-      (typeof agent?.displayName === 'string' && agent.displayName.trim()) ||
-      (typeof agent?.name === 'string' && agent.name.trim()) ||
-      agentId;
-    elements.agentLabel.textContent = `${emoji ? `${emoji} ` : ''}${name}`;
+    elements.agentLabel.textContent = displayText;
+  }
+
+  // Make the control self-describing for screen readers and reduce mixed-pane mistakes.
+  if (elements.agentButton) {
+    elements.agentButton.setAttribute('aria-label', `Change agent (current: ${displayText})`);
   }
 
   if (elements.root) {
@@ -3385,7 +3390,7 @@ function renderPaneAgentIdentity(pane) {
   }
 
   if (elements.agentWarning) {
-    if (known) {
+    if (!hasSelection || known) {
       elements.agentWarning.hidden = true;
       elements.agentWarning.textContent = '';
     } else {

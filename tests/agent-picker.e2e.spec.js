@@ -27,6 +27,10 @@ test('agent chooser: opens, shows agents, Esc closes', async ({ page }) => {
   const btn = pane.getByTestId('pane-agent-button');
   await expect(btn).toBeVisible({ timeout: 20000 });
 
+  // Header should clearly indicate the current agent target.
+  await expect(btn).toContainText(/main/i);
+  await expect(btn).toHaveAttribute('aria-label', /current:\s*main/i);
+
   await btn.click();
 
   const chooser = page.getByRole('dialog', { name: 'Choose agent' });
@@ -35,6 +39,15 @@ test('agent chooser: opens, shows agents, Esc closes', async ({ page }) => {
   const items = chooser.locator('.agent-chooser-item');
   await expect(items).toHaveCount(2);
 
+  // Switch to dev and ensure the pane header reflects the new selection.
+  await chooser.getByRole('button', { name: /dev/i }).click();
+  await expect(chooser).toHaveCount(0);
+  await expect(btn).toContainText(/dev/i);
+  await expect(btn).toHaveAttribute('aria-label', /current:\s*dev/i);
+
+  // Re-open and Esc closes.
+  await btn.click();
+  await expect(chooser).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(chooser).toHaveCount(0);
 });
