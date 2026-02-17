@@ -26,7 +26,12 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
 
   await loginAdmin(page, env.serverPort);
 
+  // When any non-chat pane types exist, the pane grid heading should be neutral.
+  await expect(page.getByTestId('pane-grid')).toHaveAttribute('aria-label', /^(Panes|Chat panes)$/);
+
   await addPane(page, 'Workqueue pane');
+
+  await expect(page.getByTestId('pane-grid')).toHaveAttribute('aria-label', 'Panes');
 
   const panes = page.locator('[data-pane]');
   const wqPane = panes.last();

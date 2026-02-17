@@ -3344,6 +3344,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
   const elements = {
     root,
     name: root.querySelector('[data-pane-name]'),
+    typePill: root.querySelector('[data-pane-type-pill]'),
+    typeIcon: root.querySelector('[data-pane-type-icon]'),
+    typeText: root.querySelector('[data-pane-type-text]'),
     agentSelect: root.querySelector('[data-pane-agent-select]'),
     agentWrap: root.querySelector('[data-pane-agent-wrap]') || root.querySelector('.pane-agent'),
     agentButton: root.querySelector('[data-pane-agent-button]'),
@@ -3408,6 +3411,24 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
   try {
     elements.root.dataset.paneKind = pane.kind;
     elements.root.classList.add(`pane-kind-${pane.kind}`);
+  } catch {}
+
+  // Pane type pill (visual + a11y).
+  try {
+    const metaByKind = {
+      chat: { icon: '💬', text: 'Chat', className: 'pane-type-chat' },
+      workqueue: { icon: '📋', text: 'Workqueue', className: 'pane-type-workqueue' },
+      cron: { icon: '⏱', text: 'Cron', className: 'pane-type-cron' },
+      timeline: { icon: '🧾', text: 'Timeline', className: 'pane-type-timeline' }
+    };
+    const meta = metaByKind[pane.kind] || metaByKind.chat;
+    if (elements.typeIcon) elements.typeIcon.textContent = meta.icon;
+    if (elements.typeText) elements.typeText.textContent = meta.text;
+    if (elements.typePill) {
+      elements.typePill.classList.remove('pane-type-chat', 'pane-type-workqueue', 'pane-type-cron', 'pane-type-timeline');
+      elements.typePill.classList.add(meta.className);
+      elements.typePill.setAttribute('aria-label', `Pane type: ${meta.text}`);
+    }
   } catch {}
 
   // Per-pane inline help popover ("What is this pane?")
@@ -4483,6 +4504,7 @@ const paneManager = {
     this.panes.forEach((pane) => globalElements.paneGrid.appendChild(pane.elements.root));
     this.updatePaneLabels();
     this.updateCloseButtons();
+    this.updatePaneGridHeading();
     this.applyInferredLayout();
   },
   destroyAll() {
@@ -4639,6 +4661,7 @@ const paneManager = {
       globalElements.paneGrid.appendChild(pane.elements.root);
       this.updatePaneLabels();
       this.updateCloseButtons();
+      this.updatePaneGridHeading();
       this.applyInferredLayout();
       this.persistAdminPanes();
       this.focusPanePrimary(pane);
@@ -4656,6 +4679,7 @@ const paneManager = {
       globalElements.paneGrid.appendChild(pane.elements.root);
       this.updatePaneLabels();
       this.updateCloseButtons();
+      this.updatePaneGridHeading();
       this.applyInferredLayout();
       this.persistAdminPanes();
       if (uiState.authed) {
@@ -4671,6 +4695,7 @@ const paneManager = {
     globalElements.paneGrid.appendChild(pane.elements.root);
     this.updatePaneLabels();
     this.updateCloseButtons();
+    this.updatePaneGridHeading();
     this.applyInferredLayout();
     this.persistAdminPanes();
     if (uiState.authed) {
@@ -4877,6 +4902,7 @@ const paneManager = {
     } catch {}
     this.updatePaneLabels();
     this.updateCloseButtons();
+    this.updatePaneGridHeading();
     this.applyInferredLayout();
     this.persistAdminPanes();
     updateGlobalStatus();
@@ -4894,6 +4920,17 @@ const paneManager = {
       if (!pane.elements.closeBtn) return;
       pane.elements.closeBtn.hidden = !(allowClose && pane.role === 'admin');
     });
+  },
+  updatePaneGridHeading() {
+    if (!globalElements.paneGrid) return;
+    const hasNonChat = this.panes.some((p) => p.kind && p.kind !== 'chat');
+    const label = hasNonChat ? 'Panes' : 'Chat panes';
+    try {
+      globalElements.paneGrid.setAttribute('aria-label', label);
+    } catch {}
+    try {
+      globalElements.paneGrid.dataset.paneGroupLabel = label;
+    } catch {}
   },
   applyLayout(cols) {
     const clamped = Math.max(1, Math.min(3, Number(cols) || 1));
