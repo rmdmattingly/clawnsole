@@ -88,6 +88,38 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   return `${sec}s`;
 });
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
+const inferPaneCols = __appCore.inferPaneCols || ((count) => {
+  const n = Number(count);
+  if (!Number.isFinite(n) || n <= 1) return 1;
+  if (n === 2) return 2;
+  if (n === 3) return 3;
+  if (n === 4) return 2;
+  return 3;
+});
+const normalizePaneKind = __appCore.normalizePaneKind || ((rawKind) => {
+  const k = String(rawKind || 'chat').trim().toLowerCase();
+  return k === 'chat'
+    ? 'chat'
+    : k === 'workqueue' || k === 'cron' || k === 'timeline'
+      ? k
+      : k.startsWith('w')
+        ? 'workqueue'
+        : k === 'c' || k.startsWith('cr')
+          ? 'cron'
+          : k === 't' || k.startsWith('ti')
+            ? 'timeline'
+            : 'chat';
+});
+const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => ({
+  isAdmin: String(state?.role || '') === 'admin',
+  startAgentAutoRefresh: String(state?.role || '') === 'admin' && !!state?.authed,
+  stopAgentAutoRefresh: String(state?.role || '') !== 'admin' || !state?.authed,
+  rolePillText: String(state?.role || '') === 'admin' ? 'signed in' : (state?.role || 'signed out'),
+  rolePillAdmin: String(state?.role || '') === 'admin',
+  showAdminControls: String(state?.role || '') === 'admin',
+  logoutEnabled: !!state?.authed,
+  logoutOpacity: !!state?.authed ? '1' : '0.5'
+}));
 
 function getRouteRole() {
   try {
@@ -700,64 +732,65 @@ function updateConnectionControls() {
 
 function setAuthState(authed) {
   uiState.authed = authed;
+  const authUi = deriveAuthOverlayState({ authed, role: roleState.role });
   updateGlobalStatus();
   updateConnectionControls();
   paneManager.refreshChatEnabled();
 
-  if (authed && roleState.role === 'admin') {
+  if (authUi.startAgentAutoRefresh) {
     startAgentAutoRefresh();
-  }
-  if (!authed) {
+  } else {
     stopAgentAutoRefresh();
   }
 
   if (globalElements.logoutBtn) {
-    globalElements.logoutBtn.disabled = !authed;
-    globalElements.logoutBtn.style.opacity = authed ? '1' : '0.5';
+    globalElements.logoutBtn.disabled = !authUi.logoutEnabled;
+    globalElements.logoutBtn.style.opacity = authUi.logoutOpacity;
   }
 }
 
 function setRole(role) {
   roleState.role = role;
+  const authUi = deriveAuthOverlayState({ authed: uiState.authed, role });
   if (globalElements.rolePill) {
-    // Clawnsole now effectively has a single signed-in role (admin), so showing the raw role name is redundant.
-    globalElements.rolePill.textContent = role === 'admin' ? 'signed in' : role;
-    // Keep the visual “signed in” styling for admin without exposing the role label.
-    globalElements.rolePill.classList.toggle('admin', role === 'admin');
+    globalElements.rolePill.textContent = authUi.rolePillText;
+    globalElements.rolePill.classList.toggle('admin', authUi.rolePillAdmin);
   }
+
+  const isAdmin = authUi.isAdmin;
+  const visibleOpacity = isAdmin ? '1' : '0.5';
 
   if (globalElements.refreshAgentsBtn) {
-    globalElements.refreshAgentsBtn.hidden = role !== 'admin';
-    globalElements.refreshAgentsBtn.disabled = role !== 'admin' || !uiState.authed;
-    globalElements.refreshAgentsBtn.style.opacity = role === 'admin' ? '1' : '0.5';
+    globalElements.refreshAgentsBtn.hidden = !isAdmin;
+    globalElements.refreshAgentsBtn.disabled = !isAdmin || !uiState.authed;
+    globalElements.refreshAgentsBtn.style.opacity = visibleOpacity;
   }
 
-  if (role === 'admin') {
+  if (authUi.startAgentAutoRefresh) {
     startAgentAutoRefresh();
   } else {
     stopAgentAutoRefresh();
   }
-  if (role === 'admin') {
-    globalElements.settingsBtn?.removeAttribute('disabled');
-    if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '1';
-  } else {
-    globalElements.settingsBtn?.setAttribute('disabled', 'disabled');
-    if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
+
+  if (globalElements.settingsBtn) {
+    if (isAdmin) globalElements.settingsBtn.removeAttribute('disabled');
+    else globalElements.settingsBtn.setAttribute('disabled', 'disabled');
+    globalElements.settingsBtn.style.opacity = visibleOpacity;
   }
 
   if (globalElements.paneControls) {
-    globalElements.paneControls.hidden = role !== 'admin';
+    globalElements.paneControls.hidden = !isAdmin;
   }
   if (globalElements.agentsBtn) {
-    globalElements.agentsBtn.hidden = role !== 'admin';
-    globalElements.agentsBtn.disabled = role !== 'admin';
-    globalElements.agentsBtn.style.opacity = role === 'admin' ? '1' : '0.5';
+    globalElements.agentsBtn.hidden = !isAdmin;
+    globalElements.agentsBtn.disabled = !isAdmin;
+    globalElements.agentsBtn.style.opacity = visibleOpacity;
   }
 
   if (globalElements.workqueueBtn) {
-    globalElements.workqueueBtn.hidden = role !== 'admin';
-    globalElements.workqueueBtn.disabled = role !== 'admin';
-    globalElements.workqueueBtn.style.opacity = role === 'admin' ? '1' : '0.5';
+    globalElements.workqueueBtn.hidden = !isAdmin;
+    globalElements.workqueueBtn.disabled = !isAdmin;
+    globalElements.workqueueBtn.style.opacity = visibleOpacity;
   }
 }
 
@@ -5035,15 +5068,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 }
 
 
-function inferPaneCols(count) {
-  if (count <= 1) return 1;
-  if (count === 2) return 2;
-  if (count === 3) return 3;
-  if (count === 4) return 2;
-  // 5-6 panes: pack into 3 columns.
-  return 3;
-}
-
+/* inlined to AppCore */
 const paneManager = {
   panes: [],
   maxPanes: 6,
@@ -5207,22 +5232,7 @@ const paneManager = {
     if (roleState.role !== 'admin') return;
     if (this.panes.length >= this.maxPanes) return;
 
-    const rawKind = String(kind || 'chat').trim().toLowerCase();
-
-    // IMPORTANT: don't accidentally coerce "chat" -> "cron".
-    // ("chat" starts with "c"; we only want to treat "cron" as cron.)
-    const normalizedKind =
-      rawKind === 'chat'
-        ? 'chat'
-        : rawKind === 'workqueue' || rawKind === 'cron' || rawKind === 'timeline'
-          ? rawKind
-          : rawKind.startsWith('w')
-            ? 'workqueue'
-            : rawKind === 'c' || rawKind.startsWith('cr')
-              ? 'cron'
-              : rawKind === 't' || rawKind.startsWith('ti')
-                ? 'timeline'
-                : 'chat';
+    const normalizedKind = normalizePaneKind(kind);
 
     if (normalizedKind === 'workqueue') {
       const pane = createPane({

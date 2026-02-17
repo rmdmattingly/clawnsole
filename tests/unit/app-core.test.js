@@ -1,7 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { escapeHtml, fmtRemaining, sortWorkqueueItems } = require('../../lib/app-core.js');
+const {
+  escapeHtml,
+  fmtRemaining,
+  sortWorkqueueItems,
+  inferPaneCols,
+  normalizePaneKind,
+  deriveAuthOverlayState,
+  extractChatText,
+  normalizeHistoryEntries
+} = require('../../lib/app-core.js');
 
 test('escapeHtml escapes html special chars', () => {
   assert.equal(escapeHtml('<div a="b">Tom & Jerry</div>'), '&lt;div a=&quot;b&quot;&gt;Tom &amp; Jerry&lt;/div&gt;');
@@ -46,4 +55,73 @@ test('sortWorkqueueItems supports explicit sort keys and stable ordering fallbac
   // For ties, preserve input order.
   const byPrio = sortWorkqueueItems(items, { sortKey: 'priority', sortDir: 'desc' });
   assert.deepEqual(byPrio.map((it) => it.id), ['a', 'b', 'c']);
+});
+
+test('inferPaneCols maps pane counts to sensible layout widths', () => {
+  assert.equal(inferPaneCols(0), 1);
+  assert.equal(inferPaneCols(1), 1);
+  assert.equal(inferPaneCols(2), 2);
+  assert.equal(inferPaneCols(3), 3);
+  assert.equal(inferPaneCols(4), 2);
+  assert.equal(inferPaneCols(5), 3);
+  assert.equal(inferPaneCols(12), 3);
+});
+
+test('normalizePaneKind handles aliases safely', () => {
+  assert.equal(normalizePaneKind('chat'), 'chat');
+  assert.equal(normalizePaneKind('workqueue'), 'workqueue');
+  assert.equal(normalizePaneKind('w'), 'workqueue');
+  assert.equal(normalizePaneKind('cron'), 'cron');
+  assert.equal(normalizePaneKind('cr'), 'cron');
+  assert.equal(normalizePaneKind('timeline'), 'timeline');
+  assert.equal(normalizePaneKind('ti'), 'timeline');
+  assert.equal(normalizePaneKind('x'), 'chat');
+});
+
+test('deriveAuthOverlayState captures auth/role transition flags', () => {
+  assert.deepEqual(deriveAuthOverlayState({ authed: true, role: 'admin' }), {
+    isAdmin: true,
+    startAgentAutoRefresh: true,
+    stopAgentAutoRefresh: false,
+    rolePillText: 'signed in',
+    rolePillAdmin: true,
+    showAdminControls: true,
+    logoutEnabled: true,
+    logoutOpacity: '1'
+  });
+
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).startAgentAutoRefresh, false);
+  assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest' }).rolePillText, 'guest');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '0.5');
+});
+
+test('extractChatText converts attachment/file payloads to markdown links', () => {
+  const message = {
+    content: [
+      { text: 'Hello' },
+      { type: 'image_url', image_url: { url: 'https://example.com/photo.png' } },
+      { type: 'file', name: 'notes.txt', url: 'https://example.com/notes.txt' }
+    ]
+  };
+
+  const text = extractChatText(message);
+  assert.equal(text.includes('Hello'), true);
+  assert.equal(text.includes('![](https://example.com/photo.png)'), true);
+  assert.equal(text.includes('[notes.txt](https://example.com/notes.txt)'), true);
+});
+
+test('normalizeHistoryEntries supports gateway payload variants', () => {
+  const entries = normalizeHistoryEntries({
+    items: [
+      { role: 'system', text: 'boot' },
+      { role: 'assistant', content: [{ text: 'hi' }] },
+      { isUser: true, message: { content: [{ text: 'me' }] } }
+    ]
+  });
+
+  assert.deepEqual(entries, [
+    { role: 'system', text: 'boot' },
+    { role: 'assistant', text: 'hi' },
+    { role: 'user', text: 'me' }
+  ]);
 });
