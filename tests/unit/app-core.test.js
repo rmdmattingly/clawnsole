@@ -8,6 +8,8 @@ const {
   inferPaneCols,
   normalizePaneKind,
   deriveAuthOverlayState,
+  deriveGlobalConnectionState,
+  deriveDisconnectButtonState,
   extractChatText,
   normalizeHistoryEntries
 } = require('../../lib/app-core.js');
@@ -124,4 +126,55 @@ test('normalizeHistoryEntries supports gateway payload variants', () => {
     { role: 'assistant', text: 'hi' },
     { role: 'user', text: 'me' }
   ]);
+});
+
+test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard error transitions', () => {
+  assert.deepEqual(deriveGlobalConnectionState({ authed: false, panes: [{ connected: true }] }), {
+    state: 'disconnected',
+    meta: 'sign in required'
+  });
+
+  assert.deepEqual(deriveGlobalConnectionState({ authed: true, panes: [] }), {
+    state: 'disconnected',
+    meta: ''
+  });
+
+  assert.deepEqual(
+    deriveGlobalConnectionState({
+      authed: true,
+      panes: [
+        { connected: true, statusState: 'connected' },
+        { connected: false, statusState: 'reconnecting' }
+      ]
+    }),
+    { state: 'reconnecting', meta: 'panes: 1/2 connected' }
+  );
+
+  assert.deepEqual(
+    deriveGlobalConnectionState({
+      authed: true,
+      panes: [
+        { connected: false, statusState: 'error', statusMeta: 'auth expired' },
+        { connected: false, statusState: 'error', statusMeta: 'gateway disconnected' }
+      ]
+    }),
+    { state: 'error', meta: 'auth expired' }
+  );
+});
+
+test('deriveDisconnectButtonState tracks active gateway sessions', () => {
+  assert.deepEqual(deriveDisconnectButtonState({ authed: false, panes: [{ statusState: 'connected' }] }), {
+    disabled: true,
+    text: 'Reconnect'
+  });
+
+  assert.deepEqual(deriveDisconnectButtonState({ authed: true, panes: [{ statusState: 'error' }] }), {
+    disabled: false,
+    text: 'Reconnect'
+  });
+
+  assert.deepEqual(deriveDisconnectButtonState({ authed: true, panes: [{ statusState: 'connecting' }] }), {
+    disabled: false,
+    text: 'Disconnect'
+  });
 });
