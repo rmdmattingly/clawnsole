@@ -101,6 +101,8 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   const instructions = `instructions ${runId}`;
 
   await wqPane.locator('details.wq-enqueue > summary').click();
+  await expect(wqPane.locator('.wq-enqueue .wq-label', { hasText: 'Assign to' })).toBeVisible();
+  await expect(wqPane.locator('.wq-enqueue .hint', { hasText: 'Who should pick this up' })).toBeVisible();
   await wqPane.locator('[data-wq-enqueue-title]').fill(title);
   await wqPane.locator('[data-wq-enqueue-instructions]').fill(instructions);
 
@@ -111,6 +113,7 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await wqPane.locator('[data-wq-enqueue-submit]').click();
   const enqueueRes = await enqueueResP;
   expect(enqueueRes.ok()).toBeTruthy();
+  await expect(wqPane.locator('[data-wq-enqueue-status]')).toContainText('Queued as Unassigned');
 
   // Close the enqueue details so it can't block clicks on the list.
   await wqPane.locator('details.wq-enqueue > summary').click();

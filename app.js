@@ -2377,7 +2377,8 @@ async function workqueueEnqueueFromUi() {
     }
 
     const item = data.item || null;
-    setWorkqueueActionStatus(item && item._deduped ? `Deduped (already exists): ${item.id}` : `Enqueued: ${item?.id || ''}`);
+    const assignLabel = 'Queued as Unassigned';
+    setWorkqueueActionStatus(item && item._deduped ? `Deduped (already exists): ${item.id} (${assignLabel})` : assignLabel);
 
     await fetchAndRenderWorkqueueItems();
     if (item?.id) {
@@ -4339,8 +4340,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
             <div class="wq-enqueue-actions">
               <label class="wq-field">
-                <span class="wq-label">Claim as (optional)</span>
+                <span class="wq-label">Assign to</span>
                 <select data-wq-claim-agent></select>
+                <span class="hint">Who should pick this up</span>
               </label>
               <label class="wq-field">
                 <span class="wq-label">Lease ms</span>
@@ -4617,6 +4619,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     const enqueueInstructions = elements.thread.querySelector('[data-wq-enqueue-instructions]');
     const enqueuePriority = elements.thread.querySelector('[data-wq-enqueue-priority]');
     const enqueueDedupe = elements.thread.querySelector('[data-wq-enqueue-dedupe]');
+    const enqueueAssignTo = elements.thread.querySelector('[data-wq-claim-agent]');
 
     const setEnqueueStatus = (text) => {
       if (!enqueueStatus) return;
@@ -4656,7 +4659,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         }
 
         const item = data.item || null;
-        setEnqueueStatus(item && item._deduped ? 'Deduped: ' + item.id : 'Enqueued: ' + String(item?.id || ''));
+        const assignToAgentId = String(enqueueAssignTo?.value || '').trim();
+        const assignLabel = assignToAgentId
+          ? `Queued for ${formatAgentLabel(getAgentRecord(assignToAgentId), { includeId: false })}`
+          : 'Queued as Unassigned';
+        setEnqueueStatus(item && item._deduped ? `Deduped: ${item.id} (${assignLabel})` : assignLabel);
         if (enqueueTitle) enqueueTitle.value = '';
         if (enqueueInstructions) enqueueInstructions.value = '';
         if (enqueueDedupe) enqueueDedupe.value = '';
