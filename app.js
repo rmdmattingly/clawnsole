@@ -1197,103 +1197,121 @@ function scoreFuzzy(hay, needle) {
 
 function buildCommandPaletteItems() {
   const items = [];
+  const withShortcut = (item, shortcut) => ({ ...item, shortcut: shortcut || '' });
 
-  // Core commands
+  // Focus pane by letter for all open panes.
+  paneManager.panes.forEach((pane, idx) => {
+    const letter = paneHeaderLetter(pane);
+    const type = paneLabel(pane);
+    const target = paneTargetLabel(pane);
+    items.push(
+      withShortcut(
+        {
+          id: `cmd:focus-pane-${pane.key}`,
+          label: `Focus pane ${letter}`,
+          detail: `${type} · ${target}`,
+          run: () => focusPaneIndex(idx)
+        },
+        idx < 9 ? `⌘/Ctrl+${idx + 1}` : ''
+      )
+    );
+  });
+
+  // Core open actions for all enabled pane types.
   items.push(
-    {
-      id: 'cmd:add-chat',
-      label: 'Add pane: Chat',
-      detail: 'Create a new Chat pane',
-      run: () => paneManager.addPane('chat')
-    },
-    {
-      id: 'cmd:add-workqueue',
-      label: 'Add pane: Workqueue',
-      detail: 'Create a new Workqueue pane',
-      run: () => paneManager.addPane('workqueue')
-    },
-    {
-      id: 'cmd:add-cron',
-      label: 'Add pane: Cron',
-      detail: 'Create a new Cron pane',
-      run: () => paneManager.addPane('cron')
-    },
-    {
-      id: 'cmd:add-timeline',
-      label: 'Add pane: Timeline',
-      detail: 'Create a new Timeline pane',
-      run: () => paneManager.addPane('timeline')
-    },
-    {
-      id: 'cmd:reset-layout',
-      label: 'Layout: Reset panes',
-      detail: 'Reset admin layout to default',
-      run: () => paneManager.resetAdminLayoutToDefault({ confirm: true })
-    },
-    {
-      id: 'cmd:toggle-shortcuts',
-      label: 'Help: Toggle shortcuts overlay',
-      detail: 'Show/hide keyboard shortcuts',
-      run: () => {
-        if (globalElements.shortcutsModal?.classList.contains('open')) closeShortcuts();
-        else openShortcuts();
-      }
-    },
-    {
-      id: 'cmd:open-workqueue',
-      label: 'Workqueue: Open modal',
-      detail: 'Open the Workqueue modal (g w)',
-      run: () => openWorkqueue()
-    },
-    {
-      id: 'cmd:refresh-agents',
-      label: 'Agents: Refresh',
-      detail: 'Refresh agent list',
-      run: () => globalElements.refreshAgentsBtn?.click?.()
-    },
-    {
-      id: 'cmd:pane-cycle',
-      label: 'Panes: Cycle focus',
-      detail: 'Move focus to next pane',
-      run: () => cyclePaneFocus()
-    },
-    {
-      id: 'cmd:focus-pane-1',
-      label: 'Panes: Focus pane 1',
-      detail: 'Focus the first pane',
-      run: () => focusPaneIndex(0)
-    },
-    {
-      id: 'cmd:focus-pane-2',
-      label: 'Panes: Focus pane 2',
-      detail: 'Focus the second pane',
-      run: () => focusPaneIndex(1)
-    },
-    {
-      id: 'cmd:focus-pane-3',
-      label: 'Panes: Focus pane 3',
-      detail: 'Focus the third pane',
-      run: () => focusPaneIndex(2)
-    },
-    {
-      id: 'cmd:focus-pane-4',
-      label: 'Panes: Focus pane 4',
-      detail: 'Focus the fourth pane',
-      run: () => focusPaneIndex(3)
-    }
+    withShortcut(
+      { id: 'cmd:add-chat', label: 'Open pane: Chat', detail: 'Create a new Chat pane', run: () => paneManager.addPane('chat') },
+      '⌘/Ctrl+Shift+C'
+    ),
+    withShortcut(
+      { id: 'cmd:add-workqueue', label: 'Open pane: Workqueue', detail: 'Create a new Workqueue pane', run: () => paneManager.addPane('workqueue') },
+      '⌘/Ctrl+Shift+W'
+    ),
+    withShortcut(
+      { id: 'cmd:add-cron', label: 'Open pane: Cron', detail: 'Create a new Cron pane', run: () => paneManager.addPane('cron') },
+      '⌘/Ctrl+Shift+R'
+    ),
+    withShortcut(
+      { id: 'cmd:add-timeline', label: 'Open pane: Timeline', detail: 'Create a new Timeline pane', run: () => paneManager.addPane('timeline') },
+      '⌘/Ctrl+Shift+T'
+    )
   );
 
-  // Agents (admin-only)
+  // Open with target (single action).
+  const queues = Array.from(new Set(['dev-team', ...paneManager.panes.filter((p) => p.kind === 'workqueue').map((p) => p.workqueue?.queue || '')]
+    .map((q) => String(q || '').trim())
+    .filter(Boolean)));
+  queues.forEach((queue) => {
+    items.push(withShortcut({
+      id: `cmd:add-workqueue:${queue}`,
+      label: `Open Workqueue: ${queue}`,
+      detail: 'Open a Workqueue pane already targeted to this queue',
+      run: () => paneManager.addPane('workqueue', { queue })
+    }, 'targeted open'));
+  });
+
   const agents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
+  items.push(withShortcut({
+    id: 'cmd:add-timeline:all',
+    label: 'Open Timeline: All agents',
+    detail: 'Open Timeline with agent filter set to all',
+    run: () => paneManager.addPane('timeline', { cronAgentId: 'all' })
+  }, 'targeted open'));
+  for (const agent of agents) {
+    const agentId = normalizeAgentId(agent?.id || 'main');
+    items.push(withShortcut({
+      id: `cmd:add-timeline:${agentId}`,
+      label: `Open Timeline: ${formatAgentLabel(agent, { includeId: false })}`,
+      detail: `Open Timeline filtered to ${agentId}`,
+      run: () => paneManager.addPane('timeline', { cronAgentId: agentId })
+    }, 'targeted open'));
+  }
+
+  items.push(
+    withShortcut(
+      {
+        id: 'cmd:reset-layout',
+        label: 'Layout: Reset panes',
+        detail: 'Reset admin layout to default',
+        run: () => paneManager.resetAdminLayoutToDefault({ confirm: true })
+      },
+      ''
+    ),
+    withShortcut(
+      {
+        id: 'cmd:toggle-shortcuts',
+        label: 'Help: Toggle shortcuts overlay',
+        detail: 'Show/hide keyboard shortcuts',
+        run: () => {
+          if (globalElements.shortcutsModal?.classList.contains('open')) closeShortcuts();
+          else openShortcuts();
+        }
+      },
+      '?'
+    ),
+    withShortcut(
+      { id: 'cmd:open-workqueue', label: 'Workqueue: Open modal', detail: 'Open the Workqueue modal', run: () => openWorkqueue() },
+      'g w'
+    ),
+    withShortcut(
+      { id: 'cmd:refresh-agents', label: 'Agents: Refresh', detail: 'Refresh agent list', run: () => globalElements.refreshAgentsBtn?.click?.() },
+      ''
+    ),
+    withShortcut(
+      { id: 'cmd:pane-cycle', label: 'Panes: Cycle focus', detail: 'Move focus to next pane', run: () => cyclePaneFocus() },
+      '⌘/Ctrl+Shift+K'
+    )
+  );
+
+  // Agent quick actions (chat target switch)
   for (const agent of agents) {
     const agentId = normalizeAgentId(agent?.id || 'main');
     const label = `Agent: ${formatAgentLabel(agent, { includeId: false })}`;
-    items.push({
+    items.push(withShortcut({
       id: `agent:${agentId}`,
       label,
       detail: agentId,
       run: () => {
-        // Focus an existing chat pane if possible; otherwise create one.
         let pane = paneManager.panes.find((p) => p.kind === 'chat');
         if (!pane) pane = paneManager.addPane('chat');
         if (pane) {
@@ -1301,7 +1319,7 @@ function buildCommandPaletteItems() {
           paneManager.focusPanePrimary(pane);
         }
       }
-    });
+    }, 'chat target'));
   }
 
   return items;
@@ -1336,7 +1354,7 @@ function renderCommandPalette() {
         <div class="command-palette-item-label">${escapeHtml(item.label)}</div>
         <div class="command-palette-item-detail">${escapeHtml(item.detail || '')}</div>
       </div>
-      <div class="command-palette-item-meta">${idx === selected ? '↵' : ''}</div>
+      <div class="command-palette-item-meta">${escapeHtml(item.shortcut || '')}${idx === selected ? (item.shortcut ? ' · ↵' : '↵') : ''}</div>
     `;
 
     btn.addEventListener('mouseenter', () => {
@@ -4011,7 +4029,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sortKey, sortDir, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sortKey, sortDir, cronAgentId, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -4060,6 +4078,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'default',
       sortDir: sortDir === 'asc' ? 'asc' : 'desc'
     },
+    cronAgentId: typeof cronAgentId === 'string' ? cronAgentId.trim() : '',
     connected: false,
     statusState: 'disconnected',
     statusMeta: '',
@@ -4736,6 +4755,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
     renderAgentFilterOptions();
     pane._renderAgentFilterOptions = renderAgentFilterOptions;
+    if (agentSel && pane.cronAgentId && Array.from(agentSel.options || []).some((opt) => opt.value === pane.cronAgentId)) {
+      agentSel.value = pane.cronAgentId;
+    }
 
     const ensureCronActionsHook = () => {
       if (!body) return;
@@ -5380,18 +5402,20 @@ const paneManager = {
       firstPane?.elements?.input?.focus?.();
     } catch {}
   },
-  addPane(kind = 'chat') {
+  addPane(kind = 'chat', options = {}) {
     if (roleState.role !== 'admin') return;
     if (this.panes.length >= this.maxPanes) return;
 
     const normalizedKind = normalizePaneKind(kind);
+    const nextQueue = String(options?.queue || 'dev-team').trim() || 'dev-team';
+    const nextCronAgentId = String(options?.cronAgentId || '').trim();
 
     if (normalizedKind === 'workqueue') {
       const pane = createPane({
         key: `p${randomId().slice(0, 8)}`,
         role: 'admin',
         kind: 'workqueue',
-        queue: 'dev-team',
+        queue: nextQueue,
         statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
         closable: true
       });
@@ -5410,6 +5434,7 @@ const paneManager = {
         key: `p${randomId().slice(0, 8)}`,
         role: 'admin',
         kind: normalizedKind,
+        cronAgentId: nextCronAgentId,
         closable: true
       });
       this.panes.push(pane);
