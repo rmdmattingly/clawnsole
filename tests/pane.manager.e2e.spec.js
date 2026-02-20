@@ -50,7 +50,7 @@ test('pane manager: lists panes + focuses via keyboard', async ({ page }) => {
   expect(focusedPaneIndex).toBe(1);
 });
 
-test('pane header: target label matches pane kind (agent vs queue vs jobs vs timeline)', async ({ page }) => {
+test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane kinds', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
 
@@ -64,20 +64,20 @@ test('pane header: target label matches pane kind (agent vs queue vs jobs vs tim
   const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
   const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
 
-  await expect(chatPane.getByTestId('pane-target-label')).toHaveText('Agent');
-  await expect(wqPane.getByTestId('pane-target-label')).toHaveText('Queue');
+  await expect(chatPane.getByTestId('pane-type-label')).toHaveText(/^A Chat · .+/);
+  await expect(wqPane.getByTestId('pane-type-label')).toHaveText(/^B Workqueue · .+/);
 
   await page.getByTestId('add-pane-btn').click();
   await page.getByTestId('pane-add-menu-cron').click();
 
   const cronPane = page.locator('[data-pane][data-pane-kind="cron"]').last();
-  await expect(cronPane.getByTestId('pane-target-label')).toHaveText('Jobs');
+  await expect(cronPane.getByTestId('pane-type-label')).toHaveText(/^C Cron · .+/);
 
   await page.getByTestId('add-pane-btn').click();
   await page.getByTestId('pane-add-menu-timeline').click();
 
   const timelinePane = page.locator('[data-pane][data-pane-kind="timeline"]').last();
-  await expect(timelinePane.getByTestId('pane-target-label')).toHaveText('Timeline');
+  await expect(timelinePane.getByTestId('pane-type-label')).toHaveText(/^D Timeline · .+/);
 });
 
 test('pane manager: quick-find filters and groups by kind', async ({ page }) => {
