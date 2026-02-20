@@ -15,6 +15,7 @@ const globalElements = {
   agentsSearch: document.getElementById('agentsSearch'),
   agentsActiveOnly: document.getElementById('agentsActiveOnly'),
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
+  agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
   toastHost: document.getElementById('toastHost'),
@@ -318,6 +319,9 @@ function showToast(message, { kind = 'info', timeoutMs = 2600 } = {}) {
 let agentRefreshTimer = null;
 let agentRefreshInFlight = null;
 let agentAutoRefreshInterval = null;
+let agentsModalAutoRefreshInterval = null;
+let agentsModalFreshnessTicker = null;
+let agentsLastRefreshedAtMs = 0;
 
 function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
@@ -334,6 +338,52 @@ function stopAgentAutoRefresh() {
   if (!agentAutoRefreshInterval) return;
   clearInterval(agentAutoRefreshInterval);
   agentAutoRefreshInterval = null;
+}
+
+function formatRelativeAge(msAgo) {
+  const ms = Math.max(0, Number(msAgo) || 0);
+  if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
+  return `${Math.floor(ms / 3_600_000)}h ago`;
+}
+
+function renderAgentsLastRefreshed() {
+  if (!globalElements.agentsLastRefreshed) return;
+  if (!agentsLastRefreshedAtMs) {
+    globalElements.agentsLastRefreshed.textContent = 'Last refreshed: never';
+    return;
+  }
+  globalElements.agentsLastRefreshed.textContent = `Last refreshed: ${formatRelativeAge(Date.now() - agentsLastRefreshedAtMs)}`;
+}
+
+function startAgentsModalAutoRefresh() {
+  if (agentsModalAutoRefreshInterval) return;
+  agentsModalAutoRefreshInterval = setInterval(() => {
+    if (!globalElements.agentsModal?.classList?.contains('open')) return;
+    if (document.hidden) return;
+    refreshAgents({ reason: 'fleet_auto_refresh' }).catch(() => {});
+  }, 10_000);
+}
+
+function stopAgentsModalAutoRefresh() {
+  if (!agentsModalAutoRefreshInterval) return;
+  clearInterval(agentsModalAutoRefreshInterval);
+  agentsModalAutoRefreshInterval = null;
+}
+
+function startAgentsModalFreshnessTicker() {
+  if (agentsModalFreshnessTicker) return;
+  agentsModalFreshnessTicker = setInterval(() => {
+    if (!globalElements.agentsModal?.classList?.contains('open')) return;
+    renderAgentsLastRefreshed();
+    renderAgentsModalList();
+  }, 1000);
+}
+
+function stopAgentsModalFreshnessTicker() {
+  if (!agentsModalFreshnessTicker) return;
+  clearInterval(agentsModalFreshnessTicker);
+  agentsModalFreshnessTicker = null;
 }
 
 async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {}) {
@@ -367,6 +417,8 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
     }
 
     uiState.agents = next;
+    agentsLastRefreshedAtMs = Date.now();
+    renderAgentsLastRefreshed();
 
     // Preserve UI state (selected agent per pane).
     paneManager.panes.forEach((pane) => {
@@ -1445,6 +1497,9 @@ function openAgentsModal() {
   }
 
   renderAgentsModalList();
+  renderAgentsLastRefreshed();
+  startAgentsModalAutoRefresh();
+  startAgentsModalFreshnessTicker();
 
   // Focus search by default for fast filtering.
   try {
@@ -1455,6 +1510,8 @@ function openAgentsModal() {
 function closeAgentsModal() {
   globalElements.agentsModal?.classList.remove('open');
   globalElements.agentsModal?.setAttribute('aria-hidden', 'true');
+  stopAgentsModalAutoRefresh();
+  stopAgentsModalFreshnessTicker();
 }
 
 function renderAgentsModalList() {
@@ -1466,6 +1523,7 @@ function renderAgentsModalList() {
   const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
 
   const pins = getPinnedAgentIds();
+  const lastSeenMap = getAgentLastSeenMap();
   const baseAgents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
 
   const matches = (agent) => {
@@ -1497,12 +1555,14 @@ function renderAgentsModalList() {
 
       const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
+      const heartbeatTs = Number(lastSeenMap[id]) || agentsLastRefreshedAtMs || 0;
+      const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
 
       row.innerHTML = `
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
         <div class="agents-row-main">
           <div class="agents-row-title">${escapeHtml(label)}</div>
-          <div class="agents-row-meta">${escapeHtml(id)}${isAgentActive(id, { withinMinutes }) ? ' · active' : ''}</div>
+          <div class="agents-row-meta">${escapeHtml(id)}${isAgentActive(id, { withinMinutes }) ? ' · active' : ''} · heartbeat ${escapeHtml(heartbeatAge)}</div>
         </div>
       `;
 
@@ -5825,6 +5885,18 @@ globalElements.agentsActiveMinutes?.addEventListener('change', () => {
   renderAgentsModalList();
 });
 
+document.addEventListener('visibilitychange', () => {
+  if (!globalElements.agentsModal?.classList?.contains('open')) return;
+  if (document.hidden) return;
+  refreshAgents({ reason: 'fleet_visibility_resume' }).catch(() => {});
+});
+
+window.addEventListener('focus', () => {
+  if (!globalElements.agentsModal?.classList?.contains('open')) return;
+  if (document.hidden) return;
+  refreshAgents({ reason: 'fleet_focus_resume' }).catch(() => {});
+});
+
 globalElements.workqueueBtn?.addEventListener('click', () => openWorkqueue());
 globalElements.workqueueCloseBtn?.addEventListener('click', () => closeWorkqueue());
 globalElements.workqueueModal?.addEventListener('click', (event) => {
@@ -6156,6 +6228,9 @@ window.addEventListener('load', () => {
 
       if (role === 'admin') {
         uiState.agents = await fetchAgents();
+        if (uiState.agents.length > 0) {
+          agentsLastRefreshedAtMs = Date.now();
+        }
         if (uiState.agents.length === 0) {
           uiState.agents = [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
         }
