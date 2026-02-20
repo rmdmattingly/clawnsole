@@ -27,6 +27,7 @@ const globalElements = {
   shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
   paneManagerModal: document.getElementById('paneManagerModal'),
   paneManagerCloseBtn: document.getElementById('paneManagerCloseBtn'),
+  paneManagerSearch: document.getElementById('paneManagerSearch'),
   paneManagerList: document.getElementById('paneManagerList'),
   paneManagerEmpty: document.getElementById('paneManagerEmpty'),
   workqueueModal: document.getElementById('workqueueModal'),
@@ -876,7 +877,15 @@ function closeShortcuts() {
 
 const paneManagerUiState = {
   open: false,
-  selectedIndex: 0
+  selectedIndex: 0,
+  query: '',
+  visiblePaneKeys: [],
+  collapsedKinds: {
+    chat: false,
+    workqueue: false,
+    cron: false,
+    timeline: false
+  }
 };
 
 function isPaneManagerOpen() {
@@ -906,82 +915,170 @@ function paneTargetLabel(pane) {
   return String(pane.agentId || 'main');
 }
 
+function paneSearchText(pane) {
+  return [
+    pane?.elements?.name?.textContent || '',
+    pane?.key || '',
+    paneLabel(pane),
+    paneTargetLabel(pane),
+    pane?.kind || ''
+  ]
+    .join(' ')
+    .toLowerCase();
+}
+
+function paneGroupOrder(kind) {
+  const order = { chat: 0, workqueue: 1, cron: 2, timeline: 3 };
+  return Number.isInteger(order[kind]) ? order[kind] : 99;
+}
+
+function movePaneWithinVisible(paneKey, direction, visibleKeys) {
+  const keys = Array.isArray(visibleKeys) ? visibleKeys : [];
+  const visibleIdx = keys.indexOf(paneKey);
+  const targetVisibleIdx = visibleIdx + direction;
+  if (visibleIdx < 0 || targetVisibleIdx < 0 || targetVisibleIdx >= keys.length) return false;
+  const neighborKey = keys[targetVisibleIdx];
+  if (!neighborKey || neighborKey === paneKey) return false;
+
+  const panes = paneManager?.panes || [];
+  let fromIdx = panes.findIndex((pane) => pane.key === paneKey);
+  const toIdx = panes.findIndex((pane) => pane.key === neighborKey);
+  if (fromIdx < 0 || toIdx < 0) return false;
+
+  let moved = false;
+  const delta = direction > 0 ? 1 : -1;
+  while (fromIdx !== toIdx) {
+    if (!paneManager.movePane(paneKey, delta)) break;
+    moved = true;
+    fromIdx += delta;
+  }
+  return moved;
+}
+
 function renderPaneManager() {
   const panes = paneManager?.panes || [];
   const list = globalElements.paneManagerList;
   const empty = globalElements.paneManagerEmpty;
   if (!list || !empty) return;
 
+  const query = String(paneManagerUiState.query || '').trim().toLowerCase();
+  const filtered = panes.filter((pane) => !query || paneSearchText(pane).includes(query));
+
+  const grouped = new Map();
+  filtered.forEach((pane) => {
+    const kind = String(pane?.kind || 'chat');
+    if (!grouped.has(kind)) grouped.set(kind, []);
+    grouped.get(kind).push(pane);
+  });
+
+  const visibleKeys = [];
+  grouped.forEach((items, kind) => {
+    if (paneManagerUiState.collapsedKinds[kind]) return;
+    items.forEach((pane) => visibleKeys.push(String(pane.key || '')));
+  });
+  paneManagerUiState.visiblePaneKeys = visibleKeys;
+
   list.innerHTML = '';
-  empty.hidden = panes.length > 0;
+  empty.hidden = filtered.length > 0;
+  if (!filtered.length) return;
 
-  const selected = Math.max(0, Math.min(paneManagerUiState.selectedIndex, panes.length - 1));
-  paneManagerUiState.selectedIndex = selected;
+  const maxIndex = Math.max(0, visibleKeys.length - 1);
+  paneManagerUiState.selectedIndex = Math.max(0, Math.min(paneManagerUiState.selectedIndex, maxIndex));
 
-  panes.forEach((pane, idx) => {
-    const row = document.createElement('div');
-    row.className = 'pane-manager-row';
-    row.setAttribute('role', 'option');
-    row.dataset.index = String(idx);
-    row.dataset.paneKey = String(pane.key || '');
-    row.setAttribute('aria-selected', idx === selected ? 'true' : 'false');
+  const sortedKinds = Array.from(grouped.keys()).sort((a, b) => paneGroupOrder(a) - paneGroupOrder(b) || a.localeCompare(b));
+  let visibleIdx = 0;
 
-    const state = String(pane.statusState || (pane.connected ? 'connected' : 'disconnected'));
+  sortedKinds.forEach((kind) => {
+    const items = grouped.get(kind) || [];
+    if (!items.length) return;
 
-    row.innerHTML = `
-      <div class="pane-manager-main">
-        <div class="pane-manager-kind" title="${escapeHtml(paneLabel(pane))}">
-          <span class="pane-manager-icon" aria-hidden="true">${escapeHtml(paneIcon(pane))}</span>
-          <span class="pane-manager-kind-label">${escapeHtml(paneLabel(pane))}</span>
-        </div>
-        <div class="pane-manager-target" title="${escapeHtml(paneTargetLabel(pane))}">${escapeHtml(paneTargetLabel(pane))}</div>
-        <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
-      </div>
-      <div class="pane-manager-actions">
-        <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="Move pane up" aria-label="Move pane up" ${idx === 0 ? 'disabled' : ''}>↑</button>
-        <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="Move pane down" aria-label="Move pane down" ${idx === panes.length - 1 ? 'disabled' : ''}>↓</button>
-        <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
-        <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
-      </div>
-    `;
+    const section = document.createElement('section');
+    section.className = 'pane-manager-group';
 
-    row.addEventListener('mouseenter', () => {
-      paneManagerUiState.selectedIndex = idx;
+    const collapsed = !!paneManagerUiState.collapsedKinds[kind];
+    const header = document.createElement('button');
+    header.type = 'button';
+    header.className = 'pane-manager-group-header';
+    header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    header.innerHTML = `<span class="pane-manager-group-title">${escapeHtml(paneLabel({ kind }))} <span class="pane-manager-group-count">(${items.length})</span></span><span class="pane-manager-group-caret" aria-hidden="true">${collapsed ? '▸' : '▾'}</span>`;
+    header.addEventListener('click', () => {
+      paneManagerUiState.collapsedKinds[kind] = !paneManagerUiState.collapsedKinds[kind];
       renderPaneManager();
     });
+    section.appendChild(header);
 
-    row.addEventListener('click', (event) => {
-      const action = event?.target?.dataset?.action;
-      paneManagerUiState.selectedIndex = idx;
-      if (action === 'close') {
-        try {
-          paneManager.removePane(pane.key);
-        } catch {}
-        renderPaneManager();
-        return;
-      }
-      if (action === 'move-up') {
-        const moved = paneManager.movePane(pane.key, -1);
-        if (moved) {
-          paneManagerUiState.selectedIndex = Math.max(0, idx - 1);
-          renderPaneManager();
-        }
-        return;
-      }
-      if (action === 'move-down') {
-        const moved = paneManager.movePane(pane.key, 1);
-        if (moved) {
-          paneManagerUiState.selectedIndex = Math.min(paneManager.panes.length - 1, idx + 1);
-          renderPaneManager();
-        }
-        return;
-      }
-      // Default: focus
-      closePaneManager();
-      focusPaneIndex(idx);
-    });
+    if (!collapsed) {
+      items.forEach((pane) => {
+        const idx = panes.findIndex((p) => p.key === pane.key);
+        const row = document.createElement('div');
+        row.className = 'pane-manager-row';
+        row.setAttribute('role', 'option');
+        row.dataset.index = String(idx);
+        row.dataset.paneKey = String(pane.key || '');
+        row.dataset.visibleIndex = String(visibleIdx);
+        row.setAttribute('aria-selected', visibleIdx === paneManagerUiState.selectedIndex ? 'true' : 'false');
 
-    list.appendChild(row);
+        const state = String(pane.statusState || (pane.connected ? 'connected' : 'disconnected'));
+
+        row.innerHTML = `
+          <div class="pane-manager-main">
+            <div class="pane-manager-kind" title="${escapeHtml(paneLabel(pane))}">
+              <span class="pane-manager-icon" aria-hidden="true">${escapeHtml(paneIcon(pane))}</span>
+              <span class="pane-manager-kind-label">${escapeHtml(paneLabel(pane))}</span>
+            </div>
+            <div class="pane-manager-target" title="${escapeHtml(paneTargetLabel(pane))}">${escapeHtml(paneTargetLabel(pane))}</div>
+            <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
+          </div>
+          <div class="pane-manager-actions">
+            <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="Move pane up" aria-label="Move pane up" ${visibleIdx === 0 ? 'disabled' : ''}>↑</button>
+            <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="Move pane down" aria-label="Move pane down" ${visibleIdx === visibleKeys.length - 1 ? 'disabled' : ''}>↓</button>
+            <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
+            <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
+          </div>
+        `;
+
+        row.addEventListener('mouseenter', () => {
+          paneManagerUiState.selectedIndex = Number(row.dataset.visibleIndex || 0);
+          renderPaneManager();
+        });
+
+        row.addEventListener('click', (event) => {
+          const action = event?.target?.dataset?.action;
+          const selectedVisible = Number(row.dataset.visibleIndex || 0);
+          paneManagerUiState.selectedIndex = selectedVisible;
+          if (action === 'close') {
+            try {
+              paneManager.removePane(pane.key);
+            } catch {}
+            renderPaneManager();
+            return;
+          }
+          if (action === 'move-up') {
+            const moved = movePaneWithinVisible(pane.key, -1, paneManagerUiState.visiblePaneKeys);
+            if (moved) {
+              paneManagerUiState.selectedIndex = Math.max(0, selectedVisible - 1);
+              renderPaneManager();
+            }
+            return;
+          }
+          if (action === 'move-down') {
+            const moved = movePaneWithinVisible(pane.key, 1, paneManagerUiState.visiblePaneKeys);
+            if (moved) {
+              paneManagerUiState.selectedIndex = Math.min(paneManagerUiState.visiblePaneKeys.length - 1, selectedVisible + 1);
+              renderPaneManager();
+            }
+            return;
+          }
+          closePaneManager();
+          focusPaneIndex(idx);
+        });
+
+        section.appendChild(row);
+        visibleIdx += 1;
+      });
+    }
+
+    list.appendChild(section);
   });
 }
 
@@ -995,14 +1092,16 @@ function openPaneManager() {
 
   paneManagerUiState.open = true;
   paneManagerUiState.selectedIndex = 0;
+  paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
 
   globalElements.paneManagerModal.classList.add('open');
   globalElements.paneManagerModal.setAttribute('aria-hidden', 'false');
   renderPaneManager();
 
-  // Ensure keydown events go somewhere stable.
+  // Focus quick-find for immediate filtering.
   try {
-    globalElements.paneManagerModal.focus?.();
+    globalElements.paneManagerSearch?.focus?.();
+    globalElements.paneManagerSearch?.select?.();
   } catch {}
 }
 
@@ -1027,11 +1126,18 @@ function paneManagerHandleKeydown(event) {
     closePaneManager();
     return true;
   }
-  if (panes.length === 0) return false;
+
+  const activeEl = document.activeElement;
+  if (activeEl === globalElements.paneManagerSearch && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+    return false;
+  }
+
+  const visibleKeys = paneManagerUiState.visiblePaneKeys || [];
+  if (visibleKeys.length === 0) return false;
 
   if (event.key === 'ArrowDown') {
     event.preventDefault();
-    paneManagerUiState.selectedIndex = Math.min(panes.length - 1, paneManagerUiState.selectedIndex + 1);
+    paneManagerUiState.selectedIndex = Math.min(visibleKeys.length - 1, paneManagerUiState.selectedIndex + 1);
     renderPaneManager();
     return true;
   }
@@ -1043,9 +1149,12 @@ function paneManagerHandleKeydown(event) {
   }
   if (event.key === 'Enter') {
     event.preventDefault();
-    const idx = Math.max(0, Math.min(panes.length - 1, paneManagerUiState.selectedIndex));
+    const idx = Math.max(0, Math.min(visibleKeys.length - 1, paneManagerUiState.selectedIndex));
+    const key = visibleKeys[idx];
+    const paneIdx = panes.findIndex((pane) => pane.key === key);
+    if (paneIdx < 0) return true;
     closePaneManager();
-    focusPaneIndex(idx);
+    focusPaneIndex(paneIdx);
     return true;
   }
   return false;
@@ -5912,6 +6021,12 @@ globalElements.paneManagerBtn?.addEventListener('click', (event) => {
 });
 
 globalElements.paneManagerCloseBtn?.addEventListener('click', () => closePaneManager());
+
+globalElements.paneManagerSearch?.addEventListener('input', () => {
+  paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
+  paneManagerUiState.selectedIndex = 0;
+  renderPaneManager();
+});
 
 globalElements.paneManagerModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.paneManagerModal) closePaneManager();

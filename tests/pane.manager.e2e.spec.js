@@ -80,6 +80,35 @@ test('pane header: target label matches pane kind (agent vs queue vs jobs vs tim
   await expect(timelinePane.getByTestId('pane-target-label')).toHaveText('Timeline');
 });
 
+test('pane manager: quick-find filters and groups by kind', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+
+  await page.keyboard.press('Control+P');
+  const modal = page.locator('#paneManagerModal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  await expect(page.locator('.pane-manager-group-header')).toHaveCount(3);
+  await expect(page.locator('.pane-manager-group-header').nth(0)).toContainText('Chat (1)');
+  await expect(page.locator('.pane-manager-group-header').nth(1)).toContainText('Workqueue (1)');
+  await expect(page.locator('.pane-manager-group-header').nth(2)).toContainText('Cron (1)');
+
+  const search = page.getByTestId('pane-manager-search');
+  await search.fill('gateway');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(1);
+  await expect(page.locator('.pane-manager-row').first()).toContainText('Cron');
+});
+
 test('pane manager: supports reordering panes', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
@@ -101,8 +130,6 @@ test('pane manager: supports reordering panes', async ({ page }) => {
   const rows = page.locator('.pane-manager-row');
   await expect(rows).toHaveCount(3);
   const firstRowMoveUp = rows.nth(0).getByTestId('pane-manager-move-up');
-  const secondRowMoveDown = rows.nth(1).getByTestId('pane-manager-move-down');
-
   await expect(firstRowMoveUp).toBeDisabled();
 
   const rowKeys = async () => {
@@ -112,13 +139,19 @@ test('pane manager: supports reordering panes', async ({ page }) => {
   const before = await rowKeys();
   expect(before.length).toBe(3);
 
-  await rows.nth(1).evaluate((row) => {
+  const workqueueKey = await page.locator('.pane-manager-row', { hasText: 'Workqueue' }).first().evaluate((row) => row.dataset.paneKey);
+  await page.locator('.pane-manager-row', { hasText: 'Workqueue' }).first().evaluate((row) => {
     const moveDown = row.querySelector('[data-action="move-down"]');
     moveDown?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
 
   const after = await rowKeys();
-  expect(after).toEqual([before[0], before[2], before[1]]);
+  const from = before.indexOf(workqueueKey);
+  expect(from).toBeGreaterThanOrEqual(0);
+  const expected = before.slice();
+  const [moved] = expected.splice(from, 1);
+  expected.splice(Math.min(from + 1, expected.length), 0, moved);
+  expect(after).toEqual(expected);
 
   await page.keyboard.press('Escape');
   await expect(modal).toHaveAttribute('aria-hidden', 'true');

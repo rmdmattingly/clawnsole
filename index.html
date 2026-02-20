@@ -260,8 +260,12 @@
           <div class="hint" style="margin-bottom: 10px;">
             Arrow keys to navigate • Enter to focus • Esc to close
           </div>
+          <label class="pane-manager-search-wrap" for="paneManagerSearch">
+            <span class="pane-manager-search-label">Quick find</span>
+            <input id="paneManagerSearch" class="pane-manager-search" type="search" placeholder="Filter by title, type, or target" autocomplete="off" data-testid="pane-manager-search" />
+          </label>
           <div id="paneManagerList" class="pane-manager-list" role="listbox" aria-label="Open panes" data-testid="pane-manager-list"></div>
-          <div id="paneManagerEmpty" class="hint" hidden>No panes.</div>
+          <div id="paneManagerEmpty" class="hint" hidden>No panes match this filter.</div>
         </div>
       </div>
     </div>
