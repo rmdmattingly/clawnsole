@@ -23,3 +23,15 @@ test('agents modal supports pinning agents and persists to localStorage', async 
   const firstPinAfter = page.locator('#agentsList .agents-pin').first();
   await expect(firstPinAfter).toHaveAttribute('aria-pressed', 'true');
 });
+
+test('agents modal shows live refresh freshness indicators', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Last refreshed:');
+  await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText('heartbeat');
+});

@@ -1255,6 +1255,12 @@ button.send-btn .btn-icon {
   margin-bottom: 14px;
 }
 
+.agents-last-refreshed {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .agents-field {
   display: flex;
   flex-direction: column;
