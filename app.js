@@ -121,6 +121,32 @@ const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => (
   logoutEnabled: !!state?.authed,
   logoutOpacity: !!state?.authed ? '1' : '0.5'
 }));
+const deriveGlobalConnectionState = __appCore.deriveGlobalConnectionState || ((state) => {
+  if (!state?.authed) return { state: 'disconnected', meta: 'sign in required' };
+  const panes = Array.isArray(state?.panes) ? state.panes : [];
+  if (panes.length === 0) return { state: 'disconnected', meta: '' };
+  const connectedCount = panes.filter((pane) => !!pane?.connected).length;
+  const total = panes.length;
+  const anyConnecting = panes.some((pane) => pane?.statusState === 'connecting' || pane?.statusState === 'reconnecting');
+  const anyError = panes.some((pane) => pane?.statusState === 'error');
+  const firstError = panes.find((pane) => pane?.statusState === 'error' && pane?.statusMeta);
+  let nextState = 'disconnected';
+  if (connectedCount === total) nextState = 'connected';
+  else if (connectedCount > 0 || anyConnecting) nextState = 'reconnecting';
+  else if (anyError) nextState = 'error';
+  const meta = connectedCount === 0 && anyError && firstError
+    ? String(firstError.statusMeta || '')
+    : `panes: ${connectedCount}/${total} connected`;
+  return { state: nextState, meta };
+});
+const deriveDisconnectButtonState = __appCore.deriveDisconnectButtonState || ((state) => {
+  if (!state?.authed) return { disabled: true, text: 'Reconnect' };
+  const panes = Array.isArray(state?.panes) ? state.panes : [];
+  const anyActive = panes.some((pane) =>
+    pane?.statusState === 'connected' || pane?.statusState === 'connecting' || pane?.statusState === 'reconnecting'
+  );
+  return { disabled: false, text: anyActive ? 'Disconnect' : 'Reconnect' };
+});
 
 function getRouteRole() {
   try {
@@ -683,52 +709,16 @@ function setStatusPill(el, state, meta = '') {
 }
 
 function updateGlobalStatus() {
-  const panes = paneManager.panes;
-  if (!uiState.authed) {
-    setStatusPill(globalElements.status, 'disconnected', 'sign in required');
-    if (globalElements.paneManagerBtn) globalElements.paneManagerBtn.textContent = 'sign in required';
-    return;
-  }
-  if (panes.length === 0) {
-    setStatusPill(globalElements.status, 'disconnected', '');
-    if (globalElements.paneManagerBtn) globalElements.paneManagerBtn.textContent = '';
-    return;
-  }
-
-  const connectedCount = panes.filter((pane) => pane.connected).length;
-  const total = panes.length;
-  const anyConnecting = panes.some((pane) => pane.statusState === 'connecting' || pane.statusState === 'reconnecting');
-  const anyError = panes.some((pane) => pane.statusState === 'error');
-  const firstError = panes.find((pane) => pane.statusState === 'error' && pane.statusMeta);
-
-  let state = 'disconnected';
-  if (connectedCount === total) {
-    state = 'connected';
-  } else if (connectedCount > 0 || anyConnecting) {
-    state = 'reconnecting';
-  } else if (anyError) {
-    state = 'error';
-  }
-
-  const meta =
-    connectedCount === 0 && anyError && firstError
-      ? firstError.statusMeta
-      : `panes: ${connectedCount}/${total} connected`;
-  setStatusPill(globalElements.status, state, meta);
-  if (globalElements.paneManagerBtn) globalElements.paneManagerBtn.textContent = meta;
+  const status = deriveGlobalConnectionState({ authed: uiState.authed, panes: paneManager.panes });
+  setStatusPill(globalElements.status, status.state, status.meta);
+  if (globalElements.paneManagerBtn) globalElements.paneManagerBtn.textContent = status.meta;
 }
 
 function updateConnectionControls() {
   if (!globalElements.disconnectBtn) return;
-  globalElements.disconnectBtn.disabled = !uiState.authed;
-  if (!uiState.authed) {
-    globalElements.disconnectBtn.textContent = 'Reconnect';
-    return;
-  }
-  const anyActive = paneManager.panes.some((pane) =>
-    pane.statusState === 'connected' || pane.statusState === 'connecting' || pane.statusState === 'reconnecting'
-  );
-  globalElements.disconnectBtn.textContent = anyActive ? 'Disconnect' : 'Reconnect';
+  const control = deriveDisconnectButtonState({ authed: uiState.authed, panes: paneManager.panes });
+  globalElements.disconnectBtn.disabled = !!control.disabled;
+  globalElements.disconnectBtn.textContent = control.text;
 }
 
 function setAuthState(authed) {
