@@ -3749,6 +3749,24 @@ function agentIdExists(agentId) {
   return uiState.agents.some((a) => String(a?.id || '').trim() === id);
 }
 
+function paneHeaderLetter(pane) {
+  try {
+    const idx = paneManager?.panes?.indexOf?.(pane) ?? -1;
+    return idx >= 0 ? String.fromCharCode(65 + (idx % 26)) : '?';
+  } catch {
+    return '?';
+  }
+}
+
+function renderPaneIdentity(pane) {
+  if (!pane?.elements?.name) return;
+  const letter = paneHeaderLetter(pane);
+  const type = paneLabel(pane);
+  const target = String(pane?.elements?.agentLabel?.textContent || '').trim() ||
+    (pane.kind === 'workqueue' ? String(pane?.workqueue?.queue || 'dev-team') : pane.kind === 'chat' ? 'main' : pane.kind === 'timeline' ? 'Last 24h' : 'Cron');
+  pane.elements.name.textContent = `${letter} ${type} · ${target}`;
+}
+
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
   if (!pane?.elements) return;
   const { targetLabel, agentButton, agentLabel, agentSelect, agentWarning } = pane.elements;
@@ -3780,6 +3798,8 @@ function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
       agentButton.addEventListener('click', handler);
     }
   }
+
+  renderPaneIdentity(pane);
 }
 
 function renderPaneAgentIdentity(pane) {
@@ -3823,6 +3843,8 @@ function renderPaneAgentIdentity(pane) {
       elements.agentWarning.textContent = `Selected agent “${agentId}” is unavailable — choose a replacement.`;
     }
   }
+
+  renderPaneIdentity(pane);
 }
 
 let agentChooserState = { openForPaneKey: null, el: null };
@@ -5124,6 +5146,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
     pane.client = buildClientForPane(pane);
     setStatusPill(elements.status, 'disconnected', '');
+    renderPaneIdentity(pane);
     return pane;
   }
 
@@ -5192,6 +5215,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
   pane.client = buildClientForPane(pane);
   setStatusPill(elements.status, 'disconnected', '');
+  renderPaneIdentity(pane);
   return pane;
 }
 
@@ -5644,10 +5668,7 @@ const paneManager = {
     return true;
   },
   updatePaneLabels() {
-    this.panes.forEach((pane, index) => {
-      const letter = String.fromCharCode(65 + (index % 26));
-      if (pane.elements.name) pane.elements.name.textContent = letter;
-    });
+    this.panes.forEach((pane) => renderPaneIdentity(pane));
   },
   updateCloseButtons() {
     const allowClose = roleState.role === 'admin' && this.panes.length > 1;
