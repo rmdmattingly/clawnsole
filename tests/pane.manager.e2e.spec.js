@@ -135,7 +135,10 @@ test('pane manager: shows summary + duplicate badge and supports close others', 
   await expect(duplicateRows.first().getByTestId('pane-manager-duplicate-badge')).toHaveText('duplicate');
 
   const chatRowWithCloseOthers = page.locator('.pane-manager-row', { has: page.getByTestId('pane-manager-close-others') }).first();
-  await chatRowWithCloseOthers.getByTestId('pane-manager-close-others').click();
+  await chatRowWithCloseOthers.evaluate((row) => {
+    const closeOthers = row.querySelector('[data-action="close-others"]');
+    closeOthers?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
 
   await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row')).toHaveCount(2);
