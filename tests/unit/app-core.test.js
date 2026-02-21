@@ -54,9 +54,20 @@ test('sortWorkqueueItems supports explicit sort keys and stable ordering fallbac
   const byTitleAsc = sortWorkqueueItems(items, { sortKey: 'title', sortDir: 'asc' });
   assert.deepEqual(byTitleAsc.map((it) => it.id), ['b', 'c', 'a']);
 
-  // For ties, preserve input order.
+  // For ties without timestamps, preserve input order.
   const byPrio = sortWorkqueueItems(items, { sortKey: 'priority', sortDir: 'desc' });
   assert.deepEqual(byPrio.map((it) => it.id), ['a', 'b', 'c']);
+});
+
+test('sortWorkqueueItems priority sort uses updatedAt desc tie-breaker', () => {
+  const items = [
+    { id: 'a', priority: 10, updatedAt: '2026-01-01T00:00:00Z' },
+    { id: 'b', priority: 10, updatedAt: '2026-01-03T00:00:00Z' },
+    { id: 'c', priority: 20, updatedAt: '2026-01-02T00:00:00Z' }
+  ];
+
+  const sorted = sortWorkqueueItems(items, { sortKey: 'priority', sortDir: 'desc' });
+  assert.deepEqual(sorted.map((it) => it.id), ['c', 'b', 'a']);
 });
 
 test('inferPaneCols maps pane counts to sensible layout widths', () => {
