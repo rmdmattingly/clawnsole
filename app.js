@@ -1141,7 +1141,8 @@ function renderPaneManager() {
         });
 
         row.addEventListener('click', (event) => {
-          const action = event?.target?.dataset?.action;
+          const actionEl = event?.target instanceof Element ? event.target.closest('[data-action]') : null;
+          const action = actionEl?.dataset?.action;
           const selectedVisible = Number(row.dataset.visibleIndex || 0);
           paneManagerUiState.selectedIndex = selectedVisible;
           if (action === 'close') {
