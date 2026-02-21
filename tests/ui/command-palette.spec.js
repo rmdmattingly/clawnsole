@@ -18,7 +18,7 @@ test.afterEach(async ({ page }) => {
   }
 });
 
-test('command palette: Ctrl/Cmd+K opens and can add a pane', async ({ page }) => {
+test('command palette: keyboard flow can open a targeted pane and focus by pane letter', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
 
@@ -34,14 +34,24 @@ test('command palette: Ctrl/Cmd+K opens and can add a pane', async ({ page }) =>
   await expect(modal).toBeVisible();
 
   const input = page.locator('#commandPaletteInput');
-  await expect(input).toBeFocused();
+  await expect(input).toBeVisible();
+  await input.click();
 
-  await input.type('add pane: timeline');
+  await input.type('open workqueue: dev-team');
   await page.keyboard.press('Enter');
 
-  const tlPane = page.locator('[data-pane-kind="timeline"]').last();
-  await expect(tlPane).toBeVisible();
+  const wqPane = page.locator('[data-pane-kind="workqueue"]').last();
+  await expect(wqPane).toBeVisible();
 
   const countAfter = await page.locator('[data-pane]').count();
   expect(countAfter).toBeGreaterThan(countBefore);
+
+  await page.keyboard.press('ControlOrMeta+K');
+  await expect(input).toBeVisible();
+  await input.click();
+  await input.fill('focus pane a');
+  await page.keyboard.press('Enter');
+
+  const firstChatInput = page.locator('[data-pane]').first().locator('[data-pane-input]');
+  await expect(firstChatInput).toBeFocused();
 });

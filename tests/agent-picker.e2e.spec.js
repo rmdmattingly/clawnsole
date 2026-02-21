@@ -44,6 +44,7 @@ test('agent chooser: opens, shows agents, Esc closes', async ({ page }) => {
   await expect(chooser).toHaveCount(0);
   await expect(btn).toContainText(/dev/i);
   await expect(btn).toHaveAttribute('aria-label', /current:\s*dev/i);
+  await expect(pane.getByTestId('pane-type-label')).toHaveText(/^A Chat · dev/i);
 
   // Re-open and Esc closes.
   await btn.click();

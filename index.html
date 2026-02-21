@@ -385,17 +385,31 @@
         </div>
         <div class="modal-body">
           <div class="agents-toolbar">
+            <div id="agentsLastRefreshed" class="agents-last-refreshed" aria-live="polite">Last refreshed: never</div>
             <label class="agents-field">
               <span class="agents-label">Search</span>
               <input id="agentsSearch" type="text" placeholder="Filter agents…" />
             </label>
-            <label class="agents-field agents-active-only">
-              <span class="agents-label">Active only</span>
-              <div class="agents-active-controls">
-                <label class="agents-toggle"><input id="agentsActiveOnly" type="checkbox" /> <span>On</span></label>
-                <input id="agentsActiveMinutes" type="number" min="1" step="1" value="10" aria-label="Active within minutes" />
-                <span class="hint">min</span>
+            <div class="agents-field agents-triage">
+              <span class="agents-label">Triage</span>
+              <div class="agents-filter-chips" role="group" aria-label="Fleet triage filters">
+                <button type="button" class="agents-chip" data-agents-filter="all" aria-pressed="true">All</button>
+                <button type="button" class="agents-chip" data-agents-filter="active" aria-pressed="false">Active</button>
+                <button type="button" class="agents-chip" data-agents-filter="stale" aria-pressed="false">Stale</button>
+                <button type="button" class="agents-chip" data-agents-filter="offline_error" aria-pressed="false">Offline/Error</button>
               </div>
+            </div>
+            <label class="agents-field">
+              <span class="agents-label">Sort</span>
+              <select id="agentsSort" aria-label="Sort agents">
+                <option value="recent_desc">Recent heartbeat (newest first)</option>
+                <option value="heartbeat_age_oldest">Last heartbeat age (oldest first)</option>
+                <option value="name_asc">Name (A-Z)</option>
+              </select>
+            </label>
+            <label class="agents-field">
+              <span class="agents-label">Active window (min)</span>
+              <input id="agentsActiveMinutes" type="number" min="1" step="1" value="10" aria-label="Active within minutes" />
             </label>
           </div>
 
