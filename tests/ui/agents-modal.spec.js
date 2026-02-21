@@ -33,7 +33,7 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await expect(page.locator('#agentsModal')).toHaveClass(/open/);
 
   await expect(page.locator('#agentsLastRefreshed')).toContainText('Last refreshed:');
-  await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText('heartbeat');
+  await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText('last seen');
 });
 
 test('agents modal quick actions open/reuse chat, timeline, and workqueue context', async ({ page, clawnsole }) => {
