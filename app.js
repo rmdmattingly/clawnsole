@@ -8,6 +8,7 @@ const globalElements = {
   paneManagerBtn: document.getElementById('paneManagerBtn'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
+  shortcutsBtn: document.getElementById('shortcutsBtn'),
   refreshAgentsBtn: document.getElementById('refreshAgentsBtn'),
   agentsBtn: document.getElementById('agentsBtn'),
   agentsModal: document.getElementById('agentsModal'),
@@ -26,6 +27,7 @@ const globalElements = {
   commandPaletteList: document.getElementById('commandPaletteList'),
   commandPaletteEmpty: document.getElementById('commandPaletteEmpty'),
   shortcutsModal: document.getElementById('shortcutsModal'),
+  shortcutsDialog: document.getElementById('shortcutsDialog'),
   shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
   paneManagerModal: document.getElementById('paneManagerModal'),
   paneManagerCloseBtn: document.getElementById('paneManagerCloseBtn'),
@@ -863,6 +865,12 @@ function setRole(role) {
     globalElements.workqueueBtn.disabled = !isAdmin;
     globalElements.workqueueBtn.style.opacity = visibleOpacity;
   }
+
+  if (globalElements.shortcutsBtn) {
+    globalElements.shortcutsBtn.hidden = !isAdmin;
+    globalElements.shortcutsBtn.disabled = !isAdmin;
+    globalElements.shortcutsBtn.style.opacity = visibleOpacity;
+  }
 }
 
 function showLogin(message = '') {
@@ -880,6 +888,8 @@ function showLogin(message = '') {
   }
   globalElements.settingsBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
+  globalElements.shortcutsBtn?.setAttribute('disabled', 'disabled');
+  if (globalElements.shortcutsBtn) globalElements.shortcutsBtn.style.opacity = '0.5';
 
   const isTouch = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
   if (!isTouch) {
@@ -933,14 +943,34 @@ function closeSettings() {
   globalElements.settingsModal.setAttribute('aria-hidden', 'true');
 }
 
+let shortcutsLastFocusedEl = null;
+
+function getModalFocusableElements(modalEl) {
+  if (!modalEl || !modalEl.querySelectorAll) return [];
+  return Array.from(modalEl.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+    .filter((el) => !el.disabled && !el.hidden && el.getAttribute('aria-hidden') !== 'true');
+}
+
 function openShortcuts() {
-  globalElements.shortcutsModal?.classList.add('open');
-  globalElements.shortcutsModal?.setAttribute('aria-hidden', 'false');
+  const modal = globalElements.shortcutsModal;
+  if (!modal || modal.classList.contains('open')) return;
+  shortcutsLastFocusedEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  window.setTimeout(() => {
+    (globalElements.shortcutsDialog || globalElements.shortcutsCloseBtn || modal).focus?.();
+  }, 0);
 }
 
 function closeShortcuts() {
-  globalElements.shortcutsModal?.classList.remove('open');
-  globalElements.shortcutsModal?.setAttribute('aria-hidden', 'true');
+  const modal = globalElements.shortcutsModal;
+  if (!modal || !modal.classList.contains('open')) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+  if (shortcutsLastFocusedEl && document.contains(shortcutsLastFocusedEl)) {
+    shortcutsLastFocusedEl.focus?.();
+  }
+  shortcutsLastFocusedEl = null;
 }
 
 // Pane Manager (admin-only)
@@ -5935,9 +5965,35 @@ globalElements.settingsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.settingsModal) closeSettings();
 });
 
+globalElements.shortcutsBtn?.addEventListener('click', () => openShortcuts());
 globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
 globalElements.shortcutsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.shortcutsModal) closeShortcuts();
+});
+globalElements.shortcutsModal?.addEventListener('keydown', (event) => {
+  if (!globalElements.shortcutsModal?.classList.contains('open')) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeShortcuts();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const focusable = getModalFocusableElements(globalElements.shortcutsModal);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement;
+  if (event.shiftKey) {
+    if (active === first || !globalElements.shortcutsModal.contains(active)) {
+      event.preventDefault();
+      last.focus();
+    }
+    return;
+  }
+  if (active === last) {
+    event.preventDefault();
+    first.focus();
+  }
 });
 globalElements.commandPaletteCloseBtn?.addEventListener('click', () => closeCommandPalette());
 globalElements.commandPaletteModal?.addEventListener('click', (event) => {
