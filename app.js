@@ -1548,6 +1548,64 @@ function closeAgentsModal() {
   stopAgentsModalFreshnessTicker();
 }
 
+function findExistingPane(kind, predicate = null) {
+  const list = Array.isArray(paneManager?.panes) ? paneManager.panes : [];
+  for (const pane of list) {
+    if (!pane || pane.role !== 'admin' || pane.kind !== kind) continue;
+    if (!predicate || predicate(pane)) return pane;
+  }
+  return null;
+}
+
+function openAgentChatFromFleet(agentId) {
+  const target = normalizeAgentId(agentId || 'main');
+  const pane =
+    findExistingPane('chat', (p) => normalizeAgentId(p.agentId || 'main') === target) ||
+    paneManager.addPane('chat');
+  if (!pane) return;
+  paneSetAgent(pane, target);
+  paneManager.focusPanePrimary(pane);
+}
+
+function openAgentTimelineFromFleet(agentId) {
+  const target = String(agentId || '').trim() || 'all';
+  const pane =
+    findExistingPane('timeline', (p) => String(p.cronAgentId || '').trim() === target) ||
+    paneManager.addPane('timeline', { cronAgentId: target });
+  if (!pane) return;
+
+  pane.cronAgentId = target;
+  paneManager.persistAdminPanes();
+
+  try {
+    const agentSel = pane.elements.thread?.querySelector?.('[data-cron-agent]');
+    if (agentSel) {
+      const exists = Array.from(agentSel.options || []).some((opt) => String(opt.value || '') === target);
+      if (exists) {
+        agentSel.value = target;
+        agentSel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+  } catch {}
+
+  paneManager.focusPanePrimary(pane);
+}
+
+function openAgentWorkqueueFromFleet() {
+  const preferredQueue =
+    String(workqueueState?.selectedQueue || '').trim() ||
+    String(findExistingPane('workqueue')?.workqueue?.queue || '').trim() ||
+    'dev-team';
+
+  const pane =
+    findExistingPane('workqueue', (p) => String(p.workqueue?.queue || '').trim() === preferredQueue) ||
+    findExistingPane('workqueue') ||
+    paneManager.addPane('workqueue', { queue: preferredQueue });
+  if (!pane) return;
+
+  paneManager.focusPanePrimary(pane);
+}
+
 function renderAgentsModalList() {
   const root = globalElements.agentsList;
   if (!root) return;
@@ -1633,6 +1691,19 @@ function renderAgentsModalList() {
           <div class="agents-row-title">${escapeHtml(label)}</div>
           <div class="agents-row-meta">${escapeHtml(id)} · ${escapeHtml(bucketLabel)} · <span class="agents-age-chip">last seen ${escapeHtml(heartbeatAge)}</span></div>
         </div>
+        <div class="agents-row-actions agents-row-actions-inline" role="group" aria-label="Quick actions for ${escapeHtml(label)}">
+          <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Chat</button>
+          <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Timeline</button>
+          <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Workqueue</button>
+        </div>
+        <details class="agents-row-actions-overflow">
+          <summary class="secondary" aria-label="More actions for ${escapeHtml(label)}" title="More actions">⋯</summary>
+          <div class="agents-row-actions-menu" role="group" aria-label="Quick actions for ${escapeHtml(label)}">
+            <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Open Chat</button>
+            <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Open Timeline</button>
+            <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Open Workqueue</button>
+          </div>
+        </details>
       `;
 
       const pinBtn = row.querySelector('[data-agent-pin]');
@@ -1643,6 +1714,18 @@ function renderAgentsModalList() {
         // Refresh both the modal list and any agent <select>s.
         paneManager.panes.forEach((p) => renderAgentOptions(p.elements?.agentSelect, p.agentId));
         renderAgentsModalList();
+      });
+
+      const actionButtons = Array.from(row.querySelectorAll('[data-agent-action]'));
+      actionButtons.forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const action = String(btn.getAttribute('data-agent-action') || '').trim();
+          if (action === 'open-chat') openAgentChatFromFleet(id);
+          else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
+          else if (action === 'open-workqueue') openAgentWorkqueueFromFleet();
+        });
       });
 
       list.appendChild(row);

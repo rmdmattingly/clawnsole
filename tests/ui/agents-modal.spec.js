@@ -35,3 +35,29 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await expect(page.locator('#agentsLastRefreshed')).toContainText('Last refreshed:');
   await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText('heartbeat');
 });
+
+test('agents modal quick actions open/reuse chat, timeline, and workqueue context', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const firstRow = page.locator('#agentsList .agents-row').first();
+  await expect(firstRow.locator('[data-agent-action="open-chat"]').first()).toBeVisible();
+  await expect(firstRow.locator('[data-agent-action="open-timeline"]').first()).toBeVisible();
+  await expect(firstRow.locator('[data-agent-action="open-workqueue"]').first()).toBeVisible();
+
+  await firstRow.locator('[data-agent-action="open-chat"]').first().click();
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]').first()).toBeVisible();
+
+  await firstRow.locator('[data-agent-action="open-timeline"]').first().click();
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+
+  await firstRow.locator('[data-agent-action="open-timeline"]').first().click();
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+
+  await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+});
