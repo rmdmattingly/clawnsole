@@ -13,7 +13,8 @@ const globalElements = {
   agentsModal: document.getElementById('agentsModal'),
   agentsCloseBtn: document.getElementById('agentsCloseBtn'),
   agentsSearch: document.getElementById('agentsSearch'),
-  agentsActiveOnly: document.getElementById('agentsActiveOnly'),
+  agentsFilterButtons: Array.from(document.querySelectorAll('[data-agents-filter]')),
+  agentsSort: document.getElementById('agentsSort'),
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
   agentsList: document.getElementById('agentsList'),
@@ -190,10 +191,11 @@ const storage = {
   }
 };
 
-// Agent list UX (pins + active-only)
+// Agent list UX (pins + triage)
 const ADMIN_AGENT_PINS_KEY = 'clawnsole.admin.agentPins';
 const ADMIN_AGENT_LAST_SEEN_KEY = 'clawnsole.admin.agentLastSeenAtMs';
-const ADMIN_AGENT_ACTIVE_ONLY_KEY = 'clawnsole.admin.agents.activeOnly';
+const ADMIN_AGENT_FILTER_KEY = 'clawnsole.admin.agents.filter';
+const ADMIN_AGENT_SORT_KEY = 'clawnsole.admin.agents.sort';
 const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 
 function readJsonFromStorage(key, fallback) {
@@ -266,6 +268,32 @@ function sortAgentsByLastSeen(agents) {
     if (dt) return dt;
     return formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true }));
   });
+}
+
+function getFleetFilter() {
+  const raw = String(storage.get(ADMIN_AGENT_FILTER_KEY, 'all') || 'all').trim();
+  const allowed = new Set(['all', 'active', 'stale', 'offline_error']);
+  return allowed.has(raw) ? raw : 'all';
+}
+
+function getFleetSort() {
+  const raw = String(storage.get(ADMIN_AGENT_SORT_KEY, 'recent_desc') || 'recent_desc').trim();
+  const allowed = new Set(['recent_desc', 'heartbeat_age_oldest', 'name_asc']);
+  return allowed.has(raw) ? raw : 'recent_desc';
+}
+
+function getAgentPaneStateMap() {
+  const out = {};
+  for (const pane of Array.isArray(paneManager?.panes) ? paneManager.panes : []) {
+    const id = String(pane?.agentId || '').trim();
+    if (!id) continue;
+    const s = String(pane?.statusState || '').trim().toLowerCase();
+    const prev = out[id] || 'unknown';
+    if (s === 'error') out[id] = 'error';
+    else if (s === 'offline' && prev !== 'error') out[id] = 'offline';
+    else if (s === 'connected' && prev === 'unknown') out[id] = 'connected';
+  }
+  return out;
 }
 
 const roleState = {
@@ -1488,9 +1516,15 @@ function openAgentsModal() {
   globalElements.agentsModal?.setAttribute('aria-hidden', 'false');
 
   // Bootstrap persisted controls.
-  if (globalElements.agentsActiveOnly) {
-    globalElements.agentsActiveOnly.checked = storage.get(ADMIN_AGENT_ACTIVE_ONLY_KEY, 'false') === 'true';
-  }
+  const filter = getFleetFilter();
+  const sort = getFleetSort();
+  globalElements.agentsFilterButtons.forEach((btn) => {
+    const key = btn.getAttribute('data-agents-filter') || '';
+    const active = key === filter;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  if (globalElements.agentsSort) globalElements.agentsSort.value = sort;
   if (globalElements.agentsActiveMinutes) {
     const minutes = Number(storage.get(ADMIN_AGENT_ACTIVE_MINUTES_KEY, '10')) || 10;
     globalElements.agentsActiveMinutes.value = String(Math.max(1, minutes));
@@ -1519,23 +1553,56 @@ function renderAgentsModalList() {
   if (!root) return;
 
   const search = String(globalElements.agentsSearch?.value || '').trim().toLowerCase();
-  const activeOnly = !!globalElements.agentsActiveOnly?.checked;
   const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
+  const filterMode = getFleetFilter();
+  const sortMode = getFleetSort();
 
   const pins = getPinnedAgentIds();
   const lastSeenMap = getAgentLastSeenMap();
+  const paneStateMap = getAgentPaneStateMap();
   const baseAgents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
+
+  const classify = (agentId) => {
+    const id = String(agentId || '').trim();
+    const ts = Number(lastSeenMap[id]) || 0;
+    const ageMs = ts > 0 ? Math.max(0, Date.now() - ts) : Number.POSITIVE_INFINITY;
+    const paneState = paneStateMap[id] || 'unknown';
+    if (paneState === 'error' || paneState === 'offline') return { bucket: 'offline_error', ts, ageMs };
+    if (!Number.isFinite(ageMs)) return { bucket: 'offline_error', ts, ageMs };
+    if (ageMs <= withinMinutes * 60_000) return { bucket: 'active', ts, ageMs };
+    return { bucket: 'stale', ts, ageMs };
+  };
 
   const matches = (agent) => {
     const label = formatAgentLabel(agent, { includeId: true }).toLowerCase();
     if (search && !label.includes(search)) return false;
-    if (activeOnly && !isAgentActive(agent.id, { withinMinutes })) return false;
-    return true;
+    if (filterMode === 'all') return true;
+    const { bucket } = classify(agent?.id);
+    return bucket === filterMode;
+  };
+
+  const sortAgents = (list) => {
+    const arr = (Array.isArray(list) ? list : []).slice();
+    if (sortMode === 'name_asc') {
+      arr.sort((a, b) => formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true })));
+      return arr;
+    }
+    if (sortMode === 'heartbeat_age_oldest') {
+      arr.sort((a, b) => {
+        const ac = classify(a?.id);
+        const bc = classify(b?.id);
+        const byAge = (bc.ageMs || 0) - (ac.ageMs || 0);
+        if (byAge) return byAge;
+        return formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true }));
+      });
+      return arr;
+    }
+    return sortAgentsByLastSeen(arr);
   };
 
   const filtered = baseAgents.filter(matches);
-  const pinned = sortAgentsByLastSeen(filtered.filter((a) => pins.has(String(a?.id || '').trim())));
-  const rest = sortAgentsByLastSeen(filtered.filter((a) => !pins.has(String(a?.id || '').trim())));
+  const pinned = sortAgents(filtered.filter((a) => pins.has(String(a?.id || '').trim())));
+  const rest = sortAgents(filtered.filter((a) => !pins.has(String(a?.id || '').trim())));
 
   root.innerHTML = '';
 
@@ -1555,14 +1622,16 @@ function renderAgentsModalList() {
 
       const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
-      const heartbeatTs = Number(lastSeenMap[id]) || agentsLastRefreshedAtMs || 0;
+      const heartbeatTs = Number(lastSeenMap[id]) || 0;
       const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
+      const triage = classify(id);
+      const bucketLabel = triage.bucket === 'offline_error' ? 'offline/error' : triage.bucket;
 
       row.innerHTML = `
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
         <div class="agents-row-main">
           <div class="agents-row-title">${escapeHtml(label)}</div>
-          <div class="agents-row-meta">${escapeHtml(id)}${isAgentActive(id, { withinMinutes }) ? ' · active' : ''} · heartbeat ${escapeHtml(heartbeatAge)}</div>
+          <div class="agents-row-meta">${escapeHtml(id)} · ${escapeHtml(bucketLabel)} · <span class="agents-age-chip">last seen ${escapeHtml(heartbeatAge)}</span></div>
         </div>
       `;
 
@@ -3674,6 +3743,11 @@ function handleGatewayFrame(pane, data) {
 
   if (data?.type !== 'event') return;
 
+  // Any agent-scoped gateway event counts as a heartbeat for triage freshness.
+  if (pane?.agentId) {
+    markAgentSeen(pane.agentId);
+  }
+
   if (data.event === 'activity') {
     const recentCount = Number(data.payload?.recentCount || 0);
     const idleForMs = Number(data.payload?.idleForMs || 0);
@@ -3781,6 +3855,7 @@ function buildClientForPane(pane) {
     onFrame: (data) => handleGatewayFrame(pane, data),
     onConnected: () => {
       pane.connected = true;
+      if (pane?.agentId) markAgentSeen(pane.agentId);
       if (pane.elements.root) pane.elements.root.dataset.connected = 'true';
       paneSetChatEnabled(pane);
       updateGlobalStatus();
@@ -5880,8 +5955,21 @@ globalElements.agentsModal?.addEventListener('click', (event) => {
 
 globalElements.agentsSearch?.addEventListener('input', () => renderAgentsModalList());
 
-globalElements.agentsActiveOnly?.addEventListener('change', () => {
-  storage.set(ADMIN_AGENT_ACTIVE_ONLY_KEY, !!globalElements.agentsActiveOnly.checked);
+globalElements.agentsFilterButtons.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const key = String(btn.getAttribute('data-agents-filter') || 'all').trim() || 'all';
+    storage.set(ADMIN_AGENT_FILTER_KEY, key);
+    globalElements.agentsFilterButtons.forEach((chip) => {
+      const active = (chip.getAttribute('data-agents-filter') || '') === key;
+      chip.classList.toggle('active', active);
+      chip.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    renderAgentsModalList();
+  });
+});
+
+globalElements.agentsSort?.addEventListener('change', () => {
+  storage.set(ADMIN_AGENT_SORT_KEY, String(globalElements.agentsSort.value || 'recent_desc'));
   renderAgentsModalList();
 });
 

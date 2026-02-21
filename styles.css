@@ -1274,22 +1274,26 @@ button.send-btn .btn-icon {
   color: var(--muted);
 }
 
-.agents-active-controls {
-  display: inline-flex;
-  gap: 10px;
-  align-items: center;
+.agents-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.agents-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
+.agents-chip {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.03);
   color: var(--text);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
 }
 
-.agents-active-controls input[type="number"] {
-  width: 72px;
+.agents-chip.active,
+.agents-chip[aria-pressed="true"] {
+  border-color: rgba(77, 196, 255, 0.6);
+  background: rgba(77, 196, 255, 0.16);
 }
 
 .agents-list {
@@ -1348,6 +1352,14 @@ button.send-btn .btn-icon {
   margin-top: 2px;
   font-size: 12px;
   color: var(--muted);
+}
+
+.agents-age-chip {
+  display: inline-block;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  padding: 1px 8px;
+  color: var(--text);
 }
 
 /* Shortcuts modal */
