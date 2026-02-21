@@ -4227,7 +4227,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
       items: [],
       selectedItemId: null,
-      sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'default',
+      sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
       sortDir: sortDir === 'asc' ? 'asc' : 'desc'
     },
     cronAgentId: typeof cronAgentId === 'string' ? cronAgentId.trim() : '',
@@ -5521,7 +5521,7 @@ const paneManager = {
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'claimed', 'in_progress'];
-          const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'default';
+          const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
           return { key, kind, queue, statusFilter, sortKey, sortDir };
         }
@@ -5556,7 +5556,7 @@ const paneManager = {
       kind: 'workqueue',
       queue: 'dev-team',
       statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
-      sortKey: 'default',
+      sortKey: 'priority',
       sortDir: 'desc'
     };
     const list = [paneA, paneB].slice(0, this.maxPanes);
@@ -5572,7 +5572,7 @@ const paneManager = {
           kind: 'workqueue',
           queue: pane.workqueue?.queue || 'dev-team',
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
-          sortKey: pane.workqueue?.sortKey || 'default',
+          sortKey: pane.workqueue?.sortKey || 'priority',
           sortDir: pane.workqueue?.sortDir || 'desc'
         };
       }
@@ -5598,7 +5598,7 @@ const paneManager = {
       kind: 'workqueue',
       queue: 'dev-team',
       statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
-      sortKey: 'default',
+      sortKey: 'priority',
       sortDir: 'desc'
     };
     storage.set(ADMIN_PANES_KEY, JSON.stringify([paneA, paneB]));
