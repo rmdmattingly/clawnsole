@@ -985,6 +985,24 @@ function paneTargetLabel(pane) {
   return String(pane.agentId || 'main');
 }
 
+function paneSummaryLabel(pane) {
+  return `${paneLabel(pane)} · ${paneTargetLabel(pane)}`;
+}
+
+function paneDuplicateKey(pane) {
+  return `${String(pane?.kind || 'chat')}::${String(paneTargetLabel(pane) || '').trim().toLowerCase()}`;
+}
+
+function focusedPaneKey() {
+  const active = document.activeElement;
+  const panes = paneManager?.panes || [];
+  const pane = panes.find((entry) => {
+    const root = entry?.elements?.root;
+    return !!(root && active && (root === active || root.contains(active)));
+  });
+  return pane?.key || '';
+}
+
 function paneSearchText(pane) {
   return [
     pane?.elements?.name?.textContent || '',
@@ -1048,6 +1066,12 @@ function renderPaneManager() {
   });
   paneManagerUiState.visiblePaneKeys = visibleKeys;
 
+  const duplicateCounts = new Map();
+  filtered.forEach((pane) => {
+    const key = paneDuplicateKey(pane);
+    duplicateCounts.set(key, (duplicateCounts.get(key) || 0) + 1);
+  });
+
   list.innerHTML = '';
   empty.hidden = filtered.length > 0;
   if (!filtered.length) return;
@@ -1089,19 +1113,23 @@ function renderPaneManager() {
         row.setAttribute('aria-selected', visibleIdx === paneManagerUiState.selectedIndex ? 'true' : 'false');
 
         const state = String(pane.statusState || (pane.connected ? 'connected' : 'disconnected'));
+        const duplicateCount = duplicateCounts.get(paneDuplicateKey(pane)) || 0;
+        const isDuplicate = duplicateCount > 1;
+        const paneLetter = String(pane?.key || '').toUpperCase();
 
         row.innerHTML = `
           <div class="pane-manager-main">
-            <div class="pane-manager-kind" title="${escapeHtml(paneLabel(pane))}">
-              <span class="pane-manager-icon" aria-hidden="true">${escapeHtml(paneIcon(pane))}</span>
-              <span class="pane-manager-kind-label">${escapeHtml(paneLabel(pane))}</span>
+            <div class="pane-manager-kind" title="${escapeHtml(paneSummaryLabel(pane))}">
+              <span class="pane-manager-letter" aria-label="Pane ${escapeHtml(paneLetter)}">${escapeHtml(paneLetter)}</span>
+              <span class="pane-manager-kind-label">${escapeHtml(paneSummaryLabel(pane))}</span>
+              ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
             </div>
-            <div class="pane-manager-target" title="${escapeHtml(paneTargetLabel(pane))}">${escapeHtml(paneTargetLabel(pane))}</div>
             <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
           </div>
           <div class="pane-manager-actions">
             <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="Move pane up" aria-label="Move pane up" ${visibleIdx === 0 ? 'disabled' : ''}>↑</button>
             <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="Move pane down" aria-label="Move pane down" ${visibleIdx === visibleKeys.length - 1 ? 'disabled' : ''}>↓</button>
+            ${isDuplicate ? '<button class="secondary pane-manager-close-others" type="button" data-action="close-others" data-testid="pane-manager-close-others">Close others</button>' : ''}
             <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
             <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
           </div>
@@ -1113,7 +1141,8 @@ function renderPaneManager() {
         });
 
         row.addEventListener('click', (event) => {
-          const action = event?.target?.dataset?.action;
+          const actionEl = event?.target instanceof Element ? event.target.closest('[data-action]') : null;
+          const action = actionEl?.dataset?.action;
           const selectedVisible = Number(row.dataset.visibleIndex || 0);
           paneManagerUiState.selectedIndex = selectedVisible;
           if (action === 'close') {
@@ -1137,6 +1166,18 @@ function renderPaneManager() {
               paneManagerUiState.selectedIndex = Math.min(paneManagerUiState.visiblePaneKeys.length - 1, selectedVisible + 1);
               renderPaneManager();
             }
+            return;
+          }
+          if (action === 'close-others') {
+            const keepKey = pane.key || focusedPaneKey();
+            const dupKey = paneDuplicateKey(pane);
+            const duplicates = (paneManager?.panes || []).filter((entry) => paneDuplicateKey(entry) === dupKey && entry.key !== keepKey);
+            duplicates.forEach((entry) => {
+              try {
+                paneManager.removePane(entry.key);
+              } catch {}
+            });
+            renderPaneManager();
             return;
           }
           closePaneManager();
