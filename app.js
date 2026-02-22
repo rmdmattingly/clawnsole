@@ -199,6 +199,8 @@ const ADMIN_AGENT_LAST_SEEN_KEY = 'clawnsole.admin.agentLastSeenAtMs';
 const ADMIN_AGENT_FILTER_KEY = 'clawnsole.admin.agents.filter';
 const ADMIN_AGENT_SORT_KEY = 'clawnsole.admin.agents.sort';
 const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
+const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
+const WQ_RECENT_TARGETS_MAX = 6;
 
 function readJsonFromStorage(key, fallback) {
   try {
@@ -216,6 +218,20 @@ function writeJsonToStorage(key, value) {
   } catch {
     // ignore storage failures
   }
+}
+
+function readRecentWorkqueueTargets() {
+  const list = readJsonFromStorage(WQ_RECENT_TARGETS_KEY, []);
+  return Array.isArray(list)
+    ? list.map((v) => String(v || '').trim()).filter(Boolean).slice(0, WQ_RECENT_TARGETS_MAX)
+    : [];
+}
+
+function rememberRecentWorkqueueTarget(target) {
+  const next = String(target || '').trim();
+  if (!next) return;
+  const deduped = [next, ...readRecentWorkqueueTargets().filter((v) => v !== next)];
+  writeJsonToStorage(WQ_RECENT_TARGETS_KEY, deduped.slice(0, WQ_RECENT_TARGETS_MAX));
 }
 
 function getPinnedAgentIds() {
@@ -4509,7 +4525,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         <div class="wq-toolbar-row">
           <label class="wq-field">
             <span class="wq-label">Queue</span>
-            <select data-wq-queue-select aria-label="Select workqueue"></select>
+            <input data-wq-queue-search type="search" placeholder="Search queues" aria-label="Search queues" autocomplete="off" />
+            <select data-wq-queue-select aria-label="Select workqueue target"></select>
             <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
           </label>
 
@@ -4608,6 +4625,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       </div>
     `;
 
+    const queueSearchEl = elements.thread.querySelector('[data-wq-queue-search]');
     const queueSelectEl = elements.thread.querySelector('[data-wq-queue-select]');
     const queueCustomEl = elements.thread.querySelector('[data-wq-queue-custom]');
 
@@ -4657,6 +4675,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     const doRefresh = async () => {
       const q = getQueueValue() || 'dev-team';
       pane.workqueue.queue = q;
+      rememberRecentWorkqueueTarget(q);
       paneSetHeaderTarget(pane, {
         label: 'Queue',
         value: String(q),
@@ -4712,6 +4731,25 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       }
     };
 
+    const applyQueueSearchFilter = () => {
+      if (!queueSelectEl) return;
+      const query = String(queueSearchEl?.value || '').trim().toLowerCase();
+      const options = Array.from(queueSelectEl.querySelectorAll('option'));
+      options.forEach((opt) => {
+        if (String(opt.value) === '__custom__') {
+          opt.hidden = false;
+          return;
+        }
+        const visible = !query || String(opt.textContent || '').toLowerCase().includes(query);
+        opt.hidden = !visible;
+      });
+
+      const active = options.find((opt) => !opt.hidden && String(opt.value) !== '__custom__');
+      if (active && (queueSelectEl.value === '__custom__' || !queueSelectEl.selectedOptions?.[0] || queueSelectEl.selectedOptions[0].hidden)) {
+        queueSelectEl.value = active.value;
+      }
+    };
+
     const populateQueueSelect = async () => {
       if (!queueSelectEl) return;
       try {
@@ -4724,12 +4762,21 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         const unique = Array.from(new Set([current, ...queues].map((q) => String(q).trim()).filter(Boolean)));
         unique.sort((a, b) => a.localeCompare(b));
 
+        const recent = readRecentWorkqueueTargets().filter((q) => q !== current);
+
         queueSelectEl.innerHTML = '';
-        for (const q of unique) {
+        const appendOption = (value, label = value) => {
           const opt = document.createElement('option');
-          opt.value = q;
-          opt.textContent = q;
+          opt.value = value;
+          opt.textContent = label;
           queueSelectEl.appendChild(opt);
+        };
+
+        appendOption(current);
+        for (const q of recent) appendOption(q, `★ ${q}`);
+        for (const q of unique) {
+          if (q === current || recent.includes(q)) continue;
+          appendOption(q);
         }
 
         const customOpt = document.createElement('option');
@@ -4747,6 +4794,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
             queueCustomEl.value = current;
           }
         }
+        applyQueueSearchFilter();
       } catch {
         // fallback: keep current queue editable
         queueSelectEl.innerHTML = '';
@@ -4759,6 +4807,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         customOpt.textContent = 'Custom…';
         queueSelectEl.appendChild(customOpt);
         queueSelectEl.value = opt.value;
+        applyQueueSearchFilter();
       }
     };
 
@@ -4769,6 +4818,25 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         if (isCustom) queueCustomEl.focus();
       }
       doRefresh();
+    });
+    queueSelectEl?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        doRefresh();
+      }
+    });
+
+    queueSearchEl?.addEventListener('input', () => applyQueueSearchFilter());
+    queueSearchEl?.addEventListener('keydown', (e) => {
+      if (!queueSelectEl) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        queueSelectEl.focus();
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        doRefresh();
+      }
     });
 
     renderStatusMultiSelect();
@@ -4873,6 +4941,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         return;
       }
 
+      rememberRecentWorkqueueTarget(queue);
       setEnqueueStatus('Enqueueing…');
       try {
         const res = await fetch('/api/workqueue/enqueue', {

@@ -123,7 +123,9 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await expect(row).toBeVisible();
 
   // Select the row to open the inspect panel.
-  await row.click();
+  // Sticky list headers can overlap pointer hit testing, so activate via keyboard instead of mouse.
+  await row.focus();
+  await page.keyboard.press('Enter');
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(title);
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(instructions);
 });
