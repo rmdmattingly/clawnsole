@@ -426,3 +426,107 @@ test('GET /agents does not apply default workspace IDENTITY.md to all agents', a
   assert.equal(ops.displayName, 'ops');
   assert.equal(ops.emoji, '');
 });
+
+test('recurring prompts list/create responses include admin/system derived fields', async () => {
+  const { homeDir, openclawDir } = makeTempHome();
+  writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
+
+  const { handleRequest } = createClawnsoleServer({ homeDir });
+  const login = await invoke(handleRequest, {
+    url: '/auth/login',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: 'admin' })
+  });
+  const adminCookie = parseCookiesFromSetCookie(login.headers['set-cookie']);
+
+  const create = await invoke(handleRequest, {
+    url: '/api/recurring-prompts',
+    method: 'POST',
+    headers: { cookie: adminCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      title: 'Morning summary',
+      agentId: 'dev',
+      message: 'summarize overnight build status',
+      intervalMinutes: 30
+    })
+  });
+  assert.equal(create.statusCode, 200);
+  const created = JSON.parse(create.body.toString('utf8')).prompt;
+  assert.equal(created.source, 'admin/system-prompt');
+  assert.equal(created.target, 'dev');
+  assert.equal(created.promptText, 'summarize overnight build status');
+  assert.equal(created.scheduleSummary, 'every 30 minutes');
+  assert.equal(created.lastRun, null);
+  assert.equal(created.nextRun, created.nextRunAt);
+
+  const list = await invoke(handleRequest, {
+    url: '/api/recurring-prompts',
+    headers: { cookie: adminCookie }
+  });
+  assert.equal(list.statusCode, 200);
+  const prompts = JSON.parse(list.body.toString('utf8')).prompts;
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].source, 'admin/system-prompt');
+  assert.ok(Array.isArray(prompts[0].runHistory));
+  assert.equal(prompts[0].runHistory.length, 0);
+});
+
+test('recurring prompt runs endpoint returns bounded recent rows', async () => {
+  const { homeDir, openclawDir } = makeTempHome();
+  writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
+
+  const now = Date.now();
+  writeJson(path.join(openclawDir, 'clawnsole-recurring-prompts.json'), {
+    prompts: [
+      {
+        id: 'p-1',
+        title: 'Run history test',
+        agentId: 'main',
+        message: 'test',
+        intervalMinutes: 60,
+        enabled: true,
+        createdAt: now - 10_000,
+        updatedAt: now,
+        nextRunAt: now + 60_000,
+        lastRunAt: now - 1_000,
+        lastStatus: 'ok',
+        lastError: '',
+        runHistory: [
+          { ts: now - 1_000, status: 'ok', error: '' },
+          { ts: now - 2_000, status: 'error', error: 'boom' },
+          { ts: now - 3_000, status: 'ok', error: '' }
+        ]
+      }
+    ]
+  });
+
+  const { handleRequest } = createClawnsoleServer({ homeDir });
+  const login = await invoke(handleRequest, {
+    url: '/auth/login',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: 'admin' })
+  });
+  const adminCookie = parseCookiesFromSetCookie(login.headers['set-cookie']);
+
+  const runs = await invoke(handleRequest, {
+    url: '/api/recurring-prompts/p-1/runs?limit=2',
+    headers: { cookie: adminCookie }
+  });
+  assert.equal(runs.statusCode, 200);
+  const payload = JSON.parse(runs.body.toString('utf8'));
+  assert.equal(payload.source, 'admin/system-prompt');
+  assert.equal(payload.promptId, 'p-1');
+  assert.equal(payload.runs.length, 2);
+  assert.equal(payload.runs[0].status, 'ok');
+  assert.equal(payload.runs[1].status, 'error');
+
+  const missing = await invoke(handleRequest, {
+    url: '/api/recurring-prompts/nope/runs',
+    headers: { cookie: adminCookie }
+  });
+  assert.equal(missing.statusCode, 404);
+});
