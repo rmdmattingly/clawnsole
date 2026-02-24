@@ -129,3 +129,55 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(title);
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(instructions);
 });
+
+test('pane: workqueue scope filter toggles deterministic row counts', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue').click();
+  const wqPane = page.locator('[data-pane]').last();
+
+  const runId = `scope-${Date.now()}`;
+  const mkTitle = (s) => `pw-e2e-${runId}-${s}`;
+
+  await wqPane.locator('details.wq-enqueue > summary').click();
+
+  // Enqueue one unassigned item.
+  await wqPane.locator('[data-wq-enqueue-title]').fill(mkTitle('unassigned'));
+  await wqPane.locator('[data-wq-enqueue-instructions]').fill('scope test unassigned');
+  await wqPane.locator('[data-wq-claim-agent]').selectOption('');
+  await wqPane.locator('[data-wq-enqueue-submit]').click();
+  await expect(wqPane.locator('[data-wq-enqueue-status]')).toContainText('Queued');
+
+  // Enqueue one assigned-to-main item.
+  await wqPane.locator('[data-wq-enqueue-title]').fill(mkTitle('assigned-main'));
+  await wqPane.locator('[data-wq-enqueue-instructions]').fill('scope test assigned');
+  await wqPane.locator('[data-wq-claim-agent]').selectOption('main');
+  await wqPane.locator('[data-wq-enqueue-submit]').click();
+  await expect(wqPane.locator('[data-wq-enqueue-status]')).toContainText('Queued');
+
+  await wqPane.locator('details.wq-enqueue > summary').click();
+
+  const refreshResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
+  await wqPane.locator('[data-wq-refresh]').click();
+  await refreshResP;
+
+  const rowsWithPrefix = () => wqPane.locator('.wq-row').filter({ hasText: `pw-e2e-${runId}-` });
+
+  await wqPane.locator('[data-wq-scope="all"]').click();
+  await expect(rowsWithPrefix()).toHaveCount(2);
+
+  await wqPane.locator('[data-wq-scope="unassigned"]').click();
+  await expect(rowsWithPrefix()).toHaveCount(2);
+
+  await wqPane.locator('[data-wq-scope="assigned"]').click();
+  await expect(rowsWithPrefix()).toHaveCount(0);
+});
