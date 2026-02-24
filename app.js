@@ -2748,7 +2748,16 @@ function renderWorkqueuePaneItems(pane) {
   body.innerHTML = '';
 
   const itemsRaw = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
-  const items = sortWorkqueueItems(itemsRaw, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const scope = pane.workqueue?.scopeFilter || 'all';
+  const activeTarget = String(pane.agentId || '').trim();
+  const getOwner = (it) => String(it?.claimedBy || it?.assignee || it?.assignedTo || it?.agentId || '').trim();
+  const scopedItems = itemsRaw.filter((it) => {
+    const owner = getOwner(it);
+    if (scope === 'unassigned') return !owner;
+    if (scope === 'assigned') return !!activeTarget && owner === activeTarget;
+    return true;
+  });
+  const items = sortWorkqueueItems(scopedItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
 
   if (empty) {
     const hasItems = items.length > 0;
@@ -2757,10 +2766,11 @@ function renderWorkqueuePaneItems(pane) {
       const queue = String(pane.workqueue?.queue || '').trim() || 'dev-team';
       const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
       const statusLabel = statuses.length ? statuses.join(', ') : 'default';
+      const scopeLabel = pane.workqueue?.scopeFilter || 'all';
       empty.innerHTML = `
         <div class="empty-state">
           <div style="font-weight:700; margin-bottom:6px;">No items in this queue.</div>
-          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span></div>
+          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
           <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
             <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
             <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
@@ -4642,7 +4652,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, sortKey, sortDir, cronAgentId, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -4686,6 +4696,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
+      scopeFilter: scopeFilter === 'assigned' || scopeFilter === 'unassigned' ? scopeFilter : 'all',
       items: [],
       selectedItemId: null,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
@@ -4855,6 +4866,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
                 </div>
               </details>
             </div>
+          </div>
+
+          <div class="wq-scope" role="group" aria-label="Workqueue scope">
+            <span class="wq-scope-label">Scope</span>
+            <button type="button" class="wq-scope-btn" data-wq-scope="assigned">Assigned to active target</button>
+            <button type="button" class="wq-scope-btn" data-wq-scope="unassigned">Unassigned</button>
+            <button type="button" class="wq-scope-btn" data-wq-scope="all">All</button>
           </div>
 
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
@@ -5168,6 +5186,28 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
       statusClearBtn?.addEventListener('click', () => applyStatuses([]));
     }
+
+    // Scope controls (client-side): assignment triage quick filters.
+    const scopeBtns = Array.from(elements.thread.querySelectorAll('[data-wq-scope]'));
+    const updateScopeUi = () => {
+      const current = pane.workqueue?.scopeFilter || 'all';
+      scopeBtns.forEach((btn) => {
+        const key = btn.getAttribute('data-wq-scope') || '';
+        const active = key && key === current;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+    };
+    const setScope = (scope) => {
+      pane.workqueue.scopeFilter = scope === 'assigned' || scope === 'unassigned' ? scope : 'all';
+      updateScopeUi();
+      renderWorkqueuePaneItems(pane);
+      paneManager.persistAdminPanes();
+    };
+    scopeBtns.forEach((btn) => {
+      btn.addEventListener('click', () => setScope(btn.getAttribute('data-wq-scope')));
+    });
+    updateScopeUi();
 
     // Sort controls (client-side): stable sorting with a status-grouping default.
     const sortBtns = Array.from(elements.thread.querySelectorAll('[data-wq-sort]'));
@@ -5939,6 +5979,7 @@ const paneManager = {
         agentId: cfg.agentId,
         queue: cfg.queue,
         statusFilter: cfg.statusFilter,
+        scopeFilter: cfg.scopeFilter,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
         closable: true
@@ -5982,9 +6023,10 @@ const paneManager = {
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'claimed', 'in_progress'];
+          const scopeFilter = item.scopeFilter === 'assigned' || item.scopeFilter === 'unassigned' ? item.scopeFilter : 'all';
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, queue, statusFilter, sortKey, sortDir };
+          return { key, kind, queue, statusFilter, scopeFilter, sortKey, sortDir };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
@@ -6017,6 +6059,7 @@ const paneManager = {
       kind: 'workqueue',
       queue: 'dev-team',
       statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+      scopeFilter: 'all',
       sortKey: 'priority',
       sortDir: 'desc'
     };
@@ -6033,6 +6076,7 @@ const paneManager = {
           kind: 'workqueue',
           queue: pane.workqueue?.queue || 'dev-team',
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
+          scopeFilter: pane.workqueue?.scopeFilter || 'all',
           sortKey: pane.workqueue?.sortKey || 'priority',
           sortDir: pane.workqueue?.sortDir || 'desc'
         };
@@ -6059,6 +6103,7 @@ const paneManager = {
       kind: 'workqueue',
       queue: 'dev-team',
       statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+      scopeFilter: 'all',
       sortKey: 'priority',
       sortDir: 'desc'
     };
@@ -6089,6 +6134,7 @@ const paneManager = {
         kind: 'workqueue',
         queue: nextQueue,
         statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+        scopeFilter: 'all',
         closable: true
       });
       this.panes.push(pane);
