@@ -4493,7 +4493,7 @@ function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
 }
 
 function renderPaneAgentIdentity(pane) {
-  if (!pane || pane.role !== 'admin') return;
+  if (!pane || pane.role !== 'admin' || pane.kind !== 'chat') return;
   const elements = pane.elements;
   if (!elements) return;
 
