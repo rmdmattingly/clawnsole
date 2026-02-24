@@ -46,6 +46,7 @@ const globalElements = {
   paneManagerModal: document.getElementById('paneManagerModal'),
   paneManagerCloseBtn: document.getElementById('paneManagerCloseBtn'),
   paneManagerSearch: document.getElementById('paneManagerSearch'),
+  paneManagerUnreadOnly: document.getElementById('paneManagerUnreadOnly'),
   paneManagerList: document.getElementById('paneManagerList'),
   paneManagerEmpty: document.getElementById('paneManagerEmpty'),
   workqueueModal: document.getElementById('workqueueModal'),
@@ -1302,6 +1303,7 @@ const paneManagerUiState = {
   open: false,
   selectedIndex: 0,
   query: '',
+  unreadOnly: false,
   visiblePaneKeys: [],
   collapsedKinds: {
     chat: false,
@@ -1356,6 +1358,28 @@ function focusedPaneKey() {
   return pane?.key || '';
 }
 
+function paneUnreadCount(pane) {
+  return Math.max(0, Number(pane?.unreadCount || 0));
+}
+
+function clearPaneUnread(pane) {
+  if (!pane) return;
+  if (!pane.unreadCount) return;
+  pane.unreadCount = 0;
+  renderPaneIdentity(pane);
+  if (isPaneManagerOpen()) renderPaneManager();
+}
+
+function markPaneUnread(pane, increment = 1) {
+  if (!pane) return;
+  const activeKey = focusedPaneKey();
+  if (activeKey && activeKey === pane.key) return;
+  const next = paneUnreadCount(pane) + Math.max(1, Number(increment || 1));
+  pane.unreadCount = next;
+  renderPaneIdentity(pane);
+  if (isPaneManagerOpen()) renderPaneManager();
+}
+
 function paneSearchText(pane) {
   return [
     pane?.elements?.name?.textContent || '',
@@ -1403,7 +1427,10 @@ function renderPaneManager() {
   if (!list || !empty) return;
 
   const query = String(paneManagerUiState.query || '').trim().toLowerCase();
-  const filtered = panes.filter((pane) => !query || paneSearchText(pane).includes(query));
+  const filtered = panes.filter((pane) => {
+    if (paneManagerUiState.unreadOnly && paneUnreadCount(pane) <= 0) return false;
+    return !query || paneSearchText(pane).includes(query);
+  });
 
   const grouped = new Map();
   filtered.forEach((pane) => {
@@ -1468,6 +1495,7 @@ function renderPaneManager() {
         const state = String(pane.statusState || (pane.connected ? 'connected' : 'disconnected'));
         const duplicateCount = duplicateCounts.get(paneDuplicateKey(pane)) || 0;
         const isDuplicate = duplicateCount > 1;
+        const unreadCount = paneUnreadCount(pane);
         const paneLetter = String(pane?.key || '').toUpperCase();
 
         row.innerHTML = `
@@ -1476,6 +1504,7 @@ function renderPaneManager() {
               <span class="pane-manager-letter" aria-label="Pane ${escapeHtml(paneLetter)}">${escapeHtml(paneLetter)}</span>
               <span class="pane-manager-kind-label">${escapeHtml(paneSummaryLabel(pane))}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
+              ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
             </div>
             <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
           </div>
@@ -1557,6 +1586,7 @@ function openPaneManager() {
   paneManagerUiState.open = true;
   paneManagerUiState.selectedIndex = 0;
   paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
+  paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
 
   globalElements.paneManagerModal.classList.add('open');
   globalElements.paneManagerModal.setAttribute('aria-hidden', 'false');
@@ -1774,6 +1804,14 @@ function buildCommandPaletteItems() {
     withShortcut(
       { id: 'cmd:pane-cycle', label: 'Panes: Cycle focus', detail: 'Move focus to next pane', run: () => cyclePaneFocus() },
       '⌘/Ctrl+Shift+K'
+    ),
+    withShortcut(
+      { id: 'cmd:pane-next-unread', label: 'Panes: Next unread', detail: 'Jump to next pane with unread activity', run: () => cycleUnreadPaneFocus(1) },
+      '⌘/Ctrl+Shift+]'
+    ),
+    withShortcut(
+      { id: 'cmd:pane-prev-unread', label: 'Panes: Previous unread', detail: 'Jump to previous pane with unread activity', run: () => cycleUnreadPaneFocus(-1) },
+      '⌘/Ctrl+Shift+['
     )
   );
 
@@ -3635,6 +3673,9 @@ function paneAddChatMessage(pane, { role, text, runId, streaming = false, persis
   }
 
   pane.elements.thread.appendChild(bubble);
+  if (role === 'assistant') {
+    markPaneUnread(pane, 1);
+  }
   pane.scroll.pinned = shouldPin;
   scrollToBottom(pane);
   if (pane.elements.scrollDownBtn) {
@@ -3661,6 +3702,9 @@ function paneUpdateChatRun(pane, runId, text, done) {
   if (!entry) {
     paneAddChatMessage(pane, { role: 'assistant', text, runId, streaming: !done, persist: done });
     return;
+  }
+  if (done) {
+    markPaneUnread(pane, 1);
   }
   const shouldPin = pane.scroll.pinned || isNearBottom(pane.elements.thread);
   entry.pendingText = text || '';
@@ -4405,7 +4449,8 @@ function renderPaneIdentity(pane) {
   const type = paneLabel(pane);
   const target = String(pane?.elements?.agentLabel?.textContent || '').trim() ||
     (pane.kind === 'workqueue' ? String(pane?.workqueue?.queue || 'dev-team') : pane.kind === 'chat' ? 'main' : pane.kind === 'timeline' ? 'Last 24h' : 'Cron');
-  pane.elements.name.textContent = `${letter} ${type} · ${target}`;
+  const unread = paneUnreadCount(pane);
+  pane.elements.name.textContent = `${letter} ${type} · ${target}${unread > 0 ? ` • ${unread} unread` : ''}`;
 }
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
@@ -4708,6 +4753,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     statusMeta: '',
     elements,
     chat: { runs: new Map(), history: [] },
+    unreadCount: 0,
     scroll: { pinned: true },
     thinking: { active: false, timer: null, dotsTimer: null, bubble: null },
     activeRunId: null,
@@ -4823,6 +4869,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       paneAbortRun(pane);
     });
   }
+
+  elements.root?.addEventListener('focusin', () => {
+    clearPaneUnread(pane);
+  });
 
   // WORKQUEUE PANE
   if (pane.role === 'admin' && pane.kind === 'workqueue') {
@@ -6670,6 +6720,7 @@ function isTypingContext(target) {
 function focusPaneIndex(idx) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
+  clearPaneUnread(pane);
 
   try {
     pane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
@@ -6713,6 +6764,29 @@ function cyclePaneFocus() {
   const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
   const next = idx >= 0 ? (idx + 1) % panes.length : 0;
   focusPaneIndex(next);
+}
+
+function cycleUnreadPaneFocus(direction = 1) {
+  const panes = paneManager?.panes || [];
+  if (!panes.length) return false;
+  const unreadIndexes = panes
+    .map((pane, idx) => ({ pane, idx }))
+    .filter(({ pane }) => paneUnreadCount(pane) > 0)
+    .map(({ idx }) => idx);
+  if (!unreadIndexes.length) {
+    toast('No unread panes.', 'info');
+    return false;
+  }
+
+  const active = document.activeElement;
+  const currentIdx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
+
+  const dir = direction >= 0 ? 1 : -1;
+  const ordered = dir > 0 ? unreadIndexes : unreadIndexes.slice().reverse();
+  const pick = ordered.find((idx) => dir > 0 ? idx > currentIdx : idx < currentIdx);
+  const next = Number.isInteger(pick) ? pick : ordered[0];
+  focusPaneIndex(next);
+  return true;
 }
 
 window.addEventListener('keydown', (event) => {
@@ -6813,6 +6887,18 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
+  // Cmd/Ctrl+Shift+] jumps to next unread pane; Cmd/Ctrl+Shift+[ goes backward.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && (key === ']' || key === '}')) {
+    event.preventDefault();
+    cycleUnreadPaneFocus(1);
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && (key === '[' || key === '{')) {
+    event.preventDefault();
+    cycleUnreadPaneFocus(-1);
+    return;
+  }
+
   // Cmd/Ctrl+Shift+N opens Add pane menu.
   if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'n') {
     event.preventDefault();
@@ -6871,6 +6957,12 @@ globalElements.paneManagerCloseBtn?.addEventListener('click', () => closePaneMan
 
 globalElements.paneManagerSearch?.addEventListener('input', () => {
   paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
+  paneManagerUiState.selectedIndex = 0;
+  renderPaneManager();
+});
+
+globalElements.paneManagerUnreadOnly?.addEventListener('change', () => {
+  paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
   paneManagerUiState.selectedIndex = 0;
   renderPaneManager();
 });
