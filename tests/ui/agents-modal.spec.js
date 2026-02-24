@@ -15,7 +15,7 @@ test('agents modal supports pinning agents and persists to localStorage', async 
 
   // Reload should keep pins.
   await page.reload();
-  await page.waitForSelector('[data-pane] [data-pane-input]', { timeout: 90000 });
+  await clawnsole.waitForAdminUiReady(page);
 
   await page.getByRole('button', { name: 'Open agents' }).click();
   await expect(page.locator('#agentsModal')).toHaveClass(/open/);

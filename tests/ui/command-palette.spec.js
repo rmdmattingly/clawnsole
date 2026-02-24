@@ -49,9 +49,15 @@ test('command palette: keyboard flow can open a targeted pane and focus by pane 
   await page.keyboard.press('ControlOrMeta+K');
   await expect(input).toBeVisible();
   await input.click();
+  await input.fill('open chat');
+  await page.keyboard.press('Enter');
+
+  await page.keyboard.press('ControlOrMeta+K');
+  await expect(input).toBeVisible();
+  await input.click();
   await input.fill('focus pane a');
   await page.keyboard.press('Enter');
 
-  const firstChatInput = page.locator('[data-pane]').first().locator('[data-pane-input]');
+  const firstChatInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
   await expect(firstChatInput).toBeFocused();
 });
