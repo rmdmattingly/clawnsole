@@ -1335,13 +1335,23 @@ function paneIcon(pane) {
 
 function paneTargetLabel(pane) {
   if (!pane) return '';
+  const current = String(pane?.elements?.agentLabel?.textContent || '').trim();
+  if (current) return current;
   if (pane.kind === 'workqueue') return String(pane.workqueue?.queue || 'dev-team');
-  if (pane.kind === 'cron' || pane.kind === 'timeline') return 'gateway';
+  if (pane.kind === 'timeline' || pane.kind === 'cron') return 'gateway';
   return String(pane.agentId || 'main');
 }
 
+function paneIdentityLabel(pane, { includeUnread = false } = {}) {
+  const letter = paneHeaderLetter(pane);
+  const type = paneLabel(pane);
+  const target = paneTargetLabel(pane);
+  const unread = paneUnreadCount(pane);
+  return `${letter} ${type} · ${target}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
+}
+
 function paneSummaryLabel(pane) {
-  return `${paneLabel(pane)} · ${paneTargetLabel(pane)}`;
+  return paneIdentityLabel(pane, { includeUnread: false });
 }
 
 function paneDuplicateKey(pane) {
@@ -1382,8 +1392,7 @@ function markPaneUnread(pane, increment = 1) {
 
 function paneSearchText(pane) {
   return [
-    pane?.elements?.name?.textContent || '',
-    pane?.key || '',
+    paneSummaryLabel(pane),
     paneLabel(pane),
     paneTargetLabel(pane),
     pane?.kind || ''
@@ -1496,13 +1505,13 @@ function renderPaneManager() {
         const duplicateCount = duplicateCounts.get(paneDuplicateKey(pane)) || 0;
         const isDuplicate = duplicateCount > 1;
         const unreadCount = paneUnreadCount(pane);
-        const paneLetter = String(pane?.key || '').toUpperCase();
+        const paneIdentity = paneSummaryLabel(pane);
 
         row.innerHTML = `
           <div class="pane-manager-main">
-            <div class="pane-manager-kind" title="${escapeHtml(paneSummaryLabel(pane))}">
-              <span class="pane-manager-letter" aria-label="Pane ${escapeHtml(paneLetter)}">${escapeHtml(paneLetter)}</span>
-              <span class="pane-manager-kind-label">${escapeHtml(paneSummaryLabel(pane))}</span>
+            <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
+              <span class="pane-manager-kind-label">${escapeHtml(paneIdentity)}</span>
+              <span class="pane-manager-pane-id" title="Internal pane id">${escapeHtml(String(pane?.key || ''))}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
               ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
             </div>
@@ -4445,12 +4454,7 @@ function paneHeaderLetter(pane) {
 
 function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
-  const letter = paneHeaderLetter(pane);
-  const type = paneLabel(pane);
-  const target = String(pane?.elements?.agentLabel?.textContent || '').trim() ||
-    (pane.kind === 'workqueue' ? String(pane?.workqueue?.queue || 'dev-team') : pane.kind === 'chat' ? 'main' : pane.kind === 'timeline' ? 'Last 24h' : 'Cron');
-  const unread = paneUnreadCount(pane);
-  pane.elements.name.textContent = `${letter} ${type} · ${target}${unread > 0 ? ` • ${unread} unread` : ''}`;
+  pane.elements.name.textContent = paneIdentityLabel(pane, { includeUnread: true });
 }
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
