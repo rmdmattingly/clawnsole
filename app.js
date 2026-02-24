@@ -6811,13 +6811,12 @@ window.addEventListener('keydown', (event) => {
   // Ctrl/Cmd+Shift+R → new cron
   // Ctrl/Cmd+Shift+T → new timeline
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey;
-  if (isAccel && roleState.role === 'admin') {
+  if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target)) {
     const key = String(event.key || '').toLowerCase();
     const map = { c: 'chat', w: 'workqueue', r: 'cron', t: 'timeline' };
     const kind = map[key];
     if (kind) {
-      // Don't hijack while typing unless it's a true accelerator.
-      // (We still allow it when focused in an input, but only with Ctrl/Cmd+Shift.)
+      // Don't hijack add-pane shortcuts while typing in inputs/editors.
       event.preventDefault();
       paneManager.closeAddPaneMenu();
       paneManager.addPane(kind);

@@ -103,3 +103,26 @@ test('alt+1..3 focuses panes by visible order and does not fire while typing', a
   await page.keyboard.press('Alt+3');
   await expect.poll(activePaneIndex).toBe(0);
 });
+
+test('add-pane shortcuts do not fire while typing in chat input', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  await expect(panes).toHaveCount(2);
+
+  const input = page.locator('[data-pane-kind="chat"] [data-pane-input]').first();
+  await input.focus();
+  await input.fill('typing');
+
+  await page.keyboard.press('Control+Shift+W');
+
+  await expect(panes).toHaveCount(2);
+});
