@@ -237,6 +237,8 @@
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>4</kbd></div><div class="shortcut-desc">Focus pane 1-4</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>P</kbd></div><div class="shortcut-desc">Open Pane Manager</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Pane switcher (cycle focus)</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>]</kbd></div><div class="shortcut-desc">Next unread pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd></div><div class="shortcut-desc">Previous unread pane</div></div>
           </div>
 
           <div class="shortcut-group">
@@ -268,6 +270,7 @@
             <span class="pane-manager-search-label">Quick find</span>
             <input id="paneManagerSearch" class="pane-manager-search" type="search" placeholder="Filter by title, type, or target" autocomplete="off" data-testid="pane-manager-search" />
           </label>
+          <label class="pane-manager-unread-only"><input id="paneManagerUnreadOnly" type="checkbox" data-testid="pane-manager-unread-only" /> Unread only</label>
           <div id="paneManagerList" class="pane-manager-list" role="listbox" aria-label="Open panes" data-testid="pane-manager-list"></div>
           <div id="paneManagerEmpty" class="hint" hidden>No panes match this filter.</div>
         </div>

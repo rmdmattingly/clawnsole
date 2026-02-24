@@ -145,6 +145,24 @@ test('pane manager: shows summary + duplicate badge and supports close others', 
   await expect(page.locator('[data-testid="pane-manager-duplicate-badge"]')).toHaveCount(0);
 });
 
+test('pane manager: unread-only filter toggle', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.keyboard.press('Control+P');
+  await page.getByTestId('pane-manager-unread-only').check();
+  await expect(page.locator('.pane-manager-row')).toHaveCount(0);
+
+  await page.keyboard.press('Escape');
+});
+
 test('pane manager: supports reordering panes', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
