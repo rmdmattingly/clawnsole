@@ -4,6 +4,20 @@ const globalElements = {
   deviceId: document.getElementById('deviceId'),
   disconnectBtn: document.getElementById('disconnectBtn'),
   resetLayoutBtn: document.getElementById('resetLayoutBtn'),
+  recurringPromptTarget: document.getElementById('recurringPromptTarget'),
+  recurringPromptInterval: document.getElementById('recurringPromptInterval'),
+  recurringPromptTimezone: document.getElementById('recurringPromptTimezone'),
+  recurringPromptMessage: document.getElementById('recurringPromptMessage'),
+  recurringPromptEnabled: document.getElementById('recurringPromptEnabled'),
+  recurringPromptCreateBtn: document.getElementById('recurringPromptCreateBtn'),
+  recurringPromptCancelEditBtn: document.getElementById('recurringPromptCancelEditBtn'),
+  recurringPromptRefreshBtn: document.getElementById('recurringPromptRefreshBtn'),
+  recurringPromptRows: document.getElementById('recurringPromptRows'),
+  recurringPromptEmpty: document.getElementById('recurringPromptEmpty'),
+  recurringPromptHistoryFilter: document.getElementById('recurringPromptHistoryFilter'),
+  recurringPromptHistoryRefreshBtn: document.getElementById('recurringPromptHistoryRefreshBtn'),
+  recurringPromptHistoryRows: document.getElementById('recurringPromptHistoryRows'),
+  recurringPromptHistoryEmpty: document.getElementById('recurringPromptHistoryEmpty'),
   status: document.getElementById('connectionStatus'),
   paneManagerBtn: document.getElementById('paneManagerBtn'),
   pulseCanvas: document.getElementById('pulseCanvas'),
@@ -957,6 +971,299 @@ function openSettings() {
 function closeSettings() {
   globalElements.settingsModal.classList.remove('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'true');
+}
+
+const recurringPromptState = {
+  editingId: '',
+  items: [],
+  historyFilterId: 'all',
+  historyRows: [],
+  historyLoading: false,
+  historyError: ''
+};
+
+function formatRecurringDate(ts) {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  try {
+    return new Date(n).toLocaleString();
+  } catch {
+    return '—';
+  }
+}
+
+function resetRecurringPromptForm() {
+  recurringPromptState.editingId = '';
+  if (globalElements.recurringPromptInterval) globalElements.recurringPromptInterval.value = '60';
+  if (globalElements.recurringPromptTimezone) globalElements.recurringPromptTimezone.value = 'local';
+  if (globalElements.recurringPromptMessage) globalElements.recurringPromptMessage.value = '';
+  if (globalElements.recurringPromptEnabled) globalElements.recurringPromptEnabled.checked = true;
+  if (globalElements.recurringPromptCreateBtn) globalElements.recurringPromptCreateBtn.textContent = 'Create prompt';
+  if (globalElements.recurringPromptCancelEditBtn) globalElements.recurringPromptCancelEditBtn.hidden = true;
+}
+
+function populateRecurringPromptForm(prompt) {
+  if (!prompt) return;
+  recurringPromptState.editingId = String(prompt.id || '');
+  if (globalElements.recurringPromptTarget) globalElements.recurringPromptTarget.value = String(prompt.target || prompt.agentId || 'main');
+  if (globalElements.recurringPromptInterval) globalElements.recurringPromptInterval.value = String(Math.max(1, Number(prompt.intervalMinutes) || 60));
+  if (globalElements.recurringPromptTimezone) globalElements.recurringPromptTimezone.value = String(prompt.timezone || 'local');
+  if (globalElements.recurringPromptMessage) globalElements.recurringPromptMessage.value = String(prompt.promptText || prompt.message || '');
+  if (globalElements.recurringPromptEnabled) globalElements.recurringPromptEnabled.checked = prompt.enabled !== false;
+  if (globalElements.recurringPromptCreateBtn) globalElements.recurringPromptCreateBtn.textContent = 'Save changes';
+  if (globalElements.recurringPromptCancelEditBtn) globalElements.recurringPromptCancelEditBtn.hidden = false;
+}
+
+function renderRecurringPrompts() {
+  const body = globalElements.recurringPromptRows;
+  if (!body) return;
+  const rows = Array.isArray(recurringPromptState.items) ? recurringPromptState.items : [];
+  body.innerHTML = '';
+  if (!rows.length) {
+    if (globalElements.recurringPromptEmpty) globalElements.recurringPromptEmpty.hidden = false;
+    return;
+  }
+  if (globalElements.recurringPromptEmpty) globalElements.recurringPromptEmpty.hidden = true;
+
+  rows.forEach((prompt) => {
+    const tr = document.createElement('tr');
+    const enabledText = prompt.enabled !== false ? 'enabled' : 'disabled';
+    const nextRun = formatRecurringDate(prompt.nextRun || prompt.nextRunAt);
+    const lastRun = formatRecurringDate(prompt?.lastRun?.ts || prompt.lastRunAt);
+    tr.innerHTML = `
+      <td>${escapeHtml(enabledText)}</td>
+      <td>${escapeHtml(String(prompt.target || prompt.agentId || 'main'))}</td>
+      <td>${escapeHtml(String(prompt.scheduleSummary || `every ${Math.max(1, Number(prompt.intervalMinutes) || 60)} minutes`))}</td>
+      <td>${escapeHtml(lastRun)}</td>
+      <td>${escapeHtml(nextRun)}</td>
+      <td class="settings-rp-actions">
+        <button type="button" class="secondary" data-rp-action="edit" data-rp-id="${escapeHtml(String(prompt.id || ''))}">Edit</button>
+        <button type="button" class="secondary" data-rp-action="toggle" data-rp-id="${escapeHtml(String(prompt.id || ''))}">${prompt.enabled !== false ? 'Disable' : 'Enable'}</button>
+        <button type="button" class="danger" data-rp-action="delete" data-rp-id="${escapeHtml(String(prompt.id || ''))}">Delete</button>
+      </td>
+    `;
+    body.appendChild(tr);
+  });
+}
+
+function renderRecurringPromptHistoryFilter() {
+  const select = globalElements.recurringPromptHistoryFilter;
+  if (!select) return;
+  const prior = String(recurringPromptState.historyFilterId || 'all');
+  const prompts = Array.isArray(recurringPromptState.items) ? recurringPromptState.items : [];
+  select.innerHTML = '<option value="all">All prompts</option>';
+  prompts.forEach((prompt) => {
+    const id = String(prompt?.id || '').trim();
+    if (!id) return;
+    const label = String(prompt?.title || prompt?.promptText || prompt?.message || id);
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = label;
+    select.appendChild(opt);
+  });
+  select.value = Array.from(select.options).find((opt) => opt.value === prior) ? prior : 'all';
+  recurringPromptState.historyFilterId = String(select.value || 'all');
+}
+
+function renderRecurringPromptHistory() {
+  const body = globalElements.recurringPromptHistoryRows;
+  const empty = globalElements.recurringPromptHistoryEmpty;
+  if (!body) return;
+  body.innerHTML = '';
+
+  if (recurringPromptState.historyLoading) {
+    if (empty) {
+      empty.hidden = false;
+      empty.textContent = 'Loading run history…';
+    }
+    return;
+  }
+
+  if (recurringPromptState.historyError) {
+    if (empty) {
+      empty.hidden = false;
+      empty.textContent = recurringPromptState.historyError;
+    }
+    return;
+  }
+
+  const rows = Array.isArray(recurringPromptState.historyRows) ? recurringPromptState.historyRows : [];
+  if (!rows.length) {
+    if (empty) {
+      empty.hidden = false;
+      empty.textContent = 'No recent runs for this filter yet.';
+    }
+    return;
+  }
+
+  if (empty) empty.hidden = true;
+  rows.forEach((row) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escapeHtml(formatRecurringDate(row.ts))}</td>
+      <td>${escapeHtml(String(row.status || 'unknown'))}</td>
+      <td>${escapeHtml(String(row.target || 'main'))}</td>
+      <td>${escapeHtml(String(row.promptTitle || row.promptId || '—'))}</td>
+      <td>${escapeHtml(String(row.error || '—'))}</td>
+    `;
+    body.appendChild(tr);
+  });
+}
+
+async function loadRecurringPromptHistory() {
+  const selectedId = String(recurringPromptState.historyFilterId || globalElements.recurringPromptHistoryFilter?.value || 'all');
+  const prompts = Array.isArray(recurringPromptState.items) ? recurringPromptState.items : [];
+  recurringPromptState.historyLoading = true;
+  recurringPromptState.historyError = '';
+  renderRecurringPromptHistory();
+
+  try {
+    let historyRows = [];
+    if (selectedId && selectedId !== 'all') {
+      const prompt = prompts.find((p) => String(p?.id || '') === selectedId);
+      const fallbackTarget = String(prompt?.target || prompt?.agentId || 'main');
+      const fallbackTitle = String(prompt?.title || prompt?.promptText || prompt?.message || selectedId);
+      const res = await fetch(`/api/recurring-prompts/${encodeURIComponent(selectedId)}/runs?limit=50`, { credentials: 'include', cache: 'no-store' });
+      if (!res.ok) throw new Error('history request failed');
+      const payload = await res.json();
+      historyRows = (Array.isArray(payload?.runs) ? payload.runs : []).map((run) => ({
+        ...run,
+        promptId: selectedId,
+        promptTitle: fallbackTitle,
+        target: fallbackTarget
+      }));
+    } else {
+      historyRows = prompts
+        .flatMap((prompt) => (Array.isArray(prompt?.runHistory) ? prompt.runHistory : []).map((run) => ({
+          ...run,
+          promptId: String(prompt?.id || ''),
+          promptTitle: String(prompt?.title || prompt?.promptText || prompt?.message || prompt?.id || '—'),
+          target: String(prompt?.target || prompt?.agentId || 'main')
+        })))
+        .sort((a, b) => (Number(b?.ts) || 0) - (Number(a?.ts) || 0))
+        .slice(0, 100);
+    }
+    recurringPromptState.historyRows = historyRows;
+  } catch {
+    recurringPromptState.historyRows = [];
+    recurringPromptState.historyError = 'Failed to load run history.';
+  } finally {
+    recurringPromptState.historyLoading = false;
+    renderRecurringPromptHistory();
+  }
+}
+
+async function loadRecurringPromptAgents() {
+  const select = globalElements.recurringPromptTarget;
+  if (!select) return;
+  try {
+    const res = await fetch('/agents', { credentials: 'include', cache: 'no-store' });
+    if (!res.ok) return;
+    const payload = await res.json();
+    const agents = Array.isArray(payload?.agents) ? payload.agents : [];
+    const prior = String(select.value || 'main');
+    select.innerHTML = '';
+    agents.forEach((agent) => {
+      const id = String(agent?.id || '').trim();
+      if (!id) return;
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = id;
+      select.appendChild(opt);
+    });
+    if (!select.options.length) {
+      const opt = document.createElement('option');
+      opt.value = 'main';
+      opt.textContent = 'main';
+      select.appendChild(opt);
+    }
+    select.value = Array.from(select.options).find((opt) => opt.value === prior) ? prior : 'main';
+  } catch {}
+}
+
+async function loadRecurringPrompts() {
+  try {
+    const res = await fetch('/api/recurring-prompts', { credentials: 'include', cache: 'no-store' });
+    if (!res.ok) throw new Error('load failed');
+    const payload = await res.json();
+    recurringPromptState.items = Array.isArray(payload?.prompts) ? payload.prompts : [];
+    renderRecurringPrompts();
+    renderRecurringPromptHistoryFilter();
+    await loadRecurringPromptHistory();
+  } catch {
+    recurringPromptState.items = [];
+    recurringPromptState.historyRows = [];
+    recurringPromptState.historyError = 'Failed to load run history.';
+    renderRecurringPrompts();
+    renderRecurringPromptHistoryFilter();
+    renderRecurringPromptHistory();
+    showToast('Failed to load recurring prompts.', { kind: 'error', timeoutMs: 3200 });
+  }
+}
+
+async function createRecurringPromptFromUi() {
+  const message = String(globalElements.recurringPromptMessage?.value || '').trim();
+  if (!message) {
+    showToast('Prompt text is required.', { kind: 'error', timeoutMs: 2800 });
+    return;
+  }
+  const intervalMinutes = Math.max(1, Number(globalElements.recurringPromptInterval?.value) || 60);
+  const body = {
+    agentId: String(globalElements.recurringPromptTarget?.value || 'main').trim() || 'main',
+    intervalMinutes,
+    message,
+    enabled: !!globalElements.recurringPromptEnabled?.checked
+  };
+
+  const isEdit = !!recurringPromptState.editingId;
+  const url = isEdit ? `/api/recurring-prompts/${encodeURIComponent(recurringPromptState.editingId)}` : '/api/recurring-prompts';
+  const method = isEdit ? 'PUT' : 'POST';
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error('save failed');
+    resetRecurringPromptForm();
+    await loadRecurringPrompts();
+    showToast(isEdit ? 'Recurring prompt updated.' : 'Recurring prompt created.', { kind: 'info', timeoutMs: 2200 });
+  } catch {
+    showToast('Failed to save recurring prompt.', { kind: 'error', timeoutMs: 3200 });
+  }
+}
+
+async function toggleRecurringPrompt(id) {
+  const current = recurringPromptState.items.find((p) => String(p?.id || '') === String(id));
+  if (!current) return;
+  try {
+    const res = await fetch(`/api/recurring-prompts/${encodeURIComponent(String(id))}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ enabled: current.enabled === false })
+    });
+    if (!res.ok) throw new Error('toggle failed');
+    await loadRecurringPrompts();
+  } catch {
+    showToast('Failed to update prompt.', { kind: 'error', timeoutMs: 3200 });
+  }
+}
+
+async function deleteRecurringPrompt(id) {
+  try {
+    const res = await fetch(`/api/recurring-prompts/${encodeURIComponent(String(id))}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    if (!res.ok) throw new Error('delete failed');
+    if (String(recurringPromptState.editingId) === String(id)) resetRecurringPromptForm();
+    await loadRecurringPrompts();
+  } catch {
+    showToast('Failed to delete prompt.', { kind: 'error', timeoutMs: 3200 });
+  }
 }
 
 let shortcutsLastFocusedEl = null;
@@ -6188,7 +6495,38 @@ globalElements.commandPaletteInput?.addEventListener('keydown', (event) => {
 
 globalElements.saveGuestPromptBtn?.addEventListener('click', () => saveGuestPrompt());
 globalElements.recurringPromptCreateBtn?.addEventListener('click', () => createRecurringPromptFromUi());
+globalElements.recurringPromptCancelEditBtn?.addEventListener('click', () => resetRecurringPromptForm());
 globalElements.recurringPromptRefreshBtn?.addEventListener('click', () => loadRecurringPrompts());
+globalElements.recurringPromptHistoryRefreshBtn?.addEventListener('click', () => loadRecurringPromptHistory());
+globalElements.recurringPromptHistoryFilter?.addEventListener('change', () => {
+  recurringPromptState.historyFilterId = String(globalElements.recurringPromptHistoryFilter?.value || 'all');
+  loadRecurringPromptHistory();
+});
+globalElements.recurringPromptRows?.addEventListener('click', (event) => {
+  const btn = event.target instanceof HTMLElement ? event.target.closest('[data-rp-action]') : null;
+  if (!btn) return;
+  const action = String(btn.getAttribute('data-rp-action') || '');
+  const id = String(btn.getAttribute('data-rp-id') || '');
+  if (!id) return;
+  if (action === 'edit') {
+    const prompt = recurringPromptState.items.find((p) => String(p?.id || '') === id);
+    if (prompt) {
+      populateRecurringPromptForm(prompt);
+      recurringPromptState.historyFilterId = id;
+      if (globalElements.recurringPromptHistoryFilter) globalElements.recurringPromptHistoryFilter.value = id;
+      loadRecurringPromptHistory();
+    }
+    return;
+  }
+  if (action === 'toggle') {
+    toggleRecurringPrompt(id);
+    return;
+  }
+  if (action === 'delete') {
+    if (!window.confirm('Delete this recurring admin/system prompt?')) return;
+    deleteRecurringPrompt(id);
+  }
+});
 
 globalElements.refreshAgentsBtn?.addEventListener('click', () => {
   refreshAgents({ reason: 'manual', showSuccessToast: true }).catch(() => {

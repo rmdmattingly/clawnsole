@@ -451,6 +451,82 @@
             Auto-connecting with the gateway token from your local OpenClaw config.
           </div>
 
+          <section class="settings-section" aria-label="Recurring admin prompts">
+            <h3>Recurring admin/system prompts</h3>
+            <p class="hint">These run as admin/system prompts via <code>/api/recurring-prompts</code>.</p>
+
+            <div class="settings-rp-form">
+              <label>
+                Target agent
+                <select id="recurringPromptTarget"></select>
+              </label>
+              <label>
+                Schedule (minutes)
+                <input id="recurringPromptInterval" type="number" min="1" step="1" value="60" />
+              </label>
+              <label>
+                Timezone
+                <input id="recurringPromptTimezone" type="text" value="local" />
+              </label>
+              <label>
+                Prompt text
+                <textarea id="recurringPromptMessage" rows="3" placeholder="Write the recurring admin/system prompt"></textarea>
+              </label>
+              <label class="inline-checkbox">
+                <input id="recurringPromptEnabled" type="checkbox" checked />
+                Enabled
+              </label>
+              <div class="button-row">
+                <button id="recurringPromptCreateBtn" type="button">Create prompt</button>
+                <button id="recurringPromptCancelEditBtn" type="button" class="secondary" hidden>Cancel edit</button>
+                <button id="recurringPromptRefreshBtn" type="button" class="secondary">Refresh</button>
+              </div>
+            </div>
+
+            <div class="settings-rp-table-wrap">
+              <table class="settings-rp-table">
+                <thead>
+                  <tr>
+                    <th>Enabled</th>
+                    <th>Target</th>
+                    <th>Schedule</th>
+                    <th>Last run</th>
+                    <th>Next run</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="recurringPromptRows"></tbody>
+              </table>
+              <div id="recurringPromptEmpty" class="hint">No recurring admin/system prompts yet.</div>
+            </div>
+
+            <div class="settings-rp-history-head">
+              <h4>Recent delivery history</h4>
+              <label>
+                Prompt filter
+                <select id="recurringPromptHistoryFilter">
+                  <option value="all">All prompts</option>
+                </select>
+              </label>
+              <button id="recurringPromptHistoryRefreshBtn" type="button" class="secondary">Refresh history</button>
+            </div>
+            <div class="settings-rp-table-wrap">
+              <table class="settings-rp-table">
+                <thead>
+                  <tr>
+                    <th>Run time</th>
+                    <th>Status</th>
+                    <th>Target</th>
+                    <th>Prompt</th>
+                    <th>Error</th>
+                  </tr>
+                </thead>
+                <tbody id="recurringPromptHistoryRows"></tbody>
+              </table>
+              <div id="recurringPromptHistoryEmpty" class="hint">No recent runs for this filter yet.</div>
+            </div>
+          </section>
+
           <div class="hint" style="margin-top: 12px;">
             <div style="font-weight: 600; margin-bottom: 6px;">Keyboard shortcuts (admin)</div>
             <div>New Chat pane: <code>Ctrl/Cmd</code> + <code>Shift</code> + <code>C</code></div>

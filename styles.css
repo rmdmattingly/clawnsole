@@ -3124,3 +3124,58 @@ kbd {
   color: rgba(230, 238, 246, 0.7);
   font-size: 12px;
 }
+
+.settings-section {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.settings-section h3 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}
+
+.settings-rp-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.settings-rp-table-wrap {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+
+.settings-rp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.settings-rp-table th,
+.settings-rp-table td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 6px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.settings-rp-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.settings-rp-history-head {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.settings-rp-history-head h4 {
+  margin: 0;
+  font-size: 0.9rem;
+}
