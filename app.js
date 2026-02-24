@@ -1806,6 +1806,10 @@ function buildCommandPaletteItems() {
       '⌘/Ctrl+Shift+K'
     ),
     withShortcut(
+      { id: 'cmd:pane-cycle-backward', label: 'Panes: Cycle focus backward', detail: 'Move focus to previous pane', run: () => cyclePaneFocusBackward() },
+      '⌘/Ctrl+Shift+J'
+    ),
+    withShortcut(
       { id: 'cmd:pane-next-unread', label: 'Panes: Next unread', detail: 'Jump to next pane with unread activity', run: () => cycleUnreadPaneFocus(1) },
       '⌘/Ctrl+Shift+]'
     ),
@@ -4825,7 +4829,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           shortcuts: [
             ['Alt/Option+1..9', 'focus panes 1-9 by visible order'],
             ['Cmd/Ctrl+1..4', 'focus pane 1-4'],
-            ['Cmd/Ctrl+K', 'cycle focus between panes']
+            ['Cmd/Ctrl+Shift+K', 'focus next pane'],
+            ['Cmd/Ctrl+Shift+J', 'focus previous pane']
           ]
         };
       })();
@@ -6884,6 +6889,13 @@ window.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'k') {
     event.preventDefault();
     cyclePaneFocus();
+    return;
+  }
+
+  // Cmd/Ctrl+Shift+J cycles focus backward across panes.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'j') {
+    event.preventDefault();
+    cyclePaneFocusBackward();
     return;
   }
 
