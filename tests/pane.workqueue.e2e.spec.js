@@ -124,3 +124,51 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(title);
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(instructions);
 });
+
+test('pane: workqueue groups routine items and allows expansion', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue').click();
+
+  const wqPane = page.locator('[data-pane]').last();
+  await expect(wqPane).toHaveAttribute('data-pane-kind', 'workqueue');
+
+  const enqueue = async (title) => {
+    await wqPane.locator('details.wq-enqueue > summary').click();
+    await wqPane.locator('[data-wq-enqueue-title]').fill(title);
+    await wqPane.locator('[data-wq-enqueue-instructions]').fill(`group-test ${Date.now()}`);
+    const enqueueResP = page.waitForResponse(
+      (res) => res.url().includes('/api/workqueue/enqueue') && res.request().method() === 'POST',
+      { timeout: 15000 }
+    );
+    await wqPane.locator('[data-wq-enqueue-submit]').click();
+    const enqueueRes = await enqueueResP;
+    expect(enqueueRes.ok()).toBeTruthy();
+    await wqPane.locator('details.wq-enqueue > summary').click();
+  };
+
+  const stamp = Date.now();
+  await enqueue(`[routine] PR review sweep (${stamp})`);
+  await enqueue(`[routine] PR review sweep (${stamp + 1})`);
+
+  await wqPane.locator('[data-wq-grouping-mode]').selectOption('on');
+  await wqPane.locator('[data-wq-refresh]').click();
+
+  const groupedRow = wqPane.locator('.wq-row', { hasText: 'PR review sweep' }).first();
+  await expect(groupedRow).toBeVisible();
+  await expect(groupedRow).toContainText('×2');
+
+  const groupWrap = groupedRow.locator('xpath=ancestor::div[contains(@class,"wq-row-group")]').first();
+  const dupToggle = groupWrap.locator('.wq-duplicates summary', { hasText: /duplicate/i });
+  await dupToggle.click();
+  await expect(groupWrap.locator('.wq-duplicate-btn')).toHaveCount(1);
+});

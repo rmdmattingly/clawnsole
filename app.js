@@ -1416,6 +1416,7 @@ function renderAgentsModalList() {
 // Workqueue (admin-only)
 
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
+const WORKQUEUE_GROUPING_AUTO_THRESHOLD = 12;
 
 const workqueueState = {
   queues: [],
@@ -1425,6 +1426,7 @@ const workqueueState = {
   selectedItemId: null,
   sortKey: 'default',
   sortDir: 'desc',
+  groupingMode: 'auto',
   leaseTicker: null,
   autoRefreshEnabled: true,
   autoRefreshIntervalMs: 15000,
@@ -1631,6 +1633,80 @@ function getWorkqueueBoardColumns() {
   return defs.filter((d) => workqueueState.statusFilter.has(d.status));
 }
 
+function getWorkqueueDedupeIdentity(item) {
+  const key = String(item?.dedupeKey || item?.meta?.dedupeKey || '').trim();
+  if (!key) return '';
+  const queue = String(item?.queue || '').trim() || '__default__';
+  return `${queue}::dedupe::${key}`;
+}
+
+function getWorkqueueFallbackGroupIdentity(item) {
+  const queue = String(item?.queue || '').trim() || '__default__';
+  const dedupeKey = String(item?.dedupeKey || item?.meta?.dedupeKey || '').trim();
+  if (dedupeKey) return '';
+
+  const title = String(item?.title || '').trim().toLowerCase();
+  const kind = String(item?.meta?.kind || '').trim().toLowerCase();
+  const isRoutine = kind.includes('pr-review') || title.includes('pr review sweep') || title.startsWith('[routine]');
+  if (!isRoutine) return '';
+
+  const normalized = title
+    .replace(/^\[[^\]]+\]\s*/g, '')
+    .replace(/\([^)]*\)\s*$/g, '')
+    .replace(/\b\d{4}-\d{2}-\d{2}(?:[ t]\d{2}(?::\d{2})?)?\b/g, '')
+    .replace(/\b[0-9a-f]{8,}\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const prefix = (normalized.split(/\s[:\-–—]\s/, 1)[0] || normalized).trim();
+  if (prefix.length < 8) return '';
+  return `${queue}::fallback::${prefix}`;
+}
+
+function resolveWorkqueueGroupingEnabled(mode, itemCount) {
+  const normalized = String(mode || 'auto').toLowerCase();
+  if (normalized === 'on') return true;
+  if (normalized === 'off') return false;
+  return Number(itemCount) > WORKQUEUE_GROUPING_AUTO_THRESHOLD;
+}
+
+function finalizeWorkqueueGroup(group) {
+  const members = [group.canonical, ...(Array.isArray(group.siblings) ? group.siblings : [])];
+  group.count = members.length;
+  group.maxPriority = members.reduce((acc, it) => Math.max(acc, Number(it?.priority ?? -Infinity)), -Infinity);
+  group.latestUpdatedAtMs = members.reduce((acc, it) => {
+    const t = Date.parse(String(it?.updatedAt || it?.createdAt || ''));
+    return Number.isFinite(t) ? Math.max(acc, t) : acc;
+  }, 0);
+  group.hasClaimed = members.some((it) => String(it?.status || '') === 'claimed' || String(it?.claimedBy || '').trim());
+  group.hasExpiredLease = members.some((it) => Number(it?.leaseUntil || 0) > 0 && Number(it.leaseUntil) < Date.now());
+  return group;
+}
+
+function groupWorkqueueItemsByDedupe(sortedItems, opts = {}) {
+  const groupingEnabled = resolveWorkqueueGroupingEnabled(opts.groupingMode, Array.isArray(sortedItems) ? sortedItems.length : 0);
+  const groups = [];
+  const groupMap = new Map();
+
+  for (const it of Array.isArray(sortedItems) ? sortedItems : []) {
+    const identity = groupingEnabled ? (getWorkqueueDedupeIdentity(it) || getWorkqueueFallbackGroupIdentity(it)) : '';
+    if (!identity) {
+      groups.push(finalizeWorkqueueGroup({ canonical: it, siblings: [] }));
+      continue;
+    }
+
+    if (!groupMap.has(identity)) {
+      const group = { canonical: it, siblings: [], identity };
+      groupMap.set(identity, group);
+      groups.push(group);
+    } else {
+      groupMap.get(identity).siblings.push(it);
+    }
+  }
+
+  return groups.map(finalizeWorkqueueGroup);
+}
+
 function renderWorkqueueItems() {
   const body = globalElements.wqListBody;
   if (!body) return;
@@ -1648,18 +1724,20 @@ function renderWorkqueueItems() {
 
   const itemsRaw = Array.isArray(workqueueState.items) ? workqueueState.items : [];
   const items = sortWorkqueueItems(itemsRaw, { sortKey: workqueueState.sortKey, sortDir: workqueueState.sortDir });
+  const groups = groupWorkqueueItemsByDedupe(items, { groupingMode: workqueueState.groupingMode });
+  const visibleItems = groups.map((g) => g.canonical);
 
-  if (!items.length) {
+  if (!visibleItems.length) {
     globalElements.wqListEmpty.hidden = false;
   } else {
     globalElements.wqListEmpty.hidden = true;
   }
 
   const cols = getWorkqueueBoardColumns();
-  const itemsByStatus = items.reduce((acc, it) => {
-    const st = String(it?.status || 'ready');
+  const groupsByStatus = groups.reduce((acc, g) => {
+    const st = String(g?.canonical?.status || 'ready');
     if (!acc[st]) acc[st] = [];
-    acc[st].push(it);
+    acc[st].push(g);
     return acc;
   }, {});
 
@@ -1669,7 +1747,7 @@ function renderWorkqueueItems() {
     col.className = 'wq-board-col';
     col.setAttribute('data-wq-col', colDef.status);
 
-    const colItems = Array.isArray(itemsByStatus[colDef.status]) ? itemsByStatus[colDef.status] : [];
+    const colItems = Array.isArray(groupsByStatus[colDef.status]) ? groupsByStatus[colDef.status] : [];
 
     const head = document.createElement('div');
     head.className = 'wq-board-col-header';
@@ -1700,11 +1778,19 @@ function renderWorkqueueItems() {
       }
     });
 
-    for (const it of colItems) {
+    for (const group of colItems) {
+      const it = group.canonical;
+      const siblings = Array.isArray(group.siblings) ? group.siblings : [];
+      const dupCount = siblings.length;
+      const isSelected = [it, ...siblings].some((x) => x?.id && x.id === workqueueState.selectedItemId);
+
+      const cardWrap = document.createElement('div');
+      cardWrap.className = 'wq-card-wrap';
+
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'wq-card';
-      if (it.id && it.id === workqueueState.selectedItemId) card.classList.add('selected');
+      if (isSelected) card.classList.add('selected');
       if (it.id) card.setAttribute('data-wq-item', it.id);
 
       // Allow dragging the whole card.
@@ -1718,18 +1804,21 @@ function renderWorkqueueItems() {
       const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
       const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
       const status = String(it.status || '');
-      const age = fmtAge(it.createdAt || it.updatedAt);
+      const age = fmtAge(group.latestUpdatedAtMs || it.updatedAt || it.createdAt);
       const next = String(it.lastNote || '').trim();
 
       card.innerHTML = `
         <div class="wq-card-title">${escapeHtml(String(it.title || ''))}</div>
         <div class="wq-card-meta">
           <span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span>
-          ${age ? `<span class="wq-card-chip mono">age ${escapeHtml(age)}</span>` : ''}
+          ${age ? `<span class="wq-card-chip mono">upd ${escapeHtml(age)}</span>` : ''}
           ${leaseLabel ? `<span class="wq-card-chip mono">lease ${escapeHtml(leaseLabel)}</span>` : ''}
+          ${dupCount > 0 ? `<span class="wq-card-chip mono">×${escapeHtml(String(group.count || (dupCount + 1)))}</span>` : ''}
+          ${group.hasClaimed ? `<span class="wq-card-chip mono">claimed</span>` : ''}
+          ${group.hasExpiredLease ? `<span class="wq-card-chip mono">expired lease</span>` : ''}
         </div>
         <div class="wq-card-fields">
-          <div class="wq-card-field"><span class="k">prio</span> <span class="v mono">${escapeHtml(String(it.priority ?? ''))}</span></div>
+          <div class="wq-card-field"><span class="k">prio</span> <span class="v mono">${escapeHtml(String(Number.isFinite(group.maxPriority) ? group.maxPriority : (it.priority ?? '')))}</span></div>
           <div class="wq-card-field"><span class="k">owner</span> <span class="v">${escapeHtml(String(it.claimedBy || ''))}</span></div>
           <div class="wq-card-field"><span class="k">att</span> <span class="v mono">${escapeHtml(String(it.attempts ?? ''))}</span></div>
         </div>
@@ -1742,7 +1831,38 @@ function renderWorkqueueItems() {
         renderWorkqueueInspect(it);
       });
 
-      lane.appendChild(card);
+      cardWrap.appendChild(card);
+
+      if (dupCount > 0) {
+        const details = document.createElement('details');
+        details.className = 'wq-duplicates';
+
+        const summary = document.createElement('summary');
+        summary.className = 'wq-duplicates-summary mono';
+        summary.textContent = `Show ${dupCount} duplicate${dupCount === 1 ? '' : 's'}`;
+
+        const list = document.createElement('div');
+        list.className = 'wq-duplicates-list';
+
+        for (const dup of siblings) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'wq-duplicate-btn';
+          btn.textContent = `${dup.id || ''} · prio ${dup.priority ?? ''} · ${dup.status || ''}`;
+          btn.addEventListener('click', () => {
+            workqueueState.selectedItemId = dup.id || null;
+            renderWorkqueueItems();
+            renderWorkqueueInspect(dup);
+          });
+          list.appendChild(btn);
+        }
+
+        details.appendChild(summary);
+        details.appendChild(list);
+        cardWrap.appendChild(details);
+      }
+
+      lane.appendChild(cardWrap);
     }
 
     col.appendChild(head);
@@ -2026,9 +2146,11 @@ function renderWorkqueuePaneItems(pane) {
 
   const itemsRaw = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
   const items = sortWorkqueueItems(itemsRaw, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const groups = groupWorkqueueItemsByDedupe(items, { groupingMode: pane.workqueue?.groupingMode });
+  const visibleItems = groups.map((g) => g.canonical);
 
   if (empty) {
-    const hasItems = items.length > 0;
+    const hasItems = visibleItems.length > 0;
     empty.hidden = hasItems;
     if (!hasItems) {
       const queue = String(pane.workqueue?.queue || '').trim() || 'dev-team';
@@ -2060,20 +2182,29 @@ function renderWorkqueuePaneItems(pane) {
   }
 
   const now = Date.now();
-  for (const it of items) {
+  for (const group of groups) {
+    const it = group.canonical;
+    const siblings = Array.isArray(group.siblings) ? group.siblings : [];
+    const dupCount = siblings.length;
+    const isSelected = [it, ...siblings].some((x) => x?.id && x.id === pane.workqueue.selectedItemId);
+
+    const groupWrap = document.createElement('div');
+    groupWrap.className = 'wq-row-group';
+
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'wq-row';
-    if (it.id && it.id === pane.workqueue.selectedItemId) row.classList.add('selected');
+    if (isSelected) row.classList.add('selected');
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
     const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
     const status = String(it.status || '');
+    const updatedAge = fmtAge(group.latestUpdatedAtMs || it.updatedAt || it.createdAt);
 
     row.innerHTML = `
-      <div class="wq-col title">${escapeHtml(String(it.title || ''))}</div>
+      <div class="wq-col title">${escapeHtml(String(it.title || ''))}${dupCount > 0 ? ` <span class="wq-card-chip mono">×${escapeHtml(String(group.count || (dupCount + 1)))}</span>` : ''}${updatedAge ? ` <span class="wq-card-chip mono">upd ${escapeHtml(updatedAge)}</span>` : ''}${group.hasClaimed ? ' <span class="wq-card-chip mono">claimed</span>' : ''}${group.hasExpiredLease ? ' <span class="wq-card-chip mono">expired lease</span>' : ''}</div>
       <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
-      <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
+      <div class="wq-col prio mono">${escapeHtml(String(Number.isFinite(group.maxPriority) ? group.maxPriority : (it.priority ?? '')))}</div>
       <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
       <div class="wq-col claimedBy">${escapeHtml(String(it.claimedBy || ''))}</div>
       <div class="wq-col lease mono" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
@@ -2085,7 +2216,38 @@ function renderWorkqueuePaneItems(pane) {
       renderWorkqueuePaneInspect(pane, it);
     });
 
-    body.appendChild(row);
+    groupWrap.appendChild(row);
+
+    if (dupCount > 0) {
+      const details = document.createElement('details');
+      details.className = 'wq-duplicates';
+
+      const summary = document.createElement('summary');
+      summary.className = 'wq-duplicates-summary mono';
+      summary.textContent = `+${dupCount} duplicate${dupCount === 1 ? '' : 's'}`;
+
+      const list = document.createElement('div');
+      list.className = 'wq-duplicates-list';
+
+      for (const dup of siblings) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'wq-duplicate-btn';
+        btn.textContent = `${dup.id || ''} · prio ${dup.priority ?? ''} · ${dup.status || ''}`;
+        btn.addEventListener('click', () => {
+          pane.workqueue.selectedItemId = dup.id || null;
+          renderWorkqueuePaneItems(pane);
+          renderWorkqueuePaneInspect(pane, dup);
+        });
+        list.appendChild(btn);
+      }
+
+      details.appendChild(summary);
+      details.appendChild(list);
+      groupWrap.appendChild(details);
+    }
+
+    body.appendChild(groupWrap);
   }
 
   // Keep inspect in sync if selection vanished.
@@ -3890,7 +4052,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sortKey, sortDir, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sortKey, sortDir, groupingMode, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -3934,7 +4096,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       items: [],
       selectedItemId: null,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'default',
-      sortDir: sortDir === 'asc' ? 'asc' : 'desc'
+      sortDir: sortDir === 'asc' ? 'asc' : 'desc',
+      groupingMode: ['auto', 'on', 'off'].includes(String(groupingMode || '').toLowerCase()) ? String(groupingMode).toLowerCase() : 'auto'
     },
     connected: false,
     statusState: 'disconnected',
@@ -4092,6 +4255,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
             </div>
           </div>
 
+          <label class="wq-field">
+            <span class="wq-label">Grouping</span>
+            <select data-wq-grouping-mode aria-label="Grouping mode">
+              <option value="auto">Auto (&gt;12 items)</option>
+              <option value="on">On</option>
+              <option value="off">Off</option>
+            </select>
+          </label>
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
 
           <div class="wq-sort" role="group" aria-label="Sort workqueue items">
@@ -4187,6 +4358,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     const statusDetailsEl = elements.thread.querySelector('[data-wq-status-details]');
     const statusClearBtn = elements.thread.querySelector('[data-wq-status-clear]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
+    const groupingModeEl = elements.thread.querySelector('[data-wq-grouping-mode]');
 
     const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
 
@@ -4330,6 +4502,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     });
 
     renderStatusMultiSelect();
+    if (groupingModeEl) groupingModeEl.value = pane.workqueue.groupingMode || 'auto';
     populateQueueSelect().then(() => doRefresh());
 
     refreshBtn?.addEventListener('click', () => doRefresh());
@@ -4351,6 +4524,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
       statusClearBtn?.addEventListener('click', () => applyStatuses([]));
     }
+
+    groupingModeEl?.addEventListener('change', () => {
+      const mode = String(groupingModeEl.value || 'auto').toLowerCase();
+      pane.workqueue.groupingMode = ['auto', 'on', 'off'].includes(mode) ? mode : 'auto';
+      renderWorkqueuePaneItems(pane);
+      paneManager.persistAdminPanes();
+    });
 
     // Sort controls (client-side): stable sorting with a status-grouping default.
     const sortBtns = Array.from(elements.thread.querySelectorAll('[data-wq-sort]'));
@@ -5113,6 +5293,7 @@ const paneManager = {
         statusFilter: cfg.statusFilter,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
+        groupingMode: cfg.groupingMode,
         closable: true
       })
     );
@@ -5156,7 +5337,8 @@ const paneManager = {
             : ['ready', 'pending', 'claimed', 'in_progress'];
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'default';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, queue, statusFilter, sortKey, sortDir };
+          const groupingMode = ['auto', 'on', 'off'].includes(String(item.groupingMode || '').toLowerCase()) ? String(item.groupingMode).toLowerCase() : 'auto';
+          return { key, kind, queue, statusFilter, sortKey, sortDir, groupingMode };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
@@ -5190,7 +5372,8 @@ const paneManager = {
       queue: 'dev-team',
       statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
       sortKey: 'default',
-      sortDir: 'desc'
+      sortDir: 'desc',
+      groupingMode: 'auto'
     };
     const list = [paneA, paneB].slice(0, this.maxPanes);
     storage.set(ADMIN_PANES_KEY, JSON.stringify(list));
@@ -5206,7 +5389,8 @@ const paneManager = {
           queue: pane.workqueue?.queue || 'dev-team',
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
           sortKey: pane.workqueue?.sortKey || 'default',
-          sortDir: pane.workqueue?.sortDir || 'desc'
+          sortDir: pane.workqueue?.sortDir || 'desc',
+          groupingMode: ['auto', 'on', 'off'].includes(String(pane.workqueue?.groupingMode || '').toLowerCase()) ? String(pane.workqueue.groupingMode).toLowerCase() : 'auto'
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
@@ -5232,7 +5416,8 @@ const paneManager = {
       queue: 'dev-team',
       statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
       sortKey: 'default',
-      sortDir: 'desc'
+      sortDir: 'desc',
+      groupingMode: 'auto'
     };
     storage.set(ADMIN_PANES_KEY, JSON.stringify([paneA, paneB]));
 

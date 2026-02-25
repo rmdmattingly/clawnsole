@@ -1865,6 +1865,40 @@ kbd {
   background: rgba(127, 209, 185, 0.12);
 }
 
+.wq-card-wrap,
+.wq-row-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wq-duplicates {
+  margin: 0 0 2px;
+}
+
+.wq-duplicates-summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wq-duplicates-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.wq-duplicate-btn {
+  width: 100%;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  text-align: left;
+  font-size: 12px;
+}
+
 .wq-col {
   min-width: 0;
   overflow: hidden;
