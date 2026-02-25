@@ -22,6 +22,7 @@ const globalElements = {
   paneManagerBtn: document.getElementById('paneManagerBtn'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
+  fleetBtn: document.getElementById('fleetBtn'),
   shortcutsBtn: document.getElementById('shortcutsBtn'),
   refreshAgentsBtn: document.getElementById('refreshAgentsBtn'),
   agentsBtn: document.getElementById('agentsBtn'),
@@ -897,6 +898,12 @@ function setRole(role) {
     globalElements.workqueueBtn.style.opacity = visibleOpacity;
   }
 
+  if (globalElements.fleetBtn) {
+    globalElements.fleetBtn.hidden = !isAdmin;
+    globalElements.fleetBtn.disabled = !isAdmin;
+    globalElements.fleetBtn.style.opacity = visibleOpacity;
+  }
+
   if (globalElements.shortcutsBtn) {
     globalElements.shortcutsBtn.hidden = !isAdmin;
     globalElements.shortcutsBtn.disabled = !isAdmin;
@@ -921,6 +928,8 @@ function showLogin(message = '') {
   if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
   globalElements.shortcutsBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.shortcutsBtn) globalElements.shortcutsBtn.style.opacity = '0.5';
+  globalElements.fleetBtn?.setAttribute('disabled', 'disabled');
+  if (globalElements.fleetBtn) globalElements.fleetBtn.style.opacity = '0.5';
 
   const isTouch = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
   if (!isTouch) {
@@ -1747,6 +1756,14 @@ function buildCommandPaletteItems() {
     withShortcut(
       { id: 'cmd:add-timeline', label: 'Open pane: Timeline', detail: 'Create a new Timeline pane', run: () => paneManager.addPane('timeline') },
       '⌘/Ctrl+Shift+T'
+    ),
+    withShortcut(
+      { id: 'cmd:open-fleet', label: 'Open pane: Fleet', detail: 'Focus existing Fleet pane or open one', run: () => openFleetPane() },
+      '⌘/Ctrl+Shift+F'
+    ),
+    withShortcut(
+      { id: 'cmd:add-fleet', label: 'Open pane: Fleet (new)', detail: 'Create a new Fleet pane even if one exists', run: () => openFleetPane({ forceNew: true }) },
+      ''
     )
   );
 
@@ -2033,6 +2050,20 @@ function openAgentTimelineFromFleet(agentId) {
     }
   } catch {}
 
+  paneManager.focusPanePrimary(pane);
+}
+
+function openFleetPane({ forceNew = false } = {}) {
+  const target = 'all';
+  const pane = forceNew
+    ? paneManager.addPane('timeline', { cronAgentId: target })
+    : findExistingPane('timeline', (p) => String(p.cronAgentId || '').trim() === target) ||
+      findExistingPane('timeline') ||
+      paneManager.addPane('timeline', { cronAgentId: target });
+  if (!pane) return;
+
+  pane.cronAgentId = target;
+  paneManager.persistAdminPanes();
   paneManager.focusPanePrimary(pane);
 }
 
@@ -6686,6 +6717,10 @@ window.addEventListener('focus', () => {
 });
 
 globalElements.workqueueBtn?.addEventListener('click', () => openWorkqueue());
+globalElements.fleetBtn?.addEventListener('click', (event) => {
+  const forceNew = !!event?.altKey;
+  openFleetPane({ forceNew });
+});
 globalElements.workqueueCloseBtn?.addEventListener('click', () => closeWorkqueue());
 globalElements.workqueueModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.workqueueModal) closeWorkqueue();
@@ -6918,6 +6953,13 @@ window.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'n') {
     event.preventDefault();
     paneManager.openAddPaneMenu(globalElements.addPaneBtn);
+    return;
+  }
+
+  // Cmd/Ctrl+Shift+F opens/focuses Fleet pane.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'f') {
+    event.preventDefault();
+    openFleetPane();
     return;
   }
 

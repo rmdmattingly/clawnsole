@@ -163,3 +163,33 @@ test('add-pane shortcuts do not fire while typing in chat input', async ({ page 
 
   await expect(panes).toHaveCount(2);
 });
+
+test('fleet quick action button + keyboard shortcut focus existing timeline pane without duplicates', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  const timelinePanes = page.locator('[data-pane-kind="timeline"]');
+  const fleetBtn = page.locator('#fleetBtn');
+
+  await expect(panes).toHaveCount(2);
+  await expect(timelinePanes).toHaveCount(0);
+
+  await fleetBtn.click();
+  await expect(panes).toHaveCount(3);
+  await expect(timelinePanes).toHaveCount(1);
+
+  await page.keyboard.press('Control+Shift+F');
+  await expect(panes).toHaveCount(3);
+  await expect(timelinePanes).toHaveCount(1);
+
+  await fleetBtn.click({ modifiers: ['Alt'] });
+  await expect(timelinePanes).toHaveCount(2);
+});
