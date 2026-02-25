@@ -9,6 +9,13 @@
   --accent: #ffb347;
   --accent-2: #7fd1b9;
   --warning: #ff6b6b;
+
+  /* Pane-kind accent tokens (AA-conscious in dark mode). */
+  --pane-accent-chat-rgb: 127, 209, 185;
+  --pane-accent-workqueue-rgb: 255, 179, 71;
+  --pane-accent-cron-rgb: 162, 155, 254;
+  --pane-accent-timeline-rgb: 86, 204, 242;
+  --pane-accent-fleet-rgb: 244, 114, 182;
   --glow: rgba(255, 179, 71, 0.35);
   --shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
 }
@@ -378,6 +385,8 @@ body::before {
   gap: 10px;
   padding: 14px;
   padding-bottom: 6px;
+  border-color: rgba(var(--pane-accent-rgb, 255, 255, 255), 0.28);
+  box-shadow: inset 0 0 0 1px rgba(var(--pane-accent-rgb, 255, 255, 255), 0.14), var(--shadow);
 }
 
 /* Workqueue pane should be full-height: never show chat composer UI in this pane. */
@@ -459,43 +468,47 @@ body::before {
 
 /* Per-pane subtle treatment */
 .pane-kind-chat {
-  --pane-accent: rgba(127, 209, 185, 0.75);
-  --pane-header-tint: rgba(127, 209, 185, 0.08);
+  --pane-accent-rgb: var(--pane-accent-chat-rgb);
+  --pane-accent: rgba(var(--pane-accent-rgb), 0.78);
+  --pane-header-tint: rgba(var(--pane-accent-rgb), 0.1);
 }
 
 .pane-kind-workqueue {
-  --pane-accent: rgba(255, 179, 71, 0.8);
-  --pane-header-tint: rgba(255, 179, 71, 0.09);
+  --pane-accent-rgb: var(--pane-accent-workqueue-rgb);
+  --pane-accent: rgba(var(--pane-accent-rgb), 0.82);
+  --pane-header-tint: rgba(var(--pane-accent-rgb), 0.11);
 }
 
 .pane-kind-cron {
-  --pane-accent: rgba(162, 155, 254, 0.8);
-  --pane-header-tint: rgba(162, 155, 254, 0.09);
+  --pane-accent-rgb: var(--pane-accent-cron-rgb);
+  --pane-accent: rgba(var(--pane-accent-rgb), 0.82);
+  --pane-header-tint: rgba(var(--pane-accent-rgb), 0.1);
 }
 
 .pane-kind-timeline {
-  --pane-accent: rgba(86, 204, 242, 0.78);
-  --pane-header-tint: rgba(86, 204, 242, 0.08);
+  --pane-accent-rgb: var(--pane-accent-timeline-rgb);
+  --pane-accent: rgba(var(--pane-accent-rgb), 0.8);
+  --pane-header-tint: rgba(var(--pane-accent-rgb), 0.1);
 }
 
 .pane-type-chat {
-  border-color: rgba(127, 209, 185, 0.45);
-  background: rgba(127, 209, 185, 0.12);
+  border-color: rgba(var(--pane-accent-chat-rgb), 0.5);
+  background: rgba(var(--pane-accent-chat-rgb), 0.14);
 }
 
 .pane-type-workqueue {
-  border-color: rgba(255, 179, 71, 0.55);
-  background: rgba(255, 179, 71, 0.12);
+  border-color: rgba(var(--pane-accent-workqueue-rgb), 0.58);
+  background: rgba(var(--pane-accent-workqueue-rgb), 0.14);
 }
 
 .pane-type-cron {
-  border-color: rgba(162, 155, 254, 0.55);
-  background: rgba(162, 155, 254, 0.12);
+  border-color: rgba(var(--pane-accent-cron-rgb), 0.58);
+  background: rgba(var(--pane-accent-cron-rgb), 0.14);
 }
 
 .pane-type-timeline {
-  border-color: rgba(86, 204, 242, 0.55);
-  background: rgba(86, 204, 242, 0.12);
+  border-color: rgba(var(--pane-accent-timeline-rgb), 0.58);
+  background: rgba(var(--pane-accent-timeline-rgb), 0.14);
 }
 
 .pane-agent {
@@ -1211,7 +1224,8 @@ button.send-btn .btn-icon {
   padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.02);
+  border-left: 3px solid var(--pane-accent, rgba(255, 255, 255, 0.2));
+  background: linear-gradient(90deg, rgba(var(--pane-accent-rgb, 255, 255, 255), 0.08), rgba(255, 255, 255, 0.02));
 }
 
 .pane-manager-row[aria-selected="true"] {
@@ -1232,6 +1246,15 @@ button.send-btn .btn-icon {
   gap: 8px;
   align-items: center;
   min-width: 0;
+}
+
+.pane-manager-accent {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  background: rgba(var(--pane-accent-rgb, 255, 255, 255), 0.95);
+  box-shadow: 0 0 0 1px rgba(8, 10, 14, 0.55);
 }
 
 .pane-manager-letter {

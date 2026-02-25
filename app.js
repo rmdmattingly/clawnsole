@@ -1495,9 +1495,11 @@ function renderPaneManager() {
         const idx = panes.findIndex((p) => p.key === pane.key);
         const row = document.createElement('div');
         row.className = 'pane-manager-row';
+        row.classList.add(`pane-kind-${pane.kind || 'chat'}`);
         row.setAttribute('role', 'option');
         row.dataset.index = String(idx);
         row.dataset.paneKey = String(pane.key || '');
+        row.dataset.paneKind = String(pane.kind || 'chat');
         row.dataset.visibleIndex = String(visibleIdx);
         row.setAttribute('aria-selected', visibleIdx === paneManagerUiState.selectedIndex ? 'true' : 'false');
 
@@ -1510,6 +1512,7 @@ function renderPaneManager() {
         row.innerHTML = `
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
+              <span class="pane-manager-accent" data-pane-manager-accent="${escapeHtml(String(pane.kind || 'chat'))}" aria-hidden="true"></span>
               <span class="pane-manager-kind-label">${escapeHtml(paneIdentity)}</span>
               <span class="pane-manager-pane-id" title="Internal pane id">${escapeHtml(String(pane?.key || ''))}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
@@ -4781,6 +4784,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   // Mark pane kind on root for CSS + debugging.
   try {
     elements.root.dataset.paneKind = pane.kind;
+    elements.root.dataset.paneAccentKind = pane.kind;
     elements.root.classList.add(`pane-kind-${pane.kind}`);
   } catch {}
 
@@ -4789,7 +4793,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     if (elements.name) elements.name.textContent = paneLabel(pane);
     if (elements.typeIcon) elements.typeIcon.textContent = paneIcon(pane);
     if (elements.typeText) elements.typeText.textContent = String(paneLabel(pane) || pane.kind || 'chat').toUpperCase();
-    if (elements.typePill) elements.typePill.setAttribute('aria-label', `Pane type: ${paneLabel(pane)}`);
+    if (elements.typePill) {
+      elements.typePill.setAttribute('aria-label', `Pane type: ${paneLabel(pane)}`);
+      elements.typePill.classList.add(`pane-type-${pane.kind}`);
+      elements.typePill.dataset.paneAccent = pane.kind;
+      elements.typePill.dataset.testid = 'pane-type-accent';
+    }
   } catch {}
 
   // Per-pane inline help popover ("What is this pane?")
