@@ -27,7 +27,7 @@ jobs:
       - run: npm run test:smoke
         timeout-minutes: 4
       - run: npx playwright install --with-deps
-        timeout-minutes: 6
+        timeout-minutes: 10
       - run: npm run test:ui
         timeout-minutes: 10
 

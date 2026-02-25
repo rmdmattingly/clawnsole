@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 
-const { startTestEnv, loginAdmin, attachConsoleErrorAsserts } = require('./_helpers');
+const { startTestEnv, loginAdmin, attachConsoleErrorAsserts, addPane } = require('./_helpers');
 
 let env;
 
@@ -27,8 +27,9 @@ test('chat pane: send/receive + upload attachment', async ({ page }, testInfo) =
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
   await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
 
-  const pane = page.locator('[data-pane]').first();
+  const pane = page.locator('[data-pane][data-pane-kind="chat"]').last();
   await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
 
   // Send/receive.
@@ -55,8 +56,9 @@ test('chat pane: stop button can cancel a running response', async ({ page }) =>
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
   await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
 
-  const pane = page.locator('[data-pane]').first();
+  const pane = page.locator('[data-pane][data-pane-kind="chat"]').last();
   await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
 
   await pane.locator('[data-pane-input]').fill('please stream this');
