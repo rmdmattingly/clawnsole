@@ -4538,6 +4538,7 @@ function renderPaneAgentIdentity(pane) {
     }
   }
 
+  paneSetDestinationStrip(pane);
   renderPaneIdentity(pane);
 }
 
@@ -4645,10 +4646,42 @@ function openAgentChooser(pane) {
   agentChooserState = { openForPaneKey: pane.key, el: backdrop };
 }
 
-function paneSetAgent(pane, nextAgentId) {
+function paneHasDraftChanges(pane) {
+  if (!pane?.elements) return false;
+  const draftText = String(pane.elements.input?.value || '').trim();
+  const hasAttachments = Array.isArray(pane.attachments?.files) && pane.attachments.files.length > 0;
+  return Boolean(draftText || hasAttachments);
+}
+
+function paneSetDestinationStrip(pane) {
+  const strip = pane?.elements?.destinationStrip;
+  const valueEl = pane?.elements?.destinationValue;
+  if (!strip || !valueEl) return;
+  if (pane.kind !== 'chat' || pane.role !== 'admin') {
+    strip.hidden = true;
+    return;
+  }
+  strip.hidden = false;
+  const raw = typeof pane.agentId === 'string' ? pane.agentId.trim() : '';
+  const hasSelection = Boolean(raw);
+  const agentId = hasSelection ? normalizeAgentId(raw) : '';
+  const agent = hasSelection ? getAgentRecord(agentId) : null;
+  const displayText = hasSelection ? formatAgentLabel(agent, { includeId: false }) : 'Pick agent…';
+  valueEl.textContent = displayText;
+}
+
+function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true } = {}) {
   if (pane.role !== 'admin') return;
   const next = normalizeAgentId(nextAgentId);
   if (next === pane.agentId) return;
+
+  if (requireDraftConfirm && pane.kind === 'chat' && paneHasDraftChanges(pane)) {
+    const nextAgent = getAgentRecord(next);
+    const nextLabel = formatAgentLabel(nextAgent, { includeId: false }) || next;
+    const ok = window.confirm(`Switch destination to “${nextLabel}”?\n\nYou have an unsent draft/attachment. Switching destination will clear this pane's draft and message history.`);
+    if (!ok) return;
+  }
+
   pane.agentId = next;
   markAgentSeen(next);
   storage.set(ADMIN_DEFAULT_AGENT_KEY, next);
@@ -4727,6 +4760,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     thread: root.querySelector('[data-pane-thread]'),
     scrollDownBtn: root.querySelector('[data-pane-scroll-down]'),
     inputRow: root.querySelector('.chat-input-row'),
+    destinationStrip: root.querySelector('[data-pane-destination-strip]'),
+    destinationButton: root.querySelector('[data-pane-destination-button]'),
+    destinationValue: root.querySelector('[data-pane-destination-value]'),
     input: root.querySelector('[data-pane-input]'),
     commandHints: root.querySelector('[data-pane-command-hints]'),
     fileInput: root.querySelector('[data-pane-file-input]'),
@@ -5950,15 +5986,19 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     renderAgentOptions(elements.agentSelect, pane.agentId);
     renderPaneAgentIdentity(pane);
 
-    // Explicit switching: a single clear button opens a chooser.
+    // Explicit switching: header and destination strip both open the chooser.
     elements.agentButton?.addEventListener('click', () => openAgentChooser(pane));
+    elements.destinationButton?.addEventListener('click', () => openAgentChooser(pane));
 
     // Keep select handler for accessibility/debug (even though the select is hidden by default).
     elements.agentSelect?.addEventListener('change', (event) => {
       paneSetAgent(pane, String(event.target.value || '').trim());
     });
+
+    paneSetDestinationStrip(pane);
   } else {
     if (elements.agentWrap) elements.agentWrap.hidden = true;
+    if (elements.destinationStrip) elements.destinationStrip.hidden = true;
     if (elements.closeBtn) elements.closeBtn.hidden = true;
   }
 

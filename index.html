@@ -119,6 +119,12 @@
 
             <div class="chat-input-row">
               <div class="chat-input-stack">
+                <div class="destination-strip" data-pane-destination-strip data-testid="pane-destination-strip">
+                  <span class="destination-strip-label">Sending to</span>
+                  <button class="destination-strip-target" type="button" data-pane-destination-button aria-label="Change destination" data-testid="pane-destination-button">
+                    <span data-pane-destination-value data-testid="pane-destination-value">main</span>
+                  </button>
+                </div>
                 <textarea data-pane-input placeholder="Message..." data-testid="pane-input"></textarea>
                 <div data-pane-command-hints class="command-hints" aria-live="polite"></div>
                 <div class="attachment-row">
