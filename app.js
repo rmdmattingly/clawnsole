@@ -1679,8 +1679,20 @@ const commandPaletteState = {
   query: '',
   items: [],
   filtered: [],
-  selectedIndex: 0
+  selectedIndex: 0,
+  expandedSubgroups: new Set()
 };
+
+const COMMAND_PALETTE_GROUP_ORDER = ['Panes', 'Navigation', 'Layout', 'Workqueue', 'Agents', 'Advanced'];
+
+function commandPaletteGroupRank(group) {
+  const idx = COMMAND_PALETTE_GROUP_ORDER.indexOf(String(group || ''));
+  return idx >= 0 ? idx : COMMAND_PALETTE_GROUP_ORDER.length;
+}
+
+function commandPaletteSubgroupKey(group, subgroup) {
+  return `${String(group || '')}::${String(subgroup || '')}`;
+}
 
 function isCommandPaletteOpen() {
   return !!globalElements.commandPaletteModal?.classList.contains('open');
@@ -1864,7 +1876,144 @@ function buildCommandPaletteItems() {
     }, 'chat target'));
   }
 
-  return items;
+  return items.map((item) => {
+    const id = String(item.id || '');
+    const label = String(item.label || '');
+    const enriched = { ...item, group: 'Advanced', subgroup: '', priority: 20, kind: 'action' };
+
+    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
+      enriched.group = 'Panes';
+      enriched.priority = 110;
+      return enriched;
+    }
+    if (id.startsWith('cmd:add-')) {
+      enriched.group = 'Navigation';
+      enriched.priority = id.includes(':') ? 55 : 95;
+      if (id.startsWith('cmd:add-timeline:') && id !== 'cmd:add-timeline:all') {
+        enriched.group = 'Agents';
+        enriched.subgroup = 'Timeline targets';
+        enriched.priority = 45;
+      }
+      return enriched;
+    }
+    if (id === 'cmd:reset-layout') {
+      enriched.group = 'Layout';
+      enriched.priority = 100;
+      return enriched;
+    }
+    if (id === 'cmd:toggle-shortcuts') {
+      enriched.group = 'Navigation';
+      enriched.priority = 85;
+      return enriched;
+    }
+    if (id === 'cmd:open-workqueue') {
+      enriched.group = 'Workqueue';
+      enriched.priority = 92;
+      return enriched;
+    }
+    if (id === 'cmd:refresh-agents') {
+      enriched.group = 'Agents';
+      enriched.priority = 90;
+      return enriched;
+    }
+    if (id.startsWith('agent:') || label.startsWith('Agent: ')) {
+      enriched.group = 'Agents';
+      enriched.subgroup = 'Agent targets';
+      enriched.priority = 40;
+      return enriched;
+    }
+    return enriched;
+  });
+}
+
+function getCommandPaletteSelectableIndexes(items) {
+  const selectable = [];
+  items.forEach((item, idx) => {
+    if (item?.kind !== 'header') selectable.push(idx);
+  });
+  return selectable;
+}
+
+function normalizeCommandPaletteSelection(items, preferFirst = false) {
+  const selectable = getCommandPaletteSelectableIndexes(items);
+  if (!selectable.length) {
+    commandPaletteState.selectedIndex = -1;
+    return;
+  }
+  if (preferFirst || !selectable.includes(commandPaletteState.selectedIndex)) {
+    commandPaletteState.selectedIndex = selectable[0];
+    return;
+  }
+  commandPaletteState.selectedIndex = Math.max(0, Math.min(items.length - 1, commandPaletteState.selectedIndex));
+}
+
+function moveCommandPaletteSelection(step) {
+  const items = commandPaletteState.filtered;
+  const selectable = getCommandPaletteSelectableIndexes(items);
+  if (!selectable.length) return;
+  const currentPos = Math.max(0, selectable.indexOf(commandPaletteState.selectedIndex));
+  const nextPos = Math.max(0, Math.min(selectable.length - 1, currentPos + step));
+  commandPaletteState.selectedIndex = selectable[nextPos];
+}
+
+function composeCommandPaletteDisplayItems(scored, query) {
+  const q = String(query || '').trim();
+  const groups = new Map();
+  for (const entry of scored) {
+    const group = String(entry.item.group || 'Advanced');
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push(entry);
+  }
+
+  const out = [];
+  const sortedGroups = Array.from(groups.keys()).sort((a, b) => commandPaletteGroupRank(a) - commandPaletteGroupRank(b) || a.localeCompare(b));
+
+  for (const group of sortedGroups) {
+    out.push({ kind: 'header', id: `header:${group}`, label: group });
+    const groupEntries = groups.get(group);
+    const direct = [];
+    const subgroupMap = new Map();
+    for (const entry of groupEntries) {
+      const subgroup = String(entry.item.subgroup || '');
+      if (!subgroup) {
+        direct.push(entry);
+        continue;
+      }
+      if (!subgroupMap.has(subgroup)) subgroupMap.set(subgroup, []);
+      subgroupMap.get(subgroup).push(entry);
+    }
+
+    direct
+      .sort((a, b) => b.rank - a.rank || String(a.item.label || '').localeCompare(String(b.item.label || '')))
+      .forEach((entry) => out.push(entry.item));
+
+    for (const [subgroup, entries] of Array.from(subgroupMap.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+      const key = commandPaletteSubgroupKey(group, subgroup);
+      const hasQuery = !!q;
+      const expanded = hasQuery || commandPaletteState.expandedSubgroups.has(key);
+      out.push({
+        kind: 'toggle',
+        id: `toggle:${key}`,
+        group,
+        subgroup,
+        label: `${subgroup} (${entries.length})`,
+        detail: expanded ? 'Hide targets' : 'Show targets',
+        shortcut: expanded ? '↩ collapse' : '↩ expand',
+        run: () => {
+          if (commandPaletteState.expandedSubgroups.has(key)) commandPaletteState.expandedSubgroups.delete(key);
+          else commandPaletteState.expandedSubgroups.add(key);
+          filterCommandPalette(commandPaletteState.query);
+        }
+      });
+      if (expanded) {
+        entries
+          .sort((a, b) => b.rank - a.rank || String(a.item.label || '').localeCompare(String(b.item.label || '')))
+          .forEach((entry) => out.push(entry.item));
+      }
+    }
+  }
+
+  return out;
 }
 
 function renderCommandPalette() {
@@ -1881,13 +2030,21 @@ function renderCommandPalette() {
   }
   if (empty) empty.hidden = true;
 
-  const selected = Math.max(0, Math.min(items.length - 1, commandPaletteState.selectedIndex));
-  commandPaletteState.selectedIndex = selected;
+  normalizeCommandPaletteSelection(items);
+  const selected = commandPaletteState.selectedIndex;
 
   items.forEach((item, idx) => {
+    if (item.kind === 'header') {
+      const header = document.createElement('div');
+      header.className = 'command-palette-group';
+      header.textContent = item.label;
+      list.appendChild(header);
+      return;
+    }
+
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'command-palette-item';
+    btn.className = `command-palette-item${item.kind === 'toggle' ? ' command-palette-toggle' : ''}`;
     btn.setAttribute('role', 'option');
     btn.setAttribute('aria-selected', idx === selected ? 'true' : 'false');
     btn.dataset.commandPaletteId = item.id;
@@ -1905,10 +2062,11 @@ function renderCommandPalette() {
     });
 
     btn.addEventListener('click', () => {
+      if (!item.run) return;
       try {
-        item.run?.();
+        item.run();
       } finally {
-        closeCommandPalette({ restoreFocus: false });
+        if (item.kind !== 'toggle') closeCommandPalette({ restoreFocus: false });
       }
     });
 
@@ -1926,15 +2084,16 @@ function filterCommandPalette(query) {
   const q = commandPaletteState.query.trim();
   const scored = commandPaletteState.items
     .map((item) => {
-      const hay = `${item.label || ''} ${item.detail || ''} ${item.id || ''}`;
-      return { item, score: scoreFuzzy(hay, q) };
+      const hay = `${item.label || ''} ${item.detail || ''} ${item.id || ''} ${item.group || ''} ${item.subgroup || ''}`;
+      const score = scoreFuzzy(hay, q);
+      const rank = score + Number(item.priority || 0);
+      return { item, score, rank };
     })
     .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .map((x) => x.item);
+    .sort((a, b) => b.rank - a.rank || commandPaletteGroupRank(a.item.group) - commandPaletteGroupRank(b.item.group));
 
-  commandPaletteState.filtered = scored;
-  commandPaletteState.selectedIndex = 0;
+  commandPaletteState.filtered = composeCommandPaletteDisplayItems(scored, q);
+  normalizeCommandPaletteSelection(commandPaletteState.filtered, true);
   renderCommandPalette();
 }
 
@@ -1947,6 +2106,7 @@ function openCommandPalette() {
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
   commandPaletteState.selectedIndex = 0;
+  commandPaletteState.expandedSubgroups = new Set();
 
   globalElements.commandPaletteModal.classList.add('open');
   globalElements.commandPaletteModal.setAttribute('aria-hidden', 'false');
@@ -6648,24 +6808,25 @@ globalElements.commandPaletteInput?.addEventListener('keydown', (event) => {
   }
   if (key === 'ArrowDown') {
     event.preventDefault();
-    commandPaletteState.selectedIndex = Math.min(commandPaletteState.filtered.length - 1, commandPaletteState.selectedIndex + 1);
+    moveCommandPaletteSelection(1);
     renderCommandPalette();
     return;
   }
   if (key === 'ArrowUp') {
     event.preventDefault();
-    commandPaletteState.selectedIndex = Math.max(0, commandPaletteState.selectedIndex - 1);
+    moveCommandPaletteSelection(-1);
     renderCommandPalette();
     return;
   }
   if (key === 'Enter') {
     event.preventDefault();
     const item = commandPaletteState.filtered[commandPaletteState.selectedIndex];
-    if (!item) return;
+    if (!item || item.kind === 'header') return;
+    if (!item.run) return;
     try {
-      item.run?.();
+      item.run();
     } finally {
-      closeCommandPalette({ restoreFocus: false });
+      if (item.kind !== 'toggle') closeCommandPalette({ restoreFocus: false });
     }
   }
 });
