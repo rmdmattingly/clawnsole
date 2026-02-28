@@ -33,7 +33,29 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await expect(page.locator('#agentsModal')).toHaveClass(/open/);
 
   await expect(page.locator('#agentsLastRefreshed')).toContainText('Last refreshed:');
-  await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText('last seen');
+  await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText(/\d+[smhd]/);
+});
+
+test('agents modal quick filter narrows list and Esc clears it', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const rows = page.locator('#agentsList .agents-row');
+  const initialCount = await rows.count();
+  expect(initialCount).toBeGreaterThan(0);
+
+  const search = page.locator('#agentsSearch');
+  await search.fill('zzzz-no-agent-match');
+  await expect(rows).toHaveCount(0);
+
+  await search.press('Escape');
+  await expect(search).toBeFocused();
+  await expect(search).toHaveValue('');
+  await expect(rows).toHaveCount(initialCount);
 });
 
 test('agents modal quick actions open/reuse chat, timeline, and workqueue context', async ({ page, clawnsole }) => {

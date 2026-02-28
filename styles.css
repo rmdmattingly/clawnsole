@@ -1394,6 +1394,10 @@ button.send-btn .btn-icon {
   color: var(--text);
 }
 
+.agents-status-snippet {
+  color: var(--muted);
+}
+
 .agents-row-actions {
   display: inline-flex;
   align-items: center;

@@ -296,7 +296,7 @@ function getFleetFilter() {
 
 function getFleetSort() {
   const raw = String(storage.get(ADMIN_AGENT_SORT_KEY, 'recent_desc') || 'recent_desc').trim();
-  const allowed = new Set(['recent_desc', 'heartbeat_age_oldest', 'name_asc']);
+  const allowed = new Set(['recent_desc', 'agent_id_asc']);
   return allowed.has(raw) ? raw : 'recent_desc';
 }
 
@@ -310,6 +310,19 @@ function getAgentPaneStateMap() {
     if (s === 'error') out[id] = 'error';
     else if (s === 'offline' && prev !== 'error') out[id] = 'offline';
     else if (s === 'connected' && prev === 'unknown') out[id] = 'connected';
+  }
+  return out;
+}
+
+function getAgentStatusSnippetMap() {
+  const out = {};
+  for (const pane of Array.isArray(paneManager?.panes) ? paneManager.panes : []) {
+    const id = String(pane?.agentId || '').trim();
+    if (!id) continue;
+    const meta = String(pane?.statusMeta || '').trim();
+    if (!meta) continue;
+    const prior = String(out[id] || '').trim();
+    if (!prior || prior.length < meta.length) out[id] = meta;
   }
   return out;
 }
@@ -1465,6 +1478,15 @@ function buildCommandPaletteItems() {
       ''
     ),
     withShortcut(
+      {
+        id: 'cmd:agents-focus-filter',
+        label: 'Agents: Open and focus filter',
+        detail: 'Open Agents modal and place cursor in quick filter',
+        run: () => openAgentsModal()
+      },
+      'g a'
+    ),
+    withShortcut(
       { id: 'cmd:pane-cycle', label: 'Panes: Cycle focus', detail: 'Move focus to next pane', run: () => cyclePaneFocus() },
       '⌘/Ctrl+Shift+K'
     )
@@ -1705,6 +1727,7 @@ function renderAgentsModalList() {
   const pins = getPinnedAgentIds();
   const lastSeenMap = getAgentLastSeenMap();
   const paneStateMap = getAgentPaneStateMap();
+  const statusSnippetMap = getAgentStatusSnippetMap();
   const baseAgents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
 
   const classify = (agentId) => {
@@ -1719,27 +1742,20 @@ function renderAgentsModalList() {
   };
 
   const matches = (agent) => {
+    const id = String(agent?.id || '').trim();
     const label = formatAgentLabel(agent, { includeId: true }).toLowerCase();
-    if (search && !label.includes(search)) return false;
+    const snippet = String(statusSnippetMap[id] || '').toLowerCase();
+    const haystack = `${label} ${id.toLowerCase()} ${snippet}`.trim();
+    if (search && !haystack.includes(search)) return false;
     if (filterMode === 'all') return true;
-    const { bucket } = classify(agent?.id);
+    const { bucket } = classify(id);
     return bucket === filterMode;
   };
 
   const sortAgents = (list) => {
     const arr = (Array.isArray(list) ? list : []).slice();
-    if (sortMode === 'name_asc') {
-      arr.sort((a, b) => formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true })));
-      return arr;
-    }
-    if (sortMode === 'heartbeat_age_oldest') {
-      arr.sort((a, b) => {
-        const ac = classify(a?.id);
-        const bc = classify(b?.id);
-        const byAge = (bc.ageMs || 0) - (ac.ageMs || 0);
-        if (byAge) return byAge;
-        return formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true }));
-      });
+    if (sortMode === 'agent_id_asc') {
+      arr.sort((a, b) => String(a?.id || '').localeCompare(String(b?.id || '')));
       return arr;
     }
     return sortAgentsByLastSeen(arr);
@@ -1771,12 +1787,14 @@ function renderAgentsModalList() {
       const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
       const triage = classify(id);
       const bucketLabel = triage.bucket === 'offline_error' ? 'offline/error' : triage.bucket;
+      const statusSnippet = String(statusSnippetMap[id] || '').trim();
+      const statusSnippetHtml = statusSnippet ? ` · <span class="agents-status-snippet">${escapeHtml(statusSnippet)}</span>` : '';
 
       row.innerHTML = `
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
         <div class="agents-row-main">
           <div class="agents-row-title">${escapeHtml(label)}</div>
-          <div class="agents-row-meta">${escapeHtml(id)} · ${escapeHtml(bucketLabel)} · <span class="agents-age-chip">last seen ${escapeHtml(heartbeatAge)}</span></div>
+          <div class="agents-row-meta">${escapeHtml(id)} · ${escapeHtml(bucketLabel)} · <span class="agents-age-chip">${escapeHtml(heartbeatAge)}</span>${statusSnippetHtml}</div>
         </div>
         <div class="agents-row-actions agents-row-actions-inline" role="group" aria-label="Quick actions for ${escapeHtml(label)}">
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Chat</button>
@@ -6203,6 +6221,14 @@ globalElements.agentsModal?.addEventListener('click', (event) => {
 });
 
 globalElements.agentsSearch?.addEventListener('input', () => renderAgentsModalList());
+globalElements.agentsSearch?.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  event.stopPropagation();
+  globalElements.agentsSearch.value = '';
+  renderAgentsModalList();
+  globalElements.agentsSearch.focus();
+});
 
 globalElements.agentsFilterButtons.forEach((btn) => {
   btn.addEventListener('click', () => {
