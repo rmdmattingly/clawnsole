@@ -172,6 +172,36 @@ test('pane manager: unread-only filter toggle', async ({ page }) => {
   await page.keyboard.press('Escape');
 });
 
+test('pane manager: status stays in sync with pane header while modal is open', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.keyboard.press('Control+P');
+  const modal = page.locator('#paneManagerModal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  const chatHeaderStatus = page.locator('[data-pane][data-pane-kind="chat"]').first().getByTestId('pane-connection-status');
+  const chatManagerState = page.locator('.pane-manager-row', { hasText: 'Chat · main' }).first().locator('.pane-manager-state');
+
+  await expect(chatHeaderStatus).toContainText(/connected|reconnecting/);
+  await expect(chatManagerState).toContainText(/connected|reconnecting/);
+
+  await page.evaluate(() => {
+    const btn = document.getElementById('disconnectBtn');
+    btn?.click();
+  });
+
+  await expect(chatHeaderStatus).toHaveText('disconnected');
+  await expect(chatManagerState).toHaveText('disconnected');
+});
+
 test('pane manager: supports reordering panes', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
