@@ -4,6 +4,15 @@ const { startClawnsoleTestApp } = require('./helpers/pw-app');
 
 let app;
 
+async function getOrCreateChatPane(page) {
+  const panes = page.locator('[data-pane][data-pane-kind="chat"]');
+  if ((await panes.count()) === 0) {
+    await page.getByRole('button', { name: 'Add pane' }).click();
+    await page.getByRole('button', { name: 'Chat pane' }).click();
+  }
+  return page.locator('[data-pane][data-pane-kind="chat"]').first();
+}
+
 test.beforeAll(async () => {
   app = await startClawnsoleTestApp();
 });
@@ -23,7 +32,7 @@ test('agent chooser: opens, shows agents, Esc closes', async ({ page }) => {
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  const pane = page.locator('[data-pane]').first();
+  const pane = await getOrCreateChatPane(page);
   const btn = pane.getByTestId('pane-agent-button');
   const destinationStrip = pane.getByTestId('pane-destination-strip');
   const destinationButton = pane.getByTestId('pane-destination-button');
