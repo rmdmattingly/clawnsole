@@ -4425,6 +4425,7 @@ function buildClientForPane(pane) {
       }
       updateGlobalStatus();
       updateConnectionControls();
+      renderPaneManager();
       paneSetChatEnabled(pane);
     },
     onFrame: (data) => handleGatewayFrame(pane, data),
@@ -4435,6 +4436,7 @@ function buildClientForPane(pane) {
       paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();
+      renderPaneManager();
       paneEnsureHiddenWelcome(pane);
       pane.client.request('sessions.resolve', { key: pane.sessionKey() });
 
@@ -4459,6 +4461,7 @@ function buildClientForPane(pane) {
       paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();
+      renderPaneManager();
     },
     isAuthed: () => uiState.authed,
     checkAuth: async () => {
