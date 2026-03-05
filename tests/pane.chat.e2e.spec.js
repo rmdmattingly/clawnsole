@@ -4,6 +4,15 @@ const { startClawnsoleTestApp } = require('./helpers/pw-app');
 
 let app;
 
+async function getOrCreateChatPane(page) {
+  const panes = page.locator('[data-pane][data-pane-kind="chat"]');
+  if ((await panes.count()) === 0) {
+    await page.getByRole('button', { name: 'Add pane' }).click();
+    await page.getByRole('button', { name: 'Chat pane' }).click();
+  }
+  return page.locator('[data-pane][data-pane-kind="chat"]').first();
+}
+
 test.beforeAll(async () => {
   app = await startClawnsoleTestApp();
 });
@@ -23,7 +32,7 @@ test('pane: chat (admin) renders + can send/receive', async ({ page }) => {
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  const pane = page.locator('[data-pane]').first();
+  const pane = await getOrCreateChatPane(page);
   await expect(pane.locator('[data-pane-input]')).toBeVisible({ timeout: 90000 });
 
   await pane.locator('[data-pane-input]').fill('hello from e2e');
