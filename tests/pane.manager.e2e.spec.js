@@ -78,6 +78,11 @@ test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane 
 
   const timelinePane = page.locator('[data-pane][data-pane-kind="timeline"]').last();
   await expect(timelinePane.getByTestId('pane-type-label')).toHaveText(/^D Timeline · .+/);
+
+  await page.keyboard.press('Control+P');
+  const firstPaneHeaderIdentity = await page.locator('[data-pane]').first().getByTestId('pane-type-label').textContent();
+  await expect(page.locator('.pane-manager-row .pane-manager-kind-label').first()).toHaveText(String(firstPaneHeaderIdentity || '').trim());
+  await expect(page.locator('.pane-manager-row .pane-manager-pane-id').first()).toHaveText(/^[a-zA-Z0-9]+$/);
 });
 
 test('pane manager: quick-find filters and groups by kind', async ({ page }) => {
@@ -104,9 +109,13 @@ test('pane manager: quick-find filters and groups by kind', async ({ page }) => 
   await expect(page.locator('.pane-manager-group-header').nth(2)).toContainText('Cron (1)');
 
   const search = page.getByTestId('pane-manager-search');
-  await search.fill('gateway');
+  await search.fill('cron');
   await expect(page.locator('.pane-manager-row')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row').first()).toContainText('Cron');
+
+  await search.fill('B');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(1);
+  await expect(page.locator('.pane-manager-row').first()).toContainText('Workqueue');
 });
 
 test('pane manager: shows summary + duplicate badge and supports close others', async ({ page }) => {
@@ -143,6 +152,24 @@ test('pane manager: shows summary + duplicate badge and supports close others', 
   await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row')).toHaveCount(2);
   await expect(page.locator('[data-testid="pane-manager-duplicate-badge"]')).toHaveCount(0);
+});
+
+test('pane manager: unread-only filter toggle', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.keyboard.press('Control+P');
+  await page.getByTestId('pane-manager-unread-only').check();
+  await expect(page.locator('.pane-manager-row')).toHaveCount(0);
+
+  await page.keyboard.press('Escape');
 });
 
 test('pane manager: supports reordering panes', async ({ page }) => {

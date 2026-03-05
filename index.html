@@ -59,6 +59,9 @@
           <button id="agentsBtn" class="icon-btn" type="button" aria-label="Open agents" hidden>
             ★
           </button>
+          <button id="fleetBtn" class="icon-btn" type="button" aria-label="Open fleet pane" title="Open Fleet pane (Cmd/Ctrl+Shift+F)" hidden>
+            FL
+          </button>
           <button id="workqueueBtn" class="icon-btn" type="button" aria-label="Open workqueue" hidden>
             WQ
           </button>
@@ -119,6 +122,12 @@
 
             <div class="chat-input-row">
               <div class="chat-input-stack">
+                <div class="destination-strip" data-pane-destination-strip data-testid="pane-destination-strip">
+                  <span class="destination-strip-label">Sending to</span>
+                  <button class="destination-strip-target" type="button" data-pane-destination-button aria-label="Change destination" data-testid="pane-destination-button">
+                    <span data-pane-destination-value data-testid="pane-destination-value">main</span>
+                  </button>
+                </div>
                 <textarea data-pane-input placeholder="Message..." data-testid="pane-input"></textarea>
                 <div data-pane-command-hints class="command-hints" aria-live="polite"></div>
                 <div class="attachment-row">
@@ -238,13 +247,17 @@
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>P</kbd></div><div class="shortcut-desc">Open Pane Manager</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Tab</kbd></div><div class="shortcut-desc">Pane switcher (MRU next)</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></div><div class="shortcut-desc">Pane switcher (MRU previous)</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Pane switcher (layout cycle)</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>]</kbd></div><div class="shortcut-desc">Next unread pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd></div><div class="shortcut-desc">Previous unread pane</div></div>
           </div>
 
           <div class="shortcut-group">
             <h3 class="shortcut-group-title">Pane actions</h3>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Open command palette</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="shortcut-desc">Add pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></div><div class="shortcut-desc">Open/focus Fleet pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>R</kbd></div><div class="shortcut-desc">Refresh agent list</div></div>
           </div>
 
@@ -270,6 +283,7 @@
             <span class="pane-manager-search-label">Quick find</span>
             <input id="paneManagerSearch" class="pane-manager-search" type="search" placeholder="Filter by title, type, or target" autocomplete="off" data-testid="pane-manager-search" />
           </label>
+          <label class="pane-manager-unread-only"><input id="paneManagerUnreadOnly" type="checkbox" data-testid="pane-manager-unread-only" /> Unread only</label>
           <div id="paneManagerList" class="pane-manager-list" role="listbox" aria-label="Open panes" data-testid="pane-manager-list"></div>
           <div id="paneManagerEmpty" class="hint" hidden>No panes match this filter.</div>
         </div>
@@ -408,9 +422,8 @@
             <label class="agents-field">
               <span class="agents-label">Sort</span>
               <select id="agentsSort" aria-label="Sort agents">
-                <option value="recent_desc">Recent heartbeat (newest first)</option>
-                <option value="heartbeat_age_oldest">Last heartbeat age (oldest first)</option>
-                <option value="name_asc">Name (A-Z)</option>
+                <option value="recent_desc">Last active (newest first)</option>
+                <option value="agent_id_asc">Agent id (A-Z)</option>
               </select>
             </label>
             <label class="agents-field">

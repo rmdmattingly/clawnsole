@@ -66,6 +66,43 @@ test('shortcuts modal restores prior focus on close', async ({ page }) => {
   await expect(openBtn).toBeFocused();
 });
 
+test('cmd/ctrl+shift+j focuses previous pane with wraparound from unfocused state', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  const triggerPrevPaneShortcut = async () => page.evaluate(() => {
+    const event = new KeyboardEvent('keydown', {
+      key: 'J',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    });
+    window.dispatchEvent(event);
+  });
+
+  await triggerPrevPaneShortcut();
+  await expect.poll(activePaneIndex).toBe(2);
+});
+
 test('alt+1..3 focuses panes by visible order and does not fire while typing', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
@@ -156,4 +193,57 @@ test('ctrl/cmd+tab switches panes by MRU and is blocked while typing', async ({ 
 
   await page.keyboard.press('ControlOrMeta+Tab');
   await expect.poll(activePaneIndex).toBe(0);
+});
+
+test('add-pane shortcuts do not fire while typing in chat input', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  await expect(panes).toHaveCount(2);
+
+  const input = page.locator('[data-pane-kind="chat"] [data-pane-input]').first();
+  await input.focus();
+  await input.fill('typing');
+
+  await page.keyboard.press('Control+Shift+W');
+
+  await expect(panes).toHaveCount(2);
+});
+
+test('fleet quick action button + keyboard shortcut focus existing timeline pane without duplicates', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  const timelinePanes = page.locator('[data-pane-kind="timeline"]');
+  const fleetBtn = page.locator('#fleetBtn');
+
+  await expect(panes).toHaveCount(2);
+  await expect(timelinePanes).toHaveCount(0);
+
+  await fleetBtn.click();
+  await expect(panes).toHaveCount(3);
+  await expect(timelinePanes).toHaveCount(1);
+
+  await page.keyboard.press('Control+Shift+F');
+  await expect(panes).toHaveCount(3);
+  await expect(timelinePanes).toHaveCount(1);
+
+  await fleetBtn.click({ modifiers: ['Alt'] });
+  await expect(timelinePanes).toHaveCount(2);
 });

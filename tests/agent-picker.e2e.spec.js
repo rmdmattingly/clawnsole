@@ -25,11 +25,15 @@ test('agent chooser: opens, shows agents, Esc closes', async ({ page }) => {
 
   const pane = page.locator('[data-pane]').first();
   const btn = pane.getByTestId('pane-agent-button');
+  const destinationStrip = pane.getByTestId('pane-destination-strip');
+  const destinationButton = pane.getByTestId('pane-destination-button');
   await expect(btn).toBeVisible({ timeout: 20000 });
+  await expect(destinationStrip).toBeVisible();
 
-  // Header should clearly indicate the current agent target.
+  // Header + composer strip should clearly indicate the current target.
   await expect(btn).toContainText(/main/i);
   await expect(btn).toHaveAttribute('aria-label', /current:\s*main/i);
+  await expect(destinationButton).toContainText(/main/i);
 
   await btn.click();
 
@@ -45,6 +49,21 @@ test('agent chooser: opens, shows agents, Esc closes', async ({ page }) => {
   await expect(btn).toContainText(/dev/i);
   await expect(btn).toHaveAttribute('aria-label', /current:\s*dev/i);
   await expect(pane.getByTestId('pane-type-label')).toHaveText(/^A Chat · dev/i);
+
+  // Guard: changing destination with a draft requires confirmation.
+  await pane.getByTestId('pane-input').fill('draft that should block accidental switch');
+  await destinationButton.click();
+  await expect(chooser).toBeVisible();
+
+  let seenConfirm = false;
+  page.once('dialog', async (dialog) => {
+    seenConfirm = true;
+    expect(dialog.message()).toMatch(/unsent draft\/attachment/i);
+    await dialog.dismiss();
+  });
+  await chooser.getByRole('button', { name: /main/i }).click();
+  await expect.poll(() => seenConfirm).toBe(true);
+  await expect(btn).toContainText(/dev/i);
 
   // Re-open and Esc closes.
   await btn.click();

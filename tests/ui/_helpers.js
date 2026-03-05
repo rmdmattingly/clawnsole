@@ -165,12 +165,23 @@ async function startTestEnv() {
   };
 }
 
+async function waitForAdminUiReady(page) {
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.waitForFunction(() => {
+    const overlay = document.querySelector('#loginOverlay');
+    if (!overlay) return false;
+    const hidden = overlay.getAttribute('aria-hidden') === 'true';
+    const closed = !overlay.classList.contains('open');
+    return hidden && closed;
+  }, { timeout: 90000 });
+  await page.locator('#addPaneBtn').waitFor({ state: 'visible', timeout: 90000 });
+}
+
 async function loginAdmin(page, serverPort) {
   await page.goto(`http://127.0.0.1:${serverPort}/`);
   await page.fill('#loginPassword', 'admin');
   await page.click('#loginBtn');
-  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
-  await page.waitForSelector('[data-pane] [data-pane-input]', { timeout: 90000 });
+  await waitForAdminUiReady(page);
 }
 
 function attachConsoleErrorAsserts(page) {
@@ -205,6 +216,11 @@ function attachConsoleErrorAsserts(page) {
 }
 
 async function openAddPaneMenu(page) {
+  await page.waitForFunction(() => {
+    const overlay = document.querySelector('#loginOverlay');
+    if (!overlay) return false;
+    return overlay.getAttribute('aria-hidden') === 'true' && !overlay.classList.contains('open');
+  }, { timeout: 90000 });
   await page.locator('#addPaneBtn').click();
   await page.getByRole('menu', { name: 'Add pane' }).waitFor({ state: 'visible' });
 }
@@ -216,6 +232,7 @@ async function addPane(page, name) {
 
 module.exports = {
   startTestEnv,
+  waitForAdminUiReady,
   loginAdmin,
   attachConsoleErrorAsserts,
   addPane
