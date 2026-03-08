@@ -6561,6 +6561,13 @@ const paneManager = {
   },
   updatePaneLabels() {
     this.panes.forEach((pane) => renderPaneIdentity(pane));
+    this.updatePaneGridLabel();
+  },
+  updatePaneGridLabel() {
+    const grid = globalElements.paneGrid;
+    if (!grid) return;
+    const hasNonChat = this.panes.some((pane) => pane?.kind && pane.kind !== 'chat');
+    grid.setAttribute('aria-label', hasNonChat ? 'Panes' : 'Chat panes');
   },
   updateCloseButtons() {
     const allowClose = roleState.role === 'admin' && this.panes.length > 1;
