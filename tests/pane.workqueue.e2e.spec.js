@@ -18,14 +18,25 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
 
   installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
 
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([{ key: 'ptestchat01', kind: 'chat', agentId: 'main' }])
+    );
+  });
+
   await page.goto(`http://127.0.0.1:${app.serverPort}/`);
   await page.fill('#loginPassword', 'admin');
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   await expect(page.getByTestId('add-pane-btn')).toBeVisible();
+  const paneGrid = page.getByTestId('pane-grid');
+  await expect(paneGrid).toHaveAttribute('aria-label', 'Chat panes');
+
   await page.getByTestId('add-pane-btn').click();
   await page.getByTestId('pane-add-menu-workqueue').click();
+  await expect(paneGrid).toHaveAttribute('aria-label', 'Panes');
 
   const panes = page.locator('[data-pane]');
   const wqPane = panes.last();
