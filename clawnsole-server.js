@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');
 const { createProxyHandlers, assertSecureWsUrl } = require('./proxy');
+const { createAdminPromptsStore } = require('./lib/admin-prompts-store');
 
 function createClawnsoleServer(options = {}) {
   const root = options.root || __dirname;
@@ -31,6 +32,15 @@ function createClawnsoleServer(options = {}) {
     process.env.CLAWNSOLE_RECURRING_PROMPTS_PATH ??
     path.join(openclawHome, `clawnsole-recurring-prompts${cookieSuffix}.json`);
 
+  const adminPromptsDbPath =
+    options.adminPromptsDbPath ??
+    process.env.CLAWNSOLE_ADMIN_PROMPTS_DB_PATH ??
+    path.join(openclawHome, `clawnsole-admin-prompts${cookieSuffix}.sqlite`);
+
+  const adminPromptsStore = createAdminPromptsStore({
+    dbPath: adminPromptsDbPath,
+    legacyPromptsPath: recurringPromptsPath
+  });
 
   const WebSocketImpl = options.WebSocketImpl || WebSocket;
 
@@ -147,23 +157,29 @@ function createClawnsoleServer(options = {}) {
 
 
   function readRecurringPrompts() {
-    try {
-      const raw = fs.readFileSync(recurringPromptsPath, 'utf8');
-      const data = JSON.parse(raw);
-      const prompts = Array.isArray(data?.prompts) ? data.prompts : [];
-      return { prompts };
-    } catch {
-      return { prompts: [] };
-    }
+    return { prompts: adminPromptsStore.listPrompts() };
   }
 
   function writeRecurringPrompts(state) {
     const prompts = Array.isArray(state?.prompts) ? state.prompts : [];
-    const dir = path.dirname(recurringPromptsPath);
-    fs.mkdirSync(dir, { recursive: true });
-    const tmp = recurringPromptsPath + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify({ prompts }, null, 2) + '\n', 'utf8');
-    fs.renameSync(tmp, recurringPromptsPath);
+    const existingById = new Map(adminPromptsStore.listPrompts().map((p) => [p.id, p]));
+    const incomingIds = new Set();
+
+    for (const prompt of prompts) {
+      if (!prompt || !prompt.id) continue;
+      incomingIds.add(prompt.id);
+      if (existingById.has(prompt.id)) {
+        adminPromptsStore.updatePrompt(prompt.id, prompt);
+      } else {
+        adminPromptsStore.createPrompt(prompt);
+      }
+    }
+
+    for (const existing of existingById.values()) {
+      if (!incomingIds.has(existing.id)) {
+        adminPromptsStore.deletePrompt(existing.id);
+      }
+    }
   }
 
   function randomId() {

@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');
+const { createAdminPromptsStore } = require('../lib/admin-prompts-store');
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -141,9 +142,7 @@ async function connectGateway({ wsUrl, token }) {
   };
 }
 
-async function deliverPrompt(gateway, { agentId, message, deviceLabel }) {
-  const sessionKey = computeSessionKey(agentId, deviceLabel);
-  const idempotencyKey = randomId();
+async function deliverPrompt(gateway, { message, sessionKey, idempotencyKey }) {
   const res = await gateway.sendReq('chat.send', {
     sessionKey,
     message,
@@ -164,13 +163,14 @@ function findDuePrompts(prompts, now) {
   });
 }
 
-async function runOnce({ promptsPath, openclawConfigPath, deviceLabel, dryRun = false }) {
-  const state = readJsonFile(promptsPath, { prompts: [] });
-  const prompts = Array.isArray(state?.prompts) ? state.prompts : [];
+async function runOnce({ dbPath, legacyPromptsPath, openclawConfigPath, deviceLabel, dryRun = false }) {
+  const store = createAdminPromptsStore({ dbPath, legacyPromptsPath });
+  const prompts = store.listPrompts();
   const now = Date.now();
 
   const due = findDuePrompts(prompts, now);
   if (due.length === 0) {
+    store.close();
     return { ok: true, delivered: 0, due: 0 };
   }
 
@@ -183,17 +183,18 @@ async function runOnce({ promptsPath, openclawConfigPath, deviceLabel, dryRun = 
   try {
     gateway = await connectGateway({ wsUrl, token });
   } catch (err) {
-    // mark all due as failed
     const message = String(err || 'gateway connect failed');
     due.forEach((p) => {
-      p.lastStatus = 'error';
-      p.lastError = message;
-      p.lastRunAt = now;
-      p.updatedAt = now;
-      const minutes = Number(p.intervalMinutes) || 60;
-      p.nextRunAt = now + Math.max(1, minutes) * 60 * 1000;
+      const minutes = Math.max(1, Number(p.intervalMinutes) || 60);
+      store.updatePrompt(p.id, {
+        lastStatus: 'error',
+        lastError: message,
+        lastRunAt: now,
+        nextRunAt: now + minutes * 60 * 1000,
+        updatedAt: now
+      });
     });
-    writeJsonAtomic(promptsPath, { prompts });
+    store.close();
     return { ok: false, delivered: 0, due: due.length, error: message };
   }
 
@@ -201,27 +202,53 @@ async function runOnce({ promptsPath, openclawConfigPath, deviceLabel, dryRun = 
   for (const prompt of due) {
     const minutes = Math.max(1, Number(prompt.intervalMinutes) || 60);
     const nextRunAt = now + minutes * 60 * 1000;
+    const sessionKey = computeSessionKey(prompt.agentId || 'main', deviceLabel);
+    const idempotencyKey = `admin-prompt:${prompt.id}:${now}`;
+
+    const runInsert = store.insertRun({
+      promptId: prompt.id,
+      idempotencyKey,
+      sessionKey,
+      status: 'pending',
+      createdAt: now
+    });
 
     try {
       if (!dryRun) {
-        await deliverPrompt(gateway, { agentId: prompt.agentId || 'main', message: prompt.message || '', deviceLabel });
+        await deliverPrompt(gateway, {
+          message: prompt.message || '',
+          sessionKey,
+          idempotencyKey
+        });
       }
-      prompt.lastStatus = dryRun ? 'dry_run' : 'ok';
-      prompt.lastError = '';
+      store.updateRun(runInsert.run.id, {
+        status: dryRun ? 'dry_run' : 'ok',
+        error: '',
+        deliveredAt: now
+      });
+      store.updatePrompt(prompt.id, {
+        lastStatus: dryRun ? 'dry_run' : 'ok',
+        lastError: '',
+        lastRunAt: now,
+        nextRunAt,
+        updatedAt: now
+      });
       delivered += 1;
     } catch (err) {
-      prompt.lastStatus = 'error';
-      prompt.lastError = String(err || 'delivery failed');
+      const message = String(err || 'delivery failed');
+      store.updateRun(runInsert.run.id, { status: 'error', error: message });
+      store.updatePrompt(prompt.id, {
+        lastStatus: 'error',
+        lastError: message,
+        lastRunAt: now,
+        nextRunAt,
+        updatedAt: now
+      });
     }
-
-    prompt.lastRunAt = now;
-    prompt.nextRunAt = nextRunAt;
-    prompt.updatedAt = now;
   }
 
-  writeJsonAtomic(promptsPath, { prompts });
   gateway.close();
-
+  store.close();
   return { ok: true, delivered, due: due.length };
 }
 
@@ -230,7 +257,8 @@ async function main() {
 
   const homeDir = process.env.HOME || '';
   const openclawHome = process.env.OPENCLAW_HOME || path.join(homeDir, '.openclaw');
-  const promptsPath = args.promptsPath || args.prompts || process.env.CLAWNSOLE_RECURRING_PROMPTS_PATH || path.join(openclawHome, 'clawnsole-recurring-prompts.json');
+  const legacyPromptsPath = args.promptsPath || args.prompts || process.env.CLAWNSOLE_RECURRING_PROMPTS_PATH || path.join(openclawHome, 'clawnsole-recurring-prompts.json');
+  const dbPath = args.dbPath || process.env.CLAWNSOLE_ADMIN_PROMPTS_DB_PATH || path.join(openclawHome, 'clawnsole-admin-prompts.sqlite');
   const openclawConfigPath = args.openclawConfig || process.env.OPENCLAW_CONFIG || path.join(openclawHome, 'openclaw.json');
   const deviceLabel = args.deviceLabel || 'scheduler';
   const loopSeconds = Number(args.loopSeconds || 60) || 60;
@@ -238,7 +266,7 @@ async function main() {
   const dryRun = Boolean(args.dryRun);
 
   const tick = async () => {
-    const result = await runOnce({ promptsPath, openclawConfigPath, deviceLabel, dryRun });
+    const result = await runOnce({ dbPath, legacyPromptsPath, openclawConfigPath, deviceLabel, dryRun });
     const summary = `[recurring-prompts] ok=${result.ok} due=${result.due} delivered=${result.delivered}${result.error ? ' err=' + result.error : ''}`;
     console.log(summary);
   };
