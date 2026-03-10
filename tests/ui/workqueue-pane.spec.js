@@ -116,3 +116,39 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
   });
   expect(['auto', 'scroll']).toContain(listStyles.overflowY);
 });
+
+test('workqueue pane: groups repetitive routine rows and expands on click', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+
+  await page.evaluate(async () => {
+    const mk = (n) => fetch('/api/workqueue/enqueue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        queue: 'dev-team',
+        title: `[routine] PR review sweep (${n})`,
+        instructions: 'smoke',
+        priority: 10,
+        dedupeKey: ''
+      })
+    });
+    for (let i = 0; i < 12; i += 1) await mk(i);
+  });
+
+  await wqPane.locator('[data-wq-refresh]').click();
+  const groupRow = wqPane.locator('.wq-group-row').first();
+  await expect(groupRow).toBeVisible();
+  await expect(groupRow).toContainText('PR review sweep');
+
+  await groupRow.click();
+  await expect(wqPane.locator('.wq-row')).toHaveCount(12, { timeout: 15000 });
+});

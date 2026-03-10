@@ -2089,6 +2089,25 @@ kbd {
   background: rgba(127, 209, 185, 0.12);
 }
 
+.wq-group-row {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.wq-group-row:hover { background: rgba(255, 255, 255, 0.06); }
+.wq-group-caret { width: 12px; color: var(--muted); }
+.wq-group-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wq-group-count { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color: var(--muted); }
+
 .wq-col {
   min-width: 0;
   overflow: hidden;
