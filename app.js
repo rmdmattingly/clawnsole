@@ -6938,7 +6938,6 @@ function cycleUnreadPaneFocus(direction = 1) {
   focusPaneIndex(next);
   return true;
 }
-}
 
 window.addEventListener('keydown', (event) => {
   const isEditableTarget = (() => {
