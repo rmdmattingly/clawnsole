@@ -1759,16 +1759,28 @@ function buildCommandPaletteItems() {
       '⌘/Ctrl+Shift+C'
     ),
     withShortcut(
-      { id: 'cmd:add-workqueue', label: 'Open pane: Workqueue', detail: 'Create a new Workqueue pane', run: () => paneManager.addPane('workqueue') },
+      { id: 'cmd:add-workqueue', label: 'Open pane: Workqueue', detail: 'Focus matching Workqueue pane target (or create one)', run: () => paneManager.addPane('workqueue') },
       '⌘/Ctrl+Shift+W'
     ),
     withShortcut(
-      { id: 'cmd:add-cron', label: 'Open pane: Cron', detail: 'Create a new Cron pane', run: () => paneManager.addPane('cron') },
+      { id: 'cmd:add-workqueue-force', label: 'Open pane: Workqueue (open anyway)', detail: 'Create a new Workqueue pane even if matching target exists', run: () => paneManager.addPane('workqueue', { forceNew: true }) },
+      ''
+    ),
+    withShortcut(
+      { id: 'cmd:add-cron', label: 'Open pane: Cron', detail: 'Focus matching Cron pane target (or create one)', run: () => paneManager.addPane('cron') },
       '⌘/Ctrl+Shift+R'
     ),
     withShortcut(
-      { id: 'cmd:add-timeline', label: 'Open pane: Timeline', detail: 'Create a new Timeline pane', run: () => paneManager.addPane('timeline') },
+      { id: 'cmd:add-cron-force', label: 'Open pane: Cron (open anyway)', detail: 'Create a new Cron pane even if matching target exists', run: () => paneManager.addPane('cron', { forceNew: true }) },
+      ''
+    ),
+    withShortcut(
+      { id: 'cmd:add-timeline', label: 'Open pane: Timeline', detail: 'Focus matching Timeline pane target (or create one)', run: () => paneManager.addPane('timeline') },
       '⌘/Ctrl+Shift+T'
+    ),
+    withShortcut(
+      { id: 'cmd:add-timeline-force', label: 'Open pane: Timeline (open anyway)', detail: 'Create a new Timeline pane even if matching target exists', run: () => paneManager.addPane('timeline', { forceNew: true }) },
+      ''
     ),
     withShortcut(
       { id: 'cmd:open-fleet', label: 'Open pane: Fleet', detail: 'Focus existing Fleet pane or open one', run: () => openFleetPane() },
@@ -6273,11 +6285,31 @@ const paneManager = {
   },
   addPane(kind = 'chat', options = {}) {
     if (roleState.role !== 'admin') return;
-    if (this.panes.length >= this.maxPanes) return;
 
     const normalizedKind = normalizePaneKind(kind);
     const nextQueue = String(options?.queue || 'dev-team').trim() || 'dev-team';
     const nextCronAgentId = String(options?.cronAgentId || '').trim();
+    const forceNew = Boolean(options?.forceNew);
+
+    const findMatchingPane = () => {
+      if (normalizedKind === 'workqueue') {
+        return this.panes.find((p) => p?.role === 'admin' && p.kind === 'workqueue' && String(p.workqueue?.queue || '').trim() === nextQueue) || null;
+      }
+      if (normalizedKind === 'cron' || normalizedKind === 'timeline') {
+        return this.panes.find((p) => p?.role === 'admin' && p.kind === normalizedKind && String(p.cronAgentId || '').trim() === nextCronAgentId) || null;
+      }
+      return null;
+    };
+
+    if (!forceNew) {
+      const existing = findMatchingPane();
+      if (existing) {
+        this.focusPanePrimary(existing);
+        return existing;
+      }
+    }
+
+    if (this.panes.length >= this.maxPanes) return;
 
     if (normalizedKind === 'workqueue') {
       const pane = createPane({
@@ -6398,21 +6430,21 @@ const paneManager = {
       wqBtn.className = 'pane-add-menu__item';
       wqBtn.textContent = 'New Workqueue pane';
       wqBtn.dataset.testid = 'pane-add-menu-workqueue';
-      wqBtn.title = 'Shortcut: Ctrl/Cmd+Shift+W';
+      wqBtn.title = 'Shortcut: Ctrl/Cmd+Shift+W (Alt/Option+click = Open anyway)';
 
       const cronBtn = document.createElement('button');
       cronBtn.type = 'button';
       cronBtn.className = 'pane-add-menu__item';
       cronBtn.textContent = 'New Cron pane';
       cronBtn.dataset.testid = 'pane-add-menu-cron';
-      cronBtn.title = 'Shortcut: Ctrl/Cmd+Shift+R';
+      cronBtn.title = 'Shortcut: Ctrl/Cmd+Shift+R (Alt/Option+click = Open anyway)';
 
       const timelineBtn = document.createElement('button');
       timelineBtn.type = 'button';
       timelineBtn.className = 'pane-add-menu__item';
       timelineBtn.textContent = 'New Timeline pane';
       timelineBtn.dataset.testid = 'pane-add-menu-timeline';
-      timelineBtn.title = 'Shortcut: Ctrl/Cmd+Shift+T';
+      timelineBtn.title = 'Shortcut: Ctrl/Cmd+Shift+T (Alt/Option+click = Open anyway)';
 
       menu.appendChild(chatBtn);
       menu.appendChild(wqBtn);
@@ -6426,7 +6458,7 @@ const paneManager = {
         if (event?.stopPropagation) event.stopPropagation();
 
         this.closeAddPaneMenu();
-        this.addPane(kind);
+        this.addPane(kind, { forceNew: !!event?.altKey });
 
         queueMicrotask(() => {
           state.menuActionInFlight = false;
@@ -6923,10 +6955,10 @@ window.addEventListener('keydown', (event) => {
 
   // Add-pane shortcuts (admin-only)
   // Ctrl/Cmd+Shift+C → new chat
-  // Ctrl/Cmd+Shift+W → new workqueue
-  // Ctrl/Cmd+Shift+R → new cron
-  // Ctrl/Cmd+Shift+T → new timeline
-  const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey;
+  // Ctrl/Cmd+Shift+W → focus matching workqueue target (Alt/Option adds anyway)
+  // Ctrl/Cmd+Shift+R → focus matching cron target (Alt/Option adds anyway)
+  // Ctrl/Cmd+Shift+T → focus matching timeline target (Alt/Option adds anyway)
+  const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey;
   if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target)) {
     const key = String(event.key || '').toLowerCase();
     const map = { c: 'chat', w: 'workqueue', r: 'cron', t: 'timeline' };
@@ -6935,7 +6967,7 @@ window.addEventListener('keydown', (event) => {
       // Don't hijack add-pane shortcuts while typing in inputs/editors.
       event.preventDefault();
       paneManager.closeAddPaneMenu();
-      paneManager.addPane(kind);
+      paneManager.addPane(kind, { forceNew: !!event.altKey });
       return;
     }
   }
