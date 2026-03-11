@@ -2812,6 +2812,37 @@ async function renderWorkqueuePane(rootEl, { queue = '' } = {}) {
 window.__debug = window.__debug || {};
 window.__debug.renderWorkqueuePane = renderWorkqueuePane;
 
+function getWorkqueueItemRepo(item) {
+  const repo = String(item?.meta?.repo || '').trim();
+  if (repo) return repo;
+
+  const candidates = [String(item?.meta?.url || ''), String(item?.meta?.issueUrl || ''), String(item?.instructions || '')];
+  for (const text of candidates) {
+    const match = text.match(/github\.com\/([^\s/]+\/[^\s/#?]+)/i);
+    if (match?.[1]) return String(match[1]).trim();
+  }
+  return '';
+}
+
+function getWorkqueueItemSource(item) {
+  const kind = String(item?.meta?.kind || '').trim().toLowerCase();
+  const title = String(item?.title || '').trim().toLowerCase();
+  if (kind.includes('coordination') || title.startsWith('[coordination]')) return 'coordination';
+  if (kind.includes('issue') || title.startsWith('[issue]')) return 'issue';
+  if (kind.includes('routine') || kind.includes('pr-review') || title.startsWith('[routine]')) return 'routine';
+  return 'other';
+}
+
+function applyWorkqueueQuickFilters(items, quickFilters) {
+  const sourceSet = new Set(Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((x) => String(x || '').trim()).filter(Boolean) : []);
+  const repoSet = new Set(Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((x) => String(x || '').trim()).filter(Boolean) : []);
+
+  return (Array.isArray(items) ? items : []).filter((it) => {
+    if (sourceSet.size && !sourceSet.has(getWorkqueueItemSource(it))) return false;
+    if (repoSet.size && !repoSet.has(getWorkqueueItemRepo(it))) return false;
+    return true;
+  });
+}
 
 async function fetchAndRenderWorkqueueItemsForPane(pane) {
   if (!pane || pane.kind !== 'workqueue') return;
@@ -2857,7 +2888,8 @@ function renderWorkqueuePaneItems(pane) {
     if (scope === 'assigned') return !!activeTarget && owner === activeTarget;
     return true;
   });
-  const items = sortWorkqueueItems(scopedItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
+  const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
 
   if (empty) {
     const hasItems = items.length > 0;
@@ -4790,7 +4822,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, cronAgentId, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -4838,6 +4870,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
       scopeFilter: scopeFilter === 'assigned' || scopeFilter === 'unassigned' ? scopeFilter : 'all',
+      quickFilters: {
+        sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
+        repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
+      },
       items: [],
       selectedItemId: null,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
@@ -5023,6 +5059,23 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <button type="button" class="wq-scope-btn" data-wq-scope="all">All</button>
           </div>
 
+          <div class="wq-field" data-wq-source-group role="group" aria-label="Filter by source">
+            <span class="wq-label">Source</span>
+            <div class="wq-scope">
+              <button type="button" class="wq-scope-btn" data-wq-source="issue">Issue</button>
+              <button type="button" class="wq-scope-btn" data-wq-source="routine">Routine</button>
+              <button type="button" class="wq-scope-btn" data-wq-source="coordination">Coordination</button>
+              <button type="button" class="wq-scope-btn" data-wq-source="other">Other</button>
+            </div>
+          </div>
+
+          <div class="wq-field" data-wq-repo-group role="group" aria-label="Filter by repo">
+            <span class="wq-label">Repo</span>
+            <div class="wq-scope" data-wq-repo-chips></div>
+          </div>
+
+          <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
+          <button data-wq-clear-quick class="secondary" type="button">Clear filters</button>
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
 
           <div class="wq-sort" role="group" aria-label="Sort workqueue items">
@@ -5119,6 +5172,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const statusOptionsEl = elements.thread.querySelector('[data-wq-status-options]');
     const statusDetailsEl = elements.thread.querySelector('[data-wq-status-details]');
     const statusClearBtn = elements.thread.querySelector('[data-wq-status-clear]');
+    const sourceBtns = Array.from(elements.thread.querySelectorAll('[data-wq-source]'));
+    const repoChipsEl = elements.thread.querySelector('[data-wq-repo-chips]');
+    const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
+    const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
 
     const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
@@ -5135,6 +5192,47 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       return sel;
     };
 
+    const initQuick = pane.workqueue?.quickFilters || {};
+    const sourceSet = new Set(Array.isArray(initQuick.sources) ? initQuick.sources.map((x) => String(x || '').trim()).filter(Boolean) : []);
+    const repoSet = new Set(Array.isArray(initQuick.repos) ? initQuick.repos.map((x) => String(x || '').trim()).filter(Boolean) : []);
+
+    const persistQuickFilters = () => {
+      pane.workqueue.quickFilters = { sources: Array.from(sourceSet), repos: Array.from(repoSet) };
+      paneManager.persistAdminPanes();
+    };
+
+    const updateQuickFilterUi = () => {
+      sourceBtns.forEach((btn) => {
+        const key = String(btn.getAttribute('data-wq-source') || '').trim();
+        const active = sourceSet.has(key);
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+
+      const repos = Array.from(new Set((Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : []).map(getWorkqueueItemRepo).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+      if (repoChipsEl) {
+        repoChipsEl.innerHTML = '';
+        for (const repo of repos) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'wq-scope-btn';
+          btn.setAttribute('data-wq-repo', repo);
+          btn.textContent = repo;
+          const active = repoSet.has(repo);
+          btn.classList.toggle('active', active);
+          btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+          btn.addEventListener('click', () => {
+            if (repoSet.has(repo)) repoSet.delete(repo);
+            else repoSet.add(repo);
+            updateQuickFilterUi();
+            renderWorkqueuePaneItems(pane);
+            persistQuickFilters();
+          });
+          repoChipsEl.appendChild(btn);
+        }
+      }
+    };
+
     const applyStatuses = async (next, { closeMenu = false } = {}) => {
       statusSet.clear();
       for (const s of next) statusSet.add(s);
@@ -5142,6 +5240,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       renderStatusMultiSelect();
       if (closeMenu) statusDetailsEl?.removeAttribute('open');
       await fetchAndRenderWorkqueueItemsForPane(pane);
+      updateQuickFilterUi();
       paneManager.persistAdminPanes();
     };
 
@@ -5166,6 +5265,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         renderStatusMultiSelect();
       }
       await fetchAndRenderWorkqueueItemsForPane(pane);
+      updateQuickFilterUi();
       paneManager.persistAdminPanes();
     };
 
@@ -5356,6 +5456,37 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       btn.addEventListener('click', () => setScope(btn.getAttribute('data-wq-scope')));
     });
     updateScopeUi();
+
+    sourceBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = String(btn.getAttribute('data-wq-source') || '').trim();
+        if (!key) return;
+        if (sourceSet.has(key)) sourceSet.delete(key);
+        else sourceSet.add(key);
+        updateQuickFilterUi();
+        renderWorkqueuePaneItems(pane);
+        persistQuickFilters();
+      });
+    });
+
+    clawnsoleOnlyBtn?.addEventListener('click', () => {
+      sourceSet.clear();
+      repoSet.clear();
+      repoSet.add('rmdmattingly/clawnsole');
+      updateQuickFilterUi();
+      renderWorkqueuePaneItems(pane);
+      persistQuickFilters();
+    });
+
+    clearQuickBtn?.addEventListener('click', () => {
+      sourceSet.clear();
+      repoSet.clear();
+      updateQuickFilterUi();
+      renderWorkqueuePaneItems(pane);
+      persistQuickFilters();
+    });
+
+    updateQuickFilterUi();
 
     // Sort controls (client-side): stable sorting with a status-grouping default.
     const sortBtns = Array.from(elements.thread.querySelectorAll('[data-wq-sort]'));
@@ -6176,9 +6307,13 @@ const paneManager = {
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'claimed', 'in_progress'];
           const scopeFilter = item.scopeFilter === 'assigned' || item.scopeFilter === 'unassigned' ? item.scopeFilter : 'all';
+          const quickFilters = {
+            sources: Array.isArray(item?.quickFilters?.sources) ? item.quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
+            repos: Array.isArray(item?.quickFilters?.repos) ? item.quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
+          };
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, queue, statusFilter, scopeFilter, sortKey, sortDir };
+          return { key, kind, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
@@ -6229,6 +6364,10 @@ const paneManager = {
           queue: pane.workqueue?.queue || 'dev-team',
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
           scopeFilter: pane.workqueue?.scopeFilter || 'all',
+          quickFilters: {
+            sources: Array.isArray(pane.workqueue?.quickFilters?.sources) ? pane.workqueue.quickFilters.sources : [],
+            repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos : []
+          },
           sortKey: pane.workqueue?.sortKey || 'priority',
           sortDir: pane.workqueue?.sortDir || 'desc'
         };
