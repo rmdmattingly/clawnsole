@@ -13,6 +13,15 @@ const { test, expect } = require('@playwright/test');
 
 const { installPageFailureAssertions } = require('./helpers/pw-assertions');
 
+async function getOrCreateChatPane(page) {
+  const panes = page.locator('[data-pane][data-pane-kind="chat"]');
+  if ((await panes.count()) === 0) {
+    await page.getByRole('button', { name: 'Add pane' }).click();
+    await page.getByRole('button', { name: 'Chat pane' }).click();
+  }
+  return page.locator('[data-pane][data-pane-kind="chat"]').first();
+}
+
 test.describe('@deploy Clawnsole deploy e2e', () => {
   test('login as admin, connect, send prompt, receive assistant response, remain logged in', async ({ page }) => {
     const baseUrl = process.env.BASE_URL || process.env.CLAWNSOLE_BASE_URL || '';
@@ -44,7 +53,7 @@ test.describe('@deploy Clawnsole deploy e2e', () => {
     // Wait for pane to connect.
     await page.waitForSelector('[data-pane][data-connected="true"] [data-pane-status]', { timeout: 30000 });
 
-    const pane = page.locator('[data-pane]').first();
+    const pane = await getOrCreateChatPane(page);
     const msg = `e2e deploy ping ${Date.now()}`;
     await pane.locator('[data-pane-input]').fill(msg);
     await pane.locator('[data-pane-send]').click();
