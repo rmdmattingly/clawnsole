@@ -2089,7 +2089,22 @@ function openFleetPane({ forceNew = false } = {}) {
   paneManager.focusPanePrimary(pane);
 }
 
-function openAgentWorkqueueFromFleet() {
+function setWorkqueueEnqueueTargetAgent(pane, agentId) {
+  if (!pane || pane.kind !== 'workqueue') return;
+  const target = normalizeAgentId(agentId || 'main');
+  pane.workqueue.enqueueAssignTo = target;
+
+  try {
+    const claimAgentSelect = pane.elements?.thread?.querySelector?.('[data-wq-claim-agent]');
+    if (!claimAgentSelect) return;
+    const exists = Array.from(claimAgentSelect.options || []).some((opt) => String(opt.value || '') === target);
+    if (!exists) return;
+    claimAgentSelect.value = target;
+  } catch {}
+}
+
+function openAgentWorkqueueFromFleet(agentId) {
+  const target = normalizeAgentId(agentId || 'main');
   const preferredQueue =
     String(workqueueState?.selectedQueue || '').trim() ||
     String(findExistingPane('workqueue')?.workqueue?.queue || '').trim() ||
@@ -2098,9 +2113,10 @@ function openAgentWorkqueueFromFleet() {
   const pane =
     findExistingPane('workqueue', (p) => String(p.workqueue?.queue || '').trim() === preferredQueue) ||
     findExistingPane('workqueue') ||
-    paneManager.addPane('workqueue', { queue: preferredQueue });
+    paneManager.addPane('workqueue', { queue: preferredQueue, enqueueAssignTo: target });
   if (!pane) return;
 
+  setWorkqueueEnqueueTargetAgent(pane, target);
   paneManager.focusPanePrimary(pane);
 }
 
@@ -2218,7 +2234,7 @@ function renderAgentsModalList() {
           const action = String(btn.getAttribute('data-agent-action') || '').trim();
           if (action === 'open-chat') openAgentChatFromFleet(id);
           else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
-          else if (action === 'open-workqueue') openAgentWorkqueueFromFleet();
+          else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(id);
         });
       });
 
@@ -4790,7 +4806,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, sortKey, sortDir, cronAgentId, enqueueAssignTo, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -4841,7 +4857,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       items: [],
       selectedItemId: null,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
-      sortDir: sortDir === 'asc' ? 'asc' : 'desc'
+      sortDir: sortDir === 'asc' ? 'asc' : 'desc',
+      enqueueAssignTo: normalizeAgentId(enqueueAssignTo || 'main')
     },
     cronAgentId: typeof cronAgentId === 'string' ? cronAgentId.trim() : '',
     connected: false,
@@ -5402,6 +5419,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         opt.textContent = formatAgentLabel(a);
         claimAgentSelect.appendChild(opt);
       }
+
+      const preferred = normalizeAgentId(pane.workqueue.enqueueAssignTo || 'main');
+      const hasPreferred = Array.from(claimAgentSelect.options || []).some((opt) => String(opt.value || '') === preferred);
+      claimAgentSelect.value = hasPreferred ? preferred : '';
     }
 
     // Enqueue (inline form).

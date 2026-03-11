@@ -80,6 +80,9 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await firstRow.locator('[data-agent-action="open-timeline"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
 
+  const firstAgentId = await firstRow.locator('[data-agent-action="open-workqueue"]').first().getAttribute('data-agent-id');
   await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
-  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]');
+  await expect(wqPane).toHaveCount(1);
+  await expect(wqPane.locator('[data-wq-claim-agent]')).toHaveValue(firstAgentId || 'main');
 });
