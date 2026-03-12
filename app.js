@@ -2491,6 +2491,7 @@ function renderWorkqueueItems() {
     const col = document.createElement('section');
     col.className = 'wq-board-col';
     col.setAttribute('data-wq-col', colDef.status);
+    col.setAttribute('data-testid', `wq-col-${colDef.status}`);
 
     const colItems = Array.isArray(itemsByStatus[colDef.status]) ? itemsByStatus[colDef.status] : [];
 
@@ -2503,6 +2504,7 @@ function renderWorkqueueItems() {
 
     const lane = document.createElement('div');
     lane.className = 'wq-board-lane';
+    lane.setAttribute('data-testid', `wq-lane-${colDef.status}`);
 
     // Drag/drop: drop a card to change status.
     lane.addEventListener('dragover', (e) => {
@@ -2529,6 +2531,7 @@ function renderWorkqueueItems() {
       card.className = 'wq-card';
       if (it.id && it.id === workqueueState.selectedItemId) card.classList.add('selected');
       if (it.id) card.setAttribute('data-wq-item', it.id);
+      card.setAttribute('data-testid', 'wq-card');
 
       // Allow dragging the whole card.
       card.draggable = true;
@@ -2607,8 +2610,8 @@ function renderWorkqueueInspect(item) {
   const actions = document.createElement('div');
   actions.className = 'wq-inspect-actions';
   actions.innerHTML = `
-    <button type="button" class="btn" data-wq-action="edit">Edit</button>
-    <button type="button" class="btn danger" data-wq-action="delete">Delete</button>
+    <button type="button" class="btn" data-wq-action="edit" data-testid="wq-inspect-edit">Edit</button>
+    <button type="button" class="btn danger" data-wq-action="delete" data-testid="wq-inspect-delete">Delete</button>
   `;
 
   const meta = root.querySelector('.wq-inspect-meta');
