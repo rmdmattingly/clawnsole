@@ -288,11 +288,11 @@
       </div>
     </div>
 
-    <div id="workqueueModal" class="modal" aria-hidden="true">
+    <div id="workqueueModal" class="modal" aria-hidden="true" data-testid="workqueue-modal">
       <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="workqueueTitle">
         <div class="modal-header">
           <h2 id="workqueueTitle">Workqueue</h2>
-          <button id="workqueueCloseBtn" class="icon-btn" type="button" aria-label="Close workqueue">
+          <button id="workqueueCloseBtn" class="icon-btn" type="button" aria-label="Close workqueue" data-testid="wq-close-btn">
             ✕
           </button>
         </div>
@@ -300,11 +300,11 @@
           <div class="wq-toolbar">
             <label class="wq-field">
               Queue
-              <select id="wqQueueSelect" aria-label="Select workqueue"></select>
+              <select id="wqQueueSelect" aria-label="Select workqueue" data-testid="wq-queue-select"></select>
             </label>
             <div class="wq-field">
               Status
-              <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters"></div>
+              <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters" data-testid="wq-status-filters"></div>
             </div>
             <label class="wq-field">
               Auto-refresh
@@ -318,7 +318,7 @@
                 </select>
               </div>
             </label>
-            <button id="wqRefreshBtn" class="secondary" type="button">Refresh</button>
+            <button id="wqRefreshBtn" class="secondary" type="button" data-testid="wq-refresh-btn">Refresh</button>
           </div>
 
           <div class="wq-actions" aria-label="Workqueue actions">
@@ -328,7 +328,7 @@
                 <div class="wq-action-grid">
                   <label class="wq-action-field">
                     Title
-                    <input id="wqEnqueueTitle" type="text" placeholder="Short title" />
+                    <input id="wqEnqueueTitle" type="text" placeholder="Short title" data-testid="wq-enqueue-title" />
                   </label>
                   <label class="wq-action-field">
                     Priority
@@ -336,7 +336,7 @@
                   </label>
                   <label class="wq-action-field" style="grid-column: 1 / -1;">
                     Instructions
-                    <textarea id="wqEnqueueInstructions" rows="4" placeholder="What should the worker do?"></textarea>
+                    <textarea id="wqEnqueueInstructions" rows="4" placeholder="What should the worker do?" data-testid="wq-enqueue-instructions"></textarea>
                   </label>
                   <label class="wq-action-field" style="grid-column: 1 / -1;">
                     Dedupe Key (optional)
@@ -344,7 +344,7 @@
                   </label>
                 </div>
                 <div class="wq-action-buttons">
-                  <button id="wqEnqueueBtn" class="primary" type="button">Enqueue</button>
+                  <button id="wqEnqueueBtn" class="primary" type="button" data-testid="wq-enqueue-btn">Enqueue</button>
                 </div>
               </div>
 
@@ -365,7 +365,7 @@
                 </div>
               </div>
             </div>
-            <div id="wqActionStatus" class="wq-action-status" role="status" aria-live="polite"></div>
+            <div id="wqActionStatus" class="wq-action-status" role="status" aria-live="polite" data-testid="wq-action-status"></div>
           </div>
 
           <div class="wq-layout">
@@ -378,13 +378,13 @@
                 <button type="button" class="wq-list-sort" data-wq-modal-sort="claimedBy">Claimed By</button>
                 <button type="button" class="wq-list-sort" data-wq-modal-sort="leaseUntil">Lease</button>
               </div>
-              <div id="wqListBody" class="wq-list-body"></div>
-              <div id="wqListEmpty" class="hint" hidden>No items match.</div>
+              <div id="wqListBody" class="wq-list-body" data-testid="wq-list-body"></div>
+              <div id="wqListEmpty" class="hint" hidden data-testid="wq-list-empty">No items match.</div>
             </div>
 
             <div class="wq-inspect" aria-label="Inspect workqueue item">
               <div class="wq-inspect-header">Item</div>
-              <div id="wqInspectBody" class="wq-inspect-body">
+              <div id="wqInspectBody" class="wq-inspect-body" data-testid="wq-inspect-body">
                 <div class="hint">Select an item to inspect.</div>
               </div>
             </div>
