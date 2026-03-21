@@ -2089,6 +2089,46 @@ kbd {
   background: rgba(127, 209, 185, 0.12);
 }
 
+.wq-row.wq-row-nested .wq-col.title {
+  padding-left: 18px;
+}
+
+.wq-group-row {
+  width: 100%;
+  border: none;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px 12px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.wq-group-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.wq-group-row.selected {
+  background: rgba(127, 209, 185, 0.14);
+}
+
+.wq-group-title {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wq-group-count {
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .wq-col {
   min-width: 0;
   overflow: hidden;
