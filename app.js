@@ -3428,6 +3428,16 @@ renderPulse();
 const ADMIN_PANES_KEY = 'clawnsole.admin.panes.v1';
 // Layout is inferred from pane count; no manual layout toggle.
 const ADMIN_DEFAULT_AGENT_KEY = 'clawnsole.admin.agentId';
+const WORKQUEUE_SCOPE_PREF_KEY = 'clawnsole.admin.workqueue.scope.v1';
+
+function normalizeWorkqueueScope(scope) {
+  return scope === 'assigned' || scope === 'unassigned' ? scope : 'all';
+}
+
+function getDefaultWorkqueueScope() {
+  // Low-noise triage default: focus on unassigned work first.
+  return normalizeWorkqueueScope(storage.get(WORKQUEUE_SCOPE_PREF_KEY, 'unassigned'));
+}
 
 function computeBaseDeviceLabel() {
   const base = globalElements.deviceId.value.trim() || 'device';
@@ -4837,7 +4847,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
-      scopeFilter: scopeFilter === 'assigned' || scopeFilter === 'unassigned' ? scopeFilter : 'all',
+      scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScope()),
       items: [],
       selectedItemId: null,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
@@ -5347,7 +5357,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       });
     };
     const setScope = (scope) => {
-      pane.workqueue.scopeFilter = scope === 'assigned' || scope === 'unassigned' ? scope : 'all';
+      pane.workqueue.scopeFilter = normalizeWorkqueueScope(scope);
+      storage.set(WORKQUEUE_SCOPE_PREF_KEY, pane.workqueue.scopeFilter);
       updateScopeUi();
       renderWorkqueuePaneItems(pane);
       paneManager.persistAdminPanes();
@@ -6175,7 +6186,7 @@ const paneManager = {
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'claimed', 'in_progress'];
-          const scopeFilter = item.scopeFilter === 'assigned' || item.scopeFilter === 'unassigned' ? item.scopeFilter : 'all';
+          const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
           return { key, kind, queue, statusFilter, scopeFilter, sortKey, sortDir };
@@ -6211,7 +6222,7 @@ const paneManager = {
       kind: 'workqueue',
       queue: 'dev-team',
       statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
-      scopeFilter: 'all',
+      scopeFilter: getDefaultWorkqueueScope(),
       sortKey: 'priority',
       sortDir: 'desc'
     };
@@ -6255,7 +6266,7 @@ const paneManager = {
       kind: 'workqueue',
       queue: 'dev-team',
       statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
-      scopeFilter: 'all',
+      scopeFilter: getDefaultWorkqueueScope(),
       sortKey: 'priority',
       sortDir: 'desc'
     };
@@ -6286,7 +6297,7 @@ const paneManager = {
         kind: 'workqueue',
         queue: nextQueue,
         statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
-        scopeFilter: 'all',
+        scopeFilter: getDefaultWorkqueueScope(),
         closable: true
       });
       this.panes.push(pane);
