@@ -192,3 +192,72 @@ test('pane: workqueue scope filter toggles deterministic row counts', async ({ p
   await wqPane.locator('[data-wq-scope="assigned"]').click();
   await expect(rowsWithPrefix()).toHaveCount(0);
 });
+
+test('pane: workqueue modal golden path covers kanban transition + edit/delete', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  // Open a Workqueue pane first (acceptance: pane-first flow).
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue').click();
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]').last()).toBeVisible();
+
+  await page.locator('#workqueueBtn').click();
+  const modal = page.getByTestId('workqueue-modal');
+  await expect(modal).toBeVisible();
+  await expect(modal.getByTestId('wq-queue-select')).toBeVisible();
+  await expect(modal.getByTestId('wq-status-filters')).toBeVisible();
+
+  await modal.getByTestId('wq-queue-select').selectOption('dev-team');
+
+  const runId = `modal-${Date.now()}`;
+  const title = `pw-e2e-wq-modal-${runId}`;
+  const editedTitle = `${title}-edited`;
+  const instructions = `instructions ${runId}`;
+  const editedInstructions = `${instructions} (edited)`;
+
+  await modal.getByTestId('wq-enqueue-title').fill(title);
+  await modal.getByTestId('wq-enqueue-instructions').fill(instructions);
+  const enqueueResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/enqueue') && res.ok(), { timeout: 15000 });
+  await modal.getByTestId('wq-enqueue-btn').click();
+  await enqueueResP;
+
+  const card = modal.getByTestId('wq-card').filter({ hasText: title }).first();
+  await expect(card).toBeVisible();
+  await card.click();
+
+  // Edit flow includes status transition (equivalent control for kanban transition).
+  const promptAnswers = [editedTitle, editedInstructions, '123', 'in_progress'];
+  page.on('dialog', async (dialog) => {
+    if (dialog.type() === 'prompt') {
+      await dialog.accept(promptAnswers.shift() || '');
+      return;
+    }
+    if (dialog.type() === 'confirm') {
+      await dialog.accept();
+      return;
+    }
+    await dialog.dismiss();
+  });
+
+  const editResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/update') && res.ok(), { timeout: 15000 });
+  await modal.getByTestId('wq-inspect-edit').click();
+  await editResP;
+
+  await expect(modal.getByTestId('wq-inspect-body')).toContainText(editedTitle);
+  await expect(modal.getByTestId('wq-inspect-body')).toContainText(editedInstructions);
+  await expect(modal.getByTestId('wq-inspect-body')).toContainText('in_progress');
+
+  const deleteResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/delete') && res.ok(), { timeout: 15000 });
+  await modal.getByTestId('wq-inspect-delete').click();
+  await deleteResP;
+
+  await expect(modal.getByTestId('wq-card').filter({ hasText: editedTitle })).toHaveCount(0);
+});
