@@ -1126,6 +1126,18 @@ button.send-btn .btn-icon {
   color: var(--muted);
 }
 
+.command-palette-group {
+  margin: 8px 4px 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.command-palette-toggle {
+  border-style: dashed;
+}
+
 /* Pane Manager */
 
 .status-meta-btn {

@@ -61,3 +61,27 @@ test('command palette: keyboard flow can open a targeted pane and focus by pane 
   const firstChatInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
   await expect(firstChatInput).toBeFocused();
 });
+
+test('command palette: groups core actions and collapses per-agent targets until expanded or searched', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await loginAdmin(page, env.serverPort);
+
+  await page.keyboard.press('ControlOrMeta+K');
+  const modal = page.locator('[data-testid="command-palette-modal"]');
+  await expect(modal).toBeVisible();
+
+  const list = page.locator('#commandPaletteList');
+  await expect(list.getByText('Panes')).toBeVisible();
+  await expect(list.getByText('Navigation')).toBeVisible();
+  await expect(list.getByRole('button', { name: /Agent targets/i })).toBeVisible();
+  await expect(list.getByRole('button', { name: /Timeline targets/i })).toBeVisible();
+
+  await expect(list.getByRole('button', { name: /Agent: /i })).toHaveCount(0);
+
+  const input = page.locator('#commandPaletteInput');
+  await input.fill('agent: main');
+  await expect(list.getByRole('button', { name: /Agent: main/i })).toBeVisible();
+});
