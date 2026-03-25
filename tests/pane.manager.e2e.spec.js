@@ -189,9 +189,13 @@ test('pane manager: status stays in sync with pane header while modal is open', 
 
   const chatHeaderStatus = page.locator('[data-pane][data-pane-kind="chat"]').first().getByTestId('pane-connection-status');
   const chatManagerState = page.locator('.pane-manager-row', { hasText: 'Chat · main' }).first().locator('.pane-manager-state');
+  const workqueueHeaderStatus = page.locator('[data-pane][data-pane-kind="workqueue"]').first().getByTestId('pane-connection-status');
+  const workqueueManagerState = page.locator('.pane-manager-row', { hasText: 'Workqueue' }).first().locator('.pane-manager-state');
 
   await expect(chatHeaderStatus).toContainText(/connected|reconnecting/);
   await expect(chatManagerState).toContainText(/connected|reconnecting/);
+  await expect(workqueueHeaderStatus).toHaveText('connected');
+  await expect(workqueueManagerState).toHaveText('connected');
 
   await page.evaluate(() => {
     const btn = document.getElementById('disconnectBtn');

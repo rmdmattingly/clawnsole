@@ -5491,6 +5491,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
     pane.client = null;
     pane.connected = true;
+    pane.statusState = 'connected';
+    pane.statusMeta = '';
+    if (pane.elements?.root) pane.elements.root.dataset.connected = 'true';
     return pane;
   }
 
