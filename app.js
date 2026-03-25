@@ -13,8 +13,9 @@ const globalElements = {
   agentsModal: document.getElementById('agentsModal'),
   agentsCloseBtn: document.getElementById('agentsCloseBtn'),
   agentsSearch: document.getElementById('agentsSearch'),
-  agentsActiveOnly: document.getElementById('agentsActiveOnly'),
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
+  agentsFilterGroup: document.getElementById('agentsFilterGroup'),
+  agentsSortMode: document.getElementById('agentsSortMode'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
   toastHost: document.getElementById('toastHost'),
@@ -35,6 +36,7 @@ const globalElements = {
   wqStatusFilters: document.getElementById('wqStatusFilters'),
   wqAutoRefreshEnabled: document.getElementById('wqAutoRefreshEnabled'),
   wqAutoRefreshInterval: document.getElementById('wqAutoRefreshInterval'),
+  wqGroupingMode: document.getElementById('wqGroupingMode'),
   wqRefreshBtn: document.getElementById('wqRefreshBtn'),
   wqListBody: document.getElementById('wqListBody'),
   wqListEmpty: document.getElementById('wqListEmpty'),
@@ -59,6 +61,7 @@ const globalElements = {
   logoutBtn: document.getElementById('logoutBtn'),
   paneControls: document.getElementById('paneControls'),
   addPaneBtn: document.getElementById('addPaneBtn'),
+  resetLayoutQuickBtn: document.getElementById('resetLayoutQuickBtn'),
   addChatPaneBtn: document.getElementById('addChatPaneBtn'),
   addQueuePaneBtn: document.getElementById('addQueuePaneBtn'),
   layoutSelect: document.getElementById('layoutSelect'),
@@ -162,11 +165,12 @@ const storage = {
   }
 };
 
-// Agent list UX (pins + active-only)
+// Agent list UX (pins + triage)
 const ADMIN_AGENT_PINS_KEY = 'clawnsole.admin.agentPins';
 const ADMIN_AGENT_LAST_SEEN_KEY = 'clawnsole.admin.agentLastSeenAtMs';
-const ADMIN_AGENT_ACTIVE_ONLY_KEY = 'clawnsole.admin.agents.activeOnly';
 const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
+const ADMIN_AGENT_FILTER_KEY = 'clawnsole.admin.agents.filter';
+const ADMIN_AGENT_SORT_KEY = 'clawnsole.admin.agents.sort';
 
 function readJsonFromStorage(key, fallback) {
   try {
@@ -230,14 +234,85 @@ function isAgentActive(agentId, { withinMinutes = 10 } = {}) {
   return Date.now() - ts <= windowMs;
 }
 
-function sortAgentsByLastSeen(agents) {
+function sortAgentsByLastSeen(agents, { mode = 'recent' } = {}) {
   const map = getAgentLastSeenMap();
   const ts = (a) => Number(map[String(a?.id || '').trim()]) || 0;
+  const dir = String(mode || 'recent') === 'oldest' ? 1 : -1;
   return (Array.isArray(agents) ? agents : []).slice().sort((a, b) => {
-    const dt = ts(b) - ts(a);
+    const at = ts(a);
+    const bt = ts(b);
+    if (!at && bt) return 1;
+    if (at && !bt) return -1;
+    const dt = (at - bt) * dir;
     if (dt) return dt;
     return formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true }));
   });
+}
+
+function formatAgeChip(lastSeenAtMs) {
+  const ts = Number(lastSeenAtMs) || 0;
+  if (!ts) return 'never seen';
+  const ageMs = Math.max(0, Date.now() - ts);
+  const mins = Math.floor(ageMs / 60_000);
+  if (mins < 1) return 'last seen now';
+  if (mins < 60) return `last seen ${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `last seen ${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  return `last seen ${days}d`;
+}
+
+function getAgentHealth(agentId, { withinMinutes = 10 } = {}) {
+  const id = String(agentId || '').trim();
+  if (!id) return 'offline_error';
+  const map = getAgentLastSeenMap();
+  const ts = Number(map[id]) || 0;
+  const status = paneManager?.panes?.find((p) => p?.kind === 'chat' && String(p?.agentId || '') === id)?.statusState || '';
+  if (status === 'offline' || status === 'error') return 'offline_error';
+  if (!ts) return 'offline_error';
+  if (isAgentActive(id, { withinMinutes })) return 'active';
+  return 'stale';
+}
+
+function getAgentConnectionState(agentId, { withinMinutes = 10 } = {}) {
+  const id = String(agentId || '').trim();
+  const pane = paneManager?.panes?.find((p) => p?.kind === 'chat' && String(p?.agentId || '') === id) || null;
+  const status = String(pane?.statusState || '');
+  const health = getAgentHealth(id, { withinMinutes });
+  const connected = health !== 'offline_error';
+  const busy = status === 'connecting' || status === 'reconnecting';
+  return { status, health, connected, busy };
+}
+
+function getAgentTriageMeta(agentId, { withinMinutes = 10 } = {}) {
+  const id = String(agentId || '').trim();
+  const map = getAgentLastSeenMap();
+  const ts = Number(map[id]) || 0;
+  const ageMs = ts ? Math.max(0, Date.now() - ts) : null;
+  const state = getAgentConnectionState(id, { withinMinutes });
+
+  let attentionScore = 0;
+  let reason = 'Healthy';
+
+  if (!state.connected) {
+    attentionScore = 300;
+    reason = 'Disconnected';
+  } else if (state.busy) {
+    attentionScore = 220;
+    reason = 'Busy';
+  } else if (state.health === 'stale') {
+    const staleMinutes = Math.max(1, Math.floor((ageMs || 0) / 60_000));
+    attentionScore = 120 + Math.min(120, staleMinutes);
+    reason = `Stale ${staleMinutes}m`;
+  }
+
+  return {
+    ...state,
+    ageMs,
+    attentionScore,
+    attentionReason: reason,
+    needsAttention: attentionScore > 0
+  };
 }
 
 const roleState = {
@@ -883,11 +958,17 @@ function isPaneManagerOpen() {
   return !!globalElements.paneManagerModal?.classList.contains('open');
 }
 
+function refreshPaneManagerIfOpen() {
+  if (!isPaneManagerOpen()) return;
+  renderPaneManager();
+}
+
 function paneLabel(pane) {
   const kind = pane?.kind || 'chat';
   if (kind === 'workqueue') return 'Workqueue';
   if (kind === 'cron') return 'Cron';
   if (kind === 'timeline') return 'Timeline';
+  if (kind === 'fleet') return 'Fleet';
   return 'Chat';
 }
 
@@ -896,7 +977,31 @@ function paneIcon(pane) {
   if (kind === 'workqueue') return 'WQ';
   if (kind === 'cron') return '⏰';
   if (kind === 'timeline') return '🕒';
+  if (kind === 'fleet') return '🛰️';
   return '💬';
+}
+
+function paneTypePresentation(pane) {
+  const kind = String(pane?.kind || 'chat');
+  return {
+    kind,
+    text: paneLabel(pane).toUpperCase(),
+    icon: paneIcon(pane)
+  };
+}
+
+function paneRenderTypePill(pane) {
+  const pill = pane?.elements?.typePill;
+  if (!pill) return;
+  const { kind, text, icon } = paneTypePresentation(pane);
+
+  const knownKinds = ['chat', 'workqueue', 'cron', 'timeline', 'fleet'];
+  for (const name of knownKinds) pill.classList.remove(`pane-type-${name}`);
+  pill.classList.add(`pane-type-${knownKinds.includes(kind) ? kind : 'chat'}`);
+  pill.setAttribute('aria-label', `Pane type ${paneLabel(pane)}`);
+
+  if (pane?.elements?.typeText) pane.elements.typeText.textContent = text;
+  if (pane?.elements?.typeIcon) pane.elements.typeIcon.textContent = icon;
 }
 
 function paneTargetLabel(pane) {
@@ -904,6 +1009,95 @@ function paneTargetLabel(pane) {
   if (pane.kind === 'workqueue') return String(pane.workqueue?.queue || 'dev-team');
   if (pane.kind === 'cron' || pane.kind === 'timeline') return 'gateway';
   return String(pane.agentId || 'main');
+}
+
+function paneLetterLabel(pane) {
+  const idx = paneManager?.panes?.findIndex?.((p) => String(p?.key || '') === String(pane?.key || ''));
+  if (!Number.isFinite(idx) || idx < 0) return '?';
+  return String.fromCharCode(65 + (idx % 26));
+}
+
+function paneDestinationSummary(pane) {
+  if (!pane) return { letter: '?', kind: 'Chat', target: 'main' };
+  return {
+    letter: paneLetterLabel(pane),
+    kind: paneLabel(pane),
+    target: paneTargetLabel(pane)
+  };
+}
+
+function paneOpenInManager(pane) {
+  if (!pane) return;
+  const panes = paneManager?.panes || [];
+  const idx = panes.findIndex((p) => String(p?.key || '') === String(pane.key || ''));
+  if (idx < 0) return;
+  paneManagerUiState.selectedIndex = idx;
+  openPaneManager();
+  renderPaneManager();
+}
+
+function paneRenderDestinationStrip(pane) {
+  const row = pane?.elements?.root?.querySelector('[data-pane-destination-strip]');
+  if (!row) return;
+  const valueEl = row.querySelector('[data-pane-destination-value]');
+  if (!valueEl) return;
+  const summary = paneDestinationSummary(pane);
+  valueEl.textContent = `${summary.letter} ${summary.kind} · ${summary.target}`;
+  row.dataset.warning = 'false';
+}
+
+function paneSetDestinationWarning(pane, warning) {
+  const row = pane?.elements?.root?.querySelector('[data-pane-destination-strip]');
+  if (!row) return;
+  row.dataset.warning = warning ? 'true' : 'false';
+}
+
+function paneIsFocused(pane) {
+  const root = pane?.elements?.root;
+  if (!root) return false;
+  const active = document.activeElement;
+  return !!active && root.contains(active);
+}
+
+function paneActivityLabel(pane) {
+  const unread = Math.max(0, Number(pane?.activity?.unread || 0));
+  if (!unread) return '';
+  const kind = String(pane?.activity?.kind || '').trim();
+  if (kind === 'workqueue') return `${unread} unread workqueue update${unread === 1 ? '' : 's'}`;
+  return `${unread} unread chat message${unread === 1 ? '' : 's'}`;
+}
+
+function paneRenderActivityBadge(pane) {
+  const badge = pane?.elements?.activityBadge;
+  if (!badge) return;
+  const unread = Math.max(0, Number(pane?.activity?.unread || 0));
+  if (!unread) {
+    badge.hidden = true;
+    badge.textContent = '';
+    badge.removeAttribute('aria-label');
+    return;
+  }
+  badge.hidden = false;
+  badge.dataset.kind = String(pane?.activity?.kind || 'chat');
+  badge.textContent = unread > 99 ? '99+' : String(unread);
+  badge.setAttribute('aria-label', paneActivityLabel(pane));
+}
+
+function paneMarkUnread(pane, kind = 'chat') {
+  if (!pane || paneIsFocused(pane)) return;
+  pane.activity = pane.activity || { unread: 0, kind: '' };
+  pane.activity.unread = Math.min(999, Math.max(0, Number(pane.activity.unread || 0)) + 1);
+  pane.activity.kind = kind === 'workqueue' ? 'workqueue' : 'chat';
+  paneRenderActivityBadge(pane);
+  refreshPaneManagerIfOpen();
+}
+
+function paneClearUnread(pane) {
+  if (!pane?.activity?.unread) return;
+  pane.activity.unread = 0;
+  pane.activity.kind = '';
+  paneRenderActivityBadge(pane);
+  refreshPaneManagerIfOpen();
 }
 
 function renderPaneManager() {
@@ -924,18 +1118,24 @@ function renderPaneManager() {
     row.setAttribute('role', 'option');
     row.dataset.index = String(idx);
     row.dataset.paneKey = String(pane.key || '');
+    row.dataset.paneAccentKind = String(pane?.kind || 'chat');
     row.setAttribute('aria-selected', idx === selected ? 'true' : 'false');
 
     const state = String(pane.statusState || (pane.connected ? 'connected' : 'disconnected'));
+    const letter = paneLetterLabel(pane);
+    const unread = Math.max(0, Number(pane?.activity?.unread || 0));
+    const unreadLabel = paneActivityLabel(pane);
 
     row.innerHTML = `
       <div class="pane-manager-main">
         <div class="pane-manager-kind" title="${escapeHtml(paneLabel(pane))}">
+          <span class="pane-manager-letter" aria-label="Pane ${escapeHtml(letter)}">${escapeHtml(letter)}</span>
           <span class="pane-manager-icon" aria-hidden="true">${escapeHtml(paneIcon(pane))}</span>
           <span class="pane-manager-kind-label">${escapeHtml(paneLabel(pane))}</span>
         </div>
         <div class="pane-manager-target" title="${escapeHtml(paneTargetLabel(pane))}">${escapeHtml(paneTargetLabel(pane))}</div>
         <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
+        ${unread ? `<div class="pane-activity-badge" data-kind="${escapeHtml(String(pane?.activity?.kind || 'chat'))}" aria-label="${escapeHtml(unreadLabel)}">${escapeHtml(unread > 99 ? '99+' : String(unread))}</div>` : ''}
       </div>
       <div class="pane-manager-actions">
         <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="Move pane up" aria-label="Move pane up" ${idx === 0 ? 'disabled' : ''}>↑</button>
@@ -1053,12 +1253,24 @@ function paneManagerHandleKeydown(event) {
 
 // Command palette (admin-only)
 
+const COMMAND_PALETTE_GROUPS = [
+  { id: 'panes', label: 'Panes', rank: 100 },
+  { id: 'navigation', label: 'Navigation', rank: 90 },
+  { id: 'layout', label: 'Layout', rank: 85 },
+  { id: 'workqueue', label: 'Workqueue', rank: 80 },
+  { id: 'agents', label: 'Agents', rank: 70 },
+  { id: 'advanced', label: 'Advanced / All agents', rank: 40 }
+];
+
 const commandPaletteState = {
   open: false,
   query: '',
   items: [],
   filtered: [],
-  selectedIndex: 0
+  visible: [],
+  selectedIndex: 0,
+  expandedSubgroups: new Set(),
+  autoExpandedSubgroups: new Set()
 };
 
 function isCommandPaletteOpen() {
@@ -1096,111 +1308,108 @@ function scoreFuzzy(hay, needle) {
   return Math.max(1, score);
 }
 
+function commandGroupRank(groupId) {
+  const group = COMMAND_PALETTE_GROUPS.find((x) => x.id === groupId);
+  return group?.rank || 0;
+}
+
+function getFocusedPane() {
+  const active = document.activeElement;
+  if (!active) return null;
+  return (paneManager?.panes || []).find((pane) => pane?.elements?.root && (pane.elements.root === active || pane.elements.root.contains(active))) || null;
+}
+
+function openWorkqueueForActiveChatAgent() {
+  const focused = getFocusedPane();
+  if (!focused || focused.kind !== 'chat') {
+    showToast('No active chat agent selected', { kind: 'error', timeoutMs: 2200 });
+    return null;
+  }
+
+  const agentId = normalizeAgentId(focused.agentId || 'main');
+  const existing = (paneManager?.panes || []).find((pane) => {
+    if (!pane || pane.kind !== 'workqueue') return false;
+    return normalizeAgentId(pane.agentId || 'main') === agentId;
+  });
+
+  const pane = existing || paneManager.addPane('workqueue', { forceNew: true, queue: 'dev-team' });
+  if (!pane) return null;
+
+  pane.agentId = agentId;
+  pane.workqueue.scope = 'assigned';
+  if (typeof paneManager?.persistAdminPanes === 'function') paneManager.persistAdminPanes();
+
+  if (pane.kind === 'workqueue') {
+    renderWorkqueuePaneItems(pane);
+    renderWorkqueuePaneInspect(pane, (pane.workqueue?.items || []).find((it) => it?.id === pane.workqueue?.selectedItemId) || null);
+    paneManager.focusPanePrimary(pane);
+  }
+
+  return pane;
+}
+
 function buildCommandPaletteItems() {
   const items = [];
 
-  // Core commands
-  items.push(
-    {
-      id: 'cmd:add-chat',
-      label: 'Add pane: Chat',
-      detail: 'Create a new Chat pane',
-      run: () => paneManager.addPane('chat')
-    },
-    {
-      id: 'cmd:add-workqueue',
-      label: 'Add pane: Workqueue',
-      detail: 'Create a new Workqueue pane',
-      run: () => paneManager.addPane('workqueue')
-    },
-    {
-      id: 'cmd:add-cron',
-      label: 'Add pane: Cron',
-      detail: 'Create a new Cron pane',
-      run: () => paneManager.addPane('cron')
-    },
-    {
-      id: 'cmd:add-timeline',
-      label: 'Add pane: Timeline',
-      detail: 'Create a new Timeline pane',
-      run: () => paneManager.addPane('timeline')
-    },
-    {
-      id: 'cmd:reset-layout',
-      label: 'Layout: Reset panes',
-      detail: 'Reset admin layout to default',
-      run: () => paneManager.resetAdminLayoutToDefault({ confirm: true })
-    },
-    {
-      id: 'cmd:toggle-shortcuts',
-      label: 'Help: Toggle shortcuts overlay',
-      detail: 'Show/hide keyboard shortcuts',
-      run: () => {
-        if (globalElements.shortcutsModal?.classList.contains('open')) closeShortcuts();
-        else openShortcuts();
-      }
-    },
-    {
-      id: 'cmd:open-workqueue',
-      label: 'Workqueue: Open modal',
-      detail: 'Open the Workqueue modal (g w)',
-      run: () => openWorkqueue()
-    },
-    {
-      id: 'cmd:refresh-agents',
-      label: 'Agents: Refresh',
-      detail: 'Refresh agent list',
-      run: () => globalElements.refreshAgentsBtn?.click?.()
-    },
-    {
-      id: 'cmd:pane-cycle',
-      label: 'Panes: Cycle focus',
-      detail: 'Move focus to next pane',
-      run: () => cyclePaneFocus()
-    },
-    {
-      id: 'cmd:focus-pane-1',
-      label: 'Panes: Focus pane 1',
-      detail: 'Focus the first pane',
-      run: () => focusPaneIndex(0)
-    },
-    {
-      id: 'cmd:focus-pane-2',
-      label: 'Panes: Focus pane 2',
-      detail: 'Focus the second pane',
-      run: () => focusPaneIndex(1)
-    },
-    {
-      id: 'cmd:focus-pane-3',
-      label: 'Panes: Focus pane 3',
-      detail: 'Focus the third pane',
-      run: () => focusPaneIndex(2)
-    },
-    {
-      id: 'cmd:focus-pane-4',
-      label: 'Panes: Focus pane 4',
-      detail: 'Focus the fourth pane',
-      run: () => focusPaneIndex(3)
-    }
-  );
+  const pushItem = (item) => items.push({
+    group: 'advanced',
+    rank: 10,
+    ...item
+  });
 
-  // Agents (admin-only)
+  // Core commands
+  pushItem({ id: 'cmd:add-chat', group: 'panes', rank: 90, label: 'Add pane: Chat', detail: 'Create a new Chat pane', run: () => paneManager.addPane('chat') });
+  pushItem({ id: 'cmd:add-workqueue', group: 'panes', rank: 90, label: 'Add pane: Workqueue', detail: 'Create a new Workqueue pane', run: () => paneManager.addPane('workqueue') });
+  pushItem({ id: 'cmd:add-cron', group: 'panes', rank: 90, label: 'Add pane: Cron', detail: 'Create a new Cron pane', run: () => paneManager.addPane('cron') });
+  pushItem({ id: 'cmd:add-timeline', group: 'panes', rank: 90, label: 'Add pane: Timeline', detail: 'Create a new Timeline pane', run: () => paneManager.addPane('timeline') });
+  pushItem({ id: 'cmd:pane-cycle', group: 'navigation', rank: 90, label: 'Panes: Cycle focus', detail: 'Move focus to next pane', run: () => cyclePaneFocus() });
+  pushItem({ id: 'cmd:focus-pane-1', group: 'navigation', rank: 85, label: 'Panes: Focus pane 1', detail: 'Focus the first pane', run: () => focusPaneIndex(0) });
+  pushItem({ id: 'cmd:focus-pane-2', group: 'navigation', rank: 84, label: 'Panes: Focus pane 2', detail: 'Focus the second pane', run: () => focusPaneIndex(1) });
+  pushItem({ id: 'cmd:focus-pane-3', group: 'navigation', rank: 83, label: 'Panes: Focus pane 3', detail: 'Focus the third pane', run: () => focusPaneIndex(2) });
+  pushItem({ id: 'cmd:focus-pane-4', group: 'navigation', rank: 82, label: 'Panes: Focus pane 4', detail: 'Focus the fourth pane', run: () => focusPaneIndex(3) });
+  pushItem({ id: 'cmd:reset-layout', group: 'layout', rank: 95, label: 'Layout: Reset panes', detail: 'Reset admin layout to default', run: () => paneManager.resetAdminLayoutToDefault({ confirm: true }) });
+  pushItem({
+    id: 'cmd:toggle-shortcuts', group: 'navigation', rank: 88, label: 'Help: Toggle shortcuts overlay', detail: 'Show/hide keyboard shortcuts',
+    run: () => { if (globalElements.shortcutsModal?.classList.contains('open')) closeShortcuts(); else openShortcuts(); }
+  });
+  pushItem({ id: 'cmd:open-workqueue', group: 'workqueue', rank: 90, label: 'Workqueue: Open modal', detail: 'Open the Workqueue modal (g w)', run: () => openWorkqueue() });
+  pushItem({ id: 'cmd:open-workqueue-active-agent', group: 'workqueue', rank: 89, label: 'Workqueue for active chat agent', detail: 'Open/focus Workqueue pane scoped to assigned items for active chat agent', run: () => openWorkqueueForActiveChatAgent() });
+  pushItem({ id: 'cmd:refresh-agents', group: 'agents', rank: 88, label: 'Agents: Refresh', detail: 'Refresh agent list', run: () => globalElements.refreshAgentsBtn?.click?.() });
+
+  for (const pane of (paneManager?.panes || [])) {
+    if (!pane?.key) continue;
+    const summary = paneDestinationSummary(pane);
+    pushItem({
+      id: `pane:focus:${pane.key}`,
+      group: 'navigation',
+      rank: 87,
+      label: `Pane ${summary.letter}: Focus`,
+      detail: `${summary.kind.toUpperCase()} · ${summary.target}`,
+      run: () => {
+        const livePane = (paneManager?.panes || []).find((p) => String(p?.key || '') === String(pane.key));
+        if (livePane) paneManager.focusPanePrimary(livePane);
+      }
+    });
+  }
+
   const agents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
   for (const agent of agents) {
     const agentId = normalizeAgentId(agent?.id || 'main');
-    const label = `Agent: ${formatAgentLabel(agent, { includeId: false })}`;
-    items.push({
+    pushItem({
       id: `agent:${agentId}`,
-      label,
-      detail: agentId,
+      group: 'advanced',
+      subgroup: 'agent-targets',
+      subgroupLabel: 'Agent targets',
+      rank: 40,
+      label: `Agent: ${formatAgentLabel(agent, { includeId: false })}`,
+      detail: `CHAT · ${agentId}`,
       run: () => {
-        // Focus an existing chat pane if possible; otherwise create one.
-        let pane = paneManager.panes.find((p) => p.kind === 'chat');
-        if (!pane) pane = paneManager.addPane('chat');
-        if (pane) {
-          paneSetAgent(pane, agentId);
-          paneManager.focusPanePrimary(pane);
+        let pane = paneManager.panes.find((p) => p?.kind === 'chat' && normalizeAgentId(p?.agentId || 'main') === agentId);
+        if (!pane) {
+          pane = paneManager.addPane('chat');
+          if (pane && normalizeAgentId(pane.agentId || 'main') !== agentId) paneSetAgent(pane, agentId);
         }
+        if (pane) paneManager.focusPanePrimary(pane);
       }
     });
   }
@@ -1215,42 +1424,87 @@ function renderCommandPalette() {
 
   list.innerHTML = '';
 
-  const items = commandPaletteState.filtered;
-  if (!items.length) {
+  const grouped = new Map();
+  for (const groupMeta of COMMAND_PALETTE_GROUPS) grouped.set(groupMeta.id, []);
+  for (const item of commandPaletteState.filtered) {
+    if (!grouped.has(item.group)) grouped.set(item.group, []);
+    grouped.get(item.group).push(item);
+  }
+
+  const visible = [];
+  for (const groupMeta of COMMAND_PALETTE_GROUPS) {
+    const groupItems = grouped.get(groupMeta.id) || [];
+    if (!groupItems.length) continue;
+
+    const title = document.createElement('div');
+    title.className = 'command-palette-group-title';
+    title.textContent = groupMeta.label;
+    list.appendChild(title);
+
+    const direct = groupItems.filter((x) => !x.subgroup);
+    const subgroupMap = new Map();
+    for (const item of groupItems.filter((x) => x.subgroup)) {
+      if (!subgroupMap.has(item.subgroup)) subgroupMap.set(item.subgroup, []);
+      subgroupMap.get(item.subgroup).push(item);
+    }
+
+    for (const item of direct) visible.push({ kind: 'item', item });
+    for (const [subgroupId, subgroupItems] of subgroupMap.entries()) {
+      visible.push({ kind: 'toggle', subgroupId, label: subgroupItems[0]?.subgroupLabel || subgroupId, count: subgroupItems.length });
+      const expanded = commandPaletteState.expandedSubgroups.has(subgroupId) || commandPaletteState.autoExpandedSubgroups.has(subgroupId);
+      if (expanded) for (const item of subgroupItems) visible.push({ kind: 'item', item, subgroupId });
+    }
+  }
+
+  commandPaletteState.visible = visible;
+  if (!visible.length) {
     if (empty) empty.hidden = false;
     return;
   }
   if (empty) empty.hidden = true;
 
-  const selected = Math.max(0, Math.min(items.length - 1, commandPaletteState.selectedIndex));
+  const selected = Math.max(0, Math.min(visible.length - 1, commandPaletteState.selectedIndex));
   commandPaletteState.selectedIndex = selected;
 
-  items.forEach((item, idx) => {
+  visible.forEach((entry, idx) => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'command-palette-item';
+    btn.className = `command-palette-item${entry.kind === 'toggle' ? ' command-palette-subgroup' : ''}${entry.subgroupId ? ' command-palette-subitem' : ''}`;
     btn.setAttribute('role', 'option');
     btn.setAttribute('aria-selected', idx === selected ? 'true' : 'false');
-    btn.dataset.commandPaletteId = item.id;
-    btn.innerHTML = `
-      <div class="command-palette-item-main">
-        <div class="command-palette-item-label">${escapeHtml(item.label)}</div>
-        <div class="command-palette-item-detail">${escapeHtml(item.detail || '')}</div>
-      </div>
-      <div class="command-palette-item-meta">${idx === selected ? '↵' : ''}</div>
-    `;
+
+    if (entry.kind === 'toggle') {
+      const expanded = commandPaletteState.expandedSubgroups.has(entry.subgroupId) || commandPaletteState.autoExpandedSubgroups.has(entry.subgroupId);
+      btn.innerHTML = `
+        <div class="command-palette-item-main">
+          <div class="command-palette-item-label">${escapeHtml(entry.label)} (${entry.count})</div>
+          <div class="command-palette-item-detail">${expanded ? 'Hide generated actions' : 'Show generated actions'}</div>
+        </div>
+        <div class="command-palette-item-meta">${expanded ? '▾' : '▸'}</div>
+      `;
+      btn.addEventListener('click', () => {
+        if (commandPaletteState.expandedSubgroups.has(entry.subgroupId)) commandPaletteState.expandedSubgroups.delete(entry.subgroupId);
+        else commandPaletteState.expandedSubgroups.add(entry.subgroupId);
+        renderCommandPalette();
+      });
+    } else {
+      const item = entry.item;
+      btn.dataset.commandPaletteId = item.id;
+      btn.innerHTML = `
+        <div class="command-palette-item-main">
+          <div class="command-palette-item-label">${escapeHtml(item.label)}</div>
+          <div class="command-palette-item-detail">${escapeHtml(item.detail || '')}</div>
+        </div>
+        <div class="command-palette-item-meta">${idx === selected ? '↵' : ''}</div>
+      `;
+      btn.addEventListener('click', () => {
+        try { item.run?.(); } finally { closeCommandPalette({ restoreFocus: false }); }
+      });
+    }
 
     btn.addEventListener('mouseenter', () => {
       commandPaletteState.selectedIndex = idx;
       renderCommandPalette();
-    });
-
-    btn.addEventListener('click', () => {
-      try {
-        item.run?.();
-      } finally {
-        closeCommandPalette({ restoreFocus: false });
-      }
     });
 
     list.appendChild(btn);
@@ -1265,16 +1519,24 @@ function renderCommandPalette() {
 function filterCommandPalette(query) {
   commandPaletteState.query = String(query || '');
   const q = commandPaletteState.query.trim();
+  const matchedSubgroups = new Set();
   const scored = commandPaletteState.items
     .map((item) => {
       const hay = `${item.label || ''} ${item.detail || ''} ${item.id || ''}`;
-      return { item, score: scoreFuzzy(hay, q) };
+      const score = scoreFuzzy(hay, q);
+      if (score > 0 && q && item.subgroup) matchedSubgroups.add(item.subgroup);
+      return { item, score };
     })
     .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => {
+      const aTotal = (a.score || 0) + (a.item.rank || 0) * 1000 + commandGroupRank(a.item.group || 'advanced') * 10000;
+      const bTotal = (b.score || 0) + (b.item.rank || 0) * 1000 + commandGroupRank(b.item.group || 'advanced') * 10000;
+      return bTotal - aTotal;
+    })
     .map((x) => x.item);
 
   commandPaletteState.filtered = scored;
+  commandPaletteState.autoExpandedSubgroups = matchedSubgroups;
   commandPaletteState.selectedIndex = 0;
   renderCommandPalette();
 }
@@ -1287,20 +1549,23 @@ function openCommandPalette() {
   commandPaletteState.open = true;
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
+  commandPaletteState.visible = commandPaletteState.filtered.slice();
   commandPaletteState.selectedIndex = 0;
+  commandPaletteState.expandedSubgroups = new Set();
+  commandPaletteState.autoExpandedSubgroups = new Set();
 
   globalElements.commandPaletteModal.classList.add('open');
   globalElements.commandPaletteModal.setAttribute('aria-hidden', 'false');
 
   if (globalElements.commandPaletteInput) {
     globalElements.commandPaletteInput.value = '';
-    // Defer focus until after the modal is painted so browsers reliably move focus.
     const focus = () => {
       try {
         globalElements.commandPaletteInput?.focus?.({ preventScroll: true });
         globalElements.commandPaletteInput?.select?.();
       } catch {}
     };
+    focus();
     try {
       requestAnimationFrame(() => requestAnimationFrame(focus));
     } catch {
@@ -1313,20 +1578,152 @@ function openCommandPalette() {
 
 // Agents (admin-only)
 
+const agentsModalState = {
+  selectedAgentId: ''
+};
+
+function getAgentsModalRows() {
+  return Array.from(globalElements.agentsList?.querySelectorAll?.('.agents-row[data-agent-id]') || []);
+}
+
+function selectAgentsModalRowByIndex(index, { scroll = true } = {}) {
+  const rows = getAgentsModalRows();
+  if (!rows.length) {
+    agentsModalState.selectedAgentId = '';
+    return null;
+  }
+  const safe = Math.max(0, Math.min(rows.length - 1, Number(index) || 0));
+  const next = rows[safe];
+  const agentId = String(next?.dataset?.agentId || '').trim();
+  agentsModalState.selectedAgentId = agentId;
+
+  rows.forEach((row, idx) => {
+    const selected = idx === safe;
+    row.classList.toggle('is-selected', selected);
+    row.setAttribute('aria-selected', selected ? 'true' : 'false');
+  });
+
+  if (scroll) {
+    try {
+      next?.scrollIntoView?.({ block: 'nearest' });
+    } catch {}
+  }
+  return next || null;
+}
+
+function selectAgentsModalRowByAgentId(agentId, { fallbackToFirst = true, scroll = false } = {}) {
+  const rows = getAgentsModalRows();
+  if (!rows.length) {
+    agentsModalState.selectedAgentId = '';
+    return null;
+  }
+  const id = String(agentId || '').trim();
+  let index = rows.findIndex((row) => String(row.dataset.agentId || '').trim() === id);
+  if (index < 0 && fallbackToFirst) index = 0;
+  if (index < 0) {
+    agentsModalState.selectedAgentId = '';
+    return null;
+  }
+  return selectAgentsModalRowByIndex(index, { scroll });
+}
+
+function focusOrCreateAgentChatPane(agentId) {
+  const id = normalizeAgentId(agentId || 'main');
+  let pane = paneManager.panes.find((p) => p?.kind === 'chat' && normalizeAgentId(p?.agentId || 'main') === id) || null;
+  if (!pane) {
+    pane = paneManager.addPane('chat');
+  }
+  if (!pane) return false;
+  if (normalizeAgentId(pane.agentId || 'main') !== id) paneSetAgent(pane, id);
+  paneManager.focusPanePrimary(pane);
+  return true;
+}
+
+function runAgentsModalTriageAction({ openWorkqueue = false, openTimeline = false } = {}) {
+  const row = selectAgentsModalRowByAgentId(agentsModalState.selectedAgentId, { fallbackToFirst: true });
+  const agentId = String(row?.dataset?.agentId || '').trim();
+  if (!agentId) return false;
+
+  if (!focusOrCreateAgentChatPane(agentId)) return false;
+
+  if (openWorkqueue) {
+    openWorkqueue();
+    if (globalElements.wqClaimAgentId) {
+      globalElements.wqClaimAgentId.value = agentId;
+      try {
+        globalElements.wqClaimAgentId.dispatchEvent(new Event('input', { bubbles: true }));
+      } catch {}
+    }
+  }
+
+  if (openTimeline) {
+    paneManager.addPane('timeline');
+  }
+
+  closeAgentsModal({ restoreFocus: false });
+  return true;
+}
+
+function agentsModalHandleKeydown(event) {
+  if (!globalElements.agentsModal?.classList.contains('open')) return false;
+  if (!event || event.defaultPrevented) return false;
+
+  const key = String(event.key || '');
+  const lower = key.toLowerCase();
+
+  if (key === 'Escape') {
+    event.preventDefault();
+    closeAgentsModal();
+    return true;
+  }
+
+  const target = event.target;
+  if (isTypingContext(target)) {
+    return false;
+  }
+
+  if (!event.metaKey && !event.ctrlKey && !event.altKey && (lower === 'j' || lower === 'k' || key === 'ArrowDown' || key === 'ArrowUp')) {
+    event.preventDefault();
+    const rows = getAgentsModalRows();
+    if (!rows.length) return true;
+    const currentIndex = Math.max(0, rows.findIndex((row) => String(row.dataset.agentId || '').trim() === String(agentsModalState.selectedAgentId || '').trim()));
+    const delta = (lower === 'j' || key === 'ArrowDown') ? 1 : -1;
+    const nextIndex = Math.max(0, Math.min(rows.length - 1, currentIndex + delta));
+    selectAgentsModalRowByIndex(nextIndex);
+    return true;
+  }
+
+  if (!event.metaKey && !event.ctrlKey && !event.altKey && key === 'Enter') {
+    event.preventDefault();
+    runAgentsModalTriageAction({ openWorkqueue: !!event.shiftKey });
+    return true;
+  }
+
+  if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && key === '.') {
+    event.preventDefault();
+    runAgentsModalTriageAction({ openTimeline: true });
+    return true;
+  }
+
+  return false;
+}
+
 function openAgentsModal() {
   if (roleState.role !== 'admin') return;
   globalElements.agentsModal?.classList.add('open');
   globalElements.agentsModal?.setAttribute('aria-hidden', 'false');
 
   // Bootstrap persisted controls.
-  if (globalElements.agentsActiveOnly) {
-    globalElements.agentsActiveOnly.checked = storage.get(ADMIN_AGENT_ACTIVE_ONLY_KEY, 'false') === 'true';
-  }
   if (globalElements.agentsActiveMinutes) {
     const minutes = Number(storage.get(ADMIN_AGENT_ACTIVE_MINUTES_KEY, '10')) || 10;
     globalElements.agentsActiveMinutes.value = String(Math.max(1, minutes));
   }
+  if (globalElements.agentsSortMode) {
+    const sortMode = String(storage.get(ADMIN_AGENT_SORT_KEY, 'attention') || 'attention');
+    globalElements.agentsSortMode.value = ['attention', 'recent', 'oldest'].includes(sortMode) ? sortMode : 'attention';
+  }
 
+  agentsModalState.selectedAgentId = '';
   renderAgentsModalList();
 
   // Focus search by default for fast filtering.
@@ -1335,9 +1732,15 @@ function openAgentsModal() {
   } catch {}
 }
 
-function closeAgentsModal() {
+function closeAgentsModal({ restoreFocus = true } = {}) {
   globalElements.agentsModal?.classList.remove('open');
   globalElements.agentsModal?.setAttribute('aria-hidden', 'true');
+  if (restoreFocus) {
+    try {
+      const pane = paneManager?.panes?.[0];
+      pane?.elements?.input?.focus?.();
+    } catch {}
+  }
 }
 
 function renderAgentsModalList() {
@@ -1345,27 +1748,67 @@ function renderAgentsModalList() {
   if (!root) return;
 
   const search = String(globalElements.agentsSearch?.value || '').trim().toLowerCase();
-  const activeOnly = !!globalElements.agentsActiveOnly?.checked;
+  const selectedFilter = String(storage.get(ADMIN_AGENT_FILTER_KEY, 'all') || 'all');
+  const sortMode = String(globalElements.agentsSortMode?.value || storage.get(ADMIN_AGENT_SORT_KEY, 'attention') || 'attention');
   const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
-
   const pins = getPinnedAgentIds();
+  const lastSeenMap = getAgentLastSeenMap();
   const baseAgents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
 
-  const matches = (agent) => {
-    const label = formatAgentLabel(agent, { includeId: true }).toLowerCase();
-    if (search && !label.includes(search)) return false;
-    if (activeOnly && !isAgentActive(agent.id, { withinMinutes })) return false;
+  const matchesFilter = (triage) => {
+    if (selectedFilter === 'all') return true;
+    if (selectedFilter === 'needs_attention') return triage.needsAttention;
+    if (selectedFilter === 'connected') return triage.connected;
+    if (selectedFilter === 'disconnected') return !triage.connected;
+    if (selectedFilter === 'busy') return triage.busy;
     return true;
   };
 
-  const filtered = baseAgents.filter(matches);
-  const pinned = sortAgentsByLastSeen(filtered.filter((a) => pins.has(String(a?.id || '').trim())));
-  const rest = sortAgentsByLastSeen(filtered.filter((a) => !pins.has(String(a?.id || '').trim())));
+  const enriched = baseAgents
+    .map((agent) => ({
+      agent,
+      id: String(agent?.id || '').trim(),
+      label: formatAgentLabel(agent, { includeId: true }),
+      triage: getAgentTriageMeta(agent?.id, { withinMinutes })
+    }))
+    .filter((entry) => {
+      if (search && !entry.label.toLowerCase().includes(search)) return false;
+      return matchesFilter(entry.triage);
+    });
+
+  const compareByAttention = (a, b) => {
+    const score = Number(b?.triage?.attentionScore || 0) - Number(a?.triage?.attentionScore || 0);
+    if (score) return score;
+    const at = Number(lastSeenMap[a.id]) || 0;
+    const bt = Number(lastSeenMap[b.id]) || 0;
+    if (!at && bt) return 1;
+    if (at && !bt) return -1;
+    const dt = bt - at;
+    if (dt) return dt;
+    return a.label.localeCompare(b.label);
+  };
+
+  const sortEntries = (entries) => {
+    if (sortMode === 'oldest') return entries.slice().sort((a, b) => (Number(lastSeenMap[a.id]) || 0) - (Number(lastSeenMap[b.id]) || 0));
+    if (sortMode === 'recent') return entries.slice().sort((a, b) => (Number(lastSeenMap[b.id]) || 0) - (Number(lastSeenMap[a.id]) || 0));
+    return entries.slice().sort(compareByAttention);
+  };
+
+  const filteredPinned = enriched.filter((e) => pins.has(e.id));
+  const filteredRest = enriched.filter((e) => !pins.has(e.id));
+  const pinned = sortEntries(filteredPinned);
+  const rest = sortEntries(filteredRest);
 
   root.innerHTML = '';
+  globalElements.agentsFilterGroup?.querySelectorAll?.('[data-agents-filter]')?.forEach((btn) => {
+    const value = String(btn.getAttribute('data-agents-filter') || 'all');
+    const on = value === selectedFilter;
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.classList.toggle('is-active', on);
+  });
 
-  const renderSection = (title, agents) => {
-    if (!agents || agents.length === 0) return;
+  const renderSection = (title, entries) => {
+    if (!entries || entries.length === 0) return;
     const section = document.createElement('div');
     section.className = 'agents-section';
     section.innerHTML = `<div class="agents-section-title">${escapeHtml(title)}</div>`;
@@ -1373,19 +1816,23 @@ function renderAgentsModalList() {
     const list = document.createElement('div');
     list.className = 'agents-rows';
 
-    for (const agent of agents) {
-      const id = String(agent?.id || '').trim();
+    for (const entry of entries) {
+      const { id, label, triage } = entry;
       const row = document.createElement('div');
-      row.className = 'agents-row';
-
-      const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
+      const lastSeenAtMs = Number(lastSeenMap[id]) || 0;
+      row.className = `agents-row ${triage.health === 'active' ? 'is-active' : triage.health === 'stale' ? 'is-stale' : 'is-offline'}`;
+      row.dataset.agentId = id;
+      row.setAttribute('role', 'option');
+      row.setAttribute('tabindex', '-1');
+      row.setAttribute('aria-selected', 'false');
 
       row.innerHTML = `
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
         <div class="agents-row-main">
-          <div class="agents-row-title">${escapeHtml(label)}</div>
-          <div class="agents-row-meta">${escapeHtml(id)}${isAgentActive(id, { withinMinutes }) ? ' · active' : ''}</div>
+          <div class="agents-row-title-wrap"><div class="agents-row-title">${escapeHtml(label)}</div><span class="agents-age-chip">${escapeHtml(formatAgeChip(lastSeenAtMs))}</span></div>
+          <div class="agents-row-meta">${escapeHtml(id)} · ${triage.connected ? (triage.busy ? 'busy' : triage.health === 'stale' ? 'stale' : 'connected') : 'disconnected/error'}</div>
+          <div class="agents-row-reason"><span class="agents-reason-chip">${escapeHtml(triage.attentionReason)}</span></div>
         </div>
       `;
 
@@ -1397,6 +1844,15 @@ function renderAgentsModalList() {
         // Refresh both the modal list and any agent <select>s.
         paneManager.panes.forEach((p) => renderAgentOptions(p.elements?.agentSelect, p.agentId));
         renderAgentsModalList();
+      });
+
+      row.addEventListener('click', () => {
+        selectAgentsModalRowByAgentId(id, { fallbackToFirst: true, scroll: false });
+      });
+
+      row.addEventListener('dblclick', () => {
+        selectAgentsModalRowByAgentId(id, { fallbackToFirst: true, scroll: false });
+        runAgentsModalTriageAction();
       });
 
       list.appendChild(row);
@@ -1411,11 +1867,15 @@ function renderAgentsModalList() {
 
   const empty = pinned.length === 0 && rest.length === 0;
   if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
+
+  if (!empty) selectAgentsModalRowByAgentId(agentsModalState.selectedAgentId, { fallbackToFirst: true, scroll: false });
+  else agentsModalState.selectedAgentId = '';
 }
 
 // Workqueue (admin-only)
 
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
+const WORKQUEUE_GROUPING_AUTO_THRESHOLD = 12;
 
 const workqueueState = {
   queues: [],
@@ -1428,6 +1888,7 @@ const workqueueState = {
   leaseTicker: null,
   autoRefreshEnabled: true,
   autoRefreshIntervalMs: 15000,
+  groupingMode: 'auto',
   autoRefreshTimer: null,
   sortingBootstrapped: false
 };
@@ -1511,8 +1972,10 @@ async function ensureWorkqueueBootstrapped() {
   try {
     const enabled = storage.get('clawnsole.wq.autorefresh.enabled');
     const interval = storage.get('clawnsole.wq.autorefresh.intervalMs');
+    const groupingMode = String(storage.get('clawnsole.wq.grouping.mode') || '').toLowerCase();
     if (enabled !== null) workqueueState.autoRefreshEnabled = Boolean(enabled);
     if (interval !== null && Number(interval) > 0) workqueueState.autoRefreshIntervalMs = Number(interval);
+    if (['auto', 'on', 'off'].includes(groupingMode)) workqueueState.groupingMode = groupingMode;
   } catch {
     // ignore
   }
@@ -1522,6 +1985,9 @@ async function ensureWorkqueueBootstrapped() {
   }
   if (globalElements.wqAutoRefreshInterval) {
     globalElements.wqAutoRefreshInterval.value = String(workqueueState.autoRefreshIntervalMs);
+  }
+  if (globalElements.wqGroupingMode) {
+    globalElements.wqGroupingMode.value = workqueueState.groupingMode;
   }
 
   renderWorkqueueStatusFilters();
@@ -1631,6 +2097,81 @@ function getWorkqueueBoardColumns() {
   return defs.filter((d) => workqueueState.statusFilter.has(d.status));
 }
 
+function getWorkqueueDedupeIdentity(item) {
+  const key = String(item?.dedupeKey || item?.meta?.dedupeKey || '').trim();
+  if (!key) return '';
+  const queue = String(item?.queue || '').trim() || '__default__';
+  return `${queue}::dedupe::${key}`;
+}
+
+function getWorkqueueFallbackGroupIdentity(item) {
+  const queue = String(item?.queue || '').trim() || '__default__';
+  const dedupeKey = String(item?.dedupeKey || item?.meta?.dedupeKey || '').trim();
+  if (dedupeKey) return '';
+
+  const title = String(item?.title || '').trim().toLowerCase();
+  const kind = String(item?.meta?.kind || '').trim().toLowerCase();
+  const isRoutine = kind.includes('pr-review') || title.includes('pr review sweep') || title.startsWith('[routine]');
+  if (!isRoutine) return '';
+
+  const normalized = title
+    .replace(/^\[[^\]]+\]\s*/g, '')
+    .replace(/\([^)]*\)\s*$/g, '')
+    .replace(/\b\d{4}-\d{2}-\d{2}(?:[ t]\d{2}(?::\d{2})?)?\b/g, '')
+    .replace(/\b[0-9a-f]{8,}\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const prefix = (normalized.split(/\s[:\-–—]\s/, 1)[0] || normalized).trim();
+  if (prefix.length < 8) return '';
+  return `${queue}::fallback::${prefix}`;
+}
+
+function resolveWorkqueueGroupingEnabled(mode, itemCount) {
+  const normalized = String(mode || 'auto').toLowerCase();
+  if (normalized === 'on') return true;
+  if (normalized === 'off') return false;
+  return Number(itemCount) > WORKQUEUE_GROUPING_AUTO_THRESHOLD;
+}
+
+function finalizeWorkqueueGroup(group) {
+  const members = [group.canonical, ...(Array.isArray(group.siblings) ? group.siblings : [])];
+  group.count = members.length;
+  group.maxPriority = members.reduce((acc, it) => Math.max(acc, Number(it?.priority ?? -Infinity)), -Infinity);
+  group.latestUpdatedAtMs = members.reduce((acc, it) => {
+    const t = Date.parse(String(it?.updatedAt || it?.createdAt || ''));
+    return Number.isFinite(t) ? Math.max(acc, t) : acc;
+  }, 0);
+  group.hasClaimed = members.some((it) => String(it?.status || '') === 'claimed' || String(it?.claimedBy || '').trim());
+  group.hasExpiredLease = members.some((it) => Number(it?.leaseUntil || 0) > 0 && Number(it.leaseUntil) < Date.now());
+  return group;
+}
+
+function groupWorkqueueItemsByDedupe(sortedItems, opts = {}) {
+  const groupingEnabled = resolveWorkqueueGroupingEnabled(opts.groupingMode, Array.isArray(sortedItems) ? sortedItems.length : 0);
+  const groups = [];
+  const groupMap = new Map();
+
+  for (const it of Array.isArray(sortedItems) ? sortedItems : []) {
+    const identity = groupingEnabled ? (getWorkqueueDedupeIdentity(it) || getWorkqueueFallbackGroupIdentity(it)) : '';
+    if (!identity) {
+      groups.push(finalizeWorkqueueGroup({ canonical: it, siblings: [] }));
+      continue;
+    }
+
+    if (!groupMap.has(identity)) {
+      const key = String(it?.dedupeKey || it?.meta?.dedupeKey || '').trim();
+      const group = { canonical: it, siblings: [], dedupeKey: key, identity };
+      groupMap.set(identity, group);
+      groups.push(group);
+    } else {
+      groupMap.get(identity).siblings.push(it);
+    }
+  }
+
+  return groups.map(finalizeWorkqueueGroup);
+}
+
 function renderWorkqueueItems() {
   const body = globalElements.wqListBody;
   if (!body) return;
@@ -1648,18 +2189,20 @@ function renderWorkqueueItems() {
 
   const itemsRaw = Array.isArray(workqueueState.items) ? workqueueState.items : [];
   const items = sortWorkqueueItems(itemsRaw, { sortKey: workqueueState.sortKey, sortDir: workqueueState.sortDir });
+  const groups = groupWorkqueueItemsByDedupe(items, { groupingMode: workqueueState.groupingMode });
+  const visibleItems = groups.map((g) => g.canonical);
 
-  if (!items.length) {
+  if (!visibleItems.length) {
     globalElements.wqListEmpty.hidden = false;
   } else {
     globalElements.wqListEmpty.hidden = true;
   }
 
   const cols = getWorkqueueBoardColumns();
-  const itemsByStatus = items.reduce((acc, it) => {
-    const st = String(it?.status || 'ready');
+  const groupsByStatus = groups.reduce((acc, g) => {
+    const st = String(g?.canonical?.status || 'ready');
     if (!acc[st]) acc[st] = [];
-    acc[st].push(it);
+    acc[st].push(g);
     return acc;
   }, {});
 
@@ -1669,7 +2212,7 @@ function renderWorkqueueItems() {
     col.className = 'wq-board-col';
     col.setAttribute('data-wq-col', colDef.status);
 
-    const colItems = Array.isArray(itemsByStatus[colDef.status]) ? itemsByStatus[colDef.status] : [];
+    const colItems = Array.isArray(groupsByStatus[colDef.status]) ? groupsByStatus[colDef.status] : [];
 
     const head = document.createElement('div');
     head.className = 'wq-board-col-header';
@@ -1700,11 +2243,19 @@ function renderWorkqueueItems() {
       }
     });
 
-    for (const it of colItems) {
+    for (const group of colItems) {
+      const it = group.canonical;
+      const siblings = Array.isArray(group.siblings) ? group.siblings : [];
+      const dupCount = siblings.length;
+      const isSelected = [it, ...siblings].some((x) => x?.id && x.id === workqueueState.selectedItemId);
+
+      const cardWrap = document.createElement('div');
+      cardWrap.className = 'wq-card-wrap';
+
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'wq-card';
-      if (it.id && it.id === workqueueState.selectedItemId) card.classList.add('selected');
+      if (isSelected) card.classList.add('selected');
       if (it.id) card.setAttribute('data-wq-item', it.id);
 
       // Allow dragging the whole card.
@@ -1727,6 +2278,9 @@ function renderWorkqueueItems() {
           <span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span>
           ${age ? `<span class="wq-card-chip mono">age ${escapeHtml(age)}</span>` : ''}
           ${leaseLabel ? `<span class="wq-card-chip mono">lease ${escapeHtml(leaseLabel)}</span>` : ''}
+          ${dupCount > 0 ? `<span class="wq-card-chip mono">×${escapeHtml(String(group.count || (dupCount + 1)))}</span>` : ''}
+          ${group.hasClaimed ? `<span class="wq-card-chip mono">claimed</span>` : ''}
+          ${group.hasExpiredLease ? `<span class="wq-card-chip mono">expired lease</span>` : ''}
         </div>
         <div class="wq-card-fields">
           <div class="wq-card-field"><span class="k">prio</span> <span class="v mono">${escapeHtml(String(it.priority ?? ''))}</span></div>
@@ -1742,7 +2296,38 @@ function renderWorkqueueItems() {
         renderWorkqueueInspect(it);
       });
 
-      lane.appendChild(card);
+      cardWrap.appendChild(card);
+
+      if (dupCount > 0) {
+        const details = document.createElement('details');
+        details.className = 'wq-duplicates';
+
+        const summary = document.createElement('summary');
+        summary.className = 'wq-duplicates-summary mono';
+        summary.textContent = `Show ${dupCount} duplicate${dupCount === 1 ? '' : 's'}`;
+
+        const list = document.createElement('div');
+        list.className = 'wq-duplicates-list';
+
+        for (const dup of siblings) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'wq-duplicate-btn';
+          btn.textContent = `${dup.id || ''} · prio ${dup.priority ?? ''} · ${dup.status || ''}`;
+          btn.addEventListener('click', () => {
+            workqueueState.selectedItemId = dup.id || null;
+            renderWorkqueueItems();
+            renderWorkqueueInspect(dup);
+          });
+          list.appendChild(btn);
+        }
+
+        details.appendChild(summary);
+        details.appendChild(list);
+        cardWrap.appendChild(details);
+      }
+
+      lane.appendChild(cardWrap);
     }
 
     col.appendChild(head);
@@ -1989,6 +2574,68 @@ async function renderWorkqueuePane(rootEl, { queue = '' } = {}) {
 window.__debug = window.__debug || {};
 window.__debug.renderWorkqueuePane = renderWorkqueuePane;
 
+function getWorkqueueItemRepo(item) {
+  const repo = String(item?.meta?.repo || '').trim();
+  if (repo) return repo;
+
+  const candidates = [String(item?.meta?.url || ''), String(item?.meta?.issueUrl || ''), String(item?.instructions || '')];
+  for (const text of candidates) {
+    const match = text.match(/github\.com\/([^\s/]+\/[^\s/#?]+)/i);
+    if (match?.[1]) return String(match[1]).trim();
+  }
+  return '';
+}
+
+function getWorkqueueItemSource(item) {
+  if (!item || typeof item !== 'object') return 'manual';
+  const repo = getWorkqueueItemRepo(item);
+  if (repo) return 'github';
+
+  const kind = String(item?.meta?.kind || '').toLowerCase();
+  if (kind.includes('pr-review')) return 'automation';
+  return 'manual';
+}
+
+function isWorkqueueActionableNoise(item) {
+  const title = String(item?.title || '').trim().toLowerCase();
+  const dedupeKey = String(item?.meta?.dedupeKey || '').trim().toLowerCase();
+  const kind = String(item?.meta?.kind || '').trim().toLowerCase();
+
+  if (!title && !dedupeKey && !kind) return false;
+
+  if (title.includes('[routine]') || title.includes('[coverage]')) return true;
+  if (title.startsWith('issue coverage:') || title.startsWith('triager:')) return true;
+  if (dedupeKey.startsWith('issue-coverage:') || dedupeKey.startsWith('triager:')) return true;
+  if (kind.includes('pr-review') || kind.includes('coverage') || kind.includes('triager')) return true;
+
+  return false;
+}
+
+function applyWorkqueueQuickFilters(items, quickFilters) {
+  const sourceFilter = String(quickFilters?.source || '').trim();
+  const repoFilter = String(quickFilters?.repo || '').trim();
+  const actionableOnly = !!quickFilters?.actionableOnly;
+
+  return (Array.isArray(items) ? items : []).filter((it) => {
+    if (sourceFilter && getWorkqueueItemSource(it) !== sourceFilter) return false;
+    if (repoFilter && getWorkqueueItemRepo(it) !== repoFilter) return false;
+    if (actionableOnly && isWorkqueueActionableNoise(it)) return false;
+    return true;
+  });
+}
+
+function applyWorkqueueScopeFilter(items, pane) {
+  const scope = String(pane?.workqueue?.scope || 'all').trim().toLowerCase();
+  if (scope === 'all') return Array.isArray(items) ? items : [];
+
+  const activeTarget = normalizeAgentId(String(pane?.agentId || 'main').trim() || 'main');
+  return (Array.isArray(items) ? items : []).filter((it) => {
+    const claimedBy = normalizeAgentId(String(it?.claimedBy || '').trim());
+    if (scope === 'unassigned') return !claimedBy;
+    if (scope === 'assigned') return claimedBy === activeTarget;
+    return true;
+  });
+}
 
 async function fetchAndRenderWorkqueueItemsForPane(pane) {
   if (!pane || pane.kind !== 'workqueue') return;
@@ -2010,7 +2657,16 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
     const items = Array.isArray(data.items) ? data.items : [];
+    const previousSig = String(pane.workqueue?.lastItemsSignature || '');
+    const nextSig = items
+      .map((it) => `${String(it?.id || '')}:${String(it?.status || '')}:${String(it?.updatedAt || '')}`)
+      .sort()
+      .join('|');
     pane.workqueue.items = items;
+    pane.workqueue.lastItemsSignature = nextSig;
+    if (previousSig && nextSig && previousSig !== nextSig) {
+      paneMarkUnread(pane, 'workqueue');
+    }
     if (statusLine) statusLine.textContent = `${items.length} item(s)`;
     renderWorkqueuePaneItems(pane);
   } catch (err) {
@@ -2025,10 +2681,14 @@ function renderWorkqueuePaneItems(pane) {
   body.innerHTML = '';
 
   const itemsRaw = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
-  const items = sortWorkqueueItems(itemsRaw, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const scopedItems = applyWorkqueueScopeFilter(itemsRaw, pane);
+  const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
+  const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const groups = groupWorkqueueItemsByDedupe(items, { groupingMode: pane.workqueue?.groupingMode });
+  const visibleItems = groups.map((g) => g.canonical);
 
   if (empty) {
-    const hasItems = items.length > 0;
+    const hasItems = visibleItems.length > 0;
     empty.hidden = hasItems;
     if (!hasItems) {
       const queue = String(pane.workqueue?.queue || '').trim() || 'dev-team';
@@ -2060,18 +2720,26 @@ function renderWorkqueuePaneItems(pane) {
   }
 
   const now = Date.now();
-  for (const it of items) {
+  for (const group of groups) {
+    const it = group.canonical;
+    const siblings = Array.isArray(group.siblings) ? group.siblings : [];
+    const dupCount = siblings.length;
+    const isSelected = [it, ...siblings].some((x) => x?.id && x.id === pane.workqueue.selectedItemId);
+
+    const groupWrap = document.createElement('div');
+    groupWrap.className = 'wq-row-group';
+
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'wq-row';
-    if (it.id && it.id === pane.workqueue.selectedItemId) row.classList.add('selected');
+    if (isSelected) row.classList.add('selected');
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
     const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
     const status = String(it.status || '');
 
     row.innerHTML = `
-      <div class="wq-col title">${escapeHtml(String(it.title || ''))}</div>
+      <div class="wq-col title">${escapeHtml(String(it.title || ''))}${dupCount > 0 ? ` <span class="wq-card-chip mono">×${escapeHtml(String(group.count || (dupCount + 1)))}</span>` : ''}${group.hasClaimed ? ' <span class="wq-card-chip mono">claimed</span>' : ''}${group.hasExpiredLease ? ' <span class="wq-card-chip mono">expired lease</span>' : ''}</div>
       <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
       <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
       <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
@@ -2085,7 +2753,38 @@ function renderWorkqueuePaneItems(pane) {
       renderWorkqueuePaneInspect(pane, it);
     });
 
-    body.appendChild(row);
+    groupWrap.appendChild(row);
+
+    if (dupCount > 0) {
+      const details = document.createElement('details');
+      details.className = 'wq-duplicates';
+
+      const summary = document.createElement('summary');
+      summary.className = 'wq-duplicates-summary mono';
+      summary.textContent = `+${dupCount} duplicate${dupCount === 1 ? '' : 's'}`;
+
+      const list = document.createElement('div');
+      list.className = 'wq-duplicates-list';
+
+      for (const dup of siblings) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'wq-duplicate-btn';
+        btn.textContent = `${dup.id || ''} · prio ${dup.priority ?? ''} · ${dup.status || ''}`;
+        btn.addEventListener('click', () => {
+          pane.workqueue.selectedItemId = dup.id || null;
+          renderWorkqueuePaneItems(pane);
+          renderWorkqueuePaneInspect(pane, dup);
+        });
+        list.appendChild(btn);
+      }
+
+      details.appendChild(summary);
+      details.appendChild(list);
+      groupWrap.appendChild(details);
+    }
+
+    body.appendChild(groupWrap);
   }
 
   // Keep inspect in sync if selection vanished.
@@ -3379,6 +4078,87 @@ function panePumpOutbox(pane) {
 }
 
 
+function paneDraftCurrentOrigin(pane) {
+  return {
+    paneId: String(pane?.key || ''),
+    paneType: String(pane?.kind || 'chat'),
+    targetAgent: String((pane?.agentId || 'main') || 'main')
+  };
+}
+
+function paneDraftOriginLabel(origin) {
+  if (!origin) return 'unknown';
+  const paneType = String(origin.paneType || 'chat');
+  const target = String(origin.targetAgent || 'main');
+  return `${paneType}:${target}`;
+}
+
+function paneDismissSendGuard(pane) {
+  if (!pane?.sendGuard?.open) {
+    paneSetDestinationWarning(pane, false);
+    return;
+  }
+  pane.sendGuard.open = false;
+  pane.sendGuard.onConfirm = null;
+  const row = pane.elements?.root?.querySelector('[data-pane-send-guard]');
+  if (row) row.hidden = true;
+  paneSetDestinationWarning(pane, false);
+}
+
+function paneShowSendGuard(pane, { origin, current, onConfirm } = {}) {
+  const row = pane.elements?.root?.querySelector('[data-pane-send-guard]');
+  if (!row) return;
+  const msg = row.querySelector('[data-pane-send-guard-msg]');
+  if (msg) {
+    msg.textContent = `You started this draft in ${paneDraftOriginLabel(origin)}, now sending to ${paneDraftOriginLabel(current)}.`;
+  }
+  if (pane.sendGuard) {
+    pane.sendGuard.open = true;
+    pane.sendGuard.onConfirm = typeof onConfirm === 'function' ? onConfirm : null;
+  }
+  row.hidden = false;
+  paneSetDestinationWarning(pane, true);
+}
+
+function paneSyncDraftOrigin(pane) {
+  const value = String(pane?.elements?.input?.value || '');
+  if (!value.trim()) {
+    pane.draftOrigin = null;
+    paneDismissSendGuard(pane);
+    paneSetDestinationWarning(pane, false);
+    return;
+  }
+  if (!pane.draftOrigin) {
+    pane.draftOrigin = paneDraftCurrentOrigin(pane);
+  }
+  const current = paneDraftCurrentOrigin(pane);
+  const origin = pane.draftOrigin;
+  const mismatch = Boolean(
+    origin && (
+      String(origin.paneId || '') !== String(current.paneId || '') ||
+      String(origin.paneType || '') !== String(current.paneType || '') ||
+      String(origin.targetAgent || '') !== String(current.targetAgent || '')
+    )
+  );
+  paneSetDestinationWarning(pane, mismatch);
+}
+
+function paneCloseGuardPrompt(pane) {
+  if (!pane || pane.kind !== 'chat') return true;
+  const hasDraft = Boolean(String(pane.elements?.input?.value || '').trim());
+  const hasActiveRun = Boolean(pane.thinking?.active || pane.pendingSend);
+  if (!hasDraft && !hasActiveRun) return true;
+
+  const warnings = [];
+  if (hasDraft) warnings.push('- unsent draft text');
+  if (hasActiveRun) warnings.push('- active run in progress');
+  const ok = window.confirm(
+    `Close this pane?\n\nYou may lose:\n${warnings.join('\n')}`
+  );
+  return Boolean(ok);
+}
+
+
 async function paneSendChat(pane) {
   const raw = pane.elements.input.value.trim();
   if (!raw) return;
@@ -3397,6 +4177,8 @@ async function paneSendChat(pane) {
   if (command === '/clear') {
     paneClearChatHistory(pane, { wipeStorage: true });
     pane.elements.input.value = '';
+    pane.draftOrigin = null;
+    paneDismissSendGuard(pane);
     paneUpdateCommandHints(pane);
     addFeed('event', 'chat', `cleared local history (${pane.sessionKey()})`);
     return;
@@ -3405,9 +4187,33 @@ async function paneSendChat(pane) {
     const key = pane.sessionKey();
     paneClearChatHistory(pane, { wipeStorage: true });
     pane.elements.input.value = '';
+    pane.draftOrigin = null;
+    paneDismissSendGuard(pane);
     paneUpdateCommandHints(pane);
     pane.client.request('sessions.reset', { key });
     addFeed('event', 'chat', `reset session (${key})`);
+    return;
+  }
+
+  const currentOrigin = paneDraftCurrentOrigin(pane);
+  const origin = pane.draftOrigin;
+  const draftMismatch = Boolean(
+    origin && (
+      String(origin.paneId || '') !== String(currentOrigin.paneId || '') ||
+      String(origin.paneType || '') !== String(currentOrigin.paneType || '') ||
+      String(origin.targetAgent || '') !== String(currentOrigin.targetAgent || '')
+    )
+  );
+  if (draftMismatch) {
+    paneShowSendGuard(pane, {
+      origin,
+      current: currentOrigin,
+      onConfirm: () => {
+        paneDismissSendGuard(pane);
+        pane.draftOrigin = paneDraftCurrentOrigin(pane);
+        paneSendChat(pane);
+      }
+    });
     return;
   }
 
@@ -3485,6 +4291,8 @@ async function paneSendChat(pane) {
   paneEnqueueOutbound(pane, { message: outbound, sessionKey, idempotencyKey, bubble });
   panePumpOutbox(pane);
 
+  pane.draftOrigin = null;
+  paneDismissSendGuard(pane);
   pane.elements.input.value = '';
   paneUpdateCommandHints(pane);
 }
@@ -3537,6 +4345,7 @@ function handleGatewayFrame(pane, data) {
       pane.pendingSend = null;
       pane.inFlight = null;
       panePumpOutbox(pane);
+      paneMarkUnread(pane, 'chat');
       triggerFiring(1.2, 2);
     } else if (payload.state === 'error') {
       const shouldMarkCanceled =
@@ -3559,6 +4368,7 @@ function handleGatewayFrame(pane, data) {
       pane.pendingSend = null;
       pane.inFlight = null;
       panePumpOutbox(pane);
+      paneMarkUnread(pane, 'chat');
       triggerFiring(0.8, 1);
     }
   }
@@ -3598,6 +4408,7 @@ function buildClientForPane(pane) {
       }
       updateGlobalStatus();
       updateConnectionControls();
+      refreshPaneManagerIfOpen();
       paneSetChatEnabled(pane);
     },
     onFrame: (data) => handleGatewayFrame(pane, data),
@@ -3607,6 +4418,7 @@ function buildClientForPane(pane) {
       paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();
+      refreshPaneManagerIfOpen();
       paneEnsureHiddenWelcome(pane);
       pane.client.request('sessions.resolve', { key: pane.sessionKey() });
 
@@ -3631,6 +4443,7 @@ function buildClientForPane(pane) {
       paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();
+      refreshPaneManagerIfOpen();
     },
     isAuthed: () => uiState.authed,
     checkAuth: async () => {
@@ -3652,6 +4465,7 @@ function agentIdExists(agentId) {
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
   if (!pane?.elements) return;
+  paneRenderDestinationStrip(pane);
   const { targetLabel, agentButton, agentLabel, agentSelect, agentWarning } = pane.elements;
 
   if (targetLabel && typeof label === 'string') targetLabel.textContent = label;
@@ -3681,6 +4495,8 @@ function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
       agentButton.addEventListener('click', handler);
     }
   }
+
+  paneRenderDestinationStrip(pane);
 }
 
 function renderPaneAgentIdentity(pane) {
@@ -3841,6 +4657,10 @@ function paneSetAgent(pane, nextAgentId) {
     if (pane.elements.agentSelect) pane.elements.agentSelect.value = next;
   } catch {}
   renderPaneAgentIdentity(pane);
+  paneRenderDestinationStrip(pane);
+  if (pane.kind === 'workqueue') {
+    renderWorkqueuePaneItems(pane);
+  }
 
   pane.attachments.files = [];
   paneRenderAttachments(pane);
@@ -3890,12 +4710,16 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sortKey, sortDir, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, quickFilters, scope, sortKey, sortDir, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
     root,
     name: root.querySelector('[data-pane-name]'),
+    activityBadge: root.querySelector('[data-pane-activity-badge]'),
+    typePill: root.querySelector('[data-pane-type-pill]'),
+    typeIcon: root.querySelector('[data-pane-type-icon]'),
+    typeText: root.querySelector('[data-pane-type-text]'),
     agentSelect: root.querySelector('[data-pane-agent-select]'),
     agentWrap: root.querySelector('[data-pane-agent-wrap]') || root.querySelector('.pane-agent'),
     targetLabel: root.querySelector('[data-pane-target-label]') || root.querySelector('.agent-label'),
@@ -3911,6 +4735,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     inputRow: root.querySelector('.chat-input-row'),
     input: root.querySelector('[data-pane-input]'),
     commandHints: root.querySelector('[data-pane-command-hints]'),
+    shortcutHints: root.querySelector('[data-pane-shortcut-hints]'),
     fileInput: root.querySelector('[data-pane-file-input]'),
     attachBtn: root.querySelector('[data-pane-attach]'),
     attachmentStatus: root.querySelector('[data-pane-attachment-status]'),
@@ -3931,13 +4756,21 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
+      quickFilters: {
+        source: typeof quickFilters?.source === 'string' ? quickFilters.source.trim() : '',
+        repo: typeof quickFilters?.repo === 'string' ? quickFilters.repo.trim() : '',
+        actionableOnly: !!quickFilters?.actionableOnly
+      },
+      scope: ['assigned', 'unassigned', 'all'].includes(String(scope || '').trim().toLowerCase()) ? String(scope).trim().toLowerCase() : 'all',
       items: [],
       selectedItemId: null,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'default',
-      sortDir: sortDir === 'asc' ? 'asc' : 'desc'
+      sortDir: sortDir === 'asc' ? 'asc' : 'desc',
+      groupingMode: ['auto', 'on', 'off'].includes(String(workqueue?.groupingMode || '').toLowerCase()) ? String(workqueue.groupingMode).toLowerCase() : 'auto'
     },
     connected: false,
     statusState: 'disconnected',
+    activity: { unread: 0, kind: '' },
     statusMeta: '',
     elements,
     chat: { runs: new Map(), history: [] },
@@ -3950,6 +4783,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     catchUp: { active: false, attemptsLeft: 0, timer: null },
     outbox: [],
     inFlight: null,
+    draftOrigin: null,
+    sendGuard: { open: false, onConfirm: null },
     chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
     legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
     sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
@@ -3957,11 +4792,38 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     client: null
   };
 
+  function getPaneShortcutHints(currentPane) {
+    const common = ['Cmd/Ctrl+Shift+K next', 'Cmd/Ctrl+Shift+J prev', 'Press ? for all shortcuts'];
+    if (currentPane.kind === 'workqueue') return ['g w Workqueue modal', 'Alt+1..9 focus pane', ...common];
+    if (currentPane.kind === 'cron') return ['Cmd/Ctrl+Shift+R add Cron pane', 'Alt+1..9 focus pane', ...common];
+    if (currentPane.kind === 'timeline') return ['Cmd/Ctrl+Shift+T add Timeline pane', 'Alt+1..9 focus pane', ...common];
+    return ['Cmd/Ctrl+K command palette', 'Alt+1..9 focus pane', ...common];
+  }
+
+  function renderPaneShortcutHints(currentPane) {
+    const el = currentPane?.elements?.shortcutHints;
+    if (!el) return;
+    const active = document.activeElement;
+    const inPane = !!(currentPane?.elements?.root && active && currentPane.elements.root.contains(active));
+    if (inPane && isTypingContext(active)) {
+      el.textContent = '';
+      el.hidden = true;
+      return;
+    }
+    const hints = getPaneShortcutHints(currentPane).slice(0, 5);
+    el.textContent = hints.join(' · ');
+    el.hidden = hints.length === 0;
+  }
+
   // Mark pane kind on root for CSS + debugging.
   try {
     elements.root.dataset.paneKind = pane.kind;
+    elements.root.dataset.paneAccentKind = pane.kind;
     elements.root.classList.add(`pane-kind-${pane.kind}`);
   } catch {}
+  if (elements.name) elements.name.textContent = paneLabel(pane);
+  paneRenderTypePill(pane);
+  renderPaneShortcutHints(pane);
 
   // Per-pane inline help popover ("What is this pane?")
   try {
@@ -3974,7 +4836,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
             lines: ['Shows queued work items, grouped by status.', 'Drag cards between columns to change status.', 'Use Refresh when another worker updates the queue.'],
             shortcuts: [
               ['g w', 'open Workqueue modal'],
-              ['Cmd/Ctrl+K', 'cycle focus between panes']
+              ['Cmd/Ctrl+Shift+K', 'focus next pane'],
+              ['Cmd/Ctrl+Shift+J', 'focus previous pane']
             ]
           };
         }
@@ -3984,7 +4847,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
             lines: ['Shows scheduled jobs in the Gateway cron scheduler.', 'Use filters to find failing/disabled jobs.', 'Use Run/Edit/Disable for quick ops.'],
             shortcuts: [
               ['?', 'keyboard shortcuts overlay'],
-              ['Cmd/Ctrl+K', 'cycle focus between panes']
+              ['Cmd/Ctrl+Shift+K', 'focus next pane'],
+              ['Cmd/Ctrl+Shift+J', 'focus previous pane']
             ]
           };
         }
@@ -3994,7 +4858,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
             lines: ['Shows recent cron run history (best-effort).', 'Adjust range/status/search to find events.', 'Click View to inspect the underlying job.'],
             shortcuts: [
               ['?', 'keyboard shortcuts overlay'],
-              ['Cmd/Ctrl+K', 'cycle focus between panes']
+              ['Cmd/Ctrl+Shift+K', 'focus next pane'],
+              ['Cmd/Ctrl+Shift+J', 'focus previous pane']
             ]
           };
         }
@@ -4002,8 +4867,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
           title: 'Chat',
           lines: ['Chat with an agent/session.', 'Pick an agent target, then send messages/files.', 'Use Stop to cancel a long response.'],
           shortcuts: [
-            ['Cmd/Ctrl+1..4', 'focus a pane'],
-            ['Cmd/Ctrl+K', 'cycle focus between panes']
+            ['Alt+1..9', 'focus visible pane by order'],
+            ['Cmd/Ctrl+1..4', 'focus a pane (legacy index)'],
+            ['Cmd/Ctrl+Shift+K', 'focus next pane'],
+            ['Cmd/Ctrl+Shift+J', 'focus previous pane']
           ]
         };
       })();
@@ -4047,6 +4914,17 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       paneAbortRun(pane);
     });
   }
+
+  elements.root.addEventListener('focusin', () => {
+    paneClearUnread(pane);
+    renderPaneShortcutHints(pane);
+  });
+  elements.root.addEventListener('focusout', () => {
+    setTimeout(() => renderPaneShortcutHints(pane), 0);
+  });
+  elements.root.addEventListener('input', () => {
+    renderPaneShortcutHints(pane);
+  });
 
   // WORKQUEUE PANE
   if (pane.role === 'admin' && pane.kind === 'workqueue') {
@@ -4092,6 +4970,42 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
             </div>
           </div>
 
+          <div class="wq-field wq-scope-field">
+            <span class="wq-label">Scope</span>
+            <div class="wq-scope" role="group" aria-label="Filter by ownership scope">
+              <button type="button" class="wq-scope-btn" data-wq-scope="assigned">Assigned to active target</button>
+              <button type="button" class="wq-scope-btn" data-wq-scope="unassigned">Unassigned</button>
+              <button type="button" class="wq-scope-btn" data-wq-scope="all">All</button>
+            </div>
+          </div>
+
+          <label class="wq-field">
+            <span class="wq-label">Source</span>
+            <select data-wq-quick-source aria-label="Filter by source">
+              <option value="">All</option>
+              <option value="github">GitHub</option>
+              <option value="automation">Automation</option>
+              <option value="manual">Manual</option>
+            </select>
+          </label>
+
+          <label class="wq-field">
+            <span class="wq-label">Repo</span>
+            <select data-wq-quick-repo aria-label="Filter by repository">
+              <option value="">All</option>
+            </select>
+          </label>
+
+          <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
+          <button data-wq-preset-actionable class="secondary" type="button" aria-pressed="false">Actionable only</button>
+          <label class="wq-field">
+            <span class="wq-label">Grouping</span>
+            <select data-wq-grouping-mode aria-label="Grouping mode">
+              <option value="auto">Auto (&gt;12 items)</option>
+              <option value="on">On</option>
+              <option value="off">Off</option>
+            </select>
+          </label>
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
 
           <div class="wq-sort" role="group" aria-label="Sort workqueue items">
@@ -4186,6 +5100,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     const statusOptionsEl = elements.thread.querySelector('[data-wq-status-options]');
     const statusDetailsEl = elements.thread.querySelector('[data-wq-status-details]');
     const statusClearBtn = elements.thread.querySelector('[data-wq-status-clear]');
+    const scopeBtns = Array.from(elements.thread.querySelectorAll('[data-wq-scope]'));
+    const quickSourceEl = elements.thread.querySelector('[data-wq-quick-source]');
+    const quickRepoEl = elements.thread.querySelector('[data-wq-quick-repo]');
+    const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
+    const actionableOnlyBtn = elements.thread.querySelector('[data-wq-preset-actionable]');
+    const groupingModeEl = elements.thread.querySelector('[data-wq-grouping-mode]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
 
     const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
@@ -4202,6 +5122,65 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       return sel;
     };
 
+    const updateActionablePresetUi = () => {
+      if (!actionableOnlyBtn) return;
+      const active = !!pane.workqueue.quickFilters?.actionableOnly;
+      actionableOnlyBtn.classList.toggle('active', active);
+      actionableOnlyBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    };
+
+    const setQuickFilters = ({ source, repo, actionableOnly } = {}) => {
+      pane.workqueue.quickFilters = {
+        source: typeof source === 'string' ? source.trim() : String(pane.workqueue.quickFilters?.source || '').trim(),
+        repo: typeof repo === 'string' ? repo.trim() : String(pane.workqueue.quickFilters?.repo || '').trim(),
+        actionableOnly: typeof actionableOnly === 'boolean' ? actionableOnly : !!pane.workqueue.quickFilters?.actionableOnly
+      };
+      if (quickSourceEl) quickSourceEl.value = pane.workqueue.quickFilters.source || '';
+      if (quickRepoEl) quickRepoEl.value = pane.workqueue.quickFilters.repo || '';
+      updateActionablePresetUi();
+    };
+
+    const refreshQuickRepoOptions = () => {
+      if (!quickRepoEl) return;
+      const current = String(pane.workqueue.quickFilters?.repo || '').trim();
+      const repos = Array.from(new Set((Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : []).map(getWorkqueueItemRepo).filter(Boolean)));
+      if (current && !repos.includes(current)) repos.push(current);
+      repos.sort((a, b) => a.localeCompare(b));
+      quickRepoEl.innerHTML = '';
+      const allOpt = document.createElement('option');
+      allOpt.value = '';
+      allOpt.textContent = 'All';
+      quickRepoEl.appendChild(allOpt);
+      for (const r of repos) {
+        const opt = document.createElement('option');
+        opt.value = r;
+        opt.textContent = r;
+        quickRepoEl.appendChild(opt);
+      }
+      if (current && repos.includes(current)) quickRepoEl.value = current;
+      else quickRepoEl.value = '';
+    };
+
+    const updateScopeUi = () => {
+      const current = String(pane.workqueue?.scope || 'all').trim().toLowerCase() || 'all';
+      scopeBtns.forEach((btn) => {
+        const value = String(btn.getAttribute('data-wq-scope') || '').trim().toLowerCase();
+        const active = value === current;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+    };
+
+    const setScope = (scopeValue) => {
+      const next = ['assigned', 'unassigned', 'all'].includes(String(scopeValue || '').trim().toLowerCase())
+        ? String(scopeValue).trim().toLowerCase()
+        : 'all';
+      pane.workqueue.scope = next;
+      updateScopeUi();
+      renderWorkqueuePaneItems(pane);
+      paneManager.persistAdminPanes();
+    };
+
     const applyStatuses = async (next, { closeMenu = false } = {}) => {
       statusSet.clear();
       for (const s of next) statusSet.add(s);
@@ -4209,6 +5188,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       renderStatusMultiSelect();
       if (closeMenu) statusDetailsEl?.removeAttribute('open');
       await fetchAndRenderWorkqueueItemsForPane(pane);
+      refreshQuickRepoOptions();
       paneManager.persistAdminPanes();
     };
 
@@ -4232,6 +5212,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         renderStatusMultiSelect();
       }
       await fetchAndRenderWorkqueueItemsForPane(pane);
+      refreshQuickRepoOptions();
       paneManager.persistAdminPanes();
     };
 
@@ -4330,7 +5311,49 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     });
 
     renderStatusMultiSelect();
+    setQuickFilters({
+      source: String(pane.workqueue?.quickFilters?.source || '').trim(),
+      repo: String(pane.workqueue?.quickFilters?.repo || '').trim(),
+      actionableOnly: !!pane.workqueue?.quickFilters?.actionableOnly
+    });
+    if (groupingModeEl) groupingModeEl.value = pane.workqueue.groupingMode || 'auto';
     populateQueueSelect().then(() => doRefresh());
+
+    quickSourceEl?.addEventListener('change', () => {
+      setQuickFilters({ source: quickSourceEl.value, repo: quickRepoEl?.value || '' });
+      renderWorkqueuePaneItems(pane);
+      paneManager.persistAdminPanes();
+    });
+    quickRepoEl?.addEventListener('change', () => {
+      setQuickFilters({ source: quickSourceEl?.value || '', repo: quickRepoEl.value });
+      renderWorkqueuePaneItems(pane);
+      paneManager.persistAdminPanes();
+    });
+    clawnsoleOnlyBtn?.addEventListener('click', () => {
+      setQuickFilters({ source: 'github', repo: 'rmdmattingly/clawnsole' });
+      renderWorkqueuePaneItems(pane);
+      paneManager.persistAdminPanes();
+    });
+    actionableOnlyBtn?.addEventListener('click', async () => {
+      const next = !pane.workqueue.quickFilters?.actionableOnly;
+      setQuickFilters({ actionableOnly: next });
+      if (next) {
+        pane.workqueue.sortKey = 'priority';
+        pane.workqueue.sortDir = 'desc';
+        try { updateSortUi(); } catch {}
+        await applyStatuses(DEFAULT_STATUSES);
+      } else {
+        renderWorkqueuePaneItems(pane);
+      }
+      paneManager.persistAdminPanes();
+    });
+
+    groupingModeEl?.addEventListener('change', () => {
+      const mode = String(groupingModeEl.value || 'auto').toLowerCase();
+      pane.workqueue.groupingMode = ['auto', 'on', 'off'].includes(mode) ? mode : 'auto';
+      renderWorkqueuePaneItems(pane);
+      paneManager.persistAdminPanes();
+    });
 
     refreshBtn?.addEventListener('click', () => doRefresh());
     queueCustomEl?.addEventListener('keydown', (e) => {
@@ -4351,6 +5374,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
       statusClearBtn?.addEventListener('click', () => applyStatuses([]));
     }
+
+    scopeBtns.forEach((btn) => {
+      btn.addEventListener('click', () => setScope(btn.getAttribute('data-wq-scope')));
+    });
+    updateScopeUi();
 
     // Sort controls (client-side): stable sorting with a status-grouping default.
     const sortBtns = Array.from(elements.thread.querySelectorAll('[data-wq-sort]'));
@@ -4461,6 +5489,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       }
     });
 
+    pane.statusState = 'connected';
+    pane.statusMeta = '';
     setStatusPill(elements.status, 'connected', '');
     // initial fetch is deferred until admin authed, but safe to load immediately too.
     setTimeout(() => {
@@ -4469,6 +5499,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
     pane.client = null;
     pane.connected = true;
+    updateGlobalStatus();
+    updateConnectionControls();
+    refreshPaneManagerIfOpen();
     return pane;
   }
 
@@ -5013,13 +6046,15 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     };
 
     pane.client = buildClientForPane(pane);
+    pane.statusState = 'disconnected';
+    pane.statusMeta = '';
     setStatusPill(elements.status, 'disconnected', '');
     return pane;
   }
 
   // CHAT PANE (existing behavior)
 
-  if (pane.role === 'admin') {
+  if (pane.role === 'admin' && pane.kind === 'chat') {
     renderAgentOptions(elements.agentSelect, pane.agentId);
     renderPaneAgentIdentity(pane);
 
@@ -5030,9 +6065,55 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     elements.agentSelect?.addEventListener('change', (event) => {
       paneSetAgent(pane, String(event.target.value || '').trim());
     });
-  } else {
+  } else if (pane.role !== 'admin') {
     if (elements.agentWrap) elements.agentWrap.hidden = true;
     if (elements.closeBtn) elements.closeBtn.hidden = true;
+  }
+
+  {
+    const stack = elements.root?.querySelector('.chat-input-stack');
+    if (stack && !stack.querySelector('[data-pane-destination-strip]')) {
+      const strip = document.createElement('button');
+      strip.type = 'button';
+      strip.className = 'destination-strip';
+      strip.setAttribute('data-pane-destination-strip', '1');
+      strip.setAttribute('data-testid', 'pane-destination-strip');
+      strip.innerHTML = `
+        <span class="destination-strip-label">Sending to:</span>
+        <span class="destination-strip-value" data-pane-destination-value></span>
+      `;
+      strip.addEventListener('click', () => paneOpenInManager(pane));
+      stack.insertBefore(strip, stack.firstChild || null);
+    }
+    paneRenderDestinationStrip(pane);
+  }
+
+  if (pane.kind === 'chat') {
+    const stack = elements.root?.querySelector('.chat-input-stack');
+    if (stack && !stack.querySelector('[data-pane-send-guard]')) {
+      const guard = document.createElement('div');
+      guard.className = 'send-guard';
+      guard.hidden = true;
+      guard.setAttribute('data-pane-send-guard', '1');
+      guard.setAttribute('data-testid', 'pane-send-guard');
+      guard.innerHTML = `
+        <div class="send-guard-msg" data-pane-send-guard-msg></div>
+        <div class="send-guard-actions">
+          <button type="button" class="secondary" data-pane-send-guard-confirm data-testid="pane-send-guard-confirm">Send anyway</button>
+          <button type="button" class="secondary" data-pane-send-guard-cancel data-testid="pane-send-guard-cancel">Cancel</button>
+        </div>
+      `;
+      stack.insertBefore(guard, elements.commandHints || null);
+
+      guard.querySelector('[data-pane-send-guard-confirm]')?.addEventListener('click', () => {
+        const fn = pane.sendGuard?.onConfirm;
+        if (typeof fn === 'function') fn();
+      });
+      guard.querySelector('[data-pane-send-guard-cancel]')?.addEventListener('click', () => {
+        paneDismissSendGuard(pane);
+        elements.input?.focus?.();
+      });
+    }
   }
 
   elements.sendBtn.addEventListener('click', () => {
@@ -5041,6 +6122,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
   });
 
   elements.input.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && pane.sendGuard?.open) {
+      event.preventDefault();
+      paneDismissSendGuard(pane);
+      return;
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       if (elements.sendBtn.disabled) return;
@@ -5049,6 +6135,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
   });
 
   elements.input.addEventListener('input', () => {
+    paneSyncDraftOrigin(pane);
     paneUpdateCommandHints(pane);
   });
 
@@ -5111,6 +6198,8 @@ const paneManager = {
         agentId: cfg.agentId,
         queue: cfg.queue,
         statusFilter: cfg.statusFilter,
+        quickFilters: cfg.quickFilters,
+        scope: cfg.scope,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
         closable: true
@@ -5120,6 +6209,20 @@ const paneManager = {
     this.updatePaneLabels();
     this.updateCloseButtons();
     this.applyInferredLayout();
+  },
+  buildDefaultAdminPanes(defaultAgent) {
+    const safeDefaultAgent = normalizeAgentId(defaultAgent || 'main');
+    const paneA = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: safeDefaultAgent };
+    const paneB = {
+      key: `p${randomId().slice(0, 8)}`,
+      kind: 'workqueue',
+      queue: 'dev-team',
+      statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+      quickFilters: { source: '', repo: '' },
+      sortKey: 'default',
+      sortDir: 'desc'
+    };
+    return [paneA, paneB].slice(0, this.maxPanes);
   },
   destroyAll() {
     this.panes.forEach((pane) => {
@@ -5137,18 +6240,27 @@ const paneManager = {
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
     const defaultAgent = normalizeAgentId(storedDefault || 'main');
 
+    const isKnownKind = (value) => value === 'chat' || value === 'workqueue' || value === 'cron' || value === 'timeline';
+    const coerceKind = (rawKind, rawMode) => {
+      const normalized = typeof rawKind === 'string' ? rawKind.trim().toLowerCase() : '';
+      if (isKnownKind(normalized)) return normalized;
+
+      const normalizedMode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : '';
+      if (isKnownKind(normalizedMode)) return normalizedMode;
+
+      // Legacy super-compact entries (no kind/mode) default to chat.
+      if (!normalized && !normalizedMode) return 'chat';
+
+      return null;
+    };
+
     const coerce = (item) => {
       // Legacy format: { key, agentId }
       if (item && typeof item === 'object') {
         const key = typeof item.key === 'string' && item.key ? item.key : '';
-        const rawKind = typeof item.kind === 'string' ? item.kind.trim().toLowerCase() : '';
-        const rawMode = typeof item.mode === 'string' ? item.mode.trim().toLowerCase() : '';
-        const kind = rawKind === 'workqueue' || rawKind === 'cron' || rawKind === 'timeline'
-          ? rawKind
-          : rawMode === 'workqueue' || rawMode === 'cron' || rawMode === 'timeline'
-            ? rawMode
-            : 'chat';
-        if (!key) return null;
+        const kind = coerceKind(item.kind, item.mode);
+        if (!key || !kind) return null;
+
         if (kind === 'workqueue') {
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
           const statusFilter = Array.isArray(item.statusFilter)
@@ -5156,18 +6268,32 @@ const paneManager = {
             : ['ready', 'pending', 'claimed', 'in_progress'];
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'default';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, queue, statusFilter, sortKey, sortDir };
+          const scope = ['assigned', 'unassigned', 'all'].includes(String(item.scope || '').trim().toLowerCase())
+            ? String(item.scope).trim().toLowerCase()
+            : 'all';
+          const quickFilters = item.quickFilters && typeof item.quickFilters === 'object'
+            ? {
+                source: typeof item.quickFilters.source === 'string' ? item.quickFilters.source.trim() : '',
+                repo: typeof item.quickFilters.repo === 'string' ? item.quickFilters.repo.trim() : '',
+                actionableOnly: !!item.quickFilters.actionableOnly
+              }
+            : { source: '', repo: '', actionableOnly: false };
+          return { key, kind, queue, statusFilter, scope, sortKey, sortDir, quickFilters };
         }
+
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
         }
+
         const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
-        return { key, kind: 'chat', agentId };
+        return { key, kind, agentId };
       }
+
       // Super-legacy format: ['pabc','pdef'] (treat as chat panes)
       if (typeof item === 'string' && item) {
         return { key: item, kind: 'chat', agentId: defaultAgent };
       }
+
       return null;
     };
 
@@ -5176,25 +6302,28 @@ const paneManager = {
       if (!raw) throw new Error('empty');
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) throw new Error('not array');
-      const list = parsed.map(coerce).filter(Boolean);
-      if (list.length > 0) {
-        return list.slice(0, this.maxPanes);
+
+      const list = [];
+      let changed = false;
+      for (const item of parsed) {
+        const normalized = coerce(item);
+        if (normalized) list.push(normalized);
+        else changed = true;
+      }
+
+      const panes = list.slice(0, this.maxPanes);
+      if (panes.length > 0) {
+        if (changed || parsed.length !== panes.length) {
+          storage.set(ADMIN_PANES_KEY, JSON.stringify(panes));
+        }
+        return panes;
       }
     } catch {}
 
     // Default: Chat + Workqueue.
-    const paneA = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: defaultAgent };
-    const paneB = {
-      key: `p${randomId().slice(0, 8)}`,
-      kind: 'workqueue',
-      queue: 'dev-team',
-      statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
-      sortKey: 'default',
-      sortDir: 'desc'
-    };
-    const list = [paneA, paneB].slice(0, this.maxPanes);
-    storage.set(ADMIN_PANES_KEY, JSON.stringify(list));
-    return list;
+    const panes = this.buildDefaultAdminPanes(defaultAgent);
+    storage.set(ADMIN_PANES_KEY, JSON.stringify(panes));
+    return panes;
   },
   persistAdminPanes() {
     if (roleState.role !== 'admin') return;
@@ -5205,6 +6334,12 @@ const paneManager = {
           kind: 'workqueue',
           queue: pane.workqueue?.queue || 'dev-team',
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
+          quickFilters: {
+            source: String(pane.workqueue?.quickFilters?.source || '').trim(),
+            repo: String(pane.workqueue?.quickFilters?.repo || '').trim(),
+            actionableOnly: !!pane.workqueue?.quickFilters?.actionableOnly
+          },
+          scope: String(pane.workqueue?.scope || 'all').trim().toLowerCase() || 'all',
           sortKey: pane.workqueue?.sortKey || 'default',
           sortDir: pane.workqueue?.sortDir || 'desc'
         };
@@ -5225,16 +6360,8 @@ const paneManager = {
 
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
     const defaultAgent = normalizeAgentId(storedDefault || 'main');
-    const paneA = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: defaultAgent };
-    const paneB = {
-      key: `p${randomId().slice(0, 8)}`,
-      kind: 'workqueue',
-      queue: 'dev-team',
-      statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
-      sortKey: 'default',
-      sortDir: 'desc'
-    };
-    storage.set(ADMIN_PANES_KEY, JSON.stringify([paneA, paneB]));
+    const payload = this.buildDefaultAdminPanes(defaultAgent);
+    storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
 
     this.init();
 
@@ -5246,19 +6373,41 @@ const paneManager = {
       firstPane?.elements?.input?.focus?.();
     } catch {}
   },
-  addPane(kind = 'chat') {
+
+  addPane(kind = 'chat', { forceNew = false, queue } = {}) {
     if (roleState.role !== 'admin') return;
-    if (this.panes.length >= this.maxPanes) return;
 
     const normalizedKind = normalizePaneKind(kind);
 
+    if (normalizedKind === 'workqueue' || normalizedKind === 'cron' || normalizedKind === 'timeline') {
+      const targetQueue = String(queue || 'dev-team').trim() || 'dev-team';
+      const existing = this.panes.find((pane) => {
+        if (!pane || pane.kind !== normalizedKind) return false;
+        if (normalizedKind === 'workqueue') {
+          return String(pane.workqueue?.queue || 'dev-team').trim() === targetQueue;
+        }
+        return true;
+      });
+
+      if (existing && !forceNew) {
+        this.focusPanePrimary(existing);
+        const noun = normalizedKind === 'workqueue' ? `workqueue (${targetQueue})` : normalizedKind;
+        showToast(`Reusing existing ${noun} pane.`, { kind: 'info', timeoutMs: 1800 });
+        return existing;
+      }
+    }
+
+    if (this.panes.length >= this.maxPanes) return;
+
     if (normalizedKind === 'workqueue') {
+      const targetQueue = String(queue || 'dev-team').trim() || 'dev-team';
       const pane = createPane({
         key: `p${randomId().slice(0, 8)}`,
         role: 'admin',
         kind: 'workqueue',
-        queue: 'dev-team',
+        queue: targetQueue,
         statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+        quickFilters: { source: '', repo: '' },
         closable: true
       });
       this.panes.push(pane);
@@ -5371,12 +6520,26 @@ const paneManager = {
       wqBtn.dataset.testid = 'pane-add-menu-workqueue';
       wqBtn.title = 'Shortcut: Ctrl/Cmd+Shift+W';
 
+      const wqForceBtn = document.createElement('button');
+      wqForceBtn.type = 'button';
+      wqForceBtn.className = 'pane-add-menu__item';
+      wqForceBtn.textContent = 'Open anyway: New Workqueue pane';
+      wqForceBtn.dataset.testid = 'pane-add-menu-workqueue-open-anyway';
+      wqForceBtn.hidden = true;
+
       const cronBtn = document.createElement('button');
       cronBtn.type = 'button';
       cronBtn.className = 'pane-add-menu__item';
       cronBtn.textContent = 'New Cron pane';
       cronBtn.dataset.testid = 'pane-add-menu-cron';
       cronBtn.title = 'Shortcut: Ctrl/Cmd+Shift+R';
+
+      const cronForceBtn = document.createElement('button');
+      cronForceBtn.type = 'button';
+      cronForceBtn.className = 'pane-add-menu__item';
+      cronForceBtn.textContent = 'Open anyway: New Cron pane';
+      cronForceBtn.dataset.testid = 'pane-add-menu-cron-open-anyway';
+      cronForceBtn.hidden = true;
 
       const timelineBtn = document.createElement('button');
       timelineBtn.type = 'button';
@@ -5385,38 +6548,50 @@ const paneManager = {
       timelineBtn.dataset.testid = 'pane-add-menu-timeline';
       timelineBtn.title = 'Shortcut: Ctrl/Cmd+Shift+T';
 
+      const timelineForceBtn = document.createElement('button');
+      timelineForceBtn.type = 'button';
+      timelineForceBtn.className = 'pane-add-menu__item';
+      timelineForceBtn.textContent = 'Open anyway: New Timeline pane';
+      timelineForceBtn.dataset.testid = 'pane-add-menu-timeline-open-anyway';
+      timelineForceBtn.hidden = true;
+
       menu.appendChild(chatBtn);
       menu.appendChild(wqBtn);
+      menu.appendChild(wqForceBtn);
       menu.appendChild(cronBtn);
+      menu.appendChild(cronForceBtn);
       menu.appendChild(timelineBtn);
+      menu.appendChild(timelineForceBtn);
 
-      const onMenuAdd = (kind) => (event) => {
-        if (state.menuActionInFlight) return;
-        state.menuActionInFlight = true;
+      const onMenuAdd = (kind, options = {}) => (event) => {
+        if (state.menuActionTaken) return;
+        state.menuActionTaken = true;
         if (event?.preventDefault) event.preventDefault();
         if (event?.stopPropagation) event.stopPropagation();
 
         this.closeAddPaneMenu();
-        this.addPane(kind);
-
-        queueMicrotask(() => {
-          state.menuActionInFlight = false;
-        });
+        this.addPane(kind, options);
       };
 
       chatBtn.addEventListener('click', onMenuAdd('chat'));
 
       wqBtn.addEventListener('click', onMenuAdd('workqueue'));
+      wqForceBtn.addEventListener('click', onMenuAdd('workqueue', { forceNew: true }));
 
       cronBtn.addEventListener('click', onMenuAdd('cron'));
+      cronForceBtn.addEventListener('click', onMenuAdd('cron', { forceNew: true }));
 
       timelineBtn.addEventListener('click', onMenuAdd('timeline'));
+      timelineForceBtn.addEventListener('click', onMenuAdd('timeline', { forceNew: true }));
 
       state.menuEl = menu;
       state.chatBtn = chatBtn;
       state.wqBtn = wqBtn;
+      state.wqForceBtn = wqForceBtn;
       state.cronBtn = cronBtn;
+      state.cronForceBtn = cronForceBtn;
       state.timelineBtn = timelineBtn;
+      state.timelineForceBtn = timelineForceBtn;
     }
 
     const positionMenu = () => {
@@ -5442,6 +6617,7 @@ const paneManager = {
     document.body.appendChild(state.menuEl);
     state.menuEl.style.display = 'block';
     state.open = true;
+    state.menuActionTaken = false;
 
     try {
       anchorEl.setAttribute('aria-expanded', 'true');
@@ -5459,10 +6635,30 @@ const paneManager = {
     window.addEventListener('scroll', positionMenu, true);
 
     const atMax = this.panes.length >= this.maxPanes;
+    const hasWorkqueue = this.panes.some((pane) => pane.kind === 'workqueue' && String(pane.workqueue?.queue || 'dev-team').trim() === 'dev-team');
+    const hasCron = this.panes.some((pane) => pane.kind === 'cron');
+    const hasTimeline = this.panes.some((pane) => pane.kind === 'timeline');
+
     state.chatBtn.disabled = atMax;
-    state.wqBtn.disabled = atMax;
-    state.cronBtn.disabled = atMax;
-    state.timelineBtn.disabled = atMax;
+    state.wqBtn.disabled = false;
+    state.cronBtn.disabled = false;
+    state.timelineBtn.disabled = false;
+
+    if (state.wqForceBtn) {
+      state.wqForceBtn.hidden = !hasWorkqueue;
+      state.wqForceBtn.disabled = atMax;
+      state.wqBtn.textContent = hasWorkqueue ? 'Open existing Workqueue pane' : 'New Workqueue pane';
+    }
+    if (state.cronForceBtn) {
+      state.cronForceBtn.hidden = !hasCron;
+      state.cronForceBtn.disabled = atMax;
+      state.cronBtn.textContent = hasCron ? 'Open existing Cron pane' : 'New Cron pane';
+    }
+    if (state.timelineForceBtn) {
+      state.timelineForceBtn.hidden = !hasTimeline;
+      state.timelineForceBtn.disabled = atMax;
+      state.timelineBtn.textContent = hasTimeline ? 'Open existing Timeline pane' : 'New Timeline pane';
+    }
 
     this._addPaneMenuState = state;
   },
@@ -5471,6 +6667,7 @@ const paneManager = {
     if (!state?.open) return;
 
     state.open = false;
+    state.menuActionTaken = false;
 
     try {
       state.anchorEl?.setAttribute?.('aria-expanded', 'false');
@@ -5495,7 +6692,9 @@ const paneManager = {
     if (this.panes.length <= 1) return;
     const idx = this.panes.findIndex((pane) => pane.key === key);
     if (idx < 0) return;
-    const [pane] = this.panes.splice(idx, 1);
+    const pane = this.panes[idx];
+    if (!paneCloseGuardPrompt(pane)) return;
+    this.panes.splice(idx, 1);
     try {
       pane.client?.disconnect(true);
     } catch {}
@@ -5537,7 +6736,13 @@ const paneManager = {
     this.panes.forEach((pane, index) => {
       const letter = String.fromCharCode(65 + (index % 26));
       if (pane.elements.name) pane.elements.name.textContent = letter;
+      paneRenderDestinationStrip(pane);
+      paneRenderActivityBadge(pane);
     });
+
+    if (globalElements.paneGrid) {
+      globalElements.paneGrid.setAttribute('aria-label', 'Panes');
+    }
   },
   updateCloseButtons() {
     const allowClose = roleState.role === 'admin' && this.panes.length > 1;
@@ -5588,6 +6793,21 @@ const paneManager = {
   }
 };
 
+try {
+  window.__clawnsoleTest = window.__clawnsoleTest || {};
+  window.__clawnsoleTest.forcePaneAgent = (index = 0, agentId = 'main') => {
+    const pane = paneManager.panes?.[Number(index) || 0];
+    if (!pane || pane.kind !== 'chat') return false;
+    pane.agentId = String(agentId || 'main').trim() || 'main';
+    try {
+      if (pane.elements?.agentSelect) pane.elements.agentSelect.value = pane.agentId;
+    } catch {}
+    renderPaneAgentIdentity(pane);
+    paneSetChatEnabled(pane);
+    return true;
+  };
+} catch {}
+
 // Global event wiring
 
 globalElements.settingsBtn?.addEventListener('click', () => openSettings());
@@ -5617,7 +6837,7 @@ globalElements.commandPaletteInput?.addEventListener('keydown', (event) => {
   }
   if (key === 'ArrowDown') {
     event.preventDefault();
-    commandPaletteState.selectedIndex = Math.min(commandPaletteState.filtered.length - 1, commandPaletteState.selectedIndex + 1);
+    commandPaletteState.selectedIndex = Math.min(commandPaletteState.visible.length - 1, commandPaletteState.selectedIndex + 1);
     renderCommandPalette();
     return;
   }
@@ -5629,7 +6849,15 @@ globalElements.commandPaletteInput?.addEventListener('keydown', (event) => {
   }
   if (key === 'Enter') {
     event.preventDefault();
-    const item = commandPaletteState.filtered[commandPaletteState.selectedIndex];
+    const entry = commandPaletteState.visible[commandPaletteState.selectedIndex];
+    if (!entry) return;
+    if (entry.kind === 'toggle' && entry.subgroupId) {
+      if (commandPaletteState.expandedSubgroups.has(entry.subgroupId)) commandPaletteState.expandedSubgroups.delete(entry.subgroupId);
+      else commandPaletteState.expandedSubgroups.add(entry.subgroupId);
+      renderCommandPalette();
+      return;
+    }
+    const item = entry.item;
     if (!item) return;
     try {
       item.run?.();
@@ -5656,9 +6884,27 @@ globalElements.agentsModal?.addEventListener('click', (event) => {
 });
 
 globalElements.agentsSearch?.addEventListener('input', () => renderAgentsModalList());
+globalElements.agentsSearch?.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  if (globalElements.agentsSearch.value) {
+    globalElements.agentsSearch.value = '';
+    renderAgentsModalList();
+  }
+  globalElements.agentsSearch.focus();
+});
 
-globalElements.agentsActiveOnly?.addEventListener('change', () => {
-  storage.set(ADMIN_AGENT_ACTIVE_ONLY_KEY, !!globalElements.agentsActiveOnly.checked);
+globalElements.agentsFilterGroup?.addEventListener('click', (event) => {
+  const btn = event.target instanceof Element ? event.target.closest('[data-agents-filter]') : null;
+  if (!btn) return;
+  const value = String(btn.getAttribute('data-agents-filter') || 'all');
+  storage.set(ADMIN_AGENT_FILTER_KEY, value);
+  renderAgentsModalList();
+});
+
+globalElements.agentsSortMode?.addEventListener('change', () => {
+  const mode = String(globalElements.agentsSortMode.value || 'attention');
+  storage.set(ADMIN_AGENT_SORT_KEY, ['attention', 'recent', 'oldest'].includes(mode) ? mode : 'attention');
   renderAgentsModalList();
 });
 
@@ -5692,6 +6938,13 @@ globalElements.wqAutoRefreshInterval?.addEventListener('change', () => {
   startWorkqueueAutoRefresh();
 });
 
+globalElements.wqGroupingMode?.addEventListener('change', () => {
+  const mode = String(globalElements.wqGroupingMode.value || 'auto').toLowerCase();
+  workqueueState.groupingMode = ['auto', 'on', 'off'].includes(mode) ? mode : 'auto';
+  storage.set('clawnsole.wq.grouping.mode', workqueueState.groupingMode);
+  renderWorkqueueItems();
+});
+
 globalElements.wqRefreshBtn?.addEventListener('click', () => {
   fetchWorkqueueQueues().then(() => fetchAndRenderWorkqueueItems());
 });
@@ -5702,17 +6955,39 @@ globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFro
 let shortcutState = { lastGAtMs: 0 };
 
 function isTypingContext(target) {
-  const el = target || document.activeElement;
-  if (!el) return false;
-  const tag = String(el.tagName || '').toUpperCase();
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
-  if (el.isContentEditable) return true;
+  let el = target || document.activeElement;
+  while (el) {
+    if (!(el instanceof HTMLElement)) break;
+
+    const tag = String(el.tagName || '').toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (el.isContentEditable || String(el.contentEditable).toLowerCase() === 'true') return true;
+
+    el = el.parentElement;
+  }
+
+  return false;
+}
+
+function isTypingShortcutExempt(event) {
+  const key = String(event.key || '').toLowerCase();
+  if (!event.metaKey && !event.ctrlKey) return false;
+  if (event.altKey) return false;
+
+  // Explicitly exempt shifted pane shortcuts (existing intended behavior).
+  if (event.shiftKey && ['c', 'w', 'r', 't', 'n'].includes(key)) return true;
+
+  // Global admin launchers should work even when typing.
+  if (!event.shiftKey && ['k', 'p'].includes(key)) return true;
+
   return false;
 }
 
 function focusPaneIndex(idx) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
+
+  paneClearUnread(pane);
 
   try {
     pane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
@@ -5748,6 +7023,34 @@ function focusPaneIndex(idx) {
   }
 }
 
+function isPaneElementVisible(el) {
+  if (!(el instanceof HTMLElement)) return false;
+  try {
+    if (el.hidden) return false;
+    if (el.getClientRects && el.getClientRects().length === 0) return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function focusVisiblePaneByShortcutPosition(position) {
+  if (!Number.isFinite(position) || position < 1) return;
+
+  const visibleRoots = Array.from(document.querySelectorAll('[data-pane]')).filter((el) => isPaneElementVisible(el));
+  if (visibleRoots.length === 0) return;
+
+  const targetRoot = visibleRoots[position - 1];
+  if (!targetRoot) return;
+
+  const pane = paneManager.panes.find((candidate) => candidate?.elements?.root === targetRoot);
+  if (!pane) return;
+
+  const idx = paneManager.panes.indexOf(pane);
+  if (idx < 0) return;
+  focusPaneIndex(idx);
+}
+
 function cyclePaneFocus() {
   const panes = paneManager.panes;
   if (!panes || panes.length === 0) return;
@@ -5756,6 +7059,31 @@ function cyclePaneFocus() {
   const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
   const next = idx >= 0 ? (idx + 1) % panes.length : 0;
   focusPaneIndex(next);
+}
+
+function cyclePaneFocusBackward() {
+  const panes = paneManager.panes;
+  if (!panes || panes.length === 0) return;
+
+  const active = document.activeElement;
+  const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
+  const prev = idx >= 0 ? (idx - 1 + panes.length) % panes.length : panes.length - 1;
+  focusPaneIndex(prev);
+}
+
+function isBlockingOverlayOpenForPaneShortcuts() {
+  // Scope pane-add keyboard accelerators to the main workspace only.
+  // If any overlay/modal is open, ignore pane-add shortcuts to avoid accidental pane creation.
+  const blockers = [
+    globalElements.loginOverlay,
+    globalElements.settingsModal,
+    globalElements.shortcutsModal,
+    globalElements.commandPaletteModal,
+    globalElements.paneManagerModal,
+    globalElements.workqueueModal,
+    globalElements.agentsModal
+  ];
+  return blockers.some((el) => !!el?.classList?.contains('open'));
 }
 
 window.addEventListener('keydown', (event) => {
@@ -5770,19 +7098,32 @@ window.addEventListener('keydown', (event) => {
   // If Pane Manager is open, it gets first dibs on keys.
   if (paneManagerHandleKeydown(event)) return;
 
+  // Agents modal fleet triage loop keys.
+  if (agentsModalHandleKeydown(event)) return;
+
+  // Never fire admin shortcuts while typing unless explicitly exempted.
+  if (isTypingContext(event.target) && !isTypingShortcutExempt(event)) return;
+
   // Add-pane shortcuts (admin-only)
   // Ctrl/Cmd+Shift+C → new chat
   // Ctrl/Cmd+Shift+W → new workqueue
   // Ctrl/Cmd+Shift+R → new cron
   // Ctrl/Cmd+Shift+T → new timeline
+  // Ctrl/Cmd+Shift+G → Workqueue for active chat agent
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey;
   if (isAccel && roleState.role === 'admin') {
     const key = String(event.key || '').toLowerCase();
+    if (key === 'g') {
+      if (isBlockingOverlayOpenForPaneShortcuts()) return;
+      event.preventDefault();
+      paneManager.closeAddPaneMenu();
+      openWorkqueueForActiveChatAgent();
+      return;
+    }
     const map = { c: 'chat', w: 'workqueue', r: 'cron', t: 'timeline' };
     const kind = map[key];
     if (kind) {
-      // Don't hijack while typing unless it's a true accelerator.
-      // (We still allow it when focused in an input, but only with Ctrl/Cmd+Shift.)
+      if (isBlockingOverlayOpenForPaneShortcuts()) return;
       event.preventDefault();
       paneManager.closeAddPaneMenu();
       paneManager.addPane(kind);
@@ -5790,14 +7131,14 @@ window.addEventListener('keydown', (event) => {
     }
   }
 
-  // Cmd/Ctrl+P opens Pane Manager (even while typing).
+  // Cmd/Ctrl+P opens Pane Manager.
   if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'p') {
     event.preventDefault();
     openPaneManager();
     return;
   }
 
-  // Cmd/Ctrl+K opens command palette (even while typing).
+  // Cmd/Ctrl+K opens command palette.
   if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'k') {
     event.preventDefault();
     openCommandPalette();
@@ -5817,9 +7158,6 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Never steal focus / override browser shortcuts while typing.
-  if (isTypingContext(event.target)) return;
-
   const key = String(event.key || '');
 
   const isQuestion = key === '?' || (key === '/' && event.shiftKey);
@@ -5829,7 +7167,20 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Cmd/Ctrl+1..4 focuses a pane.
+  // Alt+1..9 focuses panes by visible on-screen order.
+  if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+    const code = String(event.code || '');
+    if (code.startsWith('Digit')) {
+      const n = Number.parseInt(code.slice(5), 10);
+      if (Number.isFinite(n) && n >= 1 && n <= 9) {
+        event.preventDefault();
+        focusVisiblePaneByShortcutPosition(n);
+        return;
+      }
+    }
+  }
+
+  // Cmd/Ctrl+1..4 focuses a pane by layout index (legacy shortcut).
   if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
     const n = Number.parseInt(key, 10);
     if (Number.isFinite(n) && n >= 1 && n <= 4) {
@@ -5839,10 +7190,17 @@ window.addEventListener('keydown', (event) => {
     }
   }
 
-  // Cmd/Ctrl+Shift+K cycles focus across panes.
+  // Cmd/Ctrl+Shift+K focuses next pane.
   if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'k') {
     event.preventDefault();
     cyclePaneFocus();
+    return;
+  }
+
+  // Cmd/Ctrl+Shift+J focuses previous pane.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'j') {
+    event.preventDefault();
+    cyclePaneFocusBackward();
     return;
   }
 
@@ -5893,6 +7251,11 @@ globalElements.disconnectBtn?.addEventListener('click', () => {
 
 globalElements.resetLayoutBtn?.addEventListener('click', () => {
   paneManager.resetAdminLayoutToDefault({ confirm: true });
+});
+
+globalElements.resetLayoutQuickBtn?.addEventListener('click', () => {
+  paneManager.resetAdminLayoutToDefault({ confirm: false });
+  showToast('Layout reset to recommended: Chat + Workqueue.', { kind: 'success', timeoutMs: 1800 });
 });
 
 globalElements.paneManagerBtn?.addEventListener('click', (event) => {
