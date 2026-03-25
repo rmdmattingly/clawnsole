@@ -109,6 +109,23 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   return `${sec}s`;
 });
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
+const WORKQUEUE_GROUP_AUTO_THRESHOLD = 10;
+function normalizeWorkqueueGroupTitle(title) {
+  const t = String(title || '').trim();
+  if (!t) return '(untitled)';
+  return t
+    .replace(/\(\d{4}-\d{2}-\d{2}T\d{2}\)/g, '')
+    .replace(/\(\d{4}-\d{2}-\d{2}\)/g, '')
+    .replace(/\[\d{4}-\d{2}-\d{2}[^\]]*\]/g, '')
+    .replace(/\s*×\d+$/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+function workqueueGroupSignature(item) {
+  const key = String(item?.dedupeKey || '').trim();
+  if (key) return `dedupe:${key}`;
+  return `title:${normalizeWorkqueueGroupTitle(item?.title || '')}`;
+}
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
   const n = Number(count);
   if (!Number.isFinite(n) || n <= 1) return 1;
@@ -2893,7 +2910,7 @@ function renderWorkqueuePaneItems(pane) {
   }
 
   const now = Date.now();
-  for (const it of items) {
+  const renderItemRow = (it) => {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'wq-row';
@@ -2919,6 +2936,33 @@ function renderWorkqueuePaneItems(pane) {
     });
 
     body.appendChild(row);
+  };
+
+  const mode = pane.workqueue.groupMode || 'auto';
+  const shouldGroup = mode === 'on' || (mode === 'auto' && items.length > WORKQUEUE_GROUP_AUTO_THRESHOLD);
+  if (!shouldGroup) {
+    for (const it of items) renderItemRow(it);
+  } else {
+    const grouped = new Map();
+    for (const it of items) {
+      const sig = workqueueGroupSignature(it);
+      if (!grouped.has(sig)) grouped.set(sig, { key: sig, label: normalizeWorkqueueGroupTitle(it.title || ''), items: [] });
+      grouped.get(sig).items.push(it);
+    }
+    for (const group of grouped.values()) {
+      const expanded = !!pane.workqueue.expandedGroups?.[group.key] || group.items.length === 1;
+      const gRow = document.createElement('button');
+      gRow.type = 'button';
+      gRow.className = 'wq-group-row';
+      gRow.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      gRow.innerHTML = `<span class="wq-group-caret">${expanded ? '▾' : '▸'}</span><span class="wq-group-title">${escapeHtml(group.label)}</span><span class="wq-group-count">×${group.items.length}</span>`;
+      gRow.addEventListener('click', () => {
+        pane.workqueue.expandedGroups[group.key] = !expanded;
+        renderWorkqueuePaneItems(pane);
+      });
+      body.appendChild(gRow);
+      if (expanded) group.items.forEach((it) => renderItemRow(it));
+    }
   }
 
   // Keep inspect in sync if selection vanished.
@@ -4800,7 +4844,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, sortKey, sortDir, groupMode, cronAgentId, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -4851,7 +4895,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       items: [],
       selectedItemId: null,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
-      sortDir: sortDir === 'asc' ? 'asc' : 'desc'
+      sortDir: sortDir === 'asc' ? 'asc' : 'desc',
+      groupMode: groupMode === 'off' ? 'off' : groupMode === 'on' ? 'on' : 'auto',
+      expandedGroups: {}
     },
     cronAgentId: typeof cronAgentId === 'string' ? cronAgentId.trim() : '',
     connected: false,
@@ -5034,6 +5080,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           </div>
 
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
+          <button data-wq-group-toggle class="secondary" type="button" aria-pressed="false">Grouping: Auto</button>
 
           <div class="wq-sort" role="group" aria-label="Sort workqueue items">
             <span class="wq-sort-label">Sort</span>
@@ -5367,6 +5414,23 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       btn.addEventListener('click', () => setScope(btn.getAttribute('data-wq-scope')));
     });
     updateScopeUi();
+
+    const groupToggleBtn = elements.thread.querySelector('[data-wq-group-toggle]');
+    const updateGroupToggleUi = () => {
+      const mode = pane.workqueue.groupMode || 'auto';
+      if (!groupToggleBtn) return;
+      groupToggleBtn.textContent = mode === 'on' ? 'Grouping: On' : mode === 'off' ? 'Grouping: Off' : 'Grouping: Auto';
+      groupToggleBtn.setAttribute('aria-pressed', mode === 'on' ? 'true' : 'false');
+    };
+    const cycleGroupMode = () => {
+      const cur = pane.workqueue.groupMode || 'auto';
+      pane.workqueue.groupMode = cur === 'auto' ? 'on' : cur === 'on' ? 'off' : 'auto';
+      updateGroupToggleUi();
+      renderWorkqueuePaneItems(pane);
+      paneManager.persistAdminPanes();
+    };
+    groupToggleBtn?.addEventListener('click', cycleGroupMode);
+    updateGroupToggleUi();
 
     // Sort controls (client-side): stable sorting with a status-grouping default.
     const sortBtns = Array.from(elements.thread.querySelectorAll('[data-wq-sort]'));
@@ -6145,6 +6209,7 @@ const paneManager = {
         scopeFilter: cfg.scopeFilter,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
+        groupMode: cfg.groupMode,
         closable: true
       })
     );
@@ -6189,7 +6254,8 @@ const paneManager = {
           const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, queue, statusFilter, scopeFilter, sortKey, sortDir };
+          const groupMode = item.groupMode === 'on' || item.groupMode === 'off' ? item.groupMode : 'auto';
+          return { key, kind, queue, statusFilter, scopeFilter, sortKey, sortDir, groupMode };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
@@ -6241,7 +6307,8 @@ const paneManager = {
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
           scopeFilter: pane.workqueue?.scopeFilter || 'all',
           sortKey: pane.workqueue?.sortKey || 'priority',
-          sortDir: pane.workqueue?.sortDir || 'desc'
+          sortDir: pane.workqueue?.sortDir || 'desc',
+          groupMode: pane.workqueue?.groupMode || 'auto'
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
