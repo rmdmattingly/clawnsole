@@ -2892,11 +2892,60 @@ function renderWorkqueuePaneItems(pane) {
     }
   }
 
+  const ensureExpandedGroups = () => {
+    if (!pane.workqueue.expandedRoutineGroups || !(pane.workqueue.expandedRoutineGroups instanceof Set)) {
+      pane.workqueue.expandedRoutineGroups = new Set();
+    }
+    return pane.workqueue.expandedRoutineGroups;
+  };
+
+  const normalizeRoutineTitle = (title) => {
+    const raw = String(title || '').trim();
+    if (!raw) return '';
+    if (!/^\[routine\]/i.test(raw)) return '';
+    return raw
+      .replace(/^\[routine\]\s*/i, '')
+      .replace(/\(\d{4}-\d{2}-\d{2}T\d{2}\)\s*$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  };
+
+  const buildRows = (list) => {
+    const groups = new Map();
+    const singles = [];
+    list.forEach((it, index) => {
+      const key = normalizeRoutineTitle(it?.title);
+      if (!key) {
+        singles.push({ type: 'item', item: it, index });
+        return;
+      }
+      if (!groups.has(key)) groups.set(key, { key, index, items: [] });
+      groups.get(key).items.push(it);
+    });
+
+    const rows = [];
+    for (const single of singles) rows.push(single);
+    for (const group of groups.values()) {
+      if (group.items.length < 2) {
+        rows.push({ type: 'item', item: group.items[0], index: group.index });
+      } else {
+        rows.push({ type: 'group', key: group.key, index: group.index, items: group.items });
+      }
+    }
+    rows.sort((a, b) => a.index - b.index);
+    return rows;
+  };
+
   const now = Date.now();
-  for (const it of items) {
+  const rows = buildRows(items);
+  const expandedGroups = ensureExpandedGroups();
+
+  const renderItemRow = (it, { nested = false } = {}) => {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'wq-row';
+    if (nested) row.classList.add('wq-row-nested');
     if (it.id && it.id === pane.workqueue.selectedItemId) row.classList.add('selected');
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
@@ -2919,6 +2968,39 @@ function renderWorkqueuePaneItems(pane) {
     });
 
     body.appendChild(row);
+  };
+
+  for (const rowData of rows) {
+    if (rowData.type === 'item') {
+      renderItemRow(rowData.item);
+      continue;
+    }
+
+    const hasSelected = rowData.items.some((it) => it.id && it.id === pane.workqueue.selectedItemId);
+    const expanded = expandedGroups.has(rowData.key);
+    const groupRow = document.createElement('button');
+    groupRow.type = 'button';
+    groupRow.className = 'wq-group-row';
+    if (hasSelected) groupRow.classList.add('selected');
+    groupRow.setAttribute('data-wq-group-row', 'routine');
+    groupRow.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+
+    const label = rowData.items[0]?.title || 'Routine items';
+    groupRow.innerHTML = `
+      <div class="wq-group-title">${expanded ? '▾' : '▸'} ${escapeHtml(String(label))}</div>
+      <div class="wq-group-count mono">${rowData.items.length} items</div>
+    `;
+
+    groupRow.addEventListener('click', () => {
+      if (expandedGroups.has(rowData.key)) expandedGroups.delete(rowData.key);
+      else expandedGroups.add(rowData.key);
+      renderWorkqueuePaneItems(pane);
+    });
+
+    body.appendChild(groupRow);
+    if (expanded) {
+      rowData.items.forEach((it) => renderItemRow(it, { nested: true }));
+    }
   }
 
   // Keep inspect in sync if selection vanished.
