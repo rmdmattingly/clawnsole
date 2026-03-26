@@ -75,6 +75,27 @@ test('workqueue pane: queue target supports search + recent persistence', async 
   await expect(secondSelect.locator('option', { hasText: '★ qa-hotfix' })).toHaveCount(1);
 });
 
+test('workqueue pane: persists sort preference across reload with restore cue', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-sort="updatedAt"]').click();
+  await expect(pane.locator('[data-wq-sort="updatedAt"]')).toHaveClass(/active/);
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 15000 });
+
+  const reloadedPane = page.locator('[data-pane]').filter({ has: page.locator('.wq-pane') }).first();
+  await expect(reloadedPane.locator('[data-wq-sort="updatedAt"]')).toHaveClass(/active/);
+  await expect(reloadedPane.locator('[data-wq-sort-restore]')).toContainText('Restored: updatedAt');
+});
+
 test('workqueue pane: controls toolbar is sticky and list scrolls independently', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
