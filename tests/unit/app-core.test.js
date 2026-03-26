@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   escapeHtml,
   fmtRemaining,
+  normalizeWorkqueueTitle,
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
@@ -44,11 +45,24 @@ test('sortWorkqueueItems default groups by status then priority then timestamps'
   assert.deepEqual(sorted.map((it) => it.id), ['b', 'c', 'd', 'e', 'a']);
 });
 
+test('normalizeWorkqueueTitle canonicalizes mixed legacy issue prefixes', () => {
+  const rows = [
+    { title: '[issue] rmdmattingly/clawnsole#280: Normalize titles' },
+    { title: 'Open issue: rmdmattingly/clawnsole#280 - Normalize titles' },
+    { title: 'Issue coverage: rmdmattingly/clawnsole#280 — Normalize titles' },
+    { title: 'Normalize titles', meta: { repo: 'rmdmattingly/clawnsole', issueNumber: 280 } }
+  ];
+
+  for (const row of rows) {
+    assert.equal(normalizeWorkqueueTitle(row), '[ISSUE] rmdmattingly/clawnsole#280 — Normalize titles');
+  }
+});
+
 test('sortWorkqueueItems supports explicit sort keys and stable ordering fallback', () => {
   const items = [
-    { id: 'a', title: 'b', priority: 1 },
-    { id: 'b', title: 'a', priority: 1 },
-    { id: 'c', title: 'a', priority: 1 }
+    { id: 'a', title: 'Open issue: rmdmattingly/clawnsole#282 - zzz', priority: 1 },
+    { id: 'b', title: '[issue] rmdmattingly/clawnsole#280: aaa', priority: 1 },
+    { id: 'c', title: 'Issue coverage: rmdmattingly/clawnsole#281 — bbb', priority: 1 }
   ];
 
   const byTitleAsc = sortWorkqueueItems(items, { sortKey: 'title', sortDir: 'asc' });
