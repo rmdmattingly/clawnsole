@@ -1716,6 +1716,13 @@ kbd {
   flex: 1;
 }
 
+.wq-quick-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .wq-status-multiselect {
   display: flex;
   flex-direction: column;

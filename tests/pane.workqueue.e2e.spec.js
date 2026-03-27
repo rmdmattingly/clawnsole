@@ -46,6 +46,9 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   await expect(wqPane.locator('[data-wq-refresh]')).toBeVisible();
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
   await expect(wqPane.locator('[data-wq-status]')).toBeVisible();
+  await expect(wqPane.locator('[data-wq-source-chip="issue"]')).toBeVisible();
+  await expect(wqPane.locator('[data-wq-repo-preset="clawnsole"]')).toBeVisible();
+  await expect(wqPane.locator('[data-wq-clear-filters]')).toBeVisible();
 
   // Layout regression: toolbar + list should consume full thread height (no dead space below).
   const thread = wqPane.locator('[data-pane-thread]');
@@ -81,6 +84,15 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
 
   const listOverflowY = await listBody.evaluate((el) => getComputedStyle(el).overflowY);
   expect(listOverflowY).toBe('auto');
+
+  // Quick-filter flow: one-click Clawnsole preset + clear reset.
+  const clawnsoleOnlyBtn = wqPane.locator('[data-wq-repo-preset="clawnsole"]');
+  await clawnsoleOnlyBtn.click();
+  await expect(clawnsoleOnlyBtn).toHaveClass(/active/);
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('/');
+
+  await wqPane.locator('[data-wq-clear-filters]').click();
+  await expect(clawnsoleOnlyBtn).not.toHaveClass(/active/);
 
   // Workqueue pane should not show chat composer controls.
   await expect(wqPane.locator('[data-pane-input]')).toBeHidden();
