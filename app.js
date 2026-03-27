@@ -2581,17 +2581,17 @@ function renderWorkqueueInspect(item) {
     root.innerHTML = '<div class="hint">Select an item to inspect.</div>';
     return;
   }
-  const kv = (k, v) => `<div class="wq-kv"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(String(v ?? ''))}</div></div>`;
+  const kv = (label, value, tooltip = '') => `<div class="wq-kv"><div class="k"${tooltip ? ` title="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)}</div><div class="v">${escapeHtml(String(value ?? ''))}</div></div>`;
   root.innerHTML = `
     <div class="wq-inspect-meta">
-      ${kv('id', item.id)}
-      ${kv('queue', item.queue)}
-      ${kv('status', item.status)}
-      ${kv('priority', item.priority)}
-      ${kv('attempts', item.attempts)}
-      ${kv('claimedBy', item.claimedBy)}
-      ${kv('leaseUntil', item.leaseUntil ? new Date(Number(item.leaseUntil)).toISOString() : '')}
-      ${kv('updatedAt', item.updatedAt || '')}
+      ${kv('Item ID', item.id, 'Unique ID for this work item')}
+      ${kv('Queue', item.queue, 'Queue this item belongs to')}
+      ${kv('Status', item.status, 'Current lifecycle state')}
+      ${kv('Priority', item.priority, 'Higher numbers are worked first')}
+      ${kv('Attempts', item.attempts, 'How many claim/execute attempts have occurred')}
+      ${kv('Owner', item.claimedBy, 'Agent currently holding the lease')}
+      ${kv('Lease expires', item.leaseUntil ? new Date(Number(item.leaseUntil)).toISOString() : '', 'When the active claim lease ends (UTC)')}
+      ${kv('Last updated', item.updatedAt || '', 'Most recent update time (UTC)')}
     </div>
     <div class="wq-inspect-block">
       <div class="wq-inspect-label">Title</div>
@@ -2935,17 +2935,17 @@ function renderWorkqueuePaneInspect(pane, item) {
     root.innerHTML = '<div class="hint">Select an item to inspect.</div>';
     return;
   }
-  const kv = (k, v) => `<div class="wq-kv"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(String(v ?? ''))}</div></div>`;
+  const kv = (label, value, tooltip = '') => `<div class="wq-kv"><div class="k"${tooltip ? ` title="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)}</div><div class="v">${escapeHtml(String(value ?? ''))}</div></div>`;
   root.innerHTML = `
     <div class="wq-inspect-meta">
-      ${kv('id', item.id)}
-      ${kv('queue', item.queue)}
-      ${kv('status', item.status)}
-      ${kv('priority', item.priority)}
-      ${kv('attempts', item.attempts)}
-      ${kv('claimedBy', item.claimedBy)}
-      ${kv('leaseUntil', item.leaseUntil ? new Date(Number(item.leaseUntil)).toISOString() : '')}
-      ${kv('updatedAt', item.updatedAt || '')}
+      ${kv('Item ID', item.id, 'Unique ID for this work item')}
+      ${kv('Queue', item.queue, 'Queue this item belongs to')}
+      ${kv('Status', item.status, 'Current lifecycle state')}
+      ${kv('Priority', item.priority, 'Higher numbers are worked first')}
+      ${kv('Attempts', item.attempts, 'How many claim/execute attempts have occurred')}
+      ${kv('Owner', item.claimedBy, 'Agent currently holding the lease')}
+      ${kv('Lease expires', item.leaseUntil ? new Date(Number(item.leaseUntil)).toISOString() : '', 'When the active claim lease ends (UTC)')}
+      ${kv('Last updated', item.updatedAt || '', 'Most recent update time (UTC)')}
     </div>
     <div class="wq-inspect-block">
       <div class="wq-inspect-label">Title</div>
