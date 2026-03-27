@@ -49,7 +49,7 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
   await expect(queueSelect).toBeFocused();
 });
 
-test('pane add menu: single click on item adds exactly one pane', async ({ page }) => {
+test('pane add menu: single click reuses matching non-chat pane target', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
 
@@ -67,25 +67,52 @@ test('pane add menu: single click on item adds exactly one pane', async ({ page 
 
   await menu.locator('[data-testid="pane-add-menu-workqueue"]').click();
   const countAfter = await page.locator('[data-pane]').count();
-  expect(countAfter).toBe(countBefore + 1);
+  expect(countAfter).toBe(countBefore);
+
+  await addBtn.click();
+  await expect(menu).toBeVisible();
+  await menu.locator('[data-testid="pane-add-menu-workqueue"]').click({ modifiers: ['Alt'] });
+  const countAfterAlt = await page.locator('[data-pane]').count();
+  expect(countAfterAlt).toBe(countBefore + 1);
 });
 
-test('pane add shortcuts: Ctrl/Cmd+Shift+T adds a timeline pane', async ({ page }) => {
+test('pane add shortcuts: Ctrl/Cmd+Shift+T reuses timeline pane; Alt adds anyway', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
 
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
   await loginAdmin(page, env.serverPort);
+  await expect(page.locator('#addPaneBtn')).toBeVisible();
 
   const countBefore = await page.locator('[data-pane]').count();
 
-  // Use a Playwright-friendly cross-platform modifier.
-  await page.keyboard.press('ControlOrMeta+Shift+T');
+  const fireTimelineShortcut = async (forceNew = false) => {
+    await page.evaluate(({ force }) => {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'T',
+        ctrlKey: true,
+        shiftKey: true,
+        altKey: !!force,
+        bubbles: true,
+        cancelable: true
+      }));
+    }, { force: forceNew });
+  };
+
+  await fireTimelineShortcut(false);
 
   const tlPane = page.locator('[data-pane-kind="timeline"]').last();
   await expect(tlPane).toBeVisible();
 
   const countAfter = await page.locator('[data-pane]').count();
   expect(countAfter).toBeGreaterThan(countBefore);
+
+  await fireTimelineShortcut(false);
+  const countAfterReuse = await page.locator('[data-pane]').count();
+  expect(countAfterReuse).toBe(countAfter);
+
+  await fireTimelineShortcut(true);
+  const countAfterForce = await page.locator('[data-pane]').count();
+  expect(countAfterForce).toBe(countAfter + 1);
 });
