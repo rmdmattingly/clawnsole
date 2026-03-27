@@ -103,7 +103,7 @@ test('cmd/ctrl+shift+j focuses previous pane with wraparound from unfocused stat
   await expect.poll(activePaneIndex).toBe(2);
 });
 
-test('alt+1..3 focuses panes by visible order and does not fire while typing', async ({ page }) => {
+test('alt+1..3 and cmd/ctrl+1..3 focus panes by visible order; shortcuts do not fire while typing', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
 
@@ -130,14 +130,20 @@ test('alt+1..3 focuses panes by visible order and does not fire while typing', a
   await page.keyboard.press('Alt+2');
   await expect.poll(activePaneIndex).toBe(1);
 
-  await page.keyboard.press('Alt+3');
+  await page.keyboard.press('Control+3');
   await expect.poll(activePaneIndex).toBe(2);
+
+  await page.keyboard.press('Control+1');
+  await expect.poll(activePaneIndex).toBe(0);
 
   const firstPaneInput = page.locator('[data-pane]').first().locator('[data-pane-input]');
   await firstPaneInput.focus();
   await expect(firstPaneInput).toBeFocused();
 
   await page.keyboard.press('Alt+3');
+  await expect.poll(activePaneIndex).toBe(0);
+
+  await page.keyboard.press('Control+3');
   await expect.poll(activePaneIndex).toBe(0);
 });
 
