@@ -4930,7 +4930,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           lines: ['Chat with an agent/session.', 'Pick an agent target, then send messages/files.', 'Use Stop to cancel a long response.'],
           shortcuts: [
             ['Alt/Option+1..9', 'focus panes 1-9 by visible order'],
-            ['Cmd/Ctrl+1..4', 'focus pane 1-4'],
+            ['Cmd/Ctrl+1..9', 'focus panes 1-9 by visible order'],
             ['Cmd/Ctrl+Shift+K', 'focus next pane'],
             ['Cmd/Ctrl+Shift+J', 'focus previous pane']
           ]
@@ -7000,10 +7000,10 @@ window.addEventListener('keydown', (event) => {
     }
   }
 
-  // Cmd/Ctrl+1..4 focuses a pane.
+  // Cmd/Ctrl+1..9 focuses panes by visible order (layout-safe fallback to Alt/Option).
   if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
     const n = Number.parseInt(key, 10);
-    if (Number.isFinite(n) && n >= 1 && n <= 4) {
+    if (Number.isFinite(n) && n >= 1 && n <= 9) {
       event.preventDefault();
       focusPaneIndex(n - 1);
       return;
