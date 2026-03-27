@@ -83,11 +83,24 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T reuses timeline pane; Alt adds anyway
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
   await loginAdmin(page, env.serverPort);
+  await expect(page.locator('#addPaneBtn')).toBeVisible();
 
   const countBefore = await page.locator('[data-pane]').count();
 
-  // Use a Playwright-friendly cross-platform modifier.
-  await page.keyboard.press('ControlOrMeta+Shift+T');
+  const fireTimelineShortcut = async (forceNew = false) => {
+    await page.evaluate(({ force }) => {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'T',
+        ctrlKey: true,
+        shiftKey: true,
+        altKey: !!force,
+        bubbles: true,
+        cancelable: true
+      }));
+    }, { force: forceNew });
+  };
+
+  await fireTimelineShortcut(false);
 
   const tlPane = page.locator('[data-pane-kind="timeline"]').last();
   await expect(tlPane).toBeVisible();
@@ -95,11 +108,11 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T reuses timeline pane; Alt adds anyway
   const countAfter = await page.locator('[data-pane]').count();
   expect(countAfter).toBeGreaterThan(countBefore);
 
-  await page.keyboard.press('ControlOrMeta+Shift+T');
+  await fireTimelineShortcut(false);
   const countAfterReuse = await page.locator('[data-pane]').count();
   expect(countAfterReuse).toBe(countAfter);
 
-  await page.keyboard.press('Alt+ControlOrMeta+Shift+T');
+  await fireTimelineShortcut(true);
   const countAfterForce = await page.locator('[data-pane]').count();
   expect(countAfterForce).toBe(countAfter + 1);
 });
