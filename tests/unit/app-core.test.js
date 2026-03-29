@@ -142,34 +142,56 @@ test('normalizeHistoryEntries supports gateway payload variants', () => {
 test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard error transitions', () => {
   assert.deepEqual(deriveGlobalConnectionState({ authed: false, panes: [{ connected: true }] }), {
     state: 'disconnected',
-    meta: 'sign in required'
+    meta: 'sign in required',
+    connectedCount: 0,
+    disconnectedCount: 0,
+    attentionCount: 0,
+    total: 0
   });
 
   assert.deepEqual(deriveGlobalConnectionState({ authed: true, panes: [] }), {
     state: 'disconnected',
-    meta: ''
+    meta: '',
+    connectedCount: 0,
+    disconnectedCount: 0,
+    attentionCount: 0,
+    total: 0
   });
 
   assert.deepEqual(
     deriveGlobalConnectionState({
       authed: true,
       panes: [
-        { connected: true, statusState: 'connected' },
-        { connected: false, statusState: 'reconnecting' }
+        { connected: true, statusState: 'connected', unreadCount: 0 },
+        { connected: false, statusState: 'reconnecting', unreadCount: 3 }
       ]
     }),
-    { state: 'reconnecting', meta: 'panes: 1/2 connected' }
+    {
+      state: 'reconnecting',
+      meta: 'panes: 1/2 connected • 1 disconnected • 1 attention',
+      connectedCount: 1,
+      disconnectedCount: 1,
+      attentionCount: 1,
+      total: 2
+    }
   );
 
   assert.deepEqual(
     deriveGlobalConnectionState({
       authed: true,
       panes: [
-        { connected: false, statusState: 'error', statusMeta: 'auth expired' },
-        { connected: false, statusState: 'error', statusMeta: 'gateway disconnected' }
+        { connected: false, statusState: 'error', statusMeta: 'auth expired', unreadCount: 0 },
+        { connected: false, statusState: 'error', statusMeta: 'gateway disconnected', unreadCount: 0 }
       ]
     }),
-    { state: 'error', meta: 'auth expired' }
+    {
+      state: 'error',
+      meta: 'panes: 0/2 connected • 2 disconnected • 2 attention',
+      connectedCount: 0,
+      disconnectedCount: 2,
+      attentionCount: 2,
+      total: 2
+    }
   );
 });
 
