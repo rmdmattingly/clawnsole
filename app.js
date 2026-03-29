@@ -142,22 +142,21 @@ const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => (
   logoutOpacity: !!state?.authed ? '1' : '0.5'
 }));
 const deriveGlobalConnectionState = __appCore.deriveGlobalConnectionState || ((state) => {
-  if (!state?.authed) return { state: 'disconnected', meta: 'sign in required' };
+  if (!state?.authed) return { state: 'disconnected', meta: 'sign in required', connectedCount: 0, disconnectedCount: 0, attentionCount: 0, total: 0 };
   const panes = Array.isArray(state?.panes) ? state.panes : [];
-  if (panes.length === 0) return { state: 'disconnected', meta: '' };
+  if (panes.length === 0) return { state: 'disconnected', meta: '', connectedCount: 0, disconnectedCount: 0, attentionCount: 0, total: 0 };
   const connectedCount = panes.filter((pane) => !!pane?.connected).length;
   const total = panes.length;
+  const disconnectedCount = Math.max(0, total - connectedCount);
+  const attentionCount = panes.filter((pane) => Number(pane?.unreadCount || 0) > 0 || !pane?.connected).length;
   const anyConnecting = panes.some((pane) => pane?.statusState === 'connecting' || pane?.statusState === 'reconnecting');
   const anyError = panes.some((pane) => pane?.statusState === 'error');
-  const firstError = panes.find((pane) => pane?.statusState === 'error' && pane?.statusMeta);
   let nextState = 'disconnected';
   if (connectedCount === total) nextState = 'connected';
   else if (connectedCount > 0 || anyConnecting) nextState = 'reconnecting';
   else if (anyError) nextState = 'error';
-  const meta = connectedCount === 0 && anyError && firstError
-    ? String(firstError.statusMeta || '')
-    : `panes: ${connectedCount}/${total} connected`;
-  return { state: nextState, meta };
+  const meta = `panes: ${connectedCount}/${total} connected • ${disconnectedCount} disconnected • ${attentionCount} attention`;
+  return { state: nextState, meta, connectedCount, disconnectedCount, attentionCount, total };
 });
 const deriveDisconnectButtonState = __appCore.deriveDisconnectButtonState || ((state) => {
   if (!state?.authed) return { disabled: true, text: 'Reconnect' };
@@ -838,7 +837,14 @@ function setStatusPill(el, state, meta = '') {
 function updateGlobalStatus() {
   const status = deriveGlobalConnectionState({ authed: uiState.authed, panes: paneManager.panes });
   setStatusPill(globalElements.status, status.state, status.meta);
-  if (globalElements.paneManagerBtn) globalElements.paneManagerBtn.textContent = status.meta;
+  if (globalElements.paneManagerBtn) {
+    globalElements.paneManagerBtn.textContent = status.meta;
+    globalElements.paneManagerBtn.dataset.attention = status.attentionCount > 0 ? 'true' : 'false';
+    globalElements.paneManagerBtn.setAttribute(
+      'aria-label',
+      `Open pane manager. ${status.connectedCount} connected, ${status.disconnectedCount} disconnected, ${status.attentionCount} need attention.`
+    );
+  }
 }
 
 function updateConnectionControls() {
@@ -1606,7 +1612,7 @@ function renderPaneManager() {
   });
 }
 
-function openPaneManager() {
+function openPaneManager({ attentionOnly = false } = {}) {
   if (roleState.role !== 'admin') return;
   if (!uiState.authed) {
     showLogin('Please sign in to continue.');
@@ -1617,7 +1623,11 @@ function openPaneManager() {
   paneManagerUiState.open = true;
   paneManagerUiState.selectedIndex = 0;
   paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
-  paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
+  paneManagerUiState.unreadOnly = attentionOnly || !!globalElements.paneManagerUnreadOnly?.checked;
+
+  if (globalElements.paneManagerUnreadOnly) {
+    globalElements.paneManagerUnreadOnly.checked = paneManagerUiState.unreadOnly;
+  }
 
   globalElements.paneManagerModal.classList.add('open');
   globalElements.paneManagerModal.setAttribute('aria-hidden', 'false');
@@ -7094,7 +7104,8 @@ globalElements.resetLayoutBtn?.addEventListener('click', () => {
 
 globalElements.paneManagerBtn?.addEventListener('click', (event) => {
   event?.preventDefault?.();
-  openPaneManager();
+  const attentionOnly = globalElements.paneManagerBtn?.dataset?.attention === 'true';
+  openPaneManager({ attentionOnly });
 });
 
 globalElements.paneManagerCloseBtn?.addEventListener('click', () => closePaneManager());
