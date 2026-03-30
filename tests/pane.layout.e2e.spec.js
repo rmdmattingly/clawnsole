@@ -4,6 +4,26 @@ const { startClawnsoleTestApp } = require('./helpers/pw-app');
 
 let app;
 
+async function loginAdmin(page, serverPort) {
+  await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+  const loginPassword = page.locator('#loginPassword');
+  const loginBtn = page.locator('#loginBtn');
+  const loginOverlay = page.locator('#loginOverlay');
+
+  await loginPassword.waitFor({ state: 'visible', timeout: 10000 });
+  for (let i = 0; i < 3; i += 1) {
+    await loginPassword.fill('admin');
+    await loginBtn.click();
+    try {
+      await loginOverlay.waitFor({ state: 'hidden', timeout: 4000 });
+      return;
+    } catch {
+      if (i === 2) throw new Error('login did not complete after retries');
+    }
+  }
+}
+
 test.beforeAll(async () => {
   app = await startClawnsoleTestApp();
 });
@@ -18,13 +38,14 @@ test('layout: default admin layout is 2 panes (Chat + Workqueue)', async ({ page
 
   installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
 
-  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
-  await page.fill('#loginPassword', 'admin');
-  await page.click('#loginBtn');
-  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await loginAdmin(page, app.serverPort);
 
   const panes = page.locator('[data-pane]');
   await expect(panes).toHaveCount(2);
+
+  // Mixed default layout (chat + non-chat) should use a neutral pane-grid heading.
+  await expect(page.getByTestId('pane-grid')).toHaveAttribute('aria-label', 'Panes');
+  await expect(page.getByTestId('pane-grid')).not.toHaveAttribute('aria-label', 'Chat panes');
 
   const chatPane = panes.first();
   await expect(chatPane.locator('[data-pane-input]')).toBeVisible();
@@ -41,10 +62,7 @@ test('layout: reset layout restores default (Chat + Workqueue)', async ({ page }
 
   installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
 
-  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
-  await page.fill('#loginPassword', 'admin');
-  await page.click('#loginBtn');
-  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await loginAdmin(page, app.serverPort);
 
   // Add a third pane so we can prove reset clears the saved layout.
   await page.getByRole('button', { name: 'Add pane' }).click();
