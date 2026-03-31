@@ -2240,10 +2240,34 @@ function renderAgentsModalList() {
 
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
 
+function formatWorkqueueStatusLabel(status) {
+  const s = String(status || '').trim().toLowerCase();
+  if (!s) return 'Unknown';
+  return s
+    .split('_')
+    .filter(Boolean)
+    .map((part, ix) => {
+      if (ix > 0) return part;
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(' ');
+}
+
+function buildWorkqueueStatusCounts(items) {
+  const counts = Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0]));
+  for (const it of Array.isArray(items) ? items : []) {
+    const status = String(it?.status || '').trim().toLowerCase();
+    if (!status || !Object.prototype.hasOwnProperty.call(counts, status)) continue;
+    counts[status] += 1;
+  }
+  return counts;
+}
+
 const workqueueState = {
   queues: [],
   selectedQueue: '',
   statusFilter: new Set(['ready', 'pending', 'claimed', 'in_progress']),
+  statusCounts: Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0])),
   items: [],
   selectedItemId: null,
   sortKey: 'default',
@@ -2279,7 +2303,9 @@ function renderWorkqueueStatusFilters() {
     const id = `wq-status-${s}`;
     const label = document.createElement('label');
     label.className = 'wq-status-chip';
-    label.innerHTML = `<input type="checkbox" id="${id}" ${workqueueState.statusFilter.has(s) ? 'checked' : ''} /> <span>${escapeHtml(s)}</span>`;
+    const count = Number(workqueueState.statusCounts?.[s] || 0);
+    const display = `${formatWorkqueueStatusLabel(s)} (${count})`;
+    label.innerHTML = `<input type="checkbox" id="${id}" ${workqueueState.statusFilter.has(s) ? 'checked' : ''} /> <span>${escapeHtml(display)}</span>`;
     const checkbox = label.querySelector('input');
     checkbox.addEventListener('change', () => {
       if (checkbox.checked) workqueueState.statusFilter.add(s);
@@ -2399,14 +2425,31 @@ async function fetchAndRenderWorkqueueItems() {
   const params = new URLSearchParams();
   if (queue) params.set('queue', queue);
   if (statuses.length) params.set('status', statuses.join(','));
-  const url = `/api/workqueue/items${params.toString() ? `?${params.toString()}` : ''}`;
+  const filteredUrl = `/api/workqueue/items${params.toString() ? `?${params.toString()}` : ''}`;
+
+  const countsParams = new URLSearchParams();
+  if (queue) countsParams.set('queue', queue);
+  const countsUrl = `/api/workqueue/items${countsParams.toString() ? `?${countsParams.toString()}` : ''}`;
 
   try {
-    const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
-    if (!res.ok) throw new Error(String(res.status));
-    const data = await res.json();
-    const items = Array.isArray(data.items) ? data.items : [];
+    const [filteredRes, countsRes] = await Promise.all([
+      fetch(filteredUrl, { credentials: 'include', cache: 'no-store' }),
+      fetch(countsUrl, { credentials: 'include', cache: 'no-store' })
+    ]);
+    if (!filteredRes.ok) throw new Error(String(filteredRes.status));
+
+    const filteredData = await filteredRes.json();
+    const items = Array.isArray(filteredData.items) ? filteredData.items : [];
+
+    let countItems = items;
+    if (countsRes.ok) {
+      const countsData = await countsRes.json().catch(() => ({}));
+      if (Array.isArray(countsData.items)) countItems = countsData.items;
+    }
+
     workqueueState.items = items;
+    workqueueState.statusCounts = buildWorkqueueStatusCounts(countItems);
+    renderWorkqueueStatusFilters();
     renderWorkqueueItems();
   } catch (err) {
     addFeed('err', 'workqueue', `failed to load items: ${String(err)}`);
