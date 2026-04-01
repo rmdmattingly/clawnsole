@@ -2813,6 +2813,35 @@ window.__debug = window.__debug || {};
 window.__debug.renderWorkqueuePane = renderWorkqueuePane;
 
 
+function inferWorkqueueItemSource(item) {
+  const title = String(item?.title || '').trim().toLowerCase();
+  if (title.startsWith('[issue]')) return 'issue';
+  if (title.startsWith('[routine]')) return 'routine';
+  if (title.startsWith('[coordination]')) return 'coordination';
+  return 'other';
+}
+
+function getWorkqueueItemRepo(item) {
+  const fromMeta = item?.meta && typeof item.meta === 'object' ? String(item.meta.repo || '').trim() : '';
+  if (fromMeta) return fromMeta;
+
+  const text = [item?.title, item?.instructions, item?.dedupeKey].map((s) => String(s || '')).join(' ');
+  const m = text.match(/\b[a-z0-9_.-]+\/[a-z0-9_.-]+\b/i);
+  return m ? String(m[0]).toLowerCase() : '';
+}
+
+function applyWorkqueueQuickFilters(items, pane) {
+  const srcSet = new Set(Array.isArray(pane?.workqueue?.sourceFilter) ? pane.workqueue.sourceFilter : []);
+  const repoSet = new Set(Array.isArray(pane?.workqueue?.repoFilter) ? pane.workqueue.repoFilter : []);
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    const src = inferWorkqueueItemSource(item);
+    const repo = getWorkqueueItemRepo(item);
+    if (srcSet.size && !srcSet.has(src)) return false;
+    if (repoSet.size && !repoSet.has(repo)) return false;
+    return true;
+  });
+}
+
 async function fetchAndRenderWorkqueueItemsForPane(pane) {
   if (!pane || pane.kind !== 'workqueue') return;
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
@@ -2834,7 +2863,8 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
     const data = await res.json();
     const items = Array.isArray(data.items) ? data.items : [];
     pane.workqueue.items = items;
-    if (statusLine) statusLine.textContent = `${items.length} item(s)`;
+    const visible = applyWorkqueueQuickFilters(items, pane).length;
+    if (statusLine) statusLine.textContent = `${visible}/${items.length} item(s)`;
     renderWorkqueuePaneItems(pane);
   } catch (err) {
     if (statusLine) statusLine.textContent = `Failed to load: ${String(err)}`;
@@ -2857,7 +2887,8 @@ function renderWorkqueuePaneItems(pane) {
     if (scope === 'assigned') return !!activeTarget && owner === activeTarget;
     return true;
   });
-  const items = sortWorkqueueItems(scopedItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const filtered = applyWorkqueueQuickFilters(scopedItems, pane);
+  const items = sortWorkqueueItems(filtered, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
 
   if (empty) {
     const hasItems = items.length > 0;
@@ -2867,10 +2898,18 @@ function renderWorkqueuePaneItems(pane) {
       const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
       const statusLabel = statuses.length ? statuses.join(', ') : 'default';
       const scopeLabel = pane.workqueue?.scopeFilter || 'all';
+      const sourceFilters = Array.isArray(pane.workqueue?.sourceFilter) ? pane.workqueue.sourceFilter : [];
+      const repoFilters = Array.isArray(pane.workqueue?.repoFilter) ? pane.workqueue.repoFilter : [];
+      const filterSummary = [
+        `Status: ${statusLabel}`,
+        `Scope: ${scopeLabel}`,
+        sourceFilters.length ? `Source: ${sourceFilters.join(', ')}` : 'Source: all',
+        repoFilters.length ? `Repo: ${repoFilters.join(', ')}` : 'Repo: all'
+      ].join(' · ');
       empty.innerHTML = `
         <div class="empty-state">
           <div style="font-weight:700; margin-bottom:6px;">No items in this queue.</div>
-          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
+          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · ${escapeHtml(filterSummary)}</div>
           <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
             <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
             <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
@@ -4800,7 +4839,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, sourceFilter, repoFilter, sortKey, sortDir, cronAgentId, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -4848,6 +4887,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
       scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScope()),
+      sourceFilter: Array.isArray(sourceFilter) ? sourceFilter : [],
+      repoFilter: Array.isArray(repoFilter) ? repoFilter : [],
       items: [],
       selectedItemId: null,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
@@ -5033,6 +5074,15 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <button type="button" class="wq-scope-btn" data-wq-scope="all">All</button>
           </div>
 
+          <div class="wq-quick-filters" role="group" aria-label="Workqueue quick filters">
+            <button type="button" class="wq-sort-btn" data-wq-source-chip="issue">Issue</button>
+            <button type="button" class="wq-sort-btn" data-wq-source-chip="routine">Routine</button>
+            <button type="button" class="wq-sort-btn" data-wq-source-chip="coordination">Coordination</button>
+            <button type="button" class="wq-sort-btn" data-wq-source-chip="other">Other</button>
+            <button type="button" class="wq-sort-btn" data-wq-repo-preset="clawnsole">Clawnsole only</button>
+            <button type="button" class="wq-sort-btn" data-wq-clear-filters>Clear filters</button>
+          </div>
+
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
 
           <div class="wq-sort" role="group" aria-label="Sort workqueue items">
@@ -5130,8 +5180,15 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const statusDetailsEl = elements.thread.querySelector('[data-wq-status-details]');
     const statusClearBtn = elements.thread.querySelector('[data-wq-status-clear]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
+    const sourceChipEls = Array.from(elements.thread.querySelectorAll('[data-wq-source-chip]'));
+    const repoPresetClawnsoleBtn = elements.thread.querySelector('[data-wq-repo-preset="clawnsole"]');
+    const clearFiltersBtn = elements.thread.querySelector('[data-wq-clear-filters]');
 
     const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
+    const SOURCE_VALUES = ['issue', 'routine', 'coordination', 'other'];
+
+    const sourceSet = new Set((Array.isArray(pane.workqueue?.sourceFilter) ? pane.workqueue.sourceFilter : []).map((s) => String(s).trim()).filter(Boolean));
+    const repoSet = new Set((Array.isArray(pane.workqueue?.repoFilter) ? pane.workqueue.repoFilter : []).map((s) => String(s).trim().toLowerCase()).filter(Boolean));
 
     const statusSet = new Set(
       (Array.isArray(pane.workqueue?.statusFilter) && pane.workqueue.statusFilter.length ? pane.workqueue.statusFilter : DEFAULT_STATUSES)
@@ -5153,6 +5210,30 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       if (closeMenu) statusDetailsEl?.removeAttribute('open');
       await fetchAndRenderWorkqueueItemsForPane(pane);
       paneManager.persistAdminPanes();
+    };
+
+    const renderQuickFilterChips = () => {
+      for (const btn of sourceChipEls) {
+        const value = String(btn?.dataset?.wqSourceChip || '').trim();
+        btn.classList.toggle('active', sourceSet.has(value));
+      }
+      if (repoPresetClawnsoleBtn) {
+        repoPresetClawnsoleBtn.classList.toggle('active', repoSet.has('rmdmattingly/clawnsole') && repoSet.size === 1);
+      }
+    };
+
+    const applyQuickFilters = async ({ persist = true } = {}) => {
+      pane.workqueue.sourceFilter = Array.from(sourceSet);
+      pane.workqueue.repoFilter = Array.from(repoSet);
+      renderQuickFilterChips();
+      renderWorkqueuePaneItems(pane);
+      const statusLine = pane.elements?.thread?.querySelector('[data-wq-statusline]');
+      if (statusLine) {
+        const total = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items.length : 0;
+        const visible = applyWorkqueueQuickFilters(pane.workqueue?.items || [], pane).length;
+        statusLine.textContent = `${visible}/${total} item(s)`;
+      }
+      if (persist) paneManager.persistAdminPanes();
     };
 
     const doRefresh = async () => {
@@ -5323,9 +5404,32 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     });
 
     renderStatusMultiSelect();
+    renderQuickFilterChips();
     populateQueueSelect().then(() => doRefresh());
 
     refreshBtn?.addEventListener('click', () => doRefresh());
+    sourceChipEls.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const source = String(btn?.dataset?.wqSourceChip || '').trim();
+        if (!SOURCE_VALUES.includes(source)) return;
+        if (sourceSet.has(source)) sourceSet.delete(source);
+        else sourceSet.add(source);
+        applyQuickFilters();
+      });
+    });
+    repoPresetClawnsoleBtn?.addEventListener('click', () => {
+      if (repoSet.has('rmdmattingly/clawnsole') && repoSet.size === 1) repoSet.clear();
+      else {
+        repoSet.clear();
+        repoSet.add('rmdmattingly/clawnsole');
+      }
+      applyQuickFilters();
+    });
+    clearFiltersBtn?.addEventListener('click', () => {
+      sourceSet.clear();
+      repoSet.clear();
+      applyQuickFilters();
+    });
     queueCustomEl?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doRefresh();
     });
@@ -6143,6 +6247,8 @@ const paneManager = {
         queue: cfg.queue,
         statusFilter: cfg.statusFilter,
         scopeFilter: cfg.scopeFilter,
+        sourceFilter: cfg.sourceFilter,
+        repoFilter: cfg.repoFilter,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
         closable: true
@@ -6187,9 +6293,15 @@ const paneManager = {
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'claimed', 'in_progress'];
           const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
+          const sourceFilter = Array.isArray(item.sourceFilter)
+            ? item.sourceFilter.map((s) => String(s || '').trim()).filter(Boolean)
+            : [];
+          const repoFilter = Array.isArray(item.repoFilter)
+            ? item.repoFilter.map((s) => String(s || '').trim().toLowerCase()).filter(Boolean)
+            : [];
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, queue, statusFilter, scopeFilter, sortKey, sortDir };
+          return { key, kind, queue, statusFilter, scopeFilter, sourceFilter, repoFilter, sortKey, sortDir };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
@@ -6241,6 +6353,9 @@ const paneManager = {
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
           scopeFilter: pane.workqueue?.scopeFilter || 'all',
           sortKey: pane.workqueue?.sortKey || 'priority',
+          sourceFilter: Array.isArray(pane.workqueue?.sourceFilter) ? pane.workqueue.sourceFilter : [],
+          repoFilter: Array.isArray(pane.workqueue?.repoFilter) ? pane.workqueue.repoFilter : [],
+          sortKey: pane.workqueue?.sortKey || 'default',
           sortDir: pane.workqueue?.sortDir || 'desc'
         };
       }
