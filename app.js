@@ -2841,6 +2841,24 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
   }
 }
 
+function dedupeWorkqueuePaneItems(items) {
+  const seen = new Set();
+  const result = [];
+  for (const it of Array.isArray(items) ? items : []) {
+    const queue = String(it?.queue || '').trim() || '__default__';
+    const dedupeKey = String(it?.dedupeKey || it?.meta?.dedupeKey || '').trim();
+    if (!dedupeKey) {
+      result.push(it);
+      continue;
+    }
+    const identity = `${queue}::${dedupeKey}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    result.push(it);
+  }
+  return result;
+}
+
 function renderWorkqueuePaneItems(pane) {
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
   const empty = pane.elements?.thread?.querySelector('[data-wq-empty]');
@@ -2857,7 +2875,8 @@ function renderWorkqueuePaneItems(pane) {
     if (scope === 'assigned') return !!activeTarget && owner === activeTarget;
     return true;
   });
-  const items = sortWorkqueueItems(scopedItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const sorted = sortWorkqueueItems(scopedItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const items = dedupeWorkqueuePaneItems(sorted);
 
   if (empty) {
     const hasItems = items.length > 0;
