@@ -1093,6 +1093,16 @@ button.send-btn .btn-icon {
   padding-right: 2px;
 }
 
+.command-palette-group {
+  margin-top: 4px;
+  padding: 4px 8px 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
 .command-palette-item {
   display: grid;
   grid-template-columns: 1fr auto;

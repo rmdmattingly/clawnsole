@@ -1692,7 +1692,9 @@ const commandPaletteState = {
   query: '',
   items: [],
   filtered: [],
-  selectedIndex: 0
+  selectedIndex: 0,
+  expandAgents: false,
+  expandTimelines: false
 };
 
 function isCommandPaletteOpen() {
@@ -1732,7 +1734,7 @@ function scoreFuzzy(hay, needle) {
 
 function buildCommandPaletteItems() {
   const items = [];
-  const withShortcut = (item, shortcut) => ({ ...item, shortcut: shortcut || '' });
+  const withShortcut = (item, shortcut, opts = {}) => ({ ...item, shortcut: shortcut || '', ...opts });
 
   // Focus pane by letter for all open panes.
   paneManager.panes.forEach((pane, idx) => {
@@ -1747,7 +1749,8 @@ function buildCommandPaletteItems() {
           detail: `${type} · ${target}`,
           run: () => focusPaneIndex(idx)
         },
-        idx < 9 ? `⌘/Ctrl+${idx + 1}` : ''
+        idx < 9 ? `⌘/Ctrl+${idx + 1}` : '',
+        { group: 'Panes', rankBoost: 80 }
       )
     );
   });
@@ -1756,27 +1759,33 @@ function buildCommandPaletteItems() {
   items.push(
     withShortcut(
       { id: 'cmd:add-chat', label: 'Open pane: Chat', detail: 'Create a new Chat pane', run: () => paneManager.addPane('chat') },
-      '⌘/Ctrl+Shift+C'
+      '⌘/Ctrl+Shift+C',
+      { group: 'Panes', rankBoost: 120 }
     ),
     withShortcut(
       { id: 'cmd:add-workqueue', label: 'Open pane: Workqueue', detail: 'Create a new Workqueue pane', run: () => paneManager.addPane('workqueue') },
-      '⌘/Ctrl+Shift+W'
+      '⌘/Ctrl+Shift+W',
+      { group: 'Panes', rankBoost: 120 }
     ),
     withShortcut(
       { id: 'cmd:add-cron', label: 'Open pane: Cron', detail: 'Create a new Cron pane', run: () => paneManager.addPane('cron') },
-      '⌘/Ctrl+Shift+R'
+      '⌘/Ctrl+Shift+R',
+      { group: 'Panes', rankBoost: 100 }
     ),
     withShortcut(
       { id: 'cmd:add-timeline', label: 'Open pane: Timeline', detail: 'Create a new Timeline pane', run: () => paneManager.addPane('timeline') },
-      '⌘/Ctrl+Shift+T'
+      '⌘/Ctrl+Shift+T',
+      { group: 'Panes', rankBoost: 90 }
     ),
     withShortcut(
       { id: 'cmd:open-fleet', label: 'Open pane: Fleet', detail: 'Focus existing Fleet pane or open one', run: () => openFleetPane() },
-      '⌘/Ctrl+Shift+F'
+      '⌘/Ctrl+Shift+F',
+      { group: 'Panes', rankBoost: 95 }
     ),
     withShortcut(
       { id: 'cmd:add-fleet', label: 'Open pane: Fleet (new)', detail: 'Create a new Fleet pane even if one exists', run: () => openFleetPane({ forceNew: true }) },
-      ''
+      '',
+      { group: 'Panes', rankBoost: 75 }
     )
   );
 
@@ -1790,7 +1799,7 @@ function buildCommandPaletteItems() {
       label: `Open Workqueue: ${queue}`,
       detail: 'Open a Workqueue pane already targeted to this queue',
       run: () => paneManager.addPane('workqueue', { queue })
-    }, 'targeted open'));
+    }, 'targeted open', { group: 'Workqueue', rankBoost: 40 }));
   });
 
   const agents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
@@ -1799,7 +1808,7 @@ function buildCommandPaletteItems() {
     label: 'Open Timeline: All agents',
     detail: 'Open Timeline with agent filter set to all',
     run: () => paneManager.addPane('timeline', { cronAgentId: 'all' })
-  }, 'targeted open'));
+  }, 'targeted open', { group: 'Navigation', rankBoost: 10, subgroup: 'timeline-targets', collapsible: true }));
   for (const agent of agents) {
     const agentId = normalizeAgentId(agent?.id || 'main');
     items.push(withShortcut({
@@ -1807,7 +1816,7 @@ function buildCommandPaletteItems() {
       label: `Open Timeline: ${formatAgentLabel(agent, { includeId: false })}`,
       detail: `Open Timeline filtered to ${agentId}`,
       run: () => paneManager.addPane('timeline', { cronAgentId: agentId })
-    }, 'targeted open'));
+    }, 'targeted open', { group: 'Navigation', rankBoost: 8, subgroup: 'timeline-targets', collapsible: true }));
   }
 
   items.push(
@@ -1818,7 +1827,8 @@ function buildCommandPaletteItems() {
         detail: 'Reset admin layout to default',
         run: () => paneManager.resetAdminLayoutToDefault({ confirm: true })
       },
-      ''
+      '',
+      { group: 'Layout', rankBoost: 110 }
     ),
     withShortcut(
       {
@@ -1830,15 +1840,18 @@ function buildCommandPaletteItems() {
           else openShortcuts();
         }
       },
-      '?'
+      '?',
+      { group: 'Navigation', rankBoost: 105 }
     ),
     withShortcut(
       { id: 'cmd:open-workqueue', label: 'Workqueue: Open modal', detail: 'Open the Workqueue modal', run: () => openWorkqueue() },
-      'g w'
+      'g w',
+      { group: 'Workqueue', rankBoost: 90 }
     ),
     withShortcut(
       { id: 'cmd:refresh-agents', label: 'Agents: Refresh', detail: 'Refresh agent list', run: () => globalElements.refreshAgentsBtn?.click?.() },
-      ''
+      '',
+      { group: 'Agents', rankBoost: 85 }
     ),
     withShortcut(
       {
@@ -1847,23 +1860,28 @@ function buildCommandPaletteItems() {
         detail: 'Open Agents modal and place cursor in quick filter',
         run: () => openAgentsModal()
       },
-      'g a'
+      'g a',
+      { group: 'Agents', rankBoost: 84 }
     ),
     withShortcut(
       { id: 'cmd:pane-cycle', label: 'Panes: Cycle focus', detail: 'Move focus to next pane', run: () => cyclePaneFocus() },
-      '⌘/Ctrl+Shift+K'
+      '⌘/Ctrl+Shift+K',
+      { group: 'Navigation', rankBoost: 88 }
     ),
     withShortcut(
       { id: 'cmd:pane-cycle-backward', label: 'Panes: Cycle focus backward', detail: 'Move focus to previous pane', run: () => cyclePaneFocusBackward() },
-      '⌘/Ctrl+Shift+J'
+      '⌘/Ctrl+Shift+J',
+      { group: 'Navigation', rankBoost: 87 }
     ),
     withShortcut(
       { id: 'cmd:pane-next-unread', label: 'Panes: Next unread', detail: 'Jump to next pane with unread activity', run: () => cycleUnreadPaneFocus(1) },
-      '⌘/Ctrl+Shift+]'
+      '⌘/Ctrl+Shift+]',
+      { group: 'Navigation', rankBoost: 70 }
     ),
     withShortcut(
       { id: 'cmd:pane-prev-unread', label: 'Panes: Previous unread', detail: 'Jump to previous pane with unread activity', run: () => cycleUnreadPaneFocus(-1) },
-      '⌘/Ctrl+Shift+['
+      '⌘/Ctrl+Shift+[',
+      { group: 'Navigation', rankBoost: 69 }
     )
   );
 
@@ -1883,7 +1901,7 @@ function buildCommandPaletteItems() {
           paneManager.focusPanePrimary(pane);
         }
       }
-    }, 'chat target'));
+    }, 'chat target', { group: 'Agents', rankBoost: 5, subgroup: 'agent-targets', collapsible: true }));
   }
 
   return items;
@@ -1906,7 +1924,17 @@ function renderCommandPalette() {
   const selected = Math.max(0, Math.min(items.length - 1, commandPaletteState.selectedIndex));
   commandPaletteState.selectedIndex = selected;
 
+  let lastGroup = '';
   items.forEach((item, idx) => {
+    const group = String(item.group || 'Commands');
+    if (group !== lastGroup) {
+      const header = document.createElement('div');
+      header.className = 'command-palette-group';
+      header.textContent = group;
+      list.appendChild(header);
+      lastGroup = group;
+    }
+
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'command-palette-item';
@@ -1949,13 +1977,70 @@ function filterCommandPalette(query) {
   const scored = commandPaletteState.items
     .map((item) => {
       const hay = `${item.label || ''} ${item.detail || ''} ${item.id || ''}`;
-      return { item, score: scoreFuzzy(hay, q) };
+      return { item, score: scoreFuzzy(hay, q) + Number(item.rankBoost || 0) };
     })
     .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return String(a.item.label || '').localeCompare(String(b.item.label || ''));
+    })
     .map((x) => x.item);
 
-  commandPaletteState.filtered = scored;
+  const timelineItems = scored.filter((item) => item.subgroup === 'timeline-targets');
+  const agentItems = scored.filter((item) => item.subgroup === 'agent-targets');
+
+  let visible = scored.filter((item) => !item.collapsible);
+  const queryMode = q.length > 0;
+  const showTimelines = queryMode || commandPaletteState.expandTimelines;
+  const showAgents = queryMode || commandPaletteState.expandAgents;
+
+  if (showTimelines) {
+    visible = visible.concat(timelineItems);
+  } else if (timelineItems.length) {
+    visible.push({
+      id: 'cmd:expand-timeline-targets',
+      label: `Navigation: Show timeline targets (${timelineItems.length})`,
+      detail: 'Expand timeline target actions',
+      shortcut: '',
+      group: 'Navigation',
+      rankBoost: 20,
+      run: () => {
+        commandPaletteState.expandTimelines = true;
+        filterCommandPalette(commandPaletteState.query);
+      }
+    });
+  }
+
+  if (showAgents) {
+    visible = visible.concat(agentItems);
+  } else if (agentItems.length) {
+    visible.push({
+      id: 'cmd:expand-agent-targets',
+      label: `Agents: Show agent targets (${agentItems.length})`,
+      detail: 'Expand per-agent chat target actions',
+      shortcut: '',
+      group: 'Agents',
+      rankBoost: 20,
+      run: () => {
+        commandPaletteState.expandAgents = true;
+        filterCommandPalette(commandPaletteState.query);
+      }
+    });
+  }
+
+  const groupOrder = ['Panes', 'Navigation', 'Layout', 'Workqueue', 'Agents'];
+  visible.sort((a, b) => {
+    const ga = groupOrder.indexOf(String(a.group || ''));
+    const gb = groupOrder.indexOf(String(b.group || ''));
+    const va = ga >= 0 ? ga : 999;
+    const vb = gb >= 0 ? gb : 999;
+    if (va !== vb) return va - vb;
+    const sb = scoreFuzzy(`${b.label || ''} ${b.detail || ''} ${b.id || ''}`, q) + Number(b.rankBoost || 0);
+    const sa = scoreFuzzy(`${a.label || ''} ${a.detail || ''} ${a.id || ''}`, q) + Number(a.rankBoost || 0);
+    return sb - sa;
+  });
+
+  commandPaletteState.filtered = visible;
   commandPaletteState.selectedIndex = 0;
   renderCommandPalette();
 }
@@ -1966,6 +2051,8 @@ function openCommandPalette() {
   if (!globalElements.commandPaletteModal) return;
 
   commandPaletteState.open = true;
+  commandPaletteState.expandAgents = false;
+  commandPaletteState.expandTimelines = false;
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
   commandPaletteState.selectedIndex = 0;
