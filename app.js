@@ -1,4 +1,5 @@
 const globalElements = {
+  appRoot: document.querySelector('.app'),
   wsUrl: document.getElementById('wsUrl'),
   clientId: document.getElementById('clientId'),
   deviceId: document.getElementById('deviceId'),
@@ -851,6 +852,9 @@ function updateConnectionControls() {
 function setAuthState(authed) {
   uiState.authed = authed;
   const authUi = deriveAuthOverlayState({ authed, role: roleState.role });
+  if (globalElements.appRoot) {
+    globalElements.appRoot.classList.toggle('auth-locked', !!authUi.isAdmin && !authed);
+  }
   updateGlobalStatus();
   updateConnectionControls();
   paneManager.refreshChatEnabled();
