@@ -5606,6 +5606,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
             <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom viewing queue" hidden />
             <span class="hint">Affects which queue items are shown in this pane.</span>
           </label>
+          <label class="wq-field">
+            <span class="wq-label">Search queues</span>
+            <input data-wq-queue-search type="search" placeholder="Search queues…" aria-label="Search available queues" />
+          </label>
           </div>
 
           <div class="wq-field wq-status-field">
@@ -5760,6 +5764,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
 
     const queueSelectEl = elements.thread.querySelector('[data-wq-queue-select]');
     const queueCustomEl = elements.thread.querySelector('[data-wq-queue-custom]');
+    const queueSearchEl = elements.thread.querySelector('[data-wq-queue-search]');
     const enqueueQueueSelectEl = elements.thread.querySelector('[data-wq-enqueue-queue-select]');
     const enqueueQueueCustomEl = elements.thread.querySelector('[data-wq-enqueue-queue-custom]');
 
@@ -5973,6 +5978,61 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
       }
     };
 
+    let queueCatalog = [];
+
+    const renderQueueOptions = (allQueues) => {
+      const current = (pane.workqueue.queue || 'dev-team').trim();
+      const queueQuery = String(queueSearchEl?.value || '').trim().toLowerCase();
+      const filtered = !queueQuery
+        ? [...allQueues]
+        : allQueues.filter((q) => String(q || '').toLowerCase().includes(queueQuery));
+      if (current && !filtered.includes(current)) filtered.unshift(current);
+
+      queueSelectEl.innerHTML = '';
+      if (enqueueQueueSelectEl) enqueueQueueSelectEl.innerHTML = '';
+      for (const q of filtered) {
+        const opt = document.createElement('option');
+        opt.value = q;
+        opt.textContent = q;
+        queueSelectEl.appendChild(opt);
+        if (enqueueQueueSelectEl) {
+          const enqueueOpt = document.createElement('option');
+          enqueueOpt.value = q;
+          enqueueOpt.textContent = q;
+          enqueueQueueSelectEl.appendChild(enqueueOpt);
+        }
+      }
+
+      const customOpt = document.createElement('option');
+      customOpt.value = '__custom__';
+      customOpt.textContent = 'Custom…';
+      queueSelectEl.appendChild(customOpt);
+      if (enqueueQueueSelectEl) {
+        const enqueueCustomOpt = document.createElement('option');
+        enqueueCustomOpt.value = '__custom__';
+        enqueueCustomOpt.textContent = 'Custom…';
+        enqueueQueueSelectEl.appendChild(enqueueCustomOpt);
+      }
+
+      if (filtered.includes(current)) {
+        queueSelectEl.value = current;
+        if (queueCustomEl) queueCustomEl.hidden = true;
+        if (enqueueQueueSelectEl) enqueueQueueSelectEl.value = current;
+        if (enqueueQueueCustomEl) enqueueQueueCustomEl.hidden = true;
+      } else {
+        queueSelectEl.value = '__custom__';
+        if (queueCustomEl) {
+          queueCustomEl.hidden = false;
+          queueCustomEl.value = current;
+        }
+        if (enqueueQueueSelectEl) enqueueQueueSelectEl.value = '__custom__';
+        if (enqueueQueueCustomEl) {
+          enqueueQueueCustomEl.hidden = false;
+          enqueueQueueCustomEl.value = current;
+        }
+      }
+    };
+
     const populateQueueSelect = async () => {
       if (!queueSelectEl) return;
       try {
@@ -5982,78 +6042,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
         const queues = Array.isArray(data?.queues) ? data.queues : [];
 
         const current = (pane.workqueue.queue || 'dev-team').trim();
-        const unique = Array.from(new Set([current, ...queues].map((q) => String(q).trim()).filter(Boolean)));
-        unique.sort((a, b) => a.localeCompare(b));
-
-        queueSelectEl.innerHTML = '';
-        if (enqueueQueueSelectEl) enqueueQueueSelectEl.innerHTML = '';
-        for (const q of unique) {
-          const opt = document.createElement('option');
-          opt.value = q;
-          opt.textContent = q;
-          queueSelectEl.appendChild(opt);
-          if (enqueueQueueSelectEl) {
-            const enqueueOpt = document.createElement('option');
-            enqueueOpt.value = q;
-            enqueueOpt.textContent = q;
-            enqueueQueueSelectEl.appendChild(enqueueOpt);
-          }
-        }
-
-        const customOpt = document.createElement('option');
-        customOpt.value = '__custom__';
-        customOpt.textContent = 'Custom…';
-        queueSelectEl.appendChild(customOpt);
-        if (enqueueQueueSelectEl) {
-          const enqueueCustomOpt = document.createElement('option');
-          enqueueCustomOpt.value = '__custom__';
-          enqueueCustomOpt.textContent = 'Custom…';
-          enqueueQueueSelectEl.appendChild(enqueueCustomOpt);
-        }
-
-        if (unique.includes(current)) {
-          queueSelectEl.value = current;
-          if (queueCustomEl) queueCustomEl.hidden = true;
-          if (enqueueQueueSelectEl) enqueueQueueSelectEl.value = current;
-          if (enqueueQueueCustomEl) enqueueQueueCustomEl.hidden = true;
-        } else {
-          queueSelectEl.value = '__custom__';
-          if (queueCustomEl) {
-            queueCustomEl.hidden = false;
-            queueCustomEl.value = current;
-          }
-          if (enqueueQueueSelectEl) enqueueQueueSelectEl.value = '__custom__';
-          if (enqueueQueueCustomEl) {
-            enqueueQueueCustomEl.hidden = false;
-            enqueueQueueCustomEl.value = current;
-          }
-        }
+        queueCatalog = Array.from(new Set([current, ...queues].map((q) => String(q).trim()).filter(Boolean)));
+        queueCatalog.sort((a, b) => a.localeCompare(b));
+        renderQueueOptions(queueCatalog);
       } catch {
         // fallback: keep current queue editable
-        queueSelectEl.innerHTML = '';
-        if (enqueueQueueSelectEl) enqueueQueueSelectEl.innerHTML = '';
-        const opt = document.createElement('option');
-        opt.value = pane.workqueue.queue || 'dev-team';
-        opt.textContent = pane.workqueue.queue || 'dev-team';
-        queueSelectEl.appendChild(opt);
-        if (enqueueQueueSelectEl) {
-          const enqueueOpt = document.createElement('option');
-          enqueueOpt.value = opt.value;
-          enqueueOpt.textContent = opt.textContent;
-          enqueueQueueSelectEl.appendChild(enqueueOpt);
-        }
-        const customOpt = document.createElement('option');
-        customOpt.value = '__custom__';
-        customOpt.textContent = 'Custom…';
-        queueSelectEl.appendChild(customOpt);
-        if (enqueueQueueSelectEl) {
-          const enqueueCustomOpt = document.createElement('option');
-          enqueueCustomOpt.value = '__custom__';
-          enqueueCustomOpt.textContent = 'Custom…';
-          enqueueQueueSelectEl.appendChild(enqueueCustomOpt);
-        }
-        queueSelectEl.value = opt.value;
-        if (enqueueQueueSelectEl) enqueueQueueSelectEl.value = opt.value;
+        const fallback = String(pane.workqueue.queue || 'dev-team').trim() || 'dev-team';
+        queueCatalog = [fallback];
+        renderQueueOptions(queueCatalog);
       }
     };
 
@@ -6088,6 +6084,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
       pane.workqueue.searchQuery = String(itemSearchEl.value || '').trim();
       renderWorkqueuePaneItems(pane);
       paneManager.persistAdminPanes();
+    });
+
+    queueSearchEl?.addEventListener('input', () => {
+      renderQueueOptions(queueCatalog);
     });
 
     quickSourceEl?.addEventListener('change', () => {
