@@ -27,6 +27,7 @@
           <div class="brand-mark"></div>
           <div>
             <h1>Clawnsole</h1>
+            <p id="instanceIdentity" class="instance-identity" data-testid="instance-identity"></p>
           </div>
         </div>
         <div class="topbar-actions">
@@ -42,10 +43,22 @@
           </div>
           <div id="paneControls" class="pane-controls" hidden>
             <div class="pane-add-wrap">
-              <button id="addPaneBtn" class="icon-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add pane" data-testid="add-pane-btn">
-                +
+              <button id="addPaneBtn" class="icon-btn action-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add pane" title="Add Pane (Ctrl/Cmd+Shift+N)" data-testid="add-pane-btn">
+                <span class="btn-icon" aria-hidden="true">+</span>
+                <span class="btn-label">Add Pane</span>
               </button>
             </div>
+            <button
+              id="resetLayoutQuickBtn"
+              class="icon-btn action-btn"
+              type="button"
+              aria-label="Reset panes to recommended layout"
+              title="Reset to recommended layout: Chat + Workqueue"
+              data-testid="reset-layout-quick-btn"
+            >
+              <span class="btn-icon" aria-hidden="true">↺</span>
+              <span class="btn-label">Reset Layout</span>
+            </button>
             <select id="layoutSelect" aria-label="Pane layout">
               <option value="1">1-up</option>
               <option value="2" selected>2-up</option>
@@ -53,33 +66,40 @@
             </select>
           </div>
           <div class="role-pill" id="rolePill" data-testid="role-pill">signed out</div>
-          <button id="refreshAgentsBtn" class="icon-btn" type="button" aria-label="Refresh agent list" hidden>
-            ⟳
+          <button id="refreshAgentsBtn" class="icon-btn action-btn" type="button" aria-label="Refresh agent list" title="Refresh (Ctrl/Cmd+R)" hidden>
+            <span class="btn-icon" aria-hidden="true">⟳</span>
+            <span class="btn-label">Refresh</span>
           </button>
-          <button id="agentsBtn" class="icon-btn" type="button" aria-label="Open agents" hidden>
-            ★
+          <button id="agentsBtn" class="icon-btn action-btn" type="button" aria-label="Open agents" title="Agents" hidden>
+            <span class="btn-icon" aria-hidden="true">★</span>
+            <span class="btn-label">Agents</span>
           </button>
-          <button id="workqueueBtn" class="icon-btn" type="button" aria-label="Open workqueue" hidden>
-            WQ
+          <button id="workqueueBtn" class="icon-btn action-btn" type="button" aria-label="Open workqueue" title="Workqueue (g w)" hidden>
+            <span class="btn-icon" aria-hidden="true">WQ</span>
+            <span class="btn-label">Workqueue</span>
           </button>
-          <button id="settingsBtn" class="icon-btn" type="button" aria-label="Open settings">
-            ⚙︎
+          <button id="settingsBtn" class="icon-btn action-btn" type="button" aria-label="Open settings" title="Settings">
+            <span class="btn-icon" aria-hidden="true">⚙︎</span>
+            <span class="btn-label">Settings</span>
           </button>
-          <button id="logoutBtn" class="icon-btn" type="button" aria-label="Log out">
-            ⎋
+          <button id="logoutBtn" class="icon-btn action-btn" type="button" aria-label="Log out" title="Logout">
+            <span class="btn-icon" aria-hidden="true">⎋</span>
+            <span class="btn-label">Logout</span>
           </button>
         </div>
       </header>
 
       <main class="chat-page">
         <canvas id="pulseCanvas" class="flux-canvas"></canvas>
-        <div id="paneGrid" class="pane-grid" aria-label="Chat panes" data-testid="pane-grid"></div>
+        <div id="paneGrid" class="pane-grid" aria-label="Panes" data-testid="pane-grid"></div>
 
         <template id="paneTemplate">
           <section class="chat-panel pane" data-pane data-testid="pane">
             <div class="pane-header">
               <div class="pane-header-left">
                 <div class="pane-name" data-pane-name data-testid="pane-type-label">Pane</div>
+                <span class="pane-activity-badge" data-pane-activity-badge hidden aria-live="polite"></span>
+                <span class="pane-draft-badge" data-pane-draft-badge hidden aria-live="polite">Draft</span>
                 <div class="pane-type-pill" data-pane-type-pill data-testid="pane-type-pill" aria-label="Pane type">
                   <span class="pane-type-icon" data-pane-type-icon aria-hidden="true">💬</span>
                   <span class="pane-type-text" data-pane-type-text>CHAT</span>
@@ -92,6 +112,7 @@
                   <select data-pane-agent-select aria-label="Select agent" data-testid="pane-agent-select"></select>
                   <div class="agent-warning" data-pane-agent-warning role="status" aria-live="polite" hidden></div>
                 </div>
+                <div class="pane-shortcut-hints" data-pane-shortcut-hints role="note" aria-live="polite"></div>
               </div>
               <div class="pane-header-right">
                 <div class="pane-agent-pill" data-pane-agent-pill data-testid="pane-agent-pill" hidden></div>
@@ -103,6 +124,9 @@
                 </details>
 
                 <div class="status-pill pane-status" data-pane-status data-testid="pane-connection-status">disconnected</div>
+                <button class="icon-btn pane-pin" data-pane-pin type="button" aria-label="Pin pane" aria-pressed="false" title="Pin pane to prevent accidental close">
+                  📌
+                </button>
                 <button class="icon-btn pane-close" data-pane-close type="button" aria-label="Close pane" data-testid="pane-close">
                   ✕
                 </button>
@@ -177,10 +201,12 @@
           </div>
         </div>
         <p class="login-copy">Enter the admin password to continue.</p>
+        <p id="loginInstanceIdentity" class="login-identity" data-testid="login-instance-identity"></p>
         <label>
           Password
           <input id="loginPassword" type="password" placeholder="Enter password" data-testid="login-password" />
         </label>
+        <div id="loginCapsLockHint" class="login-capslock-hint" role="status" aria-live="polite" data-testid="login-capslock-hint"></div>
         <div id="loginError" class="login-error" role="alert" data-testid="login-error"></div>
         <button id="loginBtn" class="primary" data-testid="login-button">Unlock</button>
       </div>
@@ -219,8 +245,26 @@
         </div>
         <div class="modal-body">
           <div class="hint" style="margin-bottom: 10px;">
-            Shortcuts work when youre not typing in a text field.
+            Shortcuts work when you’re not typing in a text field.
           </div>
+          <div class="shortcuts-controls" role="search" aria-label="Search keyboard shortcuts">
+            <input
+              id="shortcutsSearchInput"
+              class="shortcuts-search-input"
+              type="text"
+              placeholder="Search keys, actions, or categories…"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <div id="shortcutsFilterChips" class="shortcuts-filter-chips" role="toolbar" aria-label="Shortcut category filters">
+              <button class="shortcuts-chip is-active" type="button" data-shortcuts-filter="all" aria-pressed="true">All</button>
+              <button class="shortcuts-chip" type="button" data-shortcuts-filter="global" aria-pressed="false">Global</button>
+              <button class="shortcuts-chip" type="button" data-shortcuts-filter="chat" aria-pressed="false">Chat</button>
+              <button class="shortcuts-chip" type="button" data-shortcuts-filter="workqueue" aria-pressed="false">Workqueue</button>
+              <button class="shortcuts-chip" type="button" data-shortcuts-filter="fleet" aria-pressed="false">Fleet</button>
+            </div>
+          </div>
+          <div id="shortcutsEmpty" class="hint" hidden>No shortcuts match your filters.</div>
 
           <div class="shortcut-group">
             <h3 class="shortcut-group-title">Help</h3>
@@ -230,11 +274,21 @@
 
           <div class="shortcut-group">
             <h3 class="shortcut-group-title">Panes</h3>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>4</kbd></div><div class="shortcut-desc">Focus pane 14</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>4</kbd></div><div class="shortcut-desc">Focus pane 1-4</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>P</kbd></div><div class="shortcut-desc">Open Pane Manager</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Open command palette</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Pane switcher (cycle focus)</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Alt</kbd>/<kbd>Option</kbd>+<kbd>1</kbd>..<kbd>9</kbd> or <kbd>Cmd/Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>1</kbd>..<kbd>9</kbd></div><div class="shortcut-desc">Focus visible pane by order</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></div><div class="shortcut-desc">Quick switch panes by recent focus (MRU)</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Y</kbd></div><div class="shortcut-desc">Toggle paired pane (Chat ↔ Workqueue)</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next chat pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous chat pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="shortcut-desc">Add pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd></div><div class="shortcut-desc">Add Chat pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd></div><div class="shortcut-desc">Add Workqueue pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></div><div class="shortcut-desc">Add Cron pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></div><div class="shortcut-desc">Add Timeline pane</div></div>
           </div>
 
           <div class="shortcut-group">
@@ -244,7 +298,13 @@
 
           <div class="shortcut-group">
             <h3 class="shortcut-group-title">Agents</h3>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></div><div class="shortcut-desc">Focus Fleet: first needs attention</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd></div><div class="shortcut-desc">Open/focus Workqueue for active chat agent</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>R</kbd></div><div class="shortcut-desc">Refresh agent list</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>j</kbd> / <kbd>k</kbd></div><div class="shortcut-desc">Move fleet selection down/up</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Enter</kbd></div><div class="shortcut-desc">Open selected agent chat pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Shift</kbd>+<kbd>Enter</kbd></div><div class="shortcut-desc">Open selected agent + Workqueue modal</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>.</kbd></div><div class="shortcut-desc">Open selected agent + Timeline pane</div></div>
           </div>
         </div>
       </div>
@@ -275,75 +335,85 @@
           </button>
         </div>
         <div class="modal-body">
-          <div class="wq-toolbar">
-            <label class="wq-field">
-              Queue
-              <select id="wqQueueSelect" aria-label="Select workqueue"></select>
-            </label>
-            <div class="wq-field">
-              Status
-              <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters"></div>
-            </div>
-            <label class="wq-field">
-              Auto-refresh
-              <div class="wq-autorefresh">
-                <label class="wq-toggle"><input id="wqAutoRefreshEnabled" type="checkbox" /> <span>On</span></label>
-                <select id="wqAutoRefreshInterval" aria-label="Auto-refresh interval">
-                  <option value="5000">5s</option>
-                  <option value="15000" selected>15s</option>
-                  <option value="30000">30s</option>
-                  <option value="60000">60s</option>
+          <div class="wq-modal-controls">
+            <div class="wq-toolbar">
+              <label class="wq-field">
+                Queue
+                <select id="wqQueueSelect" aria-label="Select workqueue"></select>
+              </label>
+              <div class="wq-field">
+                Status
+                <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters"></div>
+              </div>
+              <label class="wq-field">
+                Auto-refresh
+                <div class="wq-autorefresh">
+                  <label class="wq-toggle"><input id="wqAutoRefreshEnabled" type="checkbox" /> <span>On</span></label>
+                  <select id="wqAutoRefreshInterval" aria-label="Auto-refresh interval">
+                    <option value="5000">5s</option>
+                    <option value="15000" selected>15s</option>
+                    <option value="30000">30s</option>
+                    <option value="60000">60s</option>
+                  </select>
+                </div>
+              </label>
+              <label class="wq-field">
+                Grouping
+                <select id="wqGroupingMode" aria-label="Grouping mode">
+                  <option value="auto" selected>Auto (&gt;12 items)</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
                 </select>
-              </div>
-            </label>
-            <button id="wqRefreshBtn" class="secondary" type="button">Refresh</button>
-          </div>
-
-          <div class="wq-actions" aria-label="Workqueue actions">
-            <div class="wq-actions-row">
-              <div class="wq-action-card">
-                <div class="wq-action-title">Enqueue</div>
-                <div class="wq-action-grid">
-                  <label class="wq-action-field">
-                    Title
-                    <input id="wqEnqueueTitle" type="text" placeholder="Short title" />
-                  </label>
-                  <label class="wq-action-field">
-                    Priority
-                    <input id="wqEnqueuePriority" type="number" value="50" min="0" max="999" />
-                  </label>
-                  <label class="wq-action-field" style="grid-column: 1 / -1;">
-                    Instructions
-                    <textarea id="wqEnqueueInstructions" rows="4" placeholder="What should the worker do?"></textarea>
-                  </label>
-                  <label class="wq-action-field" style="grid-column: 1 / -1;">
-                    Dedupe Key (optional)
-                    <input id="wqEnqueueDedupeKey" type="text" placeholder="e.g. issue22:actions" />
-                  </label>
-                </div>
-                <div class="wq-action-buttons">
-                  <button id="wqEnqueueBtn" class="primary" type="button">Enqueue</button>
-                </div>
-              </div>
-
-              <div class="wq-action-card">
-                <div class="wq-action-title">Claim next</div>
-                <div class="wq-action-grid">
-                  <label class="wq-action-field">
-                    Agent ID
-                    <input id="wqClaimAgentId" type="text" value="dev" />
-                  </label>
-                  <label class="wq-action-field">
-                    Lease (ms)
-                    <input id="wqClaimLeaseMs" type="number" value="900000" min="1000" step="1000" />
-                  </label>
-                </div>
-                <div class="wq-action-buttons">
-                  <button id="wqClaimBtn" class="secondary" type="button">Claim next</button>
-                </div>
-              </div>
+              </label>
+              <button id="wqRefreshBtn" class="secondary" type="button">Refresh</button>
             </div>
-            <div id="wqActionStatus" class="wq-action-status" role="status" aria-live="polite"></div>
+
+            <div class="wq-actions" aria-label="Workqueue actions">
+              <div class="wq-actions-row">
+                <div class="wq-action-card">
+                  <div class="wq-action-title">Enqueue</div>
+                  <div class="wq-action-grid">
+                    <label class="wq-action-field">
+                      Title
+                      <input id="wqEnqueueTitle" type="text" placeholder="Short title" />
+                    </label>
+                    <label class="wq-action-field">
+                      Priority
+                      <input id="wqEnqueuePriority" type="number" value="50" min="0" max="999" />
+                    </label>
+                    <label class="wq-action-field" style="grid-column: 1 / -1;">
+                      Instructions
+                      <textarea id="wqEnqueueInstructions" rows="4" placeholder="What should the worker do?"></textarea>
+                    </label>
+                    <label class="wq-action-field" style="grid-column: 1 / -1;">
+                      Dedupe Key (optional)
+                      <input id="wqEnqueueDedupeKey" type="text" placeholder="e.g. issue22:actions" />
+                    </label>
+                  </div>
+                  <div class="wq-action-buttons">
+                    <button id="wqEnqueueBtn" class="primary" type="button">Enqueue</button>
+                  </div>
+                </div>
+
+                <div class="wq-action-card">
+                  <div class="wq-action-title">Claim next</div>
+                  <div class="wq-action-grid">
+                    <label class="wq-action-field">
+                      Agent ID
+                      <input id="wqClaimAgentId" type="text" value="dev" />
+                    </label>
+                    <label class="wq-action-field">
+                      Lease (ms)
+                      <input id="wqClaimLeaseMs" type="number" value="900000" min="1000" step="1000" />
+                    </label>
+                  </div>
+                  <div class="wq-action-buttons">
+                    <button id="wqClaimBtn" class="secondary" type="button">Claim next</button>
+                  </div>
+                </div>
+              </div>
+              <div id="wqActionStatus" class="wq-action-status" role="status" aria-live="polite"></div>
+            </div>
           </div>
 
           <div class="wq-layout">
@@ -386,12 +456,48 @@
               <input id="agentsSearch" type="text" placeholder="Filter agents…" />
             </label>
             <label class="agents-field agents-active-only">
-              <span class="agents-label">Active only</span>
+              <span class="agents-label">Fresh window</span>
               <div class="agents-active-controls">
-                <label class="agents-toggle"><input id="agentsActiveOnly" type="checkbox" /> <span>On</span></label>
                 <input id="agentsActiveMinutes" type="number" min="1" step="1" value="10" aria-label="Active within minutes" />
                 <span class="hint">min</span>
               </div>
+            </label>
+            <label class="agents-field">
+              <span class="agents-label">Filter</span>
+              <div id="agentsFilterGroup" class="agents-filter-group" role="group" aria-label="Fleet triage filter">
+                <button id="agentsFilterAll" type="button" class="agents-filter-btn" data-agents-filter="all">All</button>
+                <button id="agentsFilterNeedsAttention" type="button" class="agents-filter-btn" data-agents-filter="needs_attention">Needs attention</button>
+                <button id="agentsFilterConnected" type="button" class="agents-filter-btn" data-agents-filter="connected">Connected</button>
+                <button id="agentsFilterDisconnected" type="button" class="agents-filter-btn" data-agents-filter="disconnected">Disconnected</button>
+                <button id="agentsFilterBusy" type="button" class="agents-filter-btn" data-agents-filter="busy">Busy</button>
+              </div>
+            </label>
+            <label class="agents-field">
+              <span class="agents-label">Sort</span>
+              <select id="agentsSortMode" aria-label="Sort agents">
+                <option value="attention">Attention first (default)</option>
+                <option value="recent">Last heartbeat (newest first)</option>
+                <option value="oldest">Last heartbeat age (oldest first)</option>
+              </select>
+            </label>
+            <label class="agents-field">
+              <span class="agents-label">Density</span>
+              <select id="agentsDensityMode" aria-label="Fleet density">
+                <option value="cozy">Cozy</option>
+                <option value="compact">Compact</option>
+              </select>
+            </label>
+            <label class="agents-field">
+              <span class="agents-label">Columns</span>
+              <div id="agentsColumns" class="agents-columns" role="group" aria-label="Fleet column visibility">
+                <label class="agents-toggle"><input id="agentsColId" type="checkbox" checked /> ID</label>
+                <label class="agents-toggle"><input id="agentsColHealth" type="checkbox" checked /> Health</label>
+                <label class="agents-toggle"><input id="agentsColReason" type="checkbox" checked /> Reason</label>
+              </div>
+            </label>
+            <label class="agents-field agents-reset-field">
+              <span class="agents-label">View</span>
+              <button id="agentsResetTriageBtn" type="button" class="secondary" aria-label="Reset agents triage view">Reset agents triage view</button>
             </label>
           </div>
 
@@ -429,6 +535,11 @@
           <div class="hint">
             Auto-connecting with the gateway token from your local OpenClaw config.
           </div>
+
+          <label style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+            <input id="sendGuardRecentFocusEnabled" type="checkbox" checked />
+            Confirm send when pane focus changed recently
+          </label>
 
           <div class="hint" style="margin-top: 12px;">
             <div style="font-weight: 600; margin-bottom: 6px;">Keyboard shortcuts (admin)</div>

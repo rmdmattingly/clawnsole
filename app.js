@@ -16,6 +16,11 @@ const globalElements = {
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
   agentsFilterGroup: document.getElementById('agentsFilterGroup'),
   agentsSortMode: document.getElementById('agentsSortMode'),
+  agentsDensityMode: document.getElementById('agentsDensityMode'),
+  agentsColumns: document.getElementById('agentsColumns'),
+  agentsColId: document.getElementById('agentsColId'),
+  agentsColHealth: document.getElementById('agentsColHealth'),
+  agentsColReason: document.getElementById('agentsColReason'),
   agentsResetTriageBtn: document.getElementById('agentsResetTriageBtn'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
@@ -27,6 +32,9 @@ const globalElements = {
   commandPaletteEmpty: document.getElementById('commandPaletteEmpty'),
   shortcutsModal: document.getElementById('shortcutsModal'),
   shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
+  shortcutsSearchInput: document.getElementById('shortcutsSearchInput'),
+  shortcutsFilterChips: document.getElementById('shortcutsFilterChips'),
+  shortcutsEmpty: document.getElementById('shortcutsEmpty'),
   paneManagerModal: document.getElementById('paneManagerModal'),
   paneManagerCloseBtn: document.getElementById('paneManagerCloseBtn'),
   paneManagerList: document.getElementById('paneManagerList'),
@@ -54,6 +62,7 @@ const globalElements = {
   settingsBtn: document.getElementById('settingsBtn'),
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
+  sendGuardRecentFocusEnabled: document.getElementById('sendGuardRecentFocusEnabled'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
   instanceIdentity: document.getElementById('instanceIdentity'),
@@ -95,6 +104,7 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   return `${sec}s`;
 });
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
+const detectShortcutConflict = __appCore.detectShortcutConflict || (() => null);
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
   const n = Number(count);
   if (!Number.isFinite(n) || n <= 1) return 1;
@@ -188,6 +198,29 @@ const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 const ADMIN_AGENT_FILTER_KEY = 'clawnsole.admin.agents.filter';
 const ADMIN_AGENT_QUERY_KEY = 'clawnsole.admin.agents.query';
 const ADMIN_AGENT_SORT_KEY = 'clawnsole.admin.agents.sort';
+const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
+const ADMIN_AGENT_COLUMNS_KEY = 'clawnsole.admin.agents.columns';
+
+function getAgentColumnsConfig() {
+  const raw = readJsonFromStorage(ADMIN_AGENT_COLUMNS_KEY, null);
+  return {
+    id: raw?.id !== false,
+    health: raw?.health !== false,
+    reason: raw?.reason !== false
+  };
+}
+
+function applyAgentColumnsConfigToControls(cfg) {
+  if (globalElements.agentsColId) globalElements.agentsColId.checked = !!cfg.id;
+  if (globalElements.agentsColHealth) globalElements.agentsColHealth.checked = !!cfg.health;
+  if (globalElements.agentsColReason) globalElements.agentsColReason.checked = !!cfg.reason;
+}
+const SEND_GUARD_RECENT_FOCUS_ENABLED_KEY = 'clawnsole.sendGuard.recentFocus.enabled';
+const SEND_GUARD_RECENT_FOCUS_WINDOW_MS = 5000;
+
+const uiPrefs = {
+  recentFocusSendGuardEnabled: String(storage.get(SEND_GUARD_RECENT_FOCUS_ENABLED_KEY, '1')) !== '0'
+};
 
 function readJsonFromStorage(key, fallback) {
   try {
@@ -268,15 +301,22 @@ function sortAgentsByLastSeen(agents, { mode = 'recent' } = {}) {
 
 function formatAgeChip(lastSeenAtMs) {
   const ts = Number(lastSeenAtMs) || 0;
-  if (!ts) return 'never seen';
+  if (!ts) return 'heartbeat: never';
   const ageMs = Math.max(0, Date.now() - ts);
   const mins = Math.floor(ageMs / 60_000);
-  if (mins < 1) return 'last seen now';
-  if (mins < 60) return `last seen ${mins}m`;
+  if (mins < 1) return 'heartbeat: now';
+  if (mins < 60) return `heartbeat: ${mins}m`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `last seen ${hrs}h`;
+  if (hrs < 24) return `heartbeat: ${hrs}h`;
   const days = Math.floor(hrs / 24);
-  return `last seen ${days}d`;
+  return `heartbeat: ${days}d`;
+}
+
+function formatHealthChip(state) {
+  if (!state?.connected) return 'health: offline';
+  if (state?.busy) return 'health: busy';
+  if (state?.health === 'stale') return 'health: stale';
+  return 'health: connected';
 }
 
 function getAgentHealth(agentId, { withinMinutes = 10 } = {}) {
@@ -1007,6 +1047,10 @@ function openSettings() {
   globalElements.settingsModal.classList.add('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'false');
 
+  if (globalElements.sendGuardRecentFocusEnabled) {
+    globalElements.sendGuardRecentFocusEnabled.checked = !!uiPrefs.recentFocusSendGuardEnabled;
+  }
+
   // Guest mode removed.
 
   loadRecurringPromptAgents();
@@ -1018,14 +1062,118 @@ function closeSettings() {
   globalElements.settingsModal.setAttribute('aria-hidden', 'true');
 }
 
+const shortcutsUiState = {
+  query: '',
+  filter: 'all',
+  rows: [],
+  groups: [],
+  previousFocus: null
+};
+
+function deriveShortcutCategory(groupTitle) {
+  const name = String(groupTitle || '').trim().toLowerCase();
+  if (name === 'help') return 'global';
+  if (name === 'panes') return 'pane';
+  if (name === 'workqueue') return 'workqueue';
+  if (name === 'agents') return 'fleet';
+  return name || 'other';
+}
+
+function initShortcutsSearchIndex() {
+  const modal = globalElements.shortcutsModal;
+  if (!modal) return;
+  const groups = Array.from(modal.querySelectorAll('.shortcut-group'));
+  shortcutsUiState.groups = groups.map((groupEl) => {
+    const titleEl = groupEl.querySelector('.shortcut-group-title');
+    const titleText = String(titleEl?.textContent || '').trim();
+    const category = deriveShortcutCategory(titleText);
+    const rows = Array.from(groupEl.querySelectorAll('.shortcut-row')).map((rowEl) => {
+      const keysTextRaw = String(rowEl.querySelector('.shortcut-keys')?.textContent || '').trim();
+      const keysText = keysTextRaw.toLowerCase();
+      const descText = String(rowEl.querySelector('.shortcut-desc')?.textContent || '').trim().toLowerCase();
+      const conflict = detectShortcutConflict(keysTextRaw, { platform: navigator.platform || '' });
+      if (conflict) {
+        rowEl.classList.add('shortcut-row-conflict');
+        rowEl.setAttribute('title', `${conflict.reason} ${conflict.suggestion}`.trim());
+        let badge = rowEl.querySelector('.shortcut-conflict-badge');
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'shortcut-conflict-badge';
+          badge.textContent = 'May conflict';
+          badge.setAttribute('aria-label', 'This shortcut may conflict with browser or OS-reserved keybinds');
+          rowEl.querySelector('.shortcut-desc')?.append(' ', badge);
+        }
+      }
+      const searchText = `${keysText} ${descText} ${titleText.toLowerCase()} ${category}`;
+      return { rowEl, searchText };
+    });
+    return { groupEl, category, rows };
+  });
+  shortcutsUiState.rows = shortcutsUiState.groups.flatMap((group) => group.rows);
+}
+
+function setShortcutsFilter(filter) {
+  shortcutsUiState.filter = String(filter || 'all').toLowerCase();
+  const chips = globalElements.shortcutsFilterChips?.querySelectorAll?.('[data-shortcuts-filter]') || [];
+  chips.forEach((chip) => {
+    const active = String(chip.dataset.shortcutsFilter || '').toLowerCase() === shortcutsUiState.filter;
+    chip.classList.toggle('is-active', active);
+    chip.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  filterShortcuts();
+}
+
+function shortcutRowMatchesFilter(group, row) {
+  const filter = shortcutsUiState.filter;
+  if (!filter || filter === 'all') return true;
+  if (filter === 'chat') return row.searchText.includes('chat');
+  if (filter === group.category) return true;
+  return row.searchText.includes(filter);
+}
+
+function filterShortcuts() {
+  const query = String(shortcutsUiState.query || '').trim().toLowerCase();
+  let visibleRows = 0;
+  shortcutsUiState.groups.forEach((group) => {
+    let visibleInGroup = 0;
+    group.rows.forEach((row) => {
+      const matchesFilter = shortcutRowMatchesFilter(group, row);
+      const matchesQuery = !query || row.searchText.includes(query);
+      const show = matchesFilter && matchesQuery;
+      row.rowEl.hidden = !show;
+      if (show) visibleInGroup += 1;
+    });
+    group.groupEl.hidden = visibleInGroup === 0;
+    visibleRows += visibleInGroup;
+  });
+  if (globalElements.shortcutsEmpty) {
+    globalElements.shortcutsEmpty.hidden = visibleRows !== 0;
+  }
+}
+
 function openShortcuts() {
+  if (!shortcutsUiState.groups.length) initShortcutsSearchIndex();
+  shortcutsUiState.previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   globalElements.shortcutsModal?.classList.add('open');
   globalElements.shortcutsModal?.setAttribute('aria-hidden', 'false');
+  setShortcutsFilter('all');
+  shortcutsUiState.query = '';
+  if (globalElements.shortcutsSearchInput) {
+    globalElements.shortcutsSearchInput.value = '';
+    setTimeout(() => {
+      try { globalElements.shortcutsSearchInput.focus(); } catch {}
+    }, 0);
+  }
+  filterShortcuts();
 }
 
 function closeShortcuts() {
+  const wasOpen = !!globalElements.shortcutsModal?.classList.contains('open');
   globalElements.shortcutsModal?.classList.remove('open');
   globalElements.shortcutsModal?.setAttribute('aria-hidden', 'true');
+  if (wasOpen && shortcutsUiState.previousFocus && document.contains(shortcutsUiState.previousFocus)) {
+    try { shortcutsUiState.previousFocus.focus(); } catch {}
+  }
 }
 
 // Pane Manager (admin-only)
@@ -1089,11 +1237,39 @@ function paneRenderTypePill(pane) {
   if (pane?.elements?.typeIcon) pane.elements.typeIcon.textContent = icon;
 }
 
-function paneTargetLabel(pane) {
+function paneTargetBaseLabel(pane) {
   if (!pane) return '';
   if (pane.kind === 'workqueue') return String(pane.workqueue?.queue || 'dev-team');
   if (pane.kind === 'cron' || pane.kind === 'timeline') return 'gateway';
   return String(pane.agentId || 'main');
+}
+
+function paneIdentityKey(pane) {
+  if (!pane) return '';
+  return `${String(pane.kind || 'chat')}::${paneTargetBaseLabel(pane)}`;
+}
+
+function paneIdentityOrdinal(pane) {
+  const panes = Array.isArray(paneManager?.panes) ? paneManager.panes : [];
+  const key = paneIdentityKey(pane);
+  if (!key) return { index: 1, total: 1 };
+  const peers = panes
+    .filter((p) => paneIdentityKey(p) === key)
+    .sort((a, b) => String(a?.key || '').localeCompare(String(b?.key || '')));
+  const at = peers.findIndex((p) => String(p?.key || '') === String(pane?.key || ''));
+  return {
+    index: at >= 0 ? (at + 1) : 1,
+    total: Math.max(1, peers.length)
+  };
+}
+
+function paneTargetLabel(pane, opts = {}) {
+  const base = paneTargetBaseLabel(pane);
+  const disambiguate = !!opts?.disambiguate;
+  if (!disambiguate) return base;
+  const ord = paneIdentityOrdinal(pane);
+  if (ord.total <= 1) return base;
+  return `${base} (${ord.index})`;
 }
 
 function paneLetterLabel(pane) {
@@ -1107,7 +1283,7 @@ function paneDestinationSummary(pane) {
   return {
     letter: paneLetterLabel(pane),
     kind: paneLabel(pane),
-    target: paneTargetLabel(pane)
+    target: paneTargetLabel(pane, { disambiguate: true })
   };
 }
 
@@ -1127,7 +1303,11 @@ function paneRenderDestinationStrip(pane) {
   const valueEl = row.querySelector('[data-pane-destination-value]');
   if (!valueEl) return;
   const summary = paneDestinationSummary(pane);
-  valueEl.textContent = `${summary.letter} ${summary.kind} · ${summary.target}`;
+  if (pane?.kind === 'chat') {
+    valueEl.textContent = `Chat · ${summary.target}`;
+  } else {
+    valueEl.textContent = `${summary.kind} · messaging disabled`;
+  }
   row.dataset.warning = 'false';
 }
 
@@ -1228,6 +1408,7 @@ function renderPaneManager() {
     const unread = Math.max(0, Number(pane?.activity?.unread || 0));
     const unreadLabel = paneActivityLabel(pane);
     const hasDraft = paneHasUnsentDraft(pane);
+    const isPinned = !!pane?.pinned;
 
     row.innerHTML = `
       <div class="pane-manager-main">
@@ -1238,9 +1419,10 @@ function renderPaneManager() {
             <span class="pane-manager-kind-label">${escapeHtml(paneLabel(pane))}</span>
           </span>
         </div>
-        <div class="pane-manager-target" title="${escapeHtml(paneTargetLabel(pane))}">${escapeHtml(paneTargetLabel(pane))}</div>
+        <div class="pane-manager-target" title="${escapeHtml(paneTargetLabel(pane, { disambiguate: true }))}">${escapeHtml(paneTargetLabel(pane, { disambiguate: true }))}</div>
         <div class="pane-manager-state-chips">
           ${isDisconnected ? '<div class="pane-manager-state pane-manager-state--disconnected" data-state="disconnected" aria-label="Disconnected">Disconnected</div>' : ''}
+          ${isPinned ? '<div class="pane-manager-state" data-state="pinned" aria-label="Pinned">Pinned</div>' : ''}
           ${hasDraft ? '<div class="pane-draft-badge" aria-label="Has unsent draft">Draft</div>' : ''}
           ${unread ? `<div class="pane-activity-badge" data-kind="${escapeHtml(String(pane?.activity?.kind || 'chat'))}" aria-label="${escapeHtml(unreadLabel)}">${escapeHtml(unread > 99 ? '99+' : String(unread))}</div>` : ''}
         </div>
@@ -1248,8 +1430,9 @@ function renderPaneManager() {
       <div class="pane-manager-actions">
         <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="Move pane up" aria-label="Move pane up" ${idx === 0 ? 'disabled' : ''}>↑</button>
         <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="Move pane down" aria-label="Move pane down" ${idx === panes.length - 1 ? 'disabled' : ''}>↓</button>
+        <button class="secondary pane-manager-pin" type="button" data-action="pin" aria-pressed="${isPinned ? 'true' : 'false'}">${isPinned ? 'Unpin' : 'Pin'}</button>
         <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
-        <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
+        <button class="secondary pane-manager-close" type="button" data-action="close" ${isPinned ? 'disabled' : ''}>Close</button>
       </div>
     `;
 
@@ -1265,6 +1448,15 @@ function renderPaneManager() {
         try {
           paneManager.removePane(pane.key);
         } catch {}
+        renderPaneManager();
+        return;
+      }
+      if (action === 'pin') {
+        pane.pinned = !pane.pinned;
+        pane.elements?.pinBtn?.setAttribute('aria-pressed', pane.pinned ? 'true' : 'false');
+        if (pane.elements?.pinBtn) pane.elements.pinBtn.textContent = pane.pinned ? '📌' : '📍';
+        paneManager.updateCloseButtons();
+        paneManager.persistAdminPanes();
         renderPaneManager();
         return;
       }
@@ -1950,6 +2142,11 @@ function openAgentsModal() {
     const sortMode = String(storage.get(ADMIN_AGENT_SORT_KEY, 'attention') || 'attention');
     globalElements.agentsSortMode.value = ['attention', 'recent', 'oldest'].includes(sortMode) ? sortMode : 'attention';
   }
+  if (globalElements.agentsDensityMode) {
+    const density = String(storage.get(ADMIN_AGENT_DENSITY_KEY, 'cozy') || 'cozy');
+    globalElements.agentsDensityMode.value = density === 'compact' ? 'compact' : 'cozy';
+  }
+  applyAgentColumnsConfigToControls(getAgentColumnsConfig());
   if (globalElements.agentsSearch) {
     globalElements.agentsSearch.value = String(storage.get(ADMIN_AGENT_QUERY_KEY, '') || '');
   }
@@ -1981,6 +2178,8 @@ function renderAgentsModalList({ fallbackToFirst = true } = {}) {
   const search = String(globalElements.agentsSearch?.value || '').trim().toLowerCase();
   const selectedFilter = String(storage.get(ADMIN_AGENT_FILTER_KEY, 'all') || 'all');
   const sortMode = String(globalElements.agentsSortMode?.value || storage.get(ADMIN_AGENT_SORT_KEY, 'attention') || 'attention');
+  const density = String(globalElements.agentsDensityMode?.value || storage.get(ADMIN_AGENT_DENSITY_KEY, 'cozy') || 'cozy');
+  const columns = getAgentColumnsConfig();
   const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
   const pins = getPinnedAgentIds();
   const lastSeenMap = getAgentLastSeenMap();
@@ -2031,6 +2230,11 @@ function renderAgentsModalList({ fallbackToFirst = true } = {}) {
   const rest = sortEntries(filteredRest);
 
   root.innerHTML = '';
+  root.classList.toggle('agents-density-compact', density === 'compact');
+  root.classList.toggle('agents-density-cozy', density !== 'compact');
+  root.classList.toggle('agents-hide-id', !columns.id);
+  root.classList.toggle('agents-hide-health', !columns.health);
+  root.classList.toggle('agents-hide-reason', !columns.reason);
   globalElements.agentsFilterGroup?.querySelectorAll?.('[data-agents-filter]')?.forEach((btn) => {
     const value = String(btn.getAttribute('data-agents-filter') || 'all');
     const on = value === selectedFilter;
@@ -2062,8 +2266,9 @@ function renderAgentsModalList({ fallbackToFirst = true } = {}) {
       row.innerHTML = `
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
         <div class="agents-row-main">
-          <div class="agents-row-title-wrap"><div class="agents-row-title">${escapeHtml(label)}</div><span class="agents-age-chip">${escapeHtml(formatAgeChip(lastSeenAtMs))}</span></div>
-          <div class="agents-row-meta">${escapeHtml(id)} · ${triage.connected ? (triage.busy ? 'busy' : triage.health === 'stale' ? 'stale' : 'connected') : 'disconnected/error'}</div>
+          <div class="agents-row-title-wrap"><div class="agents-row-title">${escapeHtml(label)}</div></div>
+          <div class="agents-row-meta">${escapeHtml(id)}</div>
+          <div class="agents-row-chips"><span class="agents-health-chip">${escapeHtml(formatHealthChip(triage))}</span><span class="agents-age-chip">${escapeHtml(formatAgeChip(lastSeenAtMs))}</span></div>
           <div class="agents-row-reason"><span class="agents-reason-chip">${escapeHtml(triage.attentionReason)}</span></div>
         </div>
       `;
@@ -2367,7 +2572,9 @@ function getWorkqueueDedupeIdentity(item) {
   const key = String(item?.dedupeKey || item?.meta?.dedupeKey || '').trim();
   if (!key) return '';
   const queue = String(item?.queue || '').trim() || '__default__';
-  return `${queue}::dedupe::${key}`;
+  const title = String(item?.title || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const status = String(item?.status || '').trim().toLowerCase() || 'ready';
+  return `${queue}::dedupe::${key}::${status}::${title}`;
 }
 
 function getWorkqueueFallbackGroupIdentity(item) {
@@ -2413,13 +2620,20 @@ function finalizeWorkqueueGroup(group) {
   return group;
 }
 
+function workqueueItemUpdatedAtMs(item) {
+  const t = Date.parse(String(item?.updatedAt || item?.createdAt || ''));
+  return Number.isFinite(t) ? t : 0;
+}
+
 function groupWorkqueueItemsByDedupe(sortedItems, opts = {}) {
   const groupingEnabled = resolveWorkqueueGroupingEnabled(opts.groupingMode, Array.isArray(sortedItems) ? sortedItems.length : 0);
   const groups = [];
   const groupMap = new Map();
 
   for (const it of Array.isArray(sortedItems) ? sortedItems : []) {
-    const identity = groupingEnabled ? (getWorkqueueDedupeIdentity(it) || getWorkqueueFallbackGroupIdentity(it)) : '';
+    const strictIdentity = getWorkqueueDedupeIdentity(it);
+    const fallbackIdentity = groupingEnabled ? getWorkqueueFallbackGroupIdentity(it) : '';
+    const identity = strictIdentity || fallbackIdentity;
     if (!identity) {
       groups.push(finalizeWorkqueueGroup({ canonical: it, siblings: [] }));
       continue;
@@ -2431,7 +2645,13 @@ function groupWorkqueueItemsByDedupe(sortedItems, opts = {}) {
       groupMap.set(identity, group);
       groups.push(group);
     } else {
-      groupMap.get(identity).siblings.push(it);
+      const group = groupMap.get(identity);
+      if (workqueueItemUpdatedAtMs(it) > workqueueItemUpdatedAtMs(group.canonical)) {
+        group.siblings.push(group.canonical);
+        group.canonical = it;
+      } else {
+        group.siblings.push(it);
+      }
     }
   }
 
@@ -4477,7 +4697,11 @@ function paneShowSendGuard(pane, { origin, current, onConfirm } = {}) {
   if (!row) return;
   const msg = row.querySelector('[data-pane-send-guard-msg]');
   if (msg) {
-    msg.textContent = `You started this draft in ${paneDraftOriginLabel(origin)}, now sending to ${paneDraftOriginLabel(current)}.`;
+    if (String(origin?.paneType || '') === 'recent focus') {
+      msg.textContent = `Focus switched recently from ${String(origin?.targetAgent || 'another pane')}. Send to ${paneDraftOriginLabel(current)}?`;
+    } else {
+      msg.textContent = `You started this draft in ${paneDraftOriginLabel(origin)}, now sending to ${paneDraftOriginLabel(current)}.`;
+    }
   }
   if (pane.sendGuard) {
     pane.sendGuard.open = true;
@@ -4568,6 +4792,12 @@ async function paneSendChat(pane) {
 
   const currentOrigin = paneDraftCurrentOrigin(pane);
   const origin = pane.draftOrigin;
+  const recentFocusGuard = Boolean(
+    uiPrefs.recentFocusSendGuardEnabled &&
+    Number(pane?.lastFocusSwitchAtMs || 0) > 0 &&
+    (Date.now() - Number(pane.lastFocusSwitchAtMs || 0)) <= SEND_GUARD_RECENT_FOCUS_WINDOW_MS &&
+    !pane?.typedSinceLastFocusSwitch
+  );
   const draftMismatch = Boolean(
     origin && (
       String(origin.paneId || '') !== String(currentOrigin.paneId || '') ||
@@ -4582,6 +4812,19 @@ async function paneSendChat(pane) {
       onConfirm: () => {
         paneDismissSendGuard(pane);
         pane.draftOrigin = paneDraftCurrentOrigin(pane);
+        paneSendChat(pane);
+      }
+    });
+    return;
+  }
+
+  if (recentFocusGuard) {
+    paneShowSendGuard(pane, {
+      origin: { paneType: 'recent focus', targetAgent: pane.lastFocusedFromPaneLabel || 'another pane' },
+      current: currentOrigin,
+      onConfirm: () => {
+        paneDismissSendGuard(pane);
+        pane.typedSinceLastFocusSwitch = true;
         paneSendChat(pane);
       }
     });
@@ -5082,7 +5325,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, quickFilters, scope, sortKey, sortDir, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, quickFilters, scope, sortKey, sortDir, closable = true, pinned = false } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -5102,6 +5345,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
     status: root.querySelector('[data-pane-status]'),
     helpDetails: root.querySelector('[data-pane-help]'),
     helpPopover: root.querySelector('[data-pane-help-popover]'),
+    pinBtn: root.querySelector('[data-pane-pin]'),
     closeBtn: root.querySelector('[data-pane-close]'),
     thread: root.querySelector('[data-pane-thread]'),
     scrollDownBtn: root.querySelector('[data-pane-scroll-down]'),
@@ -5145,6 +5389,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
     statusState: 'disconnected',
     activity: { unread: 0, kind: '' },
     statusMeta: '',
+    pinned: !!pinned,
     elements,
     chat: { runs: new Map(), history: [] },
     scroll: { pinned: true },
@@ -5158,6 +5403,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
     inFlight: null,
     draftOrigin: null,
     sendGuard: { open: false, onConfirm: null },
+    lastFocusSwitchAtMs: 0,
+    lastFocusedFromPaneLabel: '',
+    typedSinceLastFocusSwitch: false,
     chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
     legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
     sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
@@ -5209,6 +5457,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
             lines: ['Shows queued work items, grouped by status.', 'Drag cards between columns to change status.', 'Use Refresh when another worker updates the queue.'],
             shortcuts: [
               ['g w', 'open Workqueue modal'],
+              ['Ctrl+Tab / Ctrl+Shift+Tab', 'switch panes by recent focus (MRU)'],
               ['Cmd/Ctrl+Shift+K', 'focus next pane'],
               ['Cmd/Ctrl+Shift+J', 'focus previous pane']
             ]
@@ -5220,6 +5469,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
             lines: ['Shows scheduled jobs in the Gateway cron scheduler.', 'Use filters to find failing/disabled jobs.', 'Use Run/Edit/Disable for quick ops.'],
             shortcuts: [
               ['?', 'keyboard shortcuts overlay'],
+              ['Ctrl+Tab / Ctrl+Shift+Tab', 'switch panes by recent focus (MRU)'],
               ['Cmd/Ctrl+Shift+K', 'focus next pane'],
               ['Cmd/Ctrl+Shift+J', 'focus previous pane']
             ]
@@ -5231,6 +5481,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
             lines: ['Shows recent cron run history (best-effort).', 'Adjust range/status/search to find events.', 'Click View to inspect the underlying job.'],
             shortcuts: [
               ['?', 'keyboard shortcuts overlay'],
+              ['Ctrl+Tab / Ctrl+Shift+Tab', 'switch panes by recent focus (MRU)'],
               ['Cmd/Ctrl+Shift+K', 'focus next pane'],
               ['Cmd/Ctrl+Shift+J', 'focus previous pane']
             ]
@@ -5241,6 +5492,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
           lines: ['Chat with an agent/session.', 'Pick an agent target, then send messages/files.', 'Use Stop to cancel a long response.'],
           shortcuts: [
             ['Alt/Option+1..9 or Cmd/Ctrl+Shift+1..9', 'focus visible pane by order'],
+            ['Ctrl+Tab / Ctrl+Shift+Tab', 'switch panes by recent focus (MRU)'],
             ['Cmd/Ctrl+1..4', 'focus a pane (legacy index)'],
             ['Cmd/Ctrl+Shift+K', 'focus next pane'],
             ['Cmd/Ctrl+Shift+J', 'focus previous pane']
@@ -5280,6 +5532,28 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
     });
   }
 
+  const renderPanePinButton = () => {
+    if (!elements.pinBtn) return;
+    elements.pinBtn.hidden = role !== 'admin';
+    if (role !== 'admin') return;
+    const pinnedNow = !!pane.pinned;
+    elements.pinBtn.setAttribute('aria-pressed', pinnedNow ? 'true' : 'false');
+    elements.pinBtn.setAttribute('aria-label', pinnedNow ? 'Unpin pane' : 'Pin pane');
+    elements.pinBtn.setAttribute('title', pinnedNow ? 'Pinned: click to unpin' : 'Pin pane to prevent accidental close');
+    elements.pinBtn.textContent = pinnedNow ? '📌' : '📍';
+  };
+  renderPanePinButton();
+  elements.pinBtn?.addEventListener('click', () => {
+    if (role !== 'admin') return;
+    pane.pinned = !pane.pinned;
+    renderPanePinButton();
+    paneManager.updateCloseButtons();
+    paneManager.persistAdminPanes();
+    try {
+      showToast(pane.pinned ? 'Pane pinned' : 'Pane unpinned', { kind: 'info', timeoutMs: 1500 });
+    } catch {}
+  });
+
   if (elements.stopBtn) {
     elements.stopBtn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -5289,6 +5563,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
   }
 
   elements.root.addEventListener('focusin', () => {
+    const prev = paneManager.lastFocusedPaneKey || null;
+    paneManager.notePaneFocused(pane);
+    if (prev && String(prev) !== String(pane.key || '')) {
+      pane.lastFocusSwitchAtMs = Date.now();
+      const fromPane = paneManager.panes.find((candidate) => String(candidate?.key || '') === String(prev));
+      pane.lastFocusedFromPaneLabel = paneManager.formatPaneIdentity(fromPane);
+      pane.typedSinceLastFocusSwitch = false;
+    }
     paneClearUnread(pane);
     renderPaneShortcutHints(pane);
   });
@@ -6664,6 +6946,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
   });
 
   elements.input.addEventListener('input', () => {
+    pane.typedSinceLastFocusSwitch = true;
     paneSyncDraftOrigin(pane);
     paneUpdateCommandHints(pane);
   });
@@ -6707,6 +6990,41 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
 const paneManager = {
   panes: [],
   maxPanes: 6,
+  mruPaneKeys: [],
+  lastFocusedPaneKey: null,
+  notePaneFocused(pane) {
+    if (!pane?.key) return;
+    const key = String(pane.key);
+    this.mruPaneKeys = [key, ...this.mruPaneKeys.filter((candidate) => candidate !== key)].slice(0, this.maxPanes * 2);
+    this.lastFocusedPaneKey = key;
+  },
+  getPaneMRUOrder() {
+    const byKey = new Map(this.panes.map((pane) => [String(pane?.key || ''), pane]));
+    const ordered = this.mruPaneKeys.map((key) => byKey.get(key)).filter(Boolean);
+    const seen = new Set(ordered.map((pane) => String(pane.key)));
+    for (const pane of this.panes) {
+      const key = String(pane?.key || '');
+      if (!key || seen.has(key)) continue;
+      ordered.push(pane);
+      seen.add(key);
+    }
+    return ordered;
+  },
+  formatPaneIdentity(pane) {
+    if (!pane?.key) return 'Pane';
+    const idx = this.panes.findIndex((candidate) => candidate?.key === pane.key);
+    const letter = idx >= 0 ? String.fromCharCode(65 + (idx % 26)) : '?';
+    const type = pane.kind === 'workqueue' ? 'Workqueue' : pane.kind === 'timeline' ? 'Timeline' : pane.kind === 'cron' ? 'Cron' : 'Chat';
+    if (pane.kind === 'workqueue') {
+      const queue = String(pane.workqueue?.queue || 'dev-team').trim() || 'dev-team';
+      return `${letter} ${type} · ${queue}`;
+    }
+    if (pane.kind === 'chat') {
+      const target = String(pane.agentId || 'main').trim() || 'main';
+      return `${letter} ${type} · ${target}`;
+    }
+    return `${letter} ${type}`;
+  },
   init() {
     this.destroyAll();
 
@@ -6726,6 +7044,7 @@ const paneManager = {
         role: 'admin',
         kind: cfg.kind || 'chat',
         agentId: cfg.agentId,
+        pinned: !!cfg.pinned,
         queue: cfg.queue,
         statusFilter: cfg.statusFilter,
         quickFilters: cfg.quickFilters,
@@ -6765,6 +7084,7 @@ const paneManager = {
       } catch {}
     });
     this.panes = [];
+    this.mruPaneKeys = [];
   },
   loadAdminPanes() {
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
@@ -6808,15 +7128,15 @@ const paneManager = {
                 actionableOnly: !!item.quickFilters.actionableOnly
               }
             : { source: '', repo: '', actionableOnly: false };
-          return { key, kind, queue, statusFilter, scope, sortKey, sortDir, quickFilters };
+          return { key, kind, pinned: !!item.pinned, queue, statusFilter, scope, sortKey, sortDir, quickFilters };
         }
 
         if (kind === 'cron' || kind === 'timeline') {
-          return { key, kind };
+          return { key, kind, pinned: !!item.pinned };
         }
 
         const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
-        return { key, kind, agentId };
+        return { key, kind, pinned: !!item.pinned, agentId };
       }
 
       // Super-legacy format: ['pabc','pdef'] (treat as chat panes)
@@ -6862,6 +7182,7 @@ const paneManager = {
         return {
           key: pane.key,
           kind: 'workqueue',
+          pinned: !!pane.pinned,
           queue: pane.workqueue?.queue || 'dev-team',
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
           quickFilters: {
@@ -6875,9 +7196,9 @@ const paneManager = {
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
-        return { key: pane.key, kind: pane.kind };
+        return { key: pane.key, kind: pane.kind, pinned: !!pane.pinned };
       }
-      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
+      return { key: pane.key, kind: 'chat', pinned: !!pane.pinned, agentId: pane.agentId || 'main' };
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
@@ -7220,6 +7541,10 @@ const paneManager = {
   canRemovePane(pane, { silent = false } = {}) {
     if (roleState.role !== 'admin') return false;
     if (!pane) return false;
+    if (pane.pinned) {
+      if (!silent) showToast('This pane is pinned. Unpin it before closing.', { kind: 'info', timeoutMs: 2200 });
+      return false;
+    }
     if (this.panes.length <= 1) return false;
 
     const kind = normalizePaneKind(pane.kind);
@@ -7244,6 +7569,7 @@ const paneManager = {
     if (!this.canRemovePane(pane)) return;
     if (!paneCloseGuardPrompt(pane)) return;
     this.panes.splice(idx, 1);
+    this.mruPaneKeys = this.mruPaneKeys.filter((candidate) => candidate !== String(key));
     try {
       pane.client?.disconnect(true);
     } catch {}
@@ -7366,10 +7692,23 @@ globalElements.settingsCloseBtn?.addEventListener('click', () => closeSettings()
 globalElements.settingsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.settingsModal) closeSettings();
 });
+globalElements.sendGuardRecentFocusEnabled?.addEventListener('change', () => {
+  uiPrefs.recentFocusSendGuardEnabled = !!globalElements.sendGuardRecentFocusEnabled.checked;
+  storage.set(SEND_GUARD_RECENT_FOCUS_ENABLED_KEY, uiPrefs.recentFocusSendGuardEnabled ? '1' : '0');
+});
 
 globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
 globalElements.shortcutsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.shortcutsModal) closeShortcuts();
+});
+globalElements.shortcutsSearchInput?.addEventListener('input', () => {
+  shortcutsUiState.query = globalElements.shortcutsSearchInput.value || '';
+  filterShortcuts();
+});
+globalElements.shortcutsFilterChips?.addEventListener('click', (event) => {
+  const target = event.target instanceof HTMLElement ? event.target.closest('[data-shortcuts-filter]') : null;
+  if (!target) return;
+  setShortcutsFilter(target.dataset.shortcutsFilter || 'all');
 });
 globalElements.commandPaletteCloseBtn?.addEventListener('click', () => closeCommandPalette());
 globalElements.commandPaletteModal?.addEventListener('click', (event) => {
@@ -7466,12 +7805,32 @@ globalElements.agentsSortMode?.addEventListener('change', () => {
   renderAgentsModalList();
 });
 
+globalElements.agentsDensityMode?.addEventListener('change', () => {
+  const mode = String(globalElements.agentsDensityMode.value || 'cozy');
+  storage.set(ADMIN_AGENT_DENSITY_KEY, mode === 'compact' ? 'compact' : 'cozy');
+  renderAgentsModalList();
+});
+
+globalElements.agentsColumns?.addEventListener('change', () => {
+  const cfg = {
+    id: !!globalElements.agentsColId?.checked,
+    health: !!globalElements.agentsColHealth?.checked,
+    reason: !!globalElements.agentsColReason?.checked
+  };
+  writeJsonToStorage(ADMIN_AGENT_COLUMNS_KEY, cfg);
+  renderAgentsModalList();
+});
+
 globalElements.agentsResetTriageBtn?.addEventListener('click', () => {
   if (globalElements.agentsSearch) globalElements.agentsSearch.value = '';
   if (globalElements.agentsSortMode) globalElements.agentsSortMode.value = 'attention';
   storage.remove(ADMIN_AGENT_QUERY_KEY);
   storage.remove(ADMIN_AGENT_SORT_KEY);
   storage.remove(ADMIN_AGENT_FILTER_KEY);
+  storage.remove(ADMIN_AGENT_DENSITY_KEY);
+  storage.remove(ADMIN_AGENT_COLUMNS_KEY);
+  if (globalElements.agentsDensityMode) globalElements.agentsDensityMode.value = 'cozy';
+  applyAgentColumnsConfigToControls({ id: true, health: true, reason: true });
   renderAgentsModalList();
   try {
     globalElements.agentsSearch?.focus?.();
@@ -7639,6 +7998,22 @@ function cyclePaneFocusBackward() {
   const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
   const prev = idx >= 0 ? (idx - 1 + panes.length) % panes.length : panes.length - 1;
   focusPaneIndex(prev);
+}
+
+function cyclePaneFocusMRU(direction = 'backward') {
+  const panes = paneManager.panes;
+  if (!panes || panes.length < 2) return;
+
+  const ordered = paneManager.getPaneMRUOrder();
+  if (ordered.length < 2) return;
+
+  const target = direction === 'forward' ? (ordered[2] || ordered[ordered.length - 1]) : ordered[1];
+  if (!target) return;
+
+  const idx = panes.findIndex((pane) => pane?.key === target.key);
+  if (idx < 0) return;
+  focusPaneIndex(idx);
+  showToast(`Switched to ${paneManager.formatPaneIdentity(target)}`, { kind: 'info', timeoutMs: 1200 });
 }
 
 function cyclePaneFocusByKind(kind, direction = 'next') {
@@ -7835,6 +8210,13 @@ window.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'j') {
     event.preventDefault();
     cyclePaneFocusBackward();
+    return;
+  }
+
+  // Ctrl+Tab / Ctrl+Shift+Tab switches panes by MRU order.
+  if (event.ctrlKey && !event.metaKey && !event.altKey && key === 'Tab') {
+    event.preventDefault();
+    cyclePaneFocusMRU(event.shiftKey ? 'forward' : 'backward');
     return;
   }
 
