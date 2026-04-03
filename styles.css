@@ -340,6 +340,14 @@ body::before {
   overflow: hidden;
 }
 
+.app.auth-locked .chat-page {
+  display: none;
+}
+
+.app.auth-locked .topbar-actions > :not(#rolePill) {
+  display: none !important;
+}
+
 .pane-grid {
   position: relative;
   z-index: 1;
