@@ -255,6 +255,10 @@
             <h3 class="shortcut-group-title">Pane actions</h3>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Open command palette</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="shortcut-desc">Add pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys" id="shortcutAddChat">Cmd/Ctrl+Shift+C</div><div class="shortcut-desc">New Chat pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys" id="shortcutAddWorkqueue">Cmd/Ctrl+Shift+W</div><div class="shortcut-desc">New Workqueue pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys" id="shortcutAddCron">Cmd/Ctrl+Shift+R</div><div class="shortcut-desc">New Cron pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys" id="shortcutAddTimeline">Cmd/Ctrl+Shift+T</div><div class="shortcut-desc">New Timeline pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></div><div class="shortcut-desc">Open/focus Fleet pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>R</kbd></div><div class="shortcut-desc">Refresh agent list</div></div>
           </div>
@@ -541,13 +545,24 @@
             </div>
           </section>
 
-          <div class="hint" style="margin-top: 12px;">
-            <div style="font-weight: 600; margin-bottom: 6px;">Keyboard shortcuts (admin)</div>
-            <div>New Chat pane: <code>Ctrl/Cmd</code> + <code>Shift</code> + <code>C</code></div>
-            <div>New Workqueue pane: <code>Ctrl/Cmd</code> + <code>Shift</code> + <code>W</code></div>
-            <div>New Cron pane: <code>Ctrl/Cmd</code> + <code>Shift</code> + <code>R</code></div>
-            <div>New Timeline pane: <code>Ctrl/Cmd</code> + <code>Shift</code> + <code>T</code></div>
-          </div>
+          <section class="settings-section" aria-label="Keyboard shortcuts">
+            <h3 style="margin: 0 0 6px;">Keyboard shortcuts (admin)</h3>
+            <p class="hint" style="margin: 0 0 10px;">Conflicts are detected against known browser/OS reservations and layout-sensitive combinations.</p>
+            <div class="settings-rp-table-wrap">
+              <table class="settings-rp-table">
+                <thead>
+                  <tr>
+                    <th>Action</th>
+                    <th>Binding</th>
+                    <th>Risk</th>
+                    <th>Suggestion</th>
+                  </tr>
+                </thead>
+                <tbody id="keyboardShortcutRows"></tbody>
+              </table>
+              <div id="keyboardShortcutEmpty" class="hint">No keyboard shortcut rows to show.</div>
+            </div>
+          </section>
         </div>
       </div>
     </div>
