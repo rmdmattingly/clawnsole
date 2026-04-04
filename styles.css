@@ -198,6 +198,28 @@ body::before {
   padding: 0;
 }
 
+.layout-mode-chip,
+.layout-revert-btn {
+  min-height: 30px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(9, 12, 16, 0.45);
+  color: var(--text);
+}
+
+.layout-mode-chip[data-layout-mode="custom"] {
+  border-color: rgba(255, 179, 71, 0.5);
+  color: var(--accent);
+}
+
+.layout-mode-chip:hover,
+.layout-revert-btn:hover {
+  background: rgba(9, 12, 16, 0.68);
+}
+
 .role-pill {
   padding: 6px 12px;
   border-radius: 999px;
