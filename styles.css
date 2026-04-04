@@ -1315,6 +1315,12 @@ button.send-btn .btn-icon {
   gap: 12px;
   align-items: end;
   margin-bottom: 14px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 6px 0 10px;
+  background: linear-gradient(180deg, rgba(15, 20, 28, 0.98) 0%, rgba(15, 20, 28, 0.92) 72%, rgba(15, 20, 28, 0.65) 100%);
+  backdrop-filter: blur(4px);
 }
 
 .agents-last-refreshed {
@@ -1380,13 +1386,14 @@ button.send-btn .btn-icon {
 
 .agents-row {
   display: grid;
-  grid-template-columns: 42px 1fr auto;
+  grid-template-columns: 42px minmax(240px, 1fr) auto;
   gap: 10px;
   align-items: center;
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 14px;
   padding: 10px 12px;
   background: rgba(255, 255, 255, 0.02);
+  min-width: 980px;
 }
 
 .agents-pin {
@@ -1397,11 +1404,22 @@ button.send-btn .btn-icon {
   background: rgba(9, 12, 16, 0.35);
   color: var(--text);
   cursor: pointer;
+  position: sticky;
+  left: 12px;
+  z-index: 4;
 }
 
 .agents-pin[aria-pressed="true"] {
   border-color: rgba(255, 179, 71, 0.55);
   background: rgba(255, 179, 71, 0.12);
+}
+
+.agents-row-main {
+  position: sticky;
+  left: 56px;
+  z-index: 3;
+  padding-right: 8px;
+  background: linear-gradient(90deg, rgba(18, 23, 32, 0.96) 0%, rgba(18, 23, 32, 0.92) 82%, rgba(18, 23, 32, 0) 100%);
 }
 
 .agents-row-title {
@@ -1476,6 +1494,7 @@ button.send-btn .btn-icon {
 @media (max-width: 860px) {
   .agents-row {
     grid-template-columns: 42px 1fr auto;
+    min-width: 0;
   }
 
   .agents-row-actions-inline {

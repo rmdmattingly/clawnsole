@@ -83,3 +83,48 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
 });
+
+test('agents modal keeps sticky toolbar + frozen identity columns when horizontally scrolled', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.setViewportSize({ width: 900, height: 760 });
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const body = page.locator('#agentsModal .modal-body');
+  const toolbar = page.locator('#agentsModal .agents-toolbar');
+  const row = page.locator('#agentsList .agents-row').first();
+  const pin = row.locator('.agents-pin');
+  const identity = row.locator('.agents-row-main');
+
+  await expect(row).toBeVisible();
+  await expect(pin).toBeVisible();
+  await expect(identity).toBeVisible();
+
+  await expect(toolbar).toHaveCSS('position', 'sticky');
+  await expect(pin).toHaveCSS('position', 'sticky');
+  await expect(identity).toHaveCSS('position', 'sticky');
+
+  const before = {
+    pin: await pin.boundingBox(),
+    identity: await identity.boundingBox(),
+  };
+
+  await body.evaluate((el) => {
+    el.scrollLeft = 260;
+  });
+
+  const after = {
+    pin: await pin.boundingBox(),
+    identity: await identity.boundingBox(),
+  };
+
+  expect(before.pin && after.pin).toBeTruthy();
+  expect(before.identity && after.identity).toBeTruthy();
+
+  // Sticky/frozen columns should not drift significantly with horizontal scroll.
+  expect(Math.abs((after.pin?.x || 0) - (before.pin?.x || 0))).toBeLessThan(4);
+  expect(Math.abs((after.identity?.x || 0) - (before.identity?.x || 0))).toBeLessThan(4);
+});
