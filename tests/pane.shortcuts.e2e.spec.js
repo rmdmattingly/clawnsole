@@ -117,6 +117,53 @@ test('pane-add shortcuts are scoped to workspace and blocked by overlays', async
   await expect(panes).toHaveCount(initialCount + 1);
 });
 
+test('keyboard settings flags risky add-pane shortcuts and applies safe replacement', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.locator('#settingsBtn').click();
+  await expect(page.locator('#keyboardShortcutRows')).toContainText('Often reserved by browser devtools/inspector.');
+  await page.locator('[data-shortcut-apply="chat"]').click();
+  await expect(page.locator('#keyboardShortcutRows')).toContainText('Ctrl/Cmd+Shift+A');
+  await expect(page.locator('#keyboardShortcutRows')).toContainText('OK');
+  await page.keyboard.press('Escape');
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  await expect(page.locator('#shortcutAddChat')).toHaveText('Cmd/Ctrl+Shift+A');
+  await page.keyboard.press('Escape');
+
+  const panes = page.locator('[data-pane]');
+  const initialCount = await panes.count();
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'C',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    }));
+  });
+  await expect(panes).toHaveCount(initialCount);
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'A',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    }));
+  });
+  await expect(panes).toHaveCount(initialCount + 1);
+});
+
 test('shortcuts modal restores prior focus on close', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
