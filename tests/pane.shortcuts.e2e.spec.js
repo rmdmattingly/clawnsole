@@ -164,6 +164,34 @@ test('add-pane shortcuts do not fire while typing in chat input', async ({ page 
   await expect(panes).toHaveCount(2);
 });
 
+test('holding Alt reveals pane index badges and releasing hides them', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.locator('#addPaneBtn').click();
+  await page.locator('[data-testid="pane-add-menu-cron"]').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  const visibleBadges = page.locator('[data-pane-shortcut-index-badge]:not([hidden])');
+  await expect(visibleBadges).toHaveCount(0);
+
+  await page.keyboard.down('Alt');
+  await expect(visibleBadges).toHaveCount(3);
+  await expect(visibleBadges.nth(0)).toHaveText('1');
+  await expect(visibleBadges.nth(1)).toHaveText('2');
+  await expect(visibleBadges.nth(2)).toHaveText('3');
+
+  await page.keyboard.up('Alt');
+  await expect(visibleBadges).toHaveCount(0);
+});
+
 test('fleet quick action button + keyboard shortcut focus existing timeline pane without duplicates', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
