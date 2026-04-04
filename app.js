@@ -35,6 +35,12 @@ const globalElements = {
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
+  agentsSelectionBar: document.getElementById('agentsSelectionBar'),
+  agentsSelectionTitle: document.getElementById('agentsSelectionTitle'),
+  agentsSelectionDetail: document.getElementById('agentsSelectionDetail'),
+  agentsSelectionOpenChat: document.getElementById('agentsSelectionOpenChat'),
+  agentsSelectionOpenWorkqueue: document.getElementById('agentsSelectionOpenWorkqueue'),
+  agentsSelectionOpenTimeline: document.getElementById('agentsSelectionOpenTimeline'),
   toastHost: document.getElementById('toastHost'),
   commandPaletteModal: document.getElementById('commandPaletteModal'),
   commandPaletteCloseBtn: document.getElementById('commandPaletteCloseBtn'),
@@ -397,6 +403,7 @@ let agentAutoRefreshInterval = null;
 let agentsModalAutoRefreshInterval = null;
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
+let selectedFleetAgentId = '';
 
 function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
@@ -2156,6 +2163,8 @@ function renderAgentsModalList() {
 
   root.innerHTML = '';
 
+  const visibleAgentInfo = new Map();
+
   const renderSection = (title, agents) => {
     if (!agents || agents.length === 0) return;
     const section = document.createElement('div');
@@ -2178,6 +2187,12 @@ function renderAgentsModalList() {
       const bucketLabel = triage.bucket === 'offline_error' ? 'offline/error' : triage.bucket;
       const statusSnippet = String(statusSnippetMap[id] || '').trim();
       const statusSnippetHtml = statusSnippet ? ` · <span class="agents-status-snippet">${escapeHtml(statusSnippet)}</span>` : '';
+      visibleAgentInfo.set(id, {
+        id,
+        label,
+        bucketLabel,
+        heartbeatAge
+      });
 
       row.innerHTML = `
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
@@ -2199,6 +2214,24 @@ function renderAgentsModalList() {
           </div>
         </details>
       `;
+
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      row.setAttribute('aria-label', `Select ${label}`);
+      row.classList.toggle('is-selected', selectedFleetAgentId === id);
+
+      const selectThisRow = () => {
+        selectedFleetAgentId = id;
+        renderAgentsModalList();
+      };
+
+      row.addEventListener('click', () => selectThisRow());
+      row.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          selectThisRow();
+        }
+      });
 
       const pinBtn = row.querySelector('[data-agent-pin]');
       pinBtn?.addEventListener('click', (e) => {
@@ -2234,6 +2267,41 @@ function renderAgentsModalList() {
 
   const empty = pinned.length === 0 && rest.length === 0;
   if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
+
+  if (selectedFleetAgentId && !visibleAgentInfo.has(selectedFleetAgentId)) {
+    selectedFleetAgentId = '';
+  }
+  renderFleetSelectionBar(visibleAgentInfo.get(selectedFleetAgentId) || null);
+}
+
+function renderFleetSelectionBar(agentInfo) {
+  const bar = globalElements.agentsSelectionBar;
+  if (!bar) return;
+  bar.hidden = false;
+
+  const hasSelection = !!agentInfo?.id;
+  if (globalElements.agentsSelectionTitle) {
+    globalElements.agentsSelectionTitle.textContent = hasSelection
+      ? agentInfo.label
+      : 'No agent selected';
+  }
+  if (globalElements.agentsSelectionDetail) {
+    globalElements.agentsSelectionDetail.textContent = hasSelection
+      ? `${agentInfo.bucketLabel} · heartbeat ${agentInfo.heartbeatAge}`
+      : 'Select an agent row to open Chat, Workqueue, or Timeline faster.';
+  }
+
+  const chatBtn = globalElements.agentsSelectionOpenChat;
+  const workqueueBtn = globalElements.agentsSelectionOpenWorkqueue;
+  const timelineBtn = globalElements.agentsSelectionOpenTimeline;
+
+  if (chatBtn) chatBtn.disabled = !hasSelection;
+  if (workqueueBtn) workqueueBtn.disabled = !hasSelection;
+  if (timelineBtn) timelineBtn.disabled = !hasSelection;
+
+  if (chatBtn) chatBtn.onclick = hasSelection ? () => openAgentChatFromFleet(agentInfo.id) : null;
+  if (workqueueBtn) workqueueBtn.onclick = hasSelection ? () => openAgentWorkqueueFromFleet() : null;
+  if (timelineBtn) timelineBtn.onclick = hasSelection ? () => openAgentTimelineFromFleet(agentInfo.id) : null;
 }
 
 // Workqueue (admin-only)

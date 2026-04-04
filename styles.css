@@ -1364,6 +1364,46 @@ button.send-btn .btn-icon {
   gap: 12px;
 }
 
+.agents-selection-bar {
+  position: sticky;
+  bottom: 0;
+  margin-top: 12px;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(77, 196, 255, 0.35);
+  border-radius: 12px;
+  background: rgba(8, 14, 22, 0.95);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.agents-selection-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.agents-selection-detail {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.agents-selection-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.agents-row.is-selected {
+  border-color: rgba(77, 196, 255, 0.62);
+  box-shadow: 0 0 0 1px rgba(77, 196, 255, 0.15) inset;
+}
+
 .agents-section-title {
   font-size: 11px;
   text-transform: uppercase;
@@ -1484,6 +1524,10 @@ button.send-btn .btn-icon {
 
   .agents-row-actions-overflow {
     display: block;
+  }
+
+  .agents-selection-bar {
+    grid-template-columns: 1fr;
   }
 }
 
