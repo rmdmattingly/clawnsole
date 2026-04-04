@@ -2573,6 +2573,10 @@ kbd {
   color: rgba(255, 120, 120, 0.95);
 }
 
+.chat-actions .stop-btn[hidden] {
+  display: none !important;
+}
+
 .chat-actions .stop-btn:hover {
   background: rgba(255, 70, 70, 0.12);
 }
