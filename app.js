@@ -54,6 +54,7 @@ const globalElements = {
   workqueueCloseBtn: document.getElementById('workqueueCloseBtn'),
   wqQueueSelect: document.getElementById('wqQueueSelect'),
   wqStatusFilters: document.getElementById('wqStatusFilters'),
+  wqArchivedToggleBtn: document.getElementById('wqArchivedToggleBtn'),
   wqAutoRefreshEnabled: document.getElementById('wqAutoRefreshEnabled'),
   wqAutoRefreshInterval: document.getElementById('wqAutoRefreshInterval'),
   wqRefreshBtn: document.getElementById('wqRefreshBtn'),
@@ -2239,6 +2240,24 @@ function renderAgentsModalList() {
 // Workqueue (admin-only)
 
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
+const WORKQUEUE_ARCHIVED_STATUSES = ['done', 'failed'];
+const WORKQUEUE_DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
+
+function hasArchivedStatuses(statuses) {
+  const set = statuses instanceof Set ? statuses : new Set(Array.isArray(statuses) ? statuses : []);
+  return WORKQUEUE_ARCHIVED_STATUSES.some((s) => set.has(s));
+}
+
+function setArchivedStatuses(statuses, showArchived) {
+  const set = statuses instanceof Set ? statuses : new Set(Array.isArray(statuses) ? statuses : []);
+  if (showArchived) {
+    WORKQUEUE_ARCHIVED_STATUSES.forEach((s) => set.add(s));
+    return set;
+  }
+  WORKQUEUE_ARCHIVED_STATUSES.forEach((s) => set.delete(s));
+  if (!set.size) WORKQUEUE_DEFAULT_STATUSES.forEach((s) => set.add(s));
+  return set;
+}
 
 const workqueueState = {
   queues: [],
@@ -2287,6 +2306,12 @@ function renderWorkqueueStatusFilters() {
       fetchAndRenderWorkqueueItems();
     });
     root.appendChild(label);
+  }
+
+  if (globalElements.wqArchivedToggleBtn) {
+    const showingArchived = hasArchivedStatuses(workqueueState.statusFilter);
+    globalElements.wqArchivedToggleBtn.textContent = showingArchived ? 'Hide archived' : 'Show archived';
+    globalElements.wqArchivedToggleBtn.setAttribute('aria-pressed', showingArchived ? 'true' : 'false');
   }
 }
 
@@ -5018,6 +5043,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
                     <button type="button" class="secondary" data-wq-status-preset="open">Open</button>
                     <button type="button" class="secondary" data-wq-status-preset="active">Active</button>
                     <button type="button" class="secondary" data-wq-status-preset="all">All</button>
+                    <button type="button" class="secondary" data-wq-status-archived-toggle>Show archived</button>
                     <button type="button" class="secondary" data-wq-status-clear>Clear</button>
                   </div>
                   <div class="wq-status-filters" data-wq-status-options></div>
@@ -5129,6 +5155,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const statusOptionsEl = elements.thread.querySelector('[data-wq-status-options]');
     const statusDetailsEl = elements.thread.querySelector('[data-wq-status-details]');
     const statusClearBtn = elements.thread.querySelector('[data-wq-status-clear]');
+    const statusArchivedToggleBtn = elements.thread.querySelector('[data-wq-status-archived-toggle]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
 
     const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
@@ -5211,6 +5238,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           applyStatuses(Array.from(statusSet));
         });
         statusOptionsEl.appendChild(label);
+      }
+
+      if (statusArchivedToggleBtn) {
+        const showingArchived = hasArchivedStatuses(statusSet);
+        statusArchivedToggleBtn.textContent = showingArchived ? 'Hide archived' : 'Show archived';
+        statusArchivedToggleBtn.setAttribute('aria-pressed', showingArchived ? 'true' : 'false');
       }
     };
 
@@ -5343,6 +5376,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       });
 
       statusClearBtn?.addEventListener('click', () => applyStatuses([]));
+      statusArchivedToggleBtn?.addEventListener('click', () => {
+        const showingArchived = hasArchivedStatuses(statusSet);
+        const next = setArchivedStatuses(new Set(statusSet), !showingArchived);
+        applyStatuses(Array.from(next));
+      });
     }
 
     // Scope controls (client-side): assignment triage quick filters.
@@ -6814,6 +6852,13 @@ globalElements.workqueueModal?.addEventListener('click', (event) => {
 });
 globalElements.wqQueueSelect?.addEventListener('change', () => {
   workqueueState.selectedQueue = globalElements.wqQueueSelect.value;
+  fetchAndRenderWorkqueueItems();
+});
+
+globalElements.wqArchivedToggleBtn?.addEventListener('click', () => {
+  const showingArchived = hasArchivedStatuses(workqueueState.statusFilter);
+  setArchivedStatuses(workqueueState.statusFilter, !showingArchived);
+  renderWorkqueueStatusFilters();
   fetchAndRenderWorkqueueItems();
 });
 
