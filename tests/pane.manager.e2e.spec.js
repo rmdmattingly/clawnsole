@@ -255,3 +255,25 @@ test('pane manager: supports reordering panes', async ({ page }) => {
   const persisted = await rowKeys();
   expect(persisted).toEqual(after);
 });
+
+test('pane layout lock disables pane reordering controls', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-chat').click();
+
+  await page.getByTestId('layout-lock-btn').click();
+  await expect(page.getByTestId('layout-lock-btn')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.keyboard.press('Control+P');
+  const movableRow = page.locator('.pane-manager-row', { hasText: 'Workqueue' }).first();
+  await expect(movableRow.getByTestId('pane-manager-move-down')).toBeDisabled();
+});
