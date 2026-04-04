@@ -72,6 +72,12 @@ const globalElements = {
   settingsBtn: document.getElementById('settingsBtn'),
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
+  keyboardShortcutRows: document.getElementById('keyboardShortcutRows'),
+  keyboardShortcutEmpty: document.getElementById('keyboardShortcutEmpty'),
+  shortcutAddChat: document.getElementById('shortcutAddChat'),
+  shortcutAddWorkqueue: document.getElementById('shortcutAddWorkqueue'),
+  shortcutAddCron: document.getElementById('shortcutAddCron'),
+  shortcutAddTimeline: document.getElementById('shortcutAddTimeline'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
   loginPassword: document.getElementById('loginPassword'),
@@ -217,6 +223,25 @@ const ADMIN_AGENT_SORT_KEY = 'clawnsole.admin.agents.sort';
 const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
 const WQ_RECENT_TARGETS_MAX = 6;
+const ADD_PANE_SHORTCUTS_KEY = 'clawnsole.shortcuts.addPane.v1';
+const ADD_PANE_DEFAULT_BINDINGS = {
+  chat: 'c',
+  workqueue: 'w',
+  cron: 'r',
+  timeline: 't'
+};
+const ADD_PANE_SAFE_FALLBACKS = {
+  chat: ['a', 'h', 'y'],
+  workqueue: ['q', 'u', 'x'],
+  cron: ['e', 'o', 'm'],
+  timeline: ['l', 'i', 'p']
+};
+const RESERVED_SHORTCUT_RISKS = {
+  'accel+shift+t': 'Reserved by browser tab restore / reopen closed tab.',
+  'accel+shift+w': 'Reserved by browser window close in many environments.',
+  'accel+shift+c': 'Often reserved by browser devtools/inspector.',
+  'accel+shift+r': 'Can trigger hard reload in some browsers.'
+};
 
 function readJsonFromStorage(key, fallback) {
   try {
@@ -234,6 +259,99 @@ function writeJsonToStorage(key, value) {
   } catch {
     // ignore storage failures
   }
+}
+
+function normalizeShortcutKey(value) {
+  const s = String(value || '').trim().toLowerCase();
+  return /^[a-z0-9]$/.test(s) ? s : '';
+}
+
+function readAddPaneShortcutBindings() {
+  const stored = readJsonFromStorage(ADD_PANE_SHORTCUTS_KEY, {});
+  const next = { ...ADD_PANE_DEFAULT_BINDINGS };
+  Object.keys(ADD_PANE_DEFAULT_BINDINGS).forEach((kind) => {
+    const parsed = normalizeShortcutKey(stored?.[kind]);
+    if (parsed) next[kind] = parsed;
+  });
+  return next;
+}
+
+let addPaneShortcutBindings = readAddPaneShortcutBindings();
+
+setTimeout(() => {
+  renderShortcutCheatsheetBindings();
+}, 0);
+
+function persistAddPaneShortcutBindings() {
+  writeJsonToStorage(ADD_PANE_SHORTCUTS_KEY, addPaneShortcutBindings);
+}
+
+function detectShortcutRisk(binding) {
+  const normalized = String(binding || '').toLowerCase();
+  if (RESERVED_SHORTCUT_RISKS[normalized]) return RESERVED_SHORTCUT_RISKS[normalized];
+  if (normalized.startsWith('alt+') && /\d$/.test(normalized)) {
+    return 'Layout-sensitive combo (Alt+number can be unavailable on some keyboard layouts).';
+  }
+  return '';
+}
+
+function renderKeyboardShortcutSettings() {
+  const body = globalElements.keyboardShortcutRows;
+  const empty = globalElements.keyboardShortcutEmpty;
+  if (!body) return;
+  body.innerHTML = '';
+  const rows = [
+    ['chat', 'New Chat pane'],
+    ['workqueue', 'New Workqueue pane'],
+    ['cron', 'New Cron pane'],
+    ['timeline', 'New Timeline pane']
+  ];
+  if (!rows.length) {
+    if (empty) empty.hidden = false;
+    return;
+  }
+  if (empty) empty.hidden = true;
+
+  rows.forEach(([kind, label]) => {
+    const key = normalizeShortcutKey(addPaneShortcutBindings[kind]) || ADD_PANE_DEFAULT_BINDINGS[kind];
+    const binding = `Accel+Shift+${key.toUpperCase()}`;
+    const risk = detectShortcutRisk(binding);
+    const fallback = (ADD_PANE_SAFE_FALLBACKS[kind] || []).find((candidate) => {
+      const candidateBinding = `Accel+Shift+${String(candidate).toUpperCase()}`;
+      return !detectShortcutRisk(candidateBinding);
+    }) || '';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escapeHtml(label)}</td>
+      <td><code>${escapeHtml(binding.replace('Accel', 'Ctrl/Cmd'))}</code></td>
+      <td>${escapeHtml(risk || 'OK')}</td>
+      <td>${fallback ? `<button type="button" class="secondary" data-shortcut-apply="${escapeHtml(kind)}" data-shortcut-key="${escapeHtml(fallback)}">Use Ctrl/Cmd+Shift+${escapeHtml(String(fallback).toUpperCase())}</button>` : '—'}</td>
+    `;
+    body.appendChild(tr);
+  });
+}
+
+function applySuggestedShortcut(kind, nextKey) {
+  const normalizedKind = String(kind || '').trim();
+  const normalizedKey = normalizeShortcutKey(nextKey);
+  if (!normalizedKind || !normalizedKey || !ADD_PANE_DEFAULT_BINDINGS[normalizedKind]) return;
+  addPaneShortcutBindings = { ...addPaneShortcutBindings, [normalizedKind]: normalizedKey };
+  persistAddPaneShortcutBindings();
+  renderKeyboardShortcutSettings();
+  renderShortcutCheatsheetBindings();
+}
+
+function renderShortcutCheatsheetBindings() {
+  const bindings = {
+    chat: normalizeShortcutKey(addPaneShortcutBindings.chat) || ADD_PANE_DEFAULT_BINDINGS.chat,
+    workqueue: normalizeShortcutKey(addPaneShortcutBindings.workqueue) || ADD_PANE_DEFAULT_BINDINGS.workqueue,
+    cron: normalizeShortcutKey(addPaneShortcutBindings.cron) || ADD_PANE_DEFAULT_BINDINGS.cron,
+    timeline: normalizeShortcutKey(addPaneShortcutBindings.timeline) || ADD_PANE_DEFAULT_BINDINGS.timeline
+  };
+  if (globalElements.shortcutAddChat) globalElements.shortcutAddChat.textContent = `Cmd/Ctrl+Shift+${bindings.chat.toUpperCase()}`;
+  if (globalElements.shortcutAddWorkqueue) globalElements.shortcutAddWorkqueue.textContent = `Cmd/Ctrl+Shift+${bindings.workqueue.toUpperCase()}`;
+  if (globalElements.shortcutAddCron) globalElements.shortcutAddCron.textContent = `Cmd/Ctrl+Shift+${bindings.cron.toUpperCase()}`;
+  if (globalElements.shortcutAddTimeline) globalElements.shortcutAddTimeline.textContent = `Cmd/Ctrl+Shift+${bindings.timeline.toUpperCase()}`;
 }
 
 function readRecentWorkqueueTargets() {
@@ -989,6 +1107,7 @@ function openSettings() {
 
   loadRecurringPromptAgents();
   loadRecurringPrompts();
+  renderKeyboardShortcutSettings();
 }
 
 function closeSettings() {
@@ -6718,6 +6837,14 @@ globalElements.recurringPromptHistoryFilter?.addEventListener('change', () => {
   recurringPromptState.historyFilterId = String(globalElements.recurringPromptHistoryFilter?.value || 'all');
   loadRecurringPromptHistory();
 });
+globalElements.keyboardShortcutRows?.addEventListener('click', (event) => {
+  const btn = event.target?.closest?.('[data-shortcut-apply]');
+  if (!btn) return;
+  const kind = String(btn.getAttribute('data-shortcut-apply') || '');
+  const nextKey = String(btn.getAttribute('data-shortcut-key') || '');
+  applySuggestedShortcut(kind, nextKey);
+  toast(`Updated shortcut for ${kind} pane.`, 'info');
+});
 globalElements.recurringPromptRows?.addEventListener('click', (event) => {
   const btn = event.target instanceof HTMLElement ? event.target.closest('[data-rp-action]') : null;
   if (!btn) return;
@@ -6940,7 +7067,11 @@ window.addEventListener('keydown', (event) => {
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey;
   if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target)) {
     const key = String(event.key || '').toLowerCase();
-    const map = { c: 'chat', w: 'workqueue', r: 'cron', t: 'timeline' };
+    const map = Object.entries(addPaneShortcutBindings).reduce((acc, [kind, binding]) => {
+      const k = normalizeShortcutKey(binding);
+      if (k) acc[k] = kind;
+      return acc;
+    }, {});
     const kind = map[key];
     if (kind) {
       // Don't hijack add-pane shortcuts while typing in inputs/editors.
