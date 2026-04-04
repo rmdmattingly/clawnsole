@@ -432,6 +432,17 @@
 
           <div id="agentsList" class="agents-list" aria-label="Agent list"></div>
           <div id="agentsEmpty" class="hint" hidden>No agents match.</div>
+          <div id="agentsSelectionBar" class="agents-selection-bar" role="region" aria-label="Selected agent quick actions" hidden>
+            <div class="agents-selection-meta">
+              <div id="agentsSelectionTitle" class="agents-selection-title">No agent selected</div>
+              <div id="agentsSelectionDetail" class="agents-selection-detail">Select an agent row to open Chat, Workqueue, or Timeline faster.</div>
+            </div>
+            <div class="agents-selection-actions" role="group" aria-label="Selected agent actions">
+              <button id="agentsSelectionOpenChat" class="secondary" type="button" disabled>Open Chat</button>
+              <button id="agentsSelectionOpenWorkqueue" class="secondary" type="button" disabled>Open Workqueue</button>
+              <button id="agentsSelectionOpenTimeline" class="secondary" type="button" disabled>Open Timeline</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
