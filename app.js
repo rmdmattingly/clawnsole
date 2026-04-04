@@ -4008,15 +4008,17 @@ function paneRenderStopControl(pane) {
   const btn = pane?.elements?.stopBtn;
   if (!btn) return;
   const visible = Boolean(
-    uiState.authed &&
-      pane.connected &&
-      (pane.thinking?.active || (pane.chat?.runs && pane.chat.runs.size > 0) || (pane.abortState && pane.abortState.active)
-    )
+    uiState.authed
+      && pane.connected
+      && (pane.thinking?.active || (pane.chat?.runs && pane.chat.runs.size > 0) || (pane.abortState && pane.abortState.active))
   );
   btn.hidden = !visible;
 
   const isCanceling = Boolean(pane.abortState && pane.abortState.active);
-  btn.disabled = !uiState.authed || !pane.connected || isCanceling;
+  const enabled = visible && !isCanceling;
+  btn.disabled = !enabled;
+  btn.tabIndex = enabled ? 0 : -1;
+  btn.setAttribute('aria-hidden', visible ? 'false' : 'true');
   btn.setAttribute('aria-label', isCanceling ? 'Canceling…' : 'Stop generating');
 }
 
