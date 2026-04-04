@@ -80,6 +80,7 @@ const globalElements = {
   logoutBtn: document.getElementById('logoutBtn'),
   paneControls: document.getElementById('paneControls'),
   addPaneBtn: document.getElementById('addPaneBtn'),
+  layoutLockBtn: document.getElementById('layoutLockBtn'),
   addChatPaneBtn: document.getElementById('addChatPaneBtn'),
   addQueuePaneBtn: document.getElementById('addQueuePaneBtn'),
   layoutSelect: document.getElementById('layoutSelect'),
@@ -1529,6 +1530,8 @@ function renderPaneManager() {
         const unreadCount = paneUnreadCount(pane);
         const paneIdentity = paneSummaryLabel(pane);
 
+        const lockDisabled = paneManager.isLayoutLocked();
+
         row.innerHTML = `
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
@@ -1540,8 +1543,8 @@ function renderPaneManager() {
             <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
           </div>
           <div class="pane-manager-actions">
-            <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="Move pane up" aria-label="Move pane up" ${visibleIdx === 0 ? 'disabled' : ''}>↑</button>
-            <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="Move pane down" aria-label="Move pane down" ${visibleIdx === visibleKeys.length - 1 ? 'disabled' : ''}>↓</button>
+            <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="${lockDisabled ? 'Layout is locked' : 'Move pane up'}" aria-label="Move pane up" ${(visibleIdx === 0 || lockDisabled) ? 'disabled' : ''}>↑</button>
+            <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="${lockDisabled ? 'Layout is locked' : 'Move pane down'}" aria-label="Move pane down" ${(visibleIdx === visibleKeys.length - 1 || lockDisabled) ? 'disabled' : ''}>↓</button>
             ${isDuplicate ? '<button class="secondary pane-manager-close-others" type="button" data-action="close-others" data-testid="pane-manager-close-others">Close others</button>' : ''}
             <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
             <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
@@ -1566,6 +1569,7 @@ function renderPaneManager() {
             return;
           }
           if (action === 'move-up') {
+            if (paneManager.isLayoutLocked()) return;
             const moved = movePaneWithinVisible(pane.key, -1, paneManagerUiState.visiblePaneKeys);
             if (moved) {
               paneManagerUiState.selectedIndex = Math.max(0, selectedVisible - 1);
@@ -1574,6 +1578,7 @@ function renderPaneManager() {
             return;
           }
           if (action === 'move-down') {
+            if (paneManager.isLayoutLocked()) return;
             const moved = movePaneWithinVisible(pane.key, 1, paneManagerUiState.visiblePaneKeys);
             if (moved) {
               paneManagerUiState.selectedIndex = Math.min(paneManagerUiState.visiblePaneKeys.length - 1, selectedVisible + 1);
@@ -1817,6 +1822,15 @@ function buildCommandPaletteItems() {
         label: 'Layout: Reset panes',
         detail: 'Reset admin layout to default',
         run: () => paneManager.resetAdminLayoutToDefault({ confirm: true })
+      },
+      ''
+    ),
+    withShortcut(
+      {
+        id: 'cmd:toggle-layout-lock',
+        label: 'Layout: Toggle lock',
+        detail: paneManager.isLayoutLocked() ? 'Unlock pane reordering' : 'Lock pane reordering',
+        run: () => paneManager.toggleLayoutLocked({ notify: true })
       },
       ''
     ),
@@ -3426,6 +3440,7 @@ renderPulse();
 // Panes
 
 const ADMIN_PANES_KEY = 'clawnsole.admin.panes.v1';
+const ADMIN_LAYOUT_LOCK_KEY = 'clawnsole.admin.layout.lock.v1';
 // Layout is inferred from pane count; no manual layout toggle.
 const ADMIN_DEFAULT_AGENT_KEY = 'clawnsole.admin.agentId';
 const WORKQUEUE_SCOPE_PREF_KEY = 'clawnsole.admin.workqueue.scope.v1';
@@ -6121,6 +6136,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 const paneManager = {
   panes: [],
   maxPanes: 6,
+  layoutLocked: false,
   init() {
     this.destroyAll();
 
@@ -6133,6 +6149,8 @@ const paneManager = {
     this.initAdmin();
   },
   initAdmin() {
+    this.layoutLocked = storage.get(ADMIN_LAYOUT_LOCK_KEY, '0') === '1';
+    this.updateLayoutLockButton();
     const panes = this.loadAdminPanes();
     this.panes = panes.map((cfg) =>
       createPane({
@@ -6152,6 +6170,29 @@ const paneManager = {
     this.updatePaneLabels();
     this.updateCloseButtons();
     this.applyInferredLayout();
+  },
+  isLayoutLocked() {
+    return !!this.layoutLocked;
+  },
+  setLayoutLocked(next, { persist = true, notify = false } = {}) {
+    this.layoutLocked = !!next;
+    if (persist) storage.set(ADMIN_LAYOUT_LOCK_KEY, this.layoutLocked ? '1' : '0');
+    this.updateLayoutLockButton();
+    if (paneManagerUiState.open) renderPaneManager();
+    if (notify) toast(this.layoutLocked ? 'Pane layout locked.' : 'Pane layout unlocked.', 'info');
+  },
+  toggleLayoutLocked({ notify = true } = {}) {
+    this.setLayoutLocked(!this.layoutLocked, { persist: true, notify });
+    return this.layoutLocked;
+  },
+  updateLayoutLockButton() {
+    const btn = globalElements.layoutLockBtn;
+    if (!btn) return;
+    const locked = !!this.layoutLocked;
+    btn.textContent = locked ? '🔒' : '🔓';
+    btn.setAttribute('aria-pressed', locked ? 'true' : 'false');
+    btn.setAttribute('aria-label', locked ? 'Unlock pane layout' : 'Lock pane layout');
+    btn.title = locked ? 'Pane layout locked (reorder disabled)' : 'Pane layout unlocked';
   },
   destroyAll() {
     this.panes.forEach((pane) => {
@@ -6552,6 +6593,7 @@ const paneManager = {
   },
   movePane(key, delta = 0) {
     if (roleState.role !== 'admin') return false;
+    if (this.isLayoutLocked()) return false;
     const idx = this.panes.findIndex((pane) => pane.key === key);
     if (idx < 0) return false;
 
@@ -7090,6 +7132,10 @@ globalElements.disconnectBtn?.addEventListener('click', () => {
 
 globalElements.resetLayoutBtn?.addEventListener('click', () => {
   paneManager.resetAdminLayoutToDefault({ confirm: true });
+});
+
+globalElements.layoutLockBtn?.addEventListener('click', () => {
+  paneManager.toggleLayoutLocked({ notify: true });
 });
 
 globalElements.paneManagerBtn?.addEventListener('click', (event) => {
