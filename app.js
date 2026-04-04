@@ -80,6 +80,8 @@ const globalElements = {
   logoutBtn: document.getElementById('logoutBtn'),
   paneControls: document.getElementById('paneControls'),
   addPaneBtn: document.getElementById('addPaneBtn'),
+  layoutModeChip: document.getElementById('layoutModeChip'),
+  layoutRevertBtn: document.getElementById('layoutRevertBtn'),
   addChatPaneBtn: document.getElementById('addChatPaneBtn'),
   addQueuePaneBtn: document.getElementById('addQueuePaneBtn'),
   layoutSelect: document.getElementById('layoutSelect'),
@@ -6118,6 +6120,56 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
 
 /* inlined to AppCore */
+let lastLayoutRestoreSnapshot = null;
+
+function serializeAdminPanes() {
+  return paneManager.panes.map((pane) => {
+    if (pane.kind === 'workqueue') {
+      return {
+        key: pane.key,
+        kind: 'workqueue',
+        queue: pane.workqueue?.queue || 'dev-team',
+        statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
+        sortKey: pane.workqueue?.sortKey || 'priority',
+        sortDir: pane.workqueue?.sortDir || 'desc'
+      };
+    }
+    if (pane.kind === 'cron' || pane.kind === 'timeline') return { key: pane.key, kind: pane.kind };
+    return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
+  });
+}
+
+function detectLayoutMode() {
+  const panes = Array.isArray(paneManager?.panes) ? paneManager.panes : [];
+  if (panes.length === 2) {
+    const kinds = panes.map((p) => p?.kind).sort();
+    if (kinds[0] === 'chat' && kinds[1] === 'workqueue') return 'recommended';
+  }
+  return 'custom';
+}
+
+function updateLayoutModeChip() {
+  const chip = globalElements.layoutModeChip;
+  const revertBtn = globalElements.layoutRevertBtn;
+  if (!chip) return;
+  const show = roleState.role === 'admin';
+  chip.hidden = !show;
+  chip.disabled = !show;
+  if (!show) {
+    if (revertBtn) revertBtn.hidden = true;
+    return;
+  }
+  const mode = detectLayoutMode();
+  chip.textContent = mode === 'recommended' ? 'Chat+Workqueue' : 'Custom';
+  chip.dataset.layoutMode = mode;
+  chip.title = mode === 'recommended' ? 'Layout matches recommended preset' : 'Restore recommended preset';
+  if (mode === 'recommended' && revertBtn) {
+    revertBtn.hidden = !lastLayoutRestoreSnapshot;
+  } else if (revertBtn) {
+    revertBtn.hidden = true;
+  }
+}
+
 const paneManager = {
   panes: [],
   maxPanes: 6,
@@ -6166,8 +6218,13 @@ const paneManager = {
     this.panes = [];
   },
   loadAdminPanes() {
+    const activeChat = preserveActiveTarget
+      ? this.mruPaneKeys
+          .map((key) => this.findPaneByKey(key))
+          .find((pane) => pane && pane.kind === 'chat' && pane.agentId)
+      : null;
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
-    const defaultAgent = normalizeAgentId(storedDefault || 'main');
+    const defaultAgent = normalizeAgentId(activeChat?.agentId || storedDefault || 'main');
 
     const coerce = (item) => {
       // Legacy format: { key, agentId }
@@ -6251,7 +6308,7 @@ const paneManager = {
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
-  resetAdminLayoutToDefault({ confirm = true } = {}) {
+  resetAdminLayoutToDefault({ confirm = true, preserveActiveTarget = true } = {}) {
     if (roleState.role !== 'admin') return;
     if (confirm) {
       const ok = window.confirm('Reset layout to default (Chat + Workqueue)?');
@@ -7090,6 +7147,26 @@ globalElements.disconnectBtn?.addEventListener('click', () => {
 
 globalElements.resetLayoutBtn?.addEventListener('click', () => {
   paneManager.resetAdminLayoutToDefault({ confirm: true });
+});
+
+globalElements.layoutModeChip?.addEventListener('click', () => {
+  if (roleState.role !== 'admin') return;
+  if (detectLayoutMode() === 'recommended') return;
+  lastLayoutRestoreSnapshot = serializeAdminPanes();
+  paneManager.resetAdminLayoutToDefault({ confirm: false, preserveActiveTarget: true });
+  showToast('Layout restored to Chat+Workqueue. Use Revert to undo.', { kind: 'info', timeoutMs: 5000 });
+  updateLayoutModeChip();
+});
+
+globalElements.layoutRevertBtn?.addEventListener('click', () => {
+  if (roleState.role !== 'admin') return;
+  if (!lastLayoutRestoreSnapshot || !Array.isArray(lastLayoutRestoreSnapshot) || !lastLayoutRestoreSnapshot.length) return;
+  storage.set(ADMIN_PANES_KEY, JSON.stringify(lastLayoutRestoreSnapshot));
+  lastLayoutRestoreSnapshot = null;
+  paneManager.init();
+  paneManager.connectAll();
+  showToast('Layout reverted.', { kind: 'info', timeoutMs: 3200 });
+  updateLayoutModeChip();
 });
 
 globalElements.paneManagerBtn?.addEventListener('click', (event) => {
