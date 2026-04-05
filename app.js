@@ -2829,12 +2829,18 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
   if (statusLine) statusLine.textContent = 'Loading...';
 
   try {
-    const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+    const [res, summary] = await Promise.all([
+      fetch(url, { credentials: 'include', cache: 'no-store' }),
+      fetchWorkqueueSummary(queue).catch(() => null)
+    ]);
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
     const items = Array.isArray(data.items) ? data.items : [];
     pane.workqueue.items = items;
-    if (statusLine) statusLine.textContent = `${items.length} item(s)`;
+    const counts = (summary && summary.counts && typeof summary.counts === 'object') ? summary.counts : null;
+    pane.workqueue.totalCount = counts
+      ? WORKQUEUE_STATUSES.reduce((sum, key) => sum + Number(counts[key] || 0), 0)
+      : items.length;
     renderWorkqueuePaneItems(pane);
   } catch (err) {
     if (statusLine) statusLine.textContent = `Failed to load: ${String(err)}`;
@@ -2844,6 +2850,7 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
 function renderWorkqueuePaneItems(pane) {
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
   const empty = pane.elements?.thread?.querySelector('[data-wq-empty]');
+  const statusLine = pane.elements?.thread?.querySelector('[data-wq-statusline]');
   if (!body) return;
   body.innerHTML = '';
 
@@ -2859,6 +2866,23 @@ function renderWorkqueuePaneItems(pane) {
   });
   const items = sortWorkqueueItems(scopedItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
 
+  const selectedStatuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
+  const statusFilteredCount = Math.max(0, Number(pane.workqueue?.totalCount ?? itemsRaw.length) - itemsRaw.length);
+  const scopeFilteredCount = Math.max(0, itemsRaw.length - scopedItems.length);
+  const totalCount = Math.max(items.length, Number(pane.workqueue?.totalCount ?? itemsRaw.length));
+  const anyFilterActive = selectedStatuses.length > 0 || scope !== 'all';
+  if (statusLine) {
+    if (anyFilterActive) {
+      const hiddenParts = [];
+      if (statusFilteredCount > 0) hiddenParts.push(`status ${statusFilteredCount}`);
+      if (scopeFilteredCount > 0) hiddenParts.push(`scope ${scopeFilteredCount}`);
+      const hiddenText = hiddenParts.length ? ` · hidden: ${hiddenParts.join(', ')}` : '';
+      statusLine.textContent = `Showing ${items.length} of ${totalCount} items${hiddenText}`;
+    } else {
+      statusLine.textContent = `${items.length} item(s)`;
+    }
+  }
+
   if (empty) {
     const hasItems = items.length > 0;
     empty.hidden = hasItems;
@@ -2867,10 +2891,13 @@ function renderWorkqueuePaneItems(pane) {
       const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
       const statusLabel = statuses.length ? statuses.join(', ') : 'default';
       const scopeLabel = pane.workqueue?.scopeFilter || 'all';
+      const filtersHidingAll = totalCount > 0;
+      const title = filtersHidingAll ? 'No items match current filters.' : 'No items in this queue.';
       empty.innerHTML = `
         <div class="empty-state">
-          <div style="font-weight:700; margin-bottom:6px;">No items in this queue.</div>
+          <div style="font-weight:700; margin-bottom:6px;">${escapeHtml(title)}</div>
           <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
+          ${filtersHidingAll ? `<div class="hint" style="margin-top:6px;">Showing 0 of <span class="mono">${escapeHtml(String(totalCount))}</span> items.</div>` : ''}
           <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
             <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
             <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
