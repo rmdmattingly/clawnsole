@@ -183,12 +183,17 @@ test('pane: workqueue scope filter toggles deterministic row counts', async ({ p
 
   const rowsWithPrefix = () => wqPane.locator('.wq-row').filter({ hasText: `pw-e2e-${runId}-` });
 
+  const statusline = wqPane.locator('[data-wq-statusline]');
+
   await wqPane.locator('[data-wq-scope="all"]').click();
   await expect(rowsWithPrefix()).toHaveCount(2);
+  await expect(statusline).toContainText(/Showing\s+2\s+of\s+\d+\s+items/);
 
   await wqPane.locator('[data-wq-scope="unassigned"]').click();
   await expect(rowsWithPrefix()).toHaveCount(2);
 
   await wqPane.locator('[data-wq-scope="assigned"]').click();
   await expect(rowsWithPrefix()).toHaveCount(0);
+  await expect(statusline).toContainText(/Showing\s+0\s+of\s+\d+\s+items/);
+  await expect(wqPane.locator('[data-wq-empty]')).toContainText('No items match current filters.');
 });
