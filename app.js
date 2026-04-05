@@ -68,6 +68,9 @@ const globalElements = {
   wqClaimAgentId: document.getElementById('wqClaimAgentId'),
   wqClaimLeaseMs: document.getElementById('wqClaimLeaseMs'),
   wqClaimBtn: document.getElementById('wqClaimBtn'),
+  wqArchiveDays: document.getElementById('wqArchiveDays'),
+  wqArchivePreviewBtn: document.getElementById('wqArchivePreviewBtn'),
+  wqArchiveApplyBtn: document.getElementById('wqArchiveApplyBtn'),
   wqActionStatus: document.getElementById('wqActionStatus'),
   settingsBtn: document.getElementById('settingsBtn'),
   settingsModal: document.getElementById('settingsModal'),
@@ -3078,6 +3081,51 @@ async function workqueueClaimNextFromUi() {
     renderWorkqueueInspect(item);
   } catch (err) {
     setWorkqueueActionStatus(`Claim failed: ${String(err)}`, 'err');
+  }
+}
+
+async function workqueueArchiveTerminal({ dryRun }) {
+  if (roleState.role !== 'admin') return null;
+  const queue = (workqueueState.selectedQueue || '').trim();
+  const olderThanDays = Number(globalElements.wqArchiveDays?.value || 14);
+  const res = await fetch('/api/workqueue/archive-terminal', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ queue, olderThanDays, dryRun: !!dryRun })
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.ok) {
+    throw new Error(String(data?.error || res.status));
+  }
+  return data;
+}
+
+async function workqueueArchivePreviewFromUi() {
+  try {
+    const data = await workqueueArchiveTerminal({ dryRun: true });
+    setWorkqueueActionStatus(`Preview: ${data?.count || 0} terminal items eligible for archive.`);
+  } catch (err) {
+    setWorkqueueActionStatus(`Archive preview failed: ${String(err)}`, 'err');
+  }
+}
+
+async function workqueueArchiveApplyFromUi() {
+  try {
+    const preview = await workqueueArchiveTerminal({ dryRun: true });
+    const count = Number(preview?.count || 0);
+    if (count <= 0) {
+      setWorkqueueActionStatus('No terminal items match the selected age threshold.');
+      return;
+    }
+    const days = Number(globalElements.wqArchiveDays?.value || 14);
+    const ok = window.confirm(`Archive ${count} terminal items (done/failed) older than ${days} days?`);
+    if (!ok) return;
+    const applied = await workqueueArchiveTerminal({ dryRun: false });
+    setWorkqueueActionStatus(`Archived ${applied?.count || 0} terminal items.`);
+    await fetchAndRenderWorkqueueItems();
+  } catch (err) {
+    setWorkqueueActionStatus(`Archive failed: ${String(err)}`, 'err');
   }
 }
 
@@ -6836,6 +6884,8 @@ globalElements.wqRefreshBtn?.addEventListener('click', () => {
 
 globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFromUi());
 globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFromUi());
+globalElements.wqArchivePreviewBtn?.addEventListener('click', () => workqueueArchivePreviewFromUi());
+globalElements.wqArchiveApplyBtn?.addEventListener('click', () => workqueueArchiveApplyFromUi());
 
 let shortcutState = { lastGAtMs: 0 };
 

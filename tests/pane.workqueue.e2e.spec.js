@@ -192,3 +192,24 @@ test('pane: workqueue scope filter toggles deterministic row counts', async ({ p
   await wqPane.locator('[data-wq-scope="assigned"]').click();
   await expect(rowsWithPrefix()).toHaveCount(0);
 });
+
+test('workqueue modal: bulk archive controls render and preview executes', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.click('#workqueueBtn');
+  await expect(page.locator('#workqueueModal')).toHaveClass(/open/);
+  await expect(page.locator('#wqArchiveDays')).toBeVisible();
+  await expect(page.locator('#wqArchivePreviewBtn')).toBeVisible();
+  await expect(page.locator('#wqArchiveApplyBtn')).toBeVisible();
+
+  await page.click('#wqArchivePreviewBtn');
+  await expect(page.locator('#wqActionStatus')).toContainText('terminal items eligible', { timeout: 15000 });
+});
