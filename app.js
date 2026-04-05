@@ -19,6 +19,7 @@ const globalElements = {
   recurringPromptHistoryRows: document.getElementById('recurringPromptHistoryRows'),
   recurringPromptHistoryEmpty: document.getElementById('recurringPromptHistoryEmpty'),
   status: document.getElementById('connectionStatus'),
+  panesStatusChip: document.getElementById('panesStatusChip'),
   paneManagerBtn: document.getElementById('paneManagerBtn'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
@@ -838,7 +839,11 @@ function setStatusPill(el, state, meta = '') {
 function updateGlobalStatus() {
   const status = deriveGlobalConnectionState({ authed: uiState.authed, panes: paneManager.panes });
   setStatusPill(globalElements.status, status.state, status.meta);
-  if (globalElements.paneManagerBtn) globalElements.paneManagerBtn.textContent = status.meta;
+  if (globalElements.panesStatusChip) {
+    globalElements.panesStatusChip.textContent = status.meta;
+    globalElements.panesStatusChip.title = status.meta ? `Pane status: ${status.meta}` : 'Pane status';
+    globalElements.panesStatusChip.setAttribute('aria-label', status.meta ? `Pane status: ${status.meta}` : 'Pane status');
+  }
 }
 
 function updateConnectionControls() {
@@ -7093,6 +7098,11 @@ globalElements.resetLayoutBtn?.addEventListener('click', () => {
 });
 
 globalElements.paneManagerBtn?.addEventListener('click', (event) => {
+  event?.preventDefault?.();
+  openPaneManager();
+});
+
+globalElements.panesStatusChip?.addEventListener('click', (event) => {
   event?.preventDefault?.();
   openPaneManager();
 });
