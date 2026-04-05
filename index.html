@@ -244,9 +244,9 @@
             <h3 class="shortcut-group-title">Pane focus/navigation</h3>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Alt</kbd>/<kbd>Option</kbd>+<kbd>1</kbd>..<kbd>9</kbd></div><div class="shortcut-desc">Focus panes 1-9 by visible order</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>4</kbd></div><div class="shortcut-desc">Focus pane 1-4</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>P</kbd></div><div class="shortcut-desc">Open Pane Manager</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next pane</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys" id="shortcutKey-openPaneManager"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>P</kbd></div><div class="shortcut-desc">Open Pane Manager</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys" id="shortcutKey-focusNextPane"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys" id="shortcutKey-focusPrevPane"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>]</kbd></div><div class="shortcut-desc">Next unread pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd></div><div class="shortcut-desc">Previous unread pane</div></div>
           </div>
@@ -255,13 +255,13 @@
             <h3 class="shortcut-group-title">Pane actions</h3>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Open command palette</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="shortcut-desc">Add pane</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></div><div class="shortcut-desc">Open/focus Fleet pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys" id="shortcutKey-openFleet"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></div><div class="shortcut-desc">Open/focus Fleet pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>R</kbd></div><div class="shortcut-desc">Refresh agent list</div></div>
           </div>
 
           <div class="shortcut-group">
             <h3 class="shortcut-group-title">Workqueue actions</h3>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>w</kbd></div><div class="shortcut-desc">Open Workqueue modal</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys" id="shortcutKey-openWorkqueue"><kbd>g</kbd> <kbd>w</kbd></div><div class="shortcut-desc">Open Workqueue modal</div></div>
           </div>
         </div>
       </div>
@@ -538,6 +538,17 @@
                 <tbody id="recurringPromptHistoryRows"></tbody>
               </table>
               <div id="recurringPromptHistoryEmpty" class="hint">No recent runs for this filter yet.</div>
+            </div>
+          </section>
+
+          <section class="settings-section" id="shortcutOverridesSection">
+            <h3>Shortcut Overrides</h3>
+            <p class="hint" style="margin-bottom:10px;">Customize high-impact navigation shortcuts. Changes apply immediately and persist locally for this browser profile.</p>
+            <div id="shortcutOverridesRows" class="shortcut-override-list"></div>
+            <div id="shortcutOverrideError" class="hint" style="color: #ff6b6b; min-height: 1.2em; margin-top: 8px;"></div>
+            <div style="display:flex; gap:8px; flex-wrap: wrap; margin-top:8px;">
+              <button id="shortcutOverridesSaveBtn" type="button" class="secondary">Save overrides</button>
+              <button id="shortcutOverridesResetAllBtn" type="button" class="secondary">Reset all to defaults</button>
             </div>
           </section>
 
