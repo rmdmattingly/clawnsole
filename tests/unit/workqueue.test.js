@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { enqueueItem, claimNext, loadState, saveState, transitionItem } = require('../../lib/workqueue');
+const { enqueueItem, claimNext, loadState, saveState, transitionItem, archiveTerminalItems } = require('../../lib/workqueue');
 
 function withFakeNow(ms, fn) {
   const realNow = Date.now;
@@ -255,4 +255,44 @@ test('workqueue: enqueue supports dedupeKey idempotency', () => {
 
   const state = loadState(root);
   assert.equal(state.items.length, 1);
+});
+
+test('workqueue: archiveTerminalItems only removes terminal items older than threshold', () => {
+  withFakeNow(1_800_000_000_000, () => {
+    const root = tempRoot();
+
+    const doneOld = enqueueItem(root, { queue: 'dev', title: 'done-old', instructions: 'x', priority: 0 });
+    const doneRecent = enqueueItem(root, { queue: 'dev', title: 'done-recent', instructions: 'x', priority: 0 });
+    const failedOld = enqueueItem(root, { queue: 'dev', title: 'failed-old', instructions: 'x', priority: 0 });
+    const readyOld = enqueueItem(root, { queue: 'dev', title: 'ready-old', instructions: 'x', priority: 0 });
+
+    const state = loadState(root);
+    const set = (id, patch) => Object.assign(state.items.find((it) => it.id === id), patch);
+    set(doneOld.id, { status: 'done', updatedAt: new Date(1_800_000_000_000 - 20 * 24 * 60 * 60 * 1000).toISOString() });
+    set(doneRecent.id, { status: 'done', updatedAt: new Date(1_800_000_000_000 - 2 * 24 * 60 * 60 * 1000).toISOString() });
+    set(failedOld.id, { status: 'failed', updatedAt: new Date(1_800_000_000_000 - 30 * 24 * 60 * 60 * 1000).toISOString() });
+    set(readyOld.id, { status: 'ready', updatedAt: new Date(1_800_000_000_000 - 30 * 24 * 60 * 60 * 1000).toISOString() });
+    saveState(root, state);
+
+    const preview = archiveTerminalItems(root, { queue: 'dev', olderThanDays: 14, dryRun: true });
+    assert.equal(preview.count, 2);
+
+    const applied = archiveTerminalItems(root, { queue: 'dev', olderThanDays: 14, dryRun: false });
+    assert.equal(applied.count, 2);
+
+    const after = loadState(root);
+    const ids = new Set(after.items.map((it) => it.id));
+    assert.equal(ids.has(doneOld.id), false);
+    assert.equal(ids.has(failedOld.id), false);
+    assert.equal(ids.has(doneRecent.id), true);
+    assert.equal(ids.has(readyOld.id), true);
+  });
+});
+
+test('workqueue: archiveTerminalItems validates threshold', () => {
+  const root = tempRoot();
+  assert.throws(
+    () => archiveTerminalItems(root, { queue: 'dev', olderThanDays: 0, dryRun: true }),
+    (err) => err && err.code === 'INVALID_THRESHOLD'
+  );
 });
