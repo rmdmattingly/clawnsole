@@ -9,7 +9,9 @@ const {
   normalizePaneKind,
   deriveAuthOverlayState,
   extractChatText,
-  normalizeHistoryEntries
+  normalizeHistoryEntries,
+  detectShortcutConflict,
+  deriveWorkqueueDisplayTitle
 } = require('../../lib/app-core.js');
 
 test('escapeHtml escapes html special chars', () => {
@@ -29,7 +31,7 @@ test('fmtRemaining formats remaining time', () => {
   assert.equal(fmtRemaining(3_660_000), '1h 1m');
 });
 
-test('sortWorkqueueItems default groups by status then priority then timestamps', () => {
+test('sortWorkqueueItems default is priority-first with stable tie-breakers', () => {
   const items = [
     { id: 'a', status: 'ready', priority: 1, updatedAt: '2026-01-01T00:00:00Z' },
     { id: 'b', status: 'in_progress', priority: 0, updatedAt: '2026-01-01T00:00:00Z' },
@@ -39,7 +41,7 @@ test('sortWorkqueueItems default groups by status then priority then timestamps'
   ];
 
   const sorted = sortWorkqueueItems(items);
-  assert.deepEqual(sorted.map((it) => it.id), ['b', 'c', 'd', 'e', 'a']);
+  assert.deepEqual(sorted.map((it) => it.id), ['c', 'e', 'd', 'a', 'b']);
 });
 
 test('sortWorkqueueItems supports explicit sort keys and stable ordering fallback', () => {
@@ -124,4 +126,30 @@ test('normalizeHistoryEntries supports gateway payload variants', () => {
     { role: 'assistant', text: 'hi' },
     { role: 'user', text: 'me' }
   ]);
+});
+
+test('deriveWorkqueueDisplayTitle canonicalizes issue-backed noise prefixes', () => {
+  const canonical = deriveWorkqueueDisplayTitle({
+    title: 'Open issue: rmdmattingly/clawnsole#316: UX/Auth: Unlock form polish',
+    meta: { kind: 'issue', repo: 'rmdmattingly/clawnsole', issueNumber: 316 }
+  });
+  assert.equal(canonical.title, 'rmdmattingly/clawnsole#316 — UX/Auth: Unlock form polish');
+  assert.equal(canonical.canonicalized, true);
+
+  const untouched = deriveWorkqueueDisplayTitle({ title: 'Review open PRs', meta: { kind: 'routine' } });
+  assert.equal(untouched.title, 'Review open PRs');
+  assert.equal(untouched.canonicalized, false);
+});
+
+test('detectShortcutConflict flags browser-reserved combos and suggests alternatives', () => {
+  const refreshConflict = detectShortcutConflict('Cmd/Ctrl+R', { platform: 'MacIntel' });
+  assert.equal(!!refreshConflict, true);
+  assert.match(refreshConflict.reason, /browser refresh/i);
+
+  const tabConflict = detectShortcutConflict('Ctrl+Tab / Ctrl+Shift+Tab', { platform: 'Win32' });
+  assert.equal(!!tabConflict, true);
+  assert.match(tabConflict.reason, /tab switching/i);
+
+  const safe = detectShortcutConflict('Cmd/Ctrl+Shift+K', { platform: 'MacIntel' });
+  assert.equal(safe, null);
 });

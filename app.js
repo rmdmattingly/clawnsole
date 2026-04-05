@@ -104,6 +104,11 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   return `${sec}s`;
 });
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
+const deriveWorkqueueDisplayTitle = __appCore.deriveWorkqueueDisplayTitle || ((item) => ({
+  title: String(item?.title || ''),
+  rawTitle: String(item?.title || ''),
+  canonicalized: false
+}));
 const detectShortcutConflict = __appCore.detectShortcutConflict || (() => null);
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
   const n = Number(count);
@@ -1265,6 +1270,8 @@ function paneIdentityOrdinal(pane) {
 
 function paneTargetLabel(pane, opts = {}) {
   const base = paneTargetBaseLabel(pane);
+  const nick = String(pane?.nickname || '').trim();
+  if (nick) return `${nick} (${base})`;
   const disambiguate = !!opts?.disambiguate;
   if (!disambiguate) return base;
   const ord = paneIdentityOrdinal(pane);
@@ -1362,6 +1369,45 @@ function paneRenderActivityBadge(pane) {
   badge.dataset.kind = String(pane?.activity?.kind || 'chat');
   badge.textContent = unread > 99 ? '99+' : String(unread);
   badge.setAttribute('aria-label', paneActivityLabel(pane));
+}
+
+const paneShortcutBadgeState = {
+  revealActive: false
+};
+
+function visiblePaneRoots() {
+  return Array.from(document.querySelectorAll('[data-pane]')).filter((el) => isPaneElementVisible(el));
+}
+
+function renderPaneShortcutIndexBadges() {
+  const visibleRoots = visiblePaneRoots();
+  const indexByRoot = new Map();
+  for (let i = 0; i < visibleRoots.length; i++) indexByRoot.set(visibleRoots[i], i + 1);
+
+  paneManager.panes.forEach((pane) => {
+    const badge = pane?.elements?.shortcutIndexBadge;
+    const root = pane?.elements?.root;
+    if (!badge || !root) return;
+    const index = Number(indexByRoot.get(root) || 0);
+    if (paneShortcutBadgeState.revealActive && index >= 1 && index <= 9) {
+      badge.hidden = false;
+      badge.textContent = String(index);
+      badge.setAttribute('title', `Direct focus shortcut: Alt/Option+${index}`);
+      badge.setAttribute('aria-hidden', 'false');
+      return;
+    }
+    badge.hidden = true;
+    badge.textContent = '';
+    badge.setAttribute('aria-hidden', 'true');
+    badge.removeAttribute('title');
+  });
+}
+
+function setPaneShortcutRevealActive(active) {
+  const next = !!active;
+  if (paneShortcutBadgeState.revealActive === next) return;
+  paneShortcutBadgeState.revealActive = next;
+  renderPaneShortcutIndexBadges();
 }
 
 function paneMarkUnread(pane, kind = 'chat') {
@@ -2231,6 +2277,16 @@ function renderAgentsModalList({ fallbackToFirst = true } = {}) {
 
   root.innerHTML = '';
   root.classList.toggle('agents-density-compact', density === 'compact');
+  const header = document.createElement('div');
+  header.className = 'agents-grid-header';
+  header.innerHTML = `
+    <div class="agents-grid-cell agents-grid-cell-pin" aria-hidden="true">Pin</div>
+    <div class="agents-grid-cell agents-grid-cell-identity">Agent</div>
+    <div class="agents-grid-cell agents-grid-cell-id">ID</div>
+    <div class="agents-grid-cell agents-grid-cell-health">Health</div>
+    <div class="agents-grid-cell agents-grid-cell-reason">Reason</div>
+  `;
+  root.appendChild(header);
   root.classList.toggle('agents-density-cozy', density !== 'compact');
   root.classList.toggle('agents-hide-id', !columns.id);
   root.classList.toggle('agents-hide-health', !columns.health);
@@ -2266,10 +2322,10 @@ function renderAgentsModalList({ fallbackToFirst = true } = {}) {
       row.innerHTML = `
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
         <div class="agents-row-main">
-          <div class="agents-row-title-wrap"><div class="agents-row-title">${escapeHtml(label)}</div></div>
-          <div class="agents-row-meta">${escapeHtml(id)}</div>
-          <div class="agents-row-chips"><span class="agents-health-chip">${escapeHtml(formatHealthChip(triage))}</span><span class="agents-age-chip">${escapeHtml(formatAgeChip(lastSeenAtMs))}</span></div>
-          <div class="agents-row-reason"><span class="agents-reason-chip">${escapeHtml(triage.attentionReason)}</span></div>
+          <div class="agents-row-title-wrap agents-col-identity"><div class="agents-row-title">${escapeHtml(label)}</div></div>
+          <div class="agents-row-meta agents-col-id">${escapeHtml(id)}</div>
+          <div class="agents-row-chips agents-col-health"><span class="agents-health-chip">${escapeHtml(formatHealthChip(triage))}</span><span class="agents-age-chip">${escapeHtml(formatAgeChip(lastSeenAtMs))}</span></div>
+          <div class="agents-row-reason agents-col-reason"><span class="agents-reason-chip">${escapeHtml(triage.attentionReason)}</span></div>
         </div>
       `;
 
@@ -2757,9 +2813,10 @@ function renderWorkqueueItems() {
       const status = String(it.status || '');
       const age = fmtAge(it.createdAt || it.updatedAt);
       const next = String(it.lastNote || '').trim();
+      const titleMeta = deriveWorkqueueDisplayTitle(it);
 
       card.innerHTML = `
-        <div class="wq-card-title">${escapeHtml(String(it.title || ''))}</div>
+        <div class="wq-card-title" title="${escapeHtml(titleMeta.rawTitle || titleMeta.title || '')}">${escapeHtml(String(titleMeta.title || ''))}</div>
         <div class="wq-card-meta">
           <span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span>
           ${age ? `<span class="wq-card-chip mono">age ${escapeHtml(age)}</span>` : ''}
@@ -2830,6 +2887,7 @@ function renderWorkqueueInspect(item) {
     return;
   }
   const kv = (k, v) => `<div class="wq-kv"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(String(v ?? ''))}</div></div>`;
+  const titleMeta = deriveWorkqueueDisplayTitle(item);
   root.innerHTML = `
     <div class="wq-inspect-meta">
       ${kv('id', item.id)}
@@ -2843,8 +2901,9 @@ function renderWorkqueueInspect(item) {
     </div>
     <div class="wq-inspect-block">
       <div class="wq-inspect-label">Title</div>
-      <div class="wq-inspect-pre">${escapeHtml(String(item.title || ''))}</div>
+      <div class="wq-inspect-pre">${escapeHtml(String(titleMeta.title || ''))}</div>
     </div>
+    ${titleMeta.canonicalized ? `<div class="wq-inspect-block"><div class="wq-inspect-label">Raw title</div><div class="wq-inspect-pre">${escapeHtml(String(titleMeta.rawTitle || ''))}</div></div>` : ''}
     <div class="wq-inspect-block">
       <div class="wq-inspect-label">Instructions</div>
       <pre class="wq-inspect-pre">${escapeHtml(String(item.instructions || ''))}</pre>
@@ -2998,7 +3057,8 @@ function renderWorkqueueSimpleList(rootEl, items, { emptyText }) {
   for (const it of items) {
     const li = document.createElement('li');
     const lease = it.leaseUntil ? new Date(Number(it.leaseUntil)).toISOString() : '';
-    li.innerHTML = `<div><strong>${escapeHtml(String(it.title || ''))}</strong></div>
+    const titleMeta = deriveWorkqueueDisplayTitle(it);
+    li.innerHTML = `<div><strong title="${escapeHtml(String(titleMeta.rawTitle || titleMeta.title || ''))}">${escapeHtml(String(titleMeta.title || ''))}</strong></div>
 <div class="meta">${escapeHtml(String(it.status || ''))}${it.claimedBy ? ` • ${escapeHtml(String(it.claimedBy))}` : ''}${lease ? ` • lease ${escapeHtml(lease)}` : ''}</div>`;
     ul.appendChild(li);
   }
@@ -3324,9 +3384,10 @@ function renderWorkqueuePaneItems(pane) {
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
     const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
     const status = String(it.status || '');
+    const titleMeta = deriveWorkqueueDisplayTitle(it);
 
     row.innerHTML = `
-      <div class="wq-col title">${escapeHtml(String(it.title || ''))}${dupCount > 0 ? ` <span class="wq-card-chip mono">×${escapeHtml(String(group.count || (dupCount + 1)))}</span>` : ''}${group.hasClaimed ? ' <span class="wq-card-chip mono">claimed</span>' : ''}${group.hasExpiredLease ? ' <span class="wq-card-chip mono">expired lease</span>' : ''}</div>
+      <div class="wq-col title" title="${escapeHtml(String(titleMeta.rawTitle || titleMeta.title || ''))}">${escapeHtml(String(titleMeta.title || ''))}${dupCount > 0 ? ` <span class="wq-card-chip mono">×${escapeHtml(String(group.count || (dupCount + 1)))}</span>` : ''}${group.hasClaimed ? ' <span class="wq-card-chip mono">claimed</span>' : ''}${group.hasExpiredLease ? ' <span class="wq-card-chip mono">expired lease</span>' : ''}</div>
       <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
       <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
       <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
@@ -3389,6 +3450,7 @@ function renderWorkqueuePaneInspect(pane, item) {
     return;
   }
   const kv = (k, v) => `<div class="wq-kv"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(String(v ?? ''))}</div></div>`;
+  const titleMeta = deriveWorkqueueDisplayTitle(item);
   root.innerHTML = `
     <div class="wq-inspect-meta">
       ${kv('id', item.id)}
@@ -3402,8 +3464,9 @@ function renderWorkqueuePaneInspect(pane, item) {
     </div>
     <div class="wq-inspect-block">
       <div class="wq-inspect-label">Title</div>
-      <div class="wq-inspect-pre">${escapeHtml(String(item.title || ''))}</div>
+      <div class="wq-inspect-pre">${escapeHtml(String(titleMeta.title || ''))}</div>
     </div>
+    ${titleMeta.canonicalized ? `<div class="wq-inspect-block"><div class="wq-inspect-label">Raw title</div><div class="wq-inspect-pre">${escapeHtml(String(titleMeta.rawTitle || ''))}</div></div>` : ''}
     <div class="wq-inspect-block">
       <div class="wq-inspect-label">Instructions</div>
       <pre class="wq-inspect-pre">${escapeHtml(String(item.instructions || ''))}</pre>
@@ -5029,7 +5092,13 @@ function buildClientForPane(pane) {
     onFrame: (data) => handleGatewayFrame(pane, data),
     onConnected: () => {
       pane.connected = true;
-      if (pane.elements.root) pane.elements.root.dataset.connected = 'true';
+      pane.statusState = 'connected';
+      pane.statusMeta = '';
+      setStatusPill(pane.elements.status, 'connected', '');
+      if (pane.elements.root) {
+        pane.elements.root.dataset.connected = 'true';
+        pane.elements.root.dataset.wsState = 'connected';
+      }
       paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();
@@ -5054,7 +5123,13 @@ function buildClientForPane(pane) {
     onDisconnected: () => {
       paneStopThinking(pane);
       pane.connected = false;
-      if (pane.elements.root) pane.elements.root.dataset.connected = 'false';
+      pane.statusState = 'disconnected';
+      pane.statusMeta = '';
+      setStatusPill(pane.elements.status, 'disconnected', '');
+      if (pane.elements.root) {
+        pane.elements.root.dataset.connected = 'false';
+        pane.elements.root.dataset.wsState = 'disconnected';
+      }
       paneSetChatEnabled(pane);
       updateGlobalStatus();
       updateConnectionControls();
@@ -5325,7 +5400,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, quickFilters, scope, sortKey, sortDir, closable = true, pinned = false } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, quickFilters, scope, sortKey, sortDir, nickname = '', closable = true, pinned = false } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -5353,6 +5428,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
     input: root.querySelector('[data-pane-input]'),
     commandHints: root.querySelector('[data-pane-command-hints]'),
     shortcutHints: root.querySelector('[data-pane-shortcut-hints]'),
+    shortcutIndexBadge: root.querySelector('[data-pane-shortcut-index-badge]'),
     fileInput: root.querySelector('[data-pane-file-input]'),
     attachBtn: root.querySelector('[data-pane-attach]'),
     attachmentStatus: root.querySelector('[data-pane-attachment-status]'),
@@ -5369,6 +5445,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
       const k = String(kind || 'chat').trim().toLowerCase();
       return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
     })(),
+    nickname: String(nickname || '').trim(),
     agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
@@ -5436,6 +5513,23 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
     el.hidden = hints.length === 0;
   }
 
+  try {
+    if (elements.name) {
+      elements.name.title = 'Double-click to set pane nickname';
+      elements.name.addEventListener('dblclick', () => {
+        if (roleState.role !== 'admin') return;
+        const current = String(pane.nickname || '').trim();
+        const input = window.prompt('Pane nickname (leave blank to clear):', current);
+        if (input == null) return;
+        const next = String(input || '').trim();
+        if (next === current) return;
+        pane.nickname = next;
+        paneManager.updatePaneLabels();
+        paneManager.persistAdminPanes();
+      });
+    }
+  } catch {}
+
   // Mark pane kind on root for CSS + debugging.
   try {
     elements.root.dataset.paneKind = pane.kind;
@@ -5445,6 +5539,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
   if (elements.name) elements.name.textContent = paneLabel(pane);
   paneRenderTypePill(pane);
   renderPaneShortcutHints(pane);
+  renderPaneShortcutIndexBadges();
 
   // Per-pane inline help popover ("What is this pane?")
   try {
@@ -7051,6 +7146,7 @@ const paneManager = {
         scope: cfg.scope,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
+        nickname: cfg.nickname,
         closable: true
       })
     );
@@ -7128,15 +7224,18 @@ const paneManager = {
                 actionableOnly: !!item.quickFilters.actionableOnly
               }
             : { source: '', repo: '', actionableOnly: false };
-          return { key, kind, pinned: !!item.pinned, queue, statusFilter, scope, sortKey, sortDir, quickFilters };
+          const nickname = typeof item.nickname === 'string' ? item.nickname.trim() : '';
+          return { key, kind, pinned: !!item.pinned, queue, statusFilter, scope, sortKey, sortDir, quickFilters, nickname };
         }
 
         if (kind === 'cron' || kind === 'timeline') {
-          return { key, kind, pinned: !!item.pinned };
+          const nickname = typeof item.nickname === 'string' ? item.nickname.trim() : '';
+          return { key, kind, pinned: !!item.pinned, nickname };
         }
 
         const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
-        return { key, kind, pinned: !!item.pinned, agentId };
+        const nickname = typeof item.nickname === 'string' ? item.nickname.trim() : '';
+        return { key, kind, pinned: !!item.pinned, agentId, nickname };
       }
 
       // Super-legacy format: ['pabc','pdef'] (treat as chat panes)
@@ -7192,13 +7291,14 @@ const paneManager = {
           },
           scope: String(pane.workqueue?.scope || 'all').trim().toLowerCase() || 'all',
           sortKey: pane.workqueue?.sortKey || 'default',
-          sortDir: pane.workqueue?.sortDir || 'desc'
+          sortDir: pane.workqueue?.sortDir || 'desc',
+          nickname: String(pane.nickname || '').trim()
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
-        return { key: pane.key, kind: pane.kind, pinned: !!pane.pinned };
+        return { key: pane.key, kind: pane.kind, pinned: !!pane.pinned, nickname: String(pane.nickname || '').trim() };
       }
-      return { key: pane.key, kind: 'chat', pinned: !!pane.pinned, agentId: pane.agentId || 'main' };
+      return { key: pane.key, kind: 'chat', pinned: !!pane.pinned, agentId: pane.agentId || 'main', nickname: String(pane.nickname || '').trim() };
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
@@ -7617,6 +7717,8 @@ const paneManager = {
       paneRenderDraftBadge(pane);
     });
 
+    renderPaneShortcutIndexBadges();
+
     if (globalElements.paneGrid) {
       globalElements.paneGrid.setAttribute('aria-label', 'Panes');
     }
@@ -7966,7 +8068,7 @@ function isPaneElementVisible(el) {
 function focusVisiblePaneByShortcutPosition(position) {
   if (!Number.isFinite(position) || position < 1) return;
 
-  const visibleRoots = Array.from(document.querySelectorAll('[data-pane]')).filter((el) => isPaneElementVisible(el));
+  const visibleRoots = visiblePaneRoots();
   if (visibleRoots.length === 0) return;
 
   const targetRoot = visibleRoots[position - 1];
@@ -8142,6 +8244,10 @@ window.addEventListener('keydown', (event) => {
 
   const key = String(event.key || '');
 
+  if (key === 'Alt' && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+    setPaneShortcutRevealActive(true);
+  }
+
   const isQuestion = key === '?' || (key === '/' && event.shiftKey);
   if (isQuestion && !event.metaKey && !event.ctrlKey && !event.altKey) {
     event.preventDefault();
@@ -8263,6 +8369,14 @@ window.addEventListener('keydown', (event) => {
       return;
     }
   }
+});
+
+window.addEventListener('keyup', (event) => {
+  if (String(event.key || '') === 'Alt') setPaneShortcutRevealActive(false);
+});
+
+window.addEventListener('blur', () => {
+  setPaneShortcutRevealActive(false);
 });
 
 globalElements.disconnectBtn?.addEventListener('click', () => {
