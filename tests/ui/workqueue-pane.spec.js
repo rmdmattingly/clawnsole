@@ -116,3 +116,49 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
   });
   expect(['auto', 'scroll']).toContain(listStyles.overflowY);
 });
+
+test('workqueue pane: list column header remains sticky while list body scrolls', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  const listHeader = wqPane.locator('.wq-pane .wq-list-header').first();
+  const listBody = wqPane.locator('.wq-pane [data-wq-list-body]').first();
+
+  await expect(listHeader).toBeVisible();
+  await expect(listBody).toHaveCount(1);
+
+  const headerStyles = await listHeader.evaluate((el) => {
+    const cs = window.getComputedStyle(el);
+    return {
+      position: cs.position,
+      top: cs.top,
+      zIndex: cs.zIndex,
+      backgroundColor: cs.backgroundColor
+    };
+  });
+
+  expect(headerStyles.position).toBe('sticky');
+  expect(headerStyles.top).toBe('0px');
+  expect(Number(headerStyles.zIndex)).toBeGreaterThanOrEqual(3);
+  expect(headerStyles.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+
+  await listBody.evaluate((el) => {
+    el.scrollTop = 200;
+  });
+
+  const pinned = await listHeader.evaluate((el) => {
+    const parent = el.closest('.wq-list');
+    if (!parent) return false;
+    const parentTop = parent.getBoundingClientRect().top;
+    const headerTop = el.getBoundingClientRect().top;
+    return Math.abs(headerTop - parentTop) < 2;
+  });
+
+  expect(pinned).toBe(true);
+});
