@@ -350,7 +350,8 @@ const roleState = {
 const uiState = {
   authed: false,
   meta: {},
-  agents: []
+  agents: [],
+  agentsModalSelectedAgentId: ''
 };
 
 let toastSeq = 0;
@@ -2032,6 +2033,82 @@ function closeAgentsModal() {
   stopAgentsModalFreshnessTicker();
 }
 
+function getAgentsModalRows() {
+  const root = globalElements.agentsList;
+  if (!root) return [];
+  return Array.from(root.querySelectorAll('.agents-row[data-agent-id]'));
+}
+
+function applyAgentsModalSelection(agentId, { scroll = false } = {}) {
+  const rows = getAgentsModalRows();
+  if (!rows.length) {
+    uiState.agentsModalSelectedAgentId = '';
+    return;
+  }
+
+  const desired = String(agentId || '').trim();
+  const selectedRow =
+    rows.find((row) => String(row.getAttribute('data-agent-id') || '') === desired) || rows[0];
+  const selectedId = String(selectedRow?.getAttribute('data-agent-id') || '').trim();
+  uiState.agentsModalSelectedAgentId = selectedId;
+
+  rows.forEach((row) => {
+    const active = row === selectedRow;
+    row.classList.toggle('agents-row-selected', active);
+    row.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+
+  if (scroll && selectedRow) {
+    try {
+      selectedRow.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    } catch {}
+  }
+}
+
+function moveAgentsModalSelection(delta) {
+  const rows = getAgentsModalRows();
+  if (!rows.length) return;
+  const dir = delta >= 0 ? 1 : -1;
+  const currentId = String(uiState.agentsModalSelectedAgentId || '').trim();
+  const currentIdx = rows.findIndex((row) => String(row.getAttribute('data-agent-id') || '') === currentId);
+  const baseIdx = currentIdx >= 0 ? currentIdx : 0;
+  const nextIdx = Math.max(0, Math.min(rows.length - 1, baseIdx + dir));
+  const nextId = String(rows[nextIdx].getAttribute('data-agent-id') || '').trim();
+  applyAgentsModalSelection(nextId, { scroll: true });
+}
+
+function isAgentsModalOpen() {
+  return !!globalElements.agentsModal?.classList?.contains('open');
+}
+
+function handleAgentsModalKeydown(event) {
+  if (!isAgentsModalOpen()) return false;
+  if (event.metaKey || event.ctrlKey || event.altKey) return false;
+  if (isTypingContext(event.target)) return false;
+
+  const key = String(event.key || '');
+  if (key === 'j' || key === 'ArrowDown') {
+    event.preventDefault();
+    moveAgentsModalSelection(1);
+    return true;
+  }
+  if (key === 'k' || key === 'ArrowUp') {
+    event.preventDefault();
+    moveAgentsModalSelection(-1);
+    return true;
+  }
+  if (key === 'Enter') {
+    const selectedId = String(uiState.agentsModalSelectedAgentId || '').trim();
+    if (!selectedId) return false;
+    event.preventDefault();
+    if (event.shiftKey) openAgentWorkqueueFromFleet(selectedId);
+    else openAgentChatFromFleet(selectedId);
+    return true;
+  }
+
+  return false;
+}
+
 function findExistingPane(kind, predicate = null) {
   const list = Array.isArray(paneManager?.panes) ? paneManager.panes : [];
   for (const pane of list) {
@@ -2169,6 +2246,9 @@ function renderAgentsModalList() {
       const id = String(agent?.id || '').trim();
       const row = document.createElement('div');
       row.className = 'agents-row';
+      row.setAttribute('data-agent-id', id);
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', 'false');
 
       const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
@@ -2222,6 +2302,8 @@ function renderAgentsModalList() {
         });
       });
 
+      row.addEventListener('mousedown', () => applyAgentsModalSelection(id));
+
       list.appendChild(row);
     }
 
@@ -2231,6 +2313,8 @@ function renderAgentsModalList() {
 
   renderSection('Pinned', pinned);
   renderSection('Agents', rest);
+
+  applyAgentsModalSelection(uiState.agentsModalSelectedAgentId);
 
   const empty = pinned.length === 0 && rest.length === 0;
   if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
@@ -6977,6 +7061,8 @@ window.addEventListener('keydown', (event) => {
     }
     return;
   }
+
+  if (handleAgentsModalKeydown(event)) return;
 
   // Never steal focus / override browser shortcuts while typing.
   if (isTypingContext(event.target)) return;

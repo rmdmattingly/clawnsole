@@ -83,3 +83,42 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
 });
+
+test('agents modal keyboard triage loop selects rows and opens chat/workqueue while suppressing input bleed', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const selectedRows = page.locator('#agentsList .agents-row.agents-row-selected');
+  await expect(selectedRows).toHaveCount(1);
+
+  // Keyboard movement should keep a visible selection.
+  await page.keyboard.press('j');
+  await expect(selectedRows).toHaveCount(1);
+
+  await page.keyboard.press('k');
+  await expect(selectedRows).toHaveCount(1);
+
+  // Enter opens chat for selected row.
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]').first()).toBeVisible();
+
+  // Shift+Enter opens/focuses workqueue.
+  await page.keyboard.press('Shift+Enter');
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+
+  // Typing in search should suppress triage shortcuts.
+  const chatCountBefore = await page.locator('[data-pane][data-pane-kind="chat"]').count();
+  const workqueueCountBefore = await page.locator('[data-pane][data-pane-kind="workqueue"]').count();
+  const search = page.locator('#agentsSearch');
+  await search.focus();
+  await search.press('j');
+  await search.press('Enter');
+  await search.press('Shift+Enter');
+
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(chatCountBefore);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(workqueueCountBefore);
+});
