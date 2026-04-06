@@ -33,6 +33,26 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
 
   installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
 
+  await page.addInitScript(() => {
+    localStorage.setItem('clawnsole.admin.layoutMode', 'custom');
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([
+        { key: 'ptestchat', kind: 'chat', agentId: 'main' },
+        {
+          key: 'ptestwq',
+          kind: 'workqueue',
+          agentId: 'main',
+          queue: 'dev-team',
+          statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+          scopeFilter: 'all',
+          sortKey: 'priority',
+          sortDir: 'desc'
+        }
+      ])
+    );
+  });
+
   await page.goto(`http://127.0.0.1:${app.serverPort}/`);
   await page.fill('#loginPassword', 'admin');
   await page.click('#loginBtn');
@@ -529,4 +549,39 @@ test('fleet quick action button + keyboard shortcut focus existing timeline pane
 
   await fleetBtn.click({ modifiers: ['Alt'] });
   await expect(timelinePanes).toHaveCount(2);
+});
+
+test('paired-pane toggle shortcut focuses existing pair and opens missing pair', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  // Existing pair path: from Chat, jump to the existing Workqueue pane.
+  const chatInput = page.locator('[data-pane-kind="chat"] [data-pane-input]').first();
+  await chatInput.focus();
+  await page.keyboard.press('Control+Shift+Y');
+  await expect.poll(activePaneIndex).toBe(1);
+  await expect(page.locator('[data-pane]')).toHaveCount(2);
+
+  // Missing pair path: close Workqueue, then toggle should create+focus paired Workqueue.
+  await page.locator('[data-pane-kind="workqueue"] [data-pane-close]').first().click();
+  await expect(page.locator('[data-pane-kind="workqueue"]')).toHaveCount(0);
+  await chatInput.focus();
+  await page.keyboard.press('Control+Shift+Y');
+  await expect(page.locator('[data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane]')).toHaveCount(2);
+  await expect.poll(activePaneIndex).toBe(1);
 });
