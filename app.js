@@ -109,6 +109,15 @@ const deriveWorkqueueDisplayTitle = __appCore.deriveWorkqueueDisplayTitle || ((i
   rawTitle: String(item?.title || ''),
   canonicalized: false
 }));
+const deriveInitialWorkqueueScope = __appCore.deriveInitialWorkqueueScope || (({ kind = 'chat', role = null, agentId = '', scope = '' } = {}) => {
+  const explicit = String(scope || '').trim().toLowerCase();
+  if (explicit === 'assigned' || explicit === 'unassigned' || explicit === 'all') return explicit;
+  const paneKind = String(kind || '').trim().toLowerCase();
+  if (paneKind !== 'workqueue') return 'all';
+  if (String(role || '').trim().toLowerCase() !== 'admin') return 'all';
+  const target = String(agentId || '').trim().toLowerCase();
+  return target && target !== 'main' ? 'assigned' : 'all';
+});
 const detectShortcutConflict = __appCore.detectShortcutConflict || (() => null);
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
   const n = Number(count);
@@ -5401,6 +5410,12 @@ function renderAgentOptions(selectEl, agentId) {
 }
 
 function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, quickFilters, scope, sortKey, sortDir, nickname = '', closable = true, pinned = false } = {}) {
+  const normalizedKind = (() => {
+    const allowed = new Set(['chat', 'workqueue', 'cron', 'timeline']);
+    const k = String(kind || 'chat').trim().toLowerCase();
+    return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
+  })();
+  const normalizedAgentId = role === 'admin' ? normalizeAgentId(agentId || 'main') : null;
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -5440,13 +5455,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
   const pane = {
     key,
     role,
-    kind: (() => {
-      const allowed = new Set(['chat', 'workqueue', 'cron', 'timeline']);
-      const k = String(kind || 'chat').trim().toLowerCase();
-      return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
-    })(),
+    kind: normalizedKind,
     nickname: String(nickname || '').trim(),
-    agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
+    agentId: normalizedAgentId,
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
@@ -5455,7 +5466,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
         repo: typeof quickFilters?.repo === 'string' ? quickFilters.repo.trim() : '',
         actionableOnly: !!quickFilters?.actionableOnly
       },
-      scope: ['assigned', 'unassigned', 'all'].includes(String(scope || '').trim().toLowerCase()) ? String(scope).trim().toLowerCase() : 'all',
+      scope: deriveInitialWorkqueueScope({ kind: normalizedKind, role, agentId: normalizedAgentId, scope }),
       items: [],
       selectedItemId: null,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'default',
@@ -8006,7 +8017,7 @@ function isTypingShortcutExempt(event) {
   if (event.altKey) return false;
 
   // Explicitly exempt shifted pane shortcuts (existing intended behavior).
-  if (event.shiftKey && ['c', 'w', 'r', 't', 'n'].includes(key)) return true;
+  if (event.shiftKey && ['c', 'w', 'r', 't', 'n', 'q', 'i', 's'].includes(key)) return true;
 
   // Global admin launchers should work even when typing.
   if (!event.shiftKey && ['k', 'p'].includes(key)) return true;
@@ -8152,6 +8163,43 @@ function isBlockingOverlayOpenForPaneShortcuts() {
     globalElements.agentsModal
   ];
   return blockers.some((el) => !!el?.classList?.contains('open'));
+}
+
+function focusWorkqueueControlByShortcut(target) {
+  const activePane = paneManager.getActivePane();
+  if (activePane?.kind !== 'workqueue') {
+    toast('Workqueue shortcut blocked: focus a Workqueue pane first.', 'info');
+    return false;
+  }
+
+  const thread = activePane.elements?.thread;
+  const byTarget = {
+    queueSearch: '[data-wq-queue-search]',
+    itemSearch: '[data-wq-item-search]',
+    statusFilter: '[data-wq-status-details] > summary'
+  };
+  const selector = byTarget[target] || '';
+  const control = selector ? thread?.querySelector?.(selector) : null;
+
+  if (!(control instanceof HTMLElement)) {
+    toast('Workqueue shortcut blocked: target control is unavailable.', 'info');
+    return false;
+  }
+  if (!isPaneElementVisible(control)) {
+    toast('Workqueue shortcut blocked: target control is hidden.', 'info');
+    return false;
+  }
+  if (control.disabled || String(control.getAttribute('aria-disabled') || '').toLowerCase() === 'true') {
+    toast('Workqueue shortcut blocked: target control is disabled.', 'info');
+    return false;
+  }
+
+  try { activePane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); } catch {}
+  control.focus();
+  if (target === 'queueSearch' || target === 'itemSearch') {
+    try { control.select?.(); } catch {}
+  }
+  return true;
 }
 
 window.addEventListener('keydown', (event) => {
@@ -8345,6 +8393,17 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     paneManager.openAddPaneMenu(globalElements.addPaneBtn);
     return;
+  }
+
+  // Cmd/Ctrl+Shift+Q / I / S focus key Workqueue controls.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey) {
+    const keyLower = key.toLowerCase();
+    if (keyLower === 'q' || keyLower === 'i' || keyLower === 's') {
+      event.preventDefault();
+      const target = keyLower === 'q' ? 'queueSearch' : keyLower === 'i' ? 'itemSearch' : 'statusFilter';
+      focusWorkqueueControlByShortcut(target);
+      return;
+    }
   }
 
   // Cmd/Ctrl+R refreshes agent list (instead of page reload).

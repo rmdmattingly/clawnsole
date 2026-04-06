@@ -7,6 +7,7 @@ const {
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
+  deriveInitialWorkqueueScope,
   deriveAuthOverlayState,
   extractChatText,
   normalizeHistoryEntries,
@@ -78,6 +79,13 @@ test('normalizePaneKind handles aliases safely', () => {
   assert.equal(normalizePaneKind('timeline'), 'timeline');
   assert.equal(normalizePaneKind('ti'), 'timeline');
   assert.equal(normalizePaneKind('x'), 'chat');
+});
+
+test('deriveInitialWorkqueueScope defaults targeted workqueue panes to assigned scope', () => {
+  assert.equal(deriveInitialWorkqueueScope({ kind: 'workqueue', role: 'admin', agentId: 'hop' }), 'assigned');
+  assert.equal(deriveInitialWorkqueueScope({ kind: 'workqueue', role: 'admin', agentId: 'main' }), 'all');
+  assert.equal(deriveInitialWorkqueueScope({ kind: 'workqueue', role: 'admin', agentId: '', scope: 'unassigned' }), 'unassigned');
+  assert.equal(deriveInitialWorkqueueScope({ kind: 'chat', role: 'admin', agentId: 'hop' }), 'all');
 });
 
 test('deriveAuthOverlayState captures auth/role transition flags', () => {
