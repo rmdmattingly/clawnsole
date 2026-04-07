@@ -49,3 +49,47 @@ test('pane manager: lists panes + focuses via keyboard', async ({ page }) => {
   });
   expect(focusedPaneIndex).toBe(1);
 });
+
+test('pane manager: paired action focuses existing counterpart and opens missing counterpart', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const paneManagerModal = page.locator('#paneManagerModal');
+
+  // Existing counterpart path: chat row should focus already-open workqueue pane.
+  await page.keyboard.press('Control+P');
+  await expect(paneManagerModal).toHaveAttribute('aria-hidden', 'false');
+
+  const chatRow = page.locator('.pane-manager-row').first();
+  const chatPaired = chatRow.locator('[data-action="paired"]');
+  await expect(chatPaired).toHaveText('Paired WQ');
+  await chatPaired.click();
+
+  await expect(page.locator('[data-pane-kind="workqueue"]')).toHaveCount(1);
+  const focusedKindAfterExisting = await page.evaluate(() => {
+    const active = document.activeElement;
+    const pane = active?.closest?.('[data-pane-kind]');
+    return pane?.getAttribute('data-pane-kind') || '';
+  });
+  expect(focusedKindAfterExisting).toBe('workqueue');
+
+  await page.keyboard.press('Escape');
+  await expect(paneManagerModal).toHaveAttribute('aria-hidden', 'true');
+
+  // Missing counterpart path: close workqueue, then paired from chat should open one.
+  await page.locator('[data-pane-kind="workqueue"] [data-pane-close]').first().click();
+  await expect(page.locator('[data-pane-kind="workqueue"]')).toHaveCount(0);
+
+  await page.keyboard.press('Control+P');
+  await expect(paneManagerModal).toHaveAttribute('aria-hidden', 'false');
+
+  await page.locator('.pane-manager-row').first().locator('[data-action="paired"]').click();
+  await expect(page.locator('[data-pane-kind="workqueue"]')).toHaveCount(1);
+});

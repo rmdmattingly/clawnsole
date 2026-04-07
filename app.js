@@ -873,6 +873,61 @@ function paneTargetLabel(pane) {
   return String(pane.agentId || 'main');
 }
 
+function paneManagerResolvePaired(pane) {
+  if (!pane) return null;
+  const targetAgent = normalizeAgentId(pane.agentId || 'main');
+
+  if (pane.kind === 'chat') {
+    const existing = (paneManager?.panes || []).find((candidate) => (
+      candidate && candidate.kind === 'workqueue' && normalizeAgentId(candidate.agentId || 'main') === targetAgent
+    )) || null;
+    return {
+      label: 'Paired WQ',
+      title: existing ? `Focus paired Workqueue (${targetAgent})` : `Open paired Workqueue (${targetAgent})`,
+      run: () => {
+        const live = (paneManager?.panes || []).find((candidate) => (
+          candidate && candidate.kind === 'workqueue' && normalizeAgentId(candidate.agentId || 'main') === targetAgent
+        )) || null;
+        if (live) {
+          paneManager.focusPanePrimary(live);
+          return true;
+        }
+        const created = paneManager.addPane('workqueue');
+        if (!created) return false;
+        paneSetAgent(created, targetAgent);
+        paneManager.focusPanePrimary(created);
+        return true;
+      }
+    };
+  }
+
+  if (pane.kind === 'workqueue') {
+    const existing = (paneManager?.panes || []).find((candidate) => (
+      candidate && candidate.kind === 'chat' && normalizeAgentId(candidate.agentId || 'main') === targetAgent
+    )) || null;
+    return {
+      label: 'Paired Chat',
+      title: existing ? `Focus paired Chat (${targetAgent})` : `Open paired Chat (${targetAgent})`,
+      run: () => {
+        const live = (paneManager?.panes || []).find((candidate) => (
+          candidate && candidate.kind === 'chat' && normalizeAgentId(candidate.agentId || 'main') === targetAgent
+        )) || null;
+        if (live) {
+          paneManager.focusPanePrimary(live);
+          return true;
+        }
+        const created = paneManager.addPane('chat');
+        if (!created) return false;
+        paneSetAgent(created, targetAgent);
+        paneManager.focusPanePrimary(created);
+        return true;
+      }
+    };
+  }
+
+  return null;
+}
+
 function renderPaneManager() {
   const panes = paneManager?.panes || [];
   const list = globalElements.paneManagerList;
@@ -894,6 +949,7 @@ function renderPaneManager() {
     row.setAttribute('aria-selected', idx === selected ? 'true' : 'false');
 
     const state = String(pane.statusState || (pane.connected ? 'connected' : 'disconnected'));
+    const paired = paneManagerResolvePaired(pane);
 
     row.innerHTML = `
       <div class="pane-manager-main">
@@ -905,6 +961,7 @@ function renderPaneManager() {
         <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
       </div>
       <div class="pane-manager-actions">
+        ${paired ? `<button class="secondary pane-manager-paired" type="button" data-action="paired" data-testid="pane-manager-paired" title="${escapeHtml(paired.title)}">${escapeHtml(paired.label)}</button>` : ''}
         <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
         <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
       </div>
@@ -922,6 +979,12 @@ function renderPaneManager() {
         try {
           paneManager.removePane(pane.key);
         } catch {}
+        renderPaneManager();
+        return;
+      }
+      if (action === 'paired') {
+        const ok = paired?.run?.();
+        if (!ok) showToast('No valid Chat/Workqueue pair for this pane.', { kind: 'error', timeoutMs: 2200 });
         renderPaneManager();
         return;
       }
