@@ -71,3 +71,41 @@ test('agent chooser: opens, shows agents, Esc closes', async ({ page }) => {
   await page.keyboard.press('Escape');
   await expect(chooser).toHaveCount(0);
 });
+
+test('paired target lock: ON syncs chat target to paired workqueue; OFF does not', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const chatPane = page.locator('[data-pane]').first();
+  const wqPane = page.locator('[data-pane]').nth(1);
+  const lockBtn = chatPane.getByTestId('pane-target-lock');
+  const chatTargetBtn = chatPane.getByTestId('pane-agent-button');
+
+  await expect(lockBtn).toContainText(/unlocked/i);
+  await lockBtn.click();
+  await expect(lockBtn).toContainText(/linked/i);
+
+  await chatTargetBtn.click();
+  await page.getByRole('dialog', { name: 'Choose agent' }).getByRole('button', { name: /dev/i }).click();
+
+  await expect
+    .poll(async () => wqPane.getByTestId('pane-agent-select').inputValue())
+    .toBe('dev');
+
+  await lockBtn.click();
+  await expect(lockBtn).toContainText(/unlocked/i);
+
+  await chatTargetBtn.click();
+  await page.getByRole('dialog', { name: 'Choose agent' }).getByRole('button', { name: /main/i }).click();
+
+  await expect
+    .poll(async () => wqPane.getByTestId('pane-agent-select').inputValue())
+    .toBe('dev');
+});
