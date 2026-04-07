@@ -256,3 +256,30 @@ test('workqueue: enqueue supports dedupeKey idempotency', () => {
   const state = loadState(root);
   assert.equal(state.items.length, 1);
 });
+
+test('workqueue: issue dedupe keys are canonicalized across hash/colon + issue prefix variants', () => {
+  const root = tempRoot();
+
+  const first = enqueueItem(root, {
+    queue: 'dev-team',
+    title: 'Issue follow-up',
+    instructions: 'do it',
+    priority: 1,
+    dedupeKey: 'issue:rmdmattingly/clawnsole:398'
+  });
+
+  const second = enqueueItem(root, {
+    queue: 'dev-team',
+    title: 'Issue follow-up duplicate',
+    instructions: 'do it',
+    priority: 1,
+    dedupeKey: 'rmdmattingly/clawnsole#398'
+  });
+
+  assert.equal(second.id, first.id);
+  assert.equal(second._deduped, true);
+
+  const state = loadState(root);
+  assert.equal(state.items.length, 1);
+  assert.equal(state.items[0].dedupeKey, 'rmdmattingly/clawnsole#398');
+});
