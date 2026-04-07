@@ -63,6 +63,7 @@ const globalElements = {
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   sendGuardRecentFocusEnabled: document.getElementById('sendGuardRecentFocusEnabled'),
+  sendGuardDraftOriginEnabled: document.getElementById('sendGuardDraftOriginEnabled'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
   instanceIdentity: document.getElementById('instanceIdentity'),
@@ -230,10 +231,12 @@ function applyAgentColumnsConfigToControls(cfg) {
   if (globalElements.agentsColReason) globalElements.agentsColReason.checked = !!cfg.reason;
 }
 const SEND_GUARD_RECENT_FOCUS_ENABLED_KEY = 'clawnsole.sendGuard.recentFocus.enabled';
+const SEND_GUARD_DRAFT_ORIGIN_ENABLED_KEY = 'clawnsole.sendGuard.draftOrigin.enabled';
 const SEND_GUARD_RECENT_FOCUS_WINDOW_MS = 5000;
 
 const uiPrefs = {
-  recentFocusSendGuardEnabled: String(storage.get(SEND_GUARD_RECENT_FOCUS_ENABLED_KEY, '1')) !== '0'
+  recentFocusSendGuardEnabled: String(storage.get(SEND_GUARD_RECENT_FOCUS_ENABLED_KEY, '1')) !== '0',
+  draftOriginSendGuardEnabled: String(storage.get(SEND_GUARD_DRAFT_ORIGIN_ENABLED_KEY, '1')) !== '0'
 };
 
 function readJsonFromStorage(key, fallback) {
@@ -434,6 +437,31 @@ function showToast(message, { kind = 'info', timeoutMs = 2600 } = {}) {
     clearTimeout(timer);
     remove();
   });
+}
+
+async function copyTextToClipboard(text) {
+  const value = String(text || '').trim();
+  if (!value) return false;
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = value;
+    ta.setAttribute('readonly', 'true');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return !!ok;
+  } catch {
+    return false;
+  }
 }
 
 let agentRefreshTimer = null;
@@ -1064,6 +1092,9 @@ function openSettings() {
   if (globalElements.sendGuardRecentFocusEnabled) {
     globalElements.sendGuardRecentFocusEnabled.checked = !!uiPrefs.recentFocusSendGuardEnabled;
   }
+  if (globalElements.sendGuardDraftOriginEnabled) {
+    globalElements.sendGuardDraftOriginEnabled.checked = !!uiPrefs.draftOriginSendGuardEnabled;
+  }
 
   // Guest mode removed.
 
@@ -1303,6 +1334,33 @@ function paneDestinationSummary(pane) {
   };
 }
 
+function paneManagerResolvePaired(pane) {
+  if (!pane) return null;
+  if (pane.kind === 'chat') {
+    const agentId = normalizeAgentId(pane.agentId || 'main');
+    const existing = (paneManager?.panes || []).find((candidate) => (
+      candidate && candidate.kind === 'workqueue' && normalizeAgentId(candidate.agentId || 'main') === agentId
+    )) || null;
+    return {
+      label: 'Paired WQ',
+      title: existing ? `Focus paired Workqueue (${agentId})` : `Open paired Workqueue (${agentId})`,
+      run: () => !!openWorkqueueForAgent(agentId)
+    };
+  }
+  if (pane.kind === 'workqueue') {
+    const agentId = normalizeAgentId(pane.agentId || 'main');
+    const existing = (paneManager?.panes || []).find((candidate) => (
+      candidate && candidate.kind === 'chat' && normalizeAgentId(candidate.agentId || 'main') === agentId
+    )) || null;
+    return {
+      label: 'Paired Chat',
+      title: existing ? `Focus paired Chat (${agentId})` : `Open paired Chat (${agentId})`,
+      run: () => !!focusOrCreateAgentChatPane(agentId)
+    };
+  }
+  return null;
+}
+
 function paneOpenInManager(pane) {
   if (!pane) return;
   const panes = paneManager?.panes || [];
@@ -1464,6 +1522,7 @@ function renderPaneManager() {
     const unreadLabel = paneActivityLabel(pane);
     const hasDraft = paneHasUnsentDraft(pane);
     const isPinned = !!pane?.pinned;
+    const paired = paneManagerResolvePaired(pane);
 
     row.innerHTML = `
       <div class="pane-manager-main">
@@ -1483,6 +1542,7 @@ function renderPaneManager() {
         </div>
       </div>
       <div class="pane-manager-actions">
+        ${paired ? `<button class="secondary pane-manager-paired" type="button" data-action="paired" data-testid="pane-manager-paired" title="${escapeHtml(paired.title)}">${escapeHtml(paired.label)}</button>` : ''}
         <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="Move pane up" aria-label="Move pane up" ${idx === 0 ? 'disabled' : ''}>↑</button>
         <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="Move pane down" aria-label="Move pane down" ${idx === panes.length - 1 ? 'disabled' : ''}>↓</button>
         <button class="secondary pane-manager-pin" type="button" data-action="pin" aria-pressed="${isPinned ? 'true' : 'false'}">${isPinned ? 'Unpin' : 'Pin'}</button>
@@ -1529,6 +1589,12 @@ function renderPaneManager() {
           paneManagerUiState.selectedIndex = Math.min(paneManager.panes.length - 1, idx + 1);
           renderPaneManager();
         }
+        return;
+      }
+      if (action === 'paired') {
+        const ok = paired?.run?.();
+        if (!ok) showToast('No valid Chat/Workqueue pair for this pane.', { kind: 'error', timeoutMs: 2200 });
+        renderPaneManager();
         return;
       }
       // Default: focus
@@ -1791,6 +1857,18 @@ function buildCommandPaletteItems() {
   pushItem({ id: 'cmd:open-workqueue', group: 'workqueue', rank: 90, label: 'Workqueue: Open modal', detail: 'Open the Workqueue modal (g w)', run: () => openWorkqueue() });
   pushItem({ id: 'cmd:open-workqueue-active-agent', group: 'workqueue', rank: 89, label: 'Workqueue for active chat agent', detail: 'Open/focus Workqueue pane scoped to assigned items for active chat agent', run: () => openWorkqueueForActiveChatAgent() });
   pushItem({ id: 'cmd:toggle-paired-pane', group: 'navigation', rank: 89, label: 'Toggle paired pane (Chat ↔ Workqueue)', detail: 'Switch between paired Chat/Workqueue panes for the active target (Cmd/Ctrl+Shift+Y)', run: () => togglePairedPaneForActiveTarget() });
+  pushItem({
+    id: 'cmd:toggle-paired-target-lock',
+    group: 'navigation',
+    rank: 88,
+    label: 'Paired panes: Toggle target lock',
+    detail: 'When enabled, changing Chat/Workqueue agent updates the paired pane too',
+    run: () => {
+      const next = !isPairedTargetLockEnabled();
+      setPairedTargetLockEnabled(next);
+      showToast(next ? 'Paired target lock enabled' : 'Paired target lock disabled', { kind: 'info', timeoutMs: 1800 });
+    }
+  });
   pushItem({ id: 'cmd:fleet-first-needs-attention', group: 'agents', rank: 90, label: 'Fleet: Focus first needs attention', detail: 'Open/focus Fleet and preselect the first needs-attention agent', run: () => focusFleetFirstNeedsAttention() });
   pushItem({ id: 'cmd:refresh-agents', group: 'agents', rank: 88, label: 'Agents: Refresh', detail: 'Refresh agent list', run: () => globalElements.refreshAgentsBtn?.click?.() });
 
@@ -2177,6 +2255,21 @@ function agentsModalHandleKeydown(event) {
   if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && key === '.') {
     event.preventDefault();
     runAgentsModalTriageAction({ openTimeline: true });
+    return true;
+  }
+
+  if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && lower === 'y') {
+    event.preventDefault();
+    const row = selectAgentsModalRowByAgentId(agentsModalState.selectedAgentId, { fallbackToFirst: true, scroll: false });
+    const agentId = String(row?.dataset?.agentId || '').trim();
+    if (!agentId) {
+      showToast('Fleet: select an agent first.', { kind: 'info', timeoutMs: 1800 });
+      return true;
+    }
+    void copyTextToClipboard(agentId).then((ok) => {
+      if (ok) showToast(`Copied agent id: ${agentId}`, { kind: 'success', timeoutMs: 1800 });
+      else showToast('Could not copy agent id.', { kind: 'error', timeoutMs: 2200 });
+    });
     return true;
   }
 
@@ -3338,16 +3431,26 @@ function renderWorkqueuePaneItems(pane) {
     empty.hidden = hasItems;
     if (!hasItems) {
       const queue = String(pane.workqueue?.queue || '').trim() || 'dev-team';
+      const scope = String(pane.workqueue?.scope || 'all').trim().toLowerCase() || 'all';
       const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
       const statusLabel = statuses.length ? statuses.join(', ') : 'default';
       const query = String(pane.workqueue?.searchQuery || '').trim();
+      const hiddenByScope = itemsRaw.length > 0 && scopedItems.length === 0 && scope !== 'all';
+      const hiddenByStatus = scopedItems.length > 0
+        && quickFilteredItems.length > 0
+        && statusFilteredItems.length === 0
+        && statuses.length > 0
+        && statuses.length < WORKQUEUE_STATUSES.length;
+      const hiddenBySearch = statusFilteredItems.length > 0 && searchedItems.length === 0 && !!query;
       empty.innerHTML = `
         <div class="empty-state">
-          <div style="font-weight:700; margin-bottom:6px;">${query ? 'No items match this search.' : 'No items in this queue.'}</div>
-          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span></div>
+          <div style="font-weight:700; margin-bottom:6px;">${hiddenBySearch ? 'No items match this search.' : (itemsRaw.length ? 'Filters are hiding all items.' : 'No items in this queue.')}</div>
+          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Scope: <span class="mono">${escapeHtml(scope)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span></div>
           ${query ? `<div class="hint" style="margin-top:8px;">Search: <span class="mono">${escapeHtml(query)}</span></div>` : ''}
           <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
             ${query ? '<button type="button" class="secondary" data-wq-empty-clear-search>Clear search</button>' : ''}
+            ${hiddenByScope ? '<button type="button" class="secondary" data-wq-empty-reset-scope>Reset scope</button>' : ''}
+            ${hiddenByStatus ? '<button type="button" class="secondary" data-wq-empty-reset-status>Show all statuses</button>' : ''}
             <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
             <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
           </div>
@@ -3362,6 +3465,16 @@ function renderWorkqueuePaneItems(pane) {
         pane.workqueue.searchQuery = '';
         const input = pane.elements?.thread?.querySelector('[data-wq-item-search]');
         if (input) input.value = '';
+        renderWorkqueuePaneItems(pane);
+        paneManager.persistAdminPanes();
+      });
+      empty.querySelector('[data-wq-empty-reset-scope]')?.addEventListener('click', () => {
+        pane.workqueue.scope = 'all';
+        renderWorkqueuePaneItems(pane);
+        paneManager.persistAdminPanes();
+      });
+      empty.querySelector('[data-wq-empty-reset-status]')?.addEventListener('click', () => {
+        pane.workqueue.statusFilter = Array.from(WORKQUEUE_STATUSES);
         renderWorkqueuePaneItems(pane);
         paneManager.persistAdminPanes();
       });
@@ -3388,6 +3501,7 @@ function renderWorkqueuePaneItems(pane) {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'wq-row';
+    if (it.id) row.setAttribute('data-wq-item', it.id);
     if (isSelected) row.classList.add('selected');
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
@@ -3952,6 +4066,15 @@ renderPulse();
 const ADMIN_PANES_KEY = 'clawnsole.admin.panes.v1';
 // Layout is inferred from pane count; no manual layout toggle.
 const ADMIN_DEFAULT_AGENT_KEY = 'clawnsole.admin.agentId';
+const ADMIN_PAIRED_TARGET_LOCK_KEY = 'clawnsole.admin.pairedTargetLock.enabled';
+
+function isPairedTargetLockEnabled() {
+  return String(storage.get(ADMIN_PAIRED_TARGET_LOCK_KEY, '0')) === '1';
+}
+
+function setPairedTargetLockEnabled(enabled) {
+  storage.set(ADMIN_PAIRED_TARGET_LOCK_KEY, enabled ? '1' : '0');
+}
 
 function computeBaseDeviceLabel() {
   const base = globalElements.deviceId.value.trim() || 'device';
@@ -4779,8 +4902,25 @@ function paneShowSendGuard(pane, { origin, current, onConfirm } = {}) {
     pane.sendGuard.open = true;
     pane.sendGuard.onConfirm = typeof onConfirm === 'function' ? onConfirm : null;
   }
+  const returnBtn = row.querySelector('[data-pane-send-guard-return]');
+  if (returnBtn) {
+    returnBtn.hidden = String(origin?.paneType || '') === 'recent focus';
+  }
   row.hidden = false;
+  row.querySelector('[data-pane-send-guard-confirm]')?.focus?.();
   paneSetDestinationWarning(pane, true);
+}
+
+function paneReturnToDraftOrigin(pane) {
+  const origin = pane?.draftOrigin;
+  if (!origin) return;
+  const panes = paneManager?.panes || [];
+  const idx = panes.findIndex((p) => String(p?.key || '') === String(origin.paneId || ''));
+  const targetPane = idx >= 0 ? panes[idx] : null;
+  if (!targetPane) return;
+  paneDismissSendGuard(pane);
+  focusPaneIndex(idx);
+  paneManager?.focusPanePrimary?.(targetPane);
 }
 
 function paneSyncDraftOrigin(pane) {
@@ -4877,7 +5017,7 @@ async function paneSendChat(pane) {
       String(origin.targetAgent || '') !== String(currentOrigin.targetAgent || '')
     )
   );
-  if (draftMismatch) {
+  if (uiPrefs.draftOriginSendGuardEnabled && draftMismatch) {
     paneShowSendGuard(pane, {
       origin,
       current: currentOrigin,
@@ -4885,7 +5025,8 @@ async function paneSendChat(pane) {
         paneDismissSendGuard(pane);
         pane.draftOrigin = paneDraftCurrentOrigin(pane);
         paneSendChat(pane);
-      }
+      },
+      onReturn: () => paneReturnToDraftOrigin(pane)
     });
     return;
   }
@@ -5345,8 +5486,10 @@ function openAgentChooser(pane) {
   agentChooserState = { openForPaneKey: pane.key, el: backdrop };
 }
 
-function paneSetAgent(pane, nextAgentId) {
+function paneSetAgent(pane, nextAgentId, { skipPairedSync = false } = {}) {
   if (pane.role !== 'admin') return;
+  if (pane.kind !== 'chat' && pane.kind !== 'workqueue') return;
+  const prior = normalizeAgentId(pane.agentId || 'main');
   const next = normalizeAgentId(nextAgentId);
   if (next === pane.agentId) return;
   pane.agentId = next;
@@ -5371,6 +5514,17 @@ function paneSetAgent(pane, nextAgentId) {
   paneManager.persistAdminPanes();
   if (pane.connected) {
     pane.client.request('sessions.resolve', { key: pane.sessionKey() });
+  }
+
+  if (!skipPairedSync && isPairedTargetLockEnabled()) {
+    const oppositeKind = pane.kind === 'chat' ? 'workqueue' : 'chat';
+    const counterpart = (paneManager?.panes || []).find((candidate) => {
+      if (!candidate || candidate === pane || candidate.role !== 'admin' || candidate.kind !== oppositeKind) return false;
+      return normalizeAgentId(candidate.agentId || 'main') === prior;
+    });
+    if (counterpart && normalizeAgentId(counterpart.agentId || 'main') !== next) {
+      paneSetAgent(counterpart, next, { skipPairedSync: true });
+    }
   }
 }
 
@@ -7016,12 +7170,16 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, qu
       guard.innerHTML = `
         <div class="send-guard-msg" data-pane-send-guard-msg></div>
         <div class="send-guard-actions">
+          <button type="button" class="secondary" data-pane-send-guard-return data-testid="pane-send-guard-return">Return to origin pane</button>
           <button type="button" class="secondary" data-pane-send-guard-confirm data-testid="pane-send-guard-confirm">Send anyway</button>
           <button type="button" class="secondary" data-pane-send-guard-cancel data-testid="pane-send-guard-cancel">Cancel</button>
         </div>
       `;
       stack.insertBefore(guard, elements.commandHints || null);
 
+      guard.querySelector('[data-pane-send-guard-return]')?.addEventListener('click', () => {
+        paneReturnToDraftOrigin(pane);
+      });
       guard.querySelector('[data-pane-send-guard-confirm]')?.addEventListener('click', () => {
         const fn = pane.sendGuard?.onConfirm;
         if (typeof fn === 'function') fn();
@@ -7809,6 +7967,10 @@ globalElements.sendGuardRecentFocusEnabled?.addEventListener('change', () => {
   uiPrefs.recentFocusSendGuardEnabled = !!globalElements.sendGuardRecentFocusEnabled.checked;
   storage.set(SEND_GUARD_RECENT_FOCUS_ENABLED_KEY, uiPrefs.recentFocusSendGuardEnabled ? '1' : '0');
 });
+globalElements.sendGuardDraftOriginEnabled?.addEventListener('change', () => {
+  uiPrefs.draftOriginSendGuardEnabled = !!globalElements.sendGuardDraftOriginEnabled.checked;
+  storage.set(SEND_GUARD_DRAFT_ORIGIN_ENABLED_KEY, uiPrefs.draftOriginSendGuardEnabled ? '1' : '0');
+});
 
 globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
 globalElements.shortcutsModal?.addEventListener('click', (event) => {
@@ -8202,6 +8364,93 @@ function focusWorkqueueControlByShortcut(target) {
   return true;
 }
 
+function getVisibleWorkqueueRows(pane) {
+  const thread = pane?.elements?.thread;
+  if (!thread) return [];
+  return Array.from(thread.querySelectorAll('.wq-row[data-wq-item]')).filter((row) => row instanceof HTMLElement && isPaneElementVisible(row));
+}
+
+function getSelectedWorkqueueRow(pane) {
+  const selectedId = String(pane?.workqueue?.selectedItemId || '').trim();
+  if (!selectedId) return null;
+  return pane?.elements?.thread?.querySelector?.(`.wq-row[data-wq-item="${CSS.escape(selectedId)}"]`) || null;
+}
+
+async function quickTransitionSelectedWorkqueueItem(pane, nextStatus) {
+  const selectedId = String(pane?.workqueue?.selectedItemId || '').trim();
+  if (!selectedId) {
+    toast('Workqueue triage: select a row first.', 'info');
+    return;
+  }
+  try {
+    const res = await fetch('/api/workqueue/update', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: selectedId, patch: { status: nextStatus } })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await fetchAndRenderWorkqueueItemsForPane(pane);
+    renderWorkqueuePaneItems(pane);
+    const selectedItem = (Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : []).find((it) => it?.id === pane.workqueue.selectedItemId) || null;
+    renderWorkqueuePaneInspect(pane, selectedItem);
+    paneManager.persistAdminPanes();
+    toast(`Workqueue triage: moved item to ${nextStatus}.`, 'ok');
+  } catch (err) {
+    toast(`Workqueue triage failed: ${String(err)}`, 'err');
+  }
+}
+
+function handleWorkqueueTriageShortcut(event) {
+  if (event.metaKey || event.ctrlKey || event.altKey) return false;
+  const pane = paneManager.getActivePane();
+  if (pane?.kind !== 'workqueue') return false;
+
+  const key = String(event.key || '').toLowerCase();
+  const rows = getVisibleWorkqueueRows(pane);
+  if (!rows.length) return false;
+
+  const selectedRow = getSelectedWorkqueueRow(pane) || rows[0];
+  const currentIdx = Math.max(0, rows.findIndex((row) => row === selectedRow));
+
+  if (key === 'j' || key === 'k') {
+    event.preventDefault();
+    const delta = key === 'j' ? 1 : -1;
+    const nextRow = rows[(currentIdx + delta + rows.length) % rows.length] || rows[0];
+    const nextId = String(nextRow.getAttribute('data-wq-item') || '').trim();
+    if (!nextId) return true;
+    pane.workqueue.selectedItemId = nextId;
+    renderWorkqueuePaneItems(pane);
+    const selectedItem = (Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : []).find((it) => it?.id === nextId) || null;
+    renderWorkqueuePaneInspect(pane, selectedItem);
+    paneManager.persistAdminPanes();
+    return true;
+  }
+
+  if (key === 'enter' && !event.shiftKey) {
+    event.preventDefault();
+    selectedRow.click();
+    return true;
+  }
+
+  const statusByKey = {
+    r: 'ready',
+    p: 'pending',
+    c: 'claimed',
+    i: 'in_progress',
+    d: 'done',
+    f: 'failed'
+  };
+  const nextStatus = statusByKey[key];
+  if (nextStatus) {
+    event.preventDefault();
+    void quickTransitionSelectedWorkqueueItem(pane, nextStatus);
+    return true;
+  }
+
+  return false;
+}
+
 window.addEventListener('keydown', (event) => {
   const isEditableTarget = (() => {
     const el = event.target;
@@ -8315,6 +8564,9 @@ window.addEventListener('keydown', (event) => {
       }
     }
   }
+
+  // Workqueue row triage mode: j/k navigation, Enter inspect, r/p/c/i/d/f quick status.
+  if (handleWorkqueueTriageShortcut(event)) return;
 
   // Alt+1..9 focuses panes by visible on-screen order.
   if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
