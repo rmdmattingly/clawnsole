@@ -19,6 +19,10 @@ test('agent chooser: opens, shows agents, Esc closes', async ({ page }) => {
   installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
 
   await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.evaluate(() => {
+    localStorage.removeItem('clawnsole.admin.panes.v1');
+    localStorage.removeItem('clawnsole.admin.agentId');
+  });
   await page.fill('#loginPassword', 'admin');
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
@@ -70,4 +74,46 @@ test('agent chooser: opens, shows agents, Esc closes', async ({ page }) => {
   await expect(chooser).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(chooser).toHaveCount(0);
+});
+
+test('paired target lock: ON syncs chat target to paired workqueue; OFF does not', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const chatPane = page.locator('[data-pane]').first();
+  const wqPane = page.locator('[data-pane]').nth(1);
+  const lockBtn = chatPane.getByTestId('pane-target-lock');
+  const chatTargetBtn = chatPane.getByTestId('pane-agent-button');
+
+  await expect(lockBtn).toContainText(/unlocked/i);
+  await lockBtn.click();
+  await expect(lockBtn).toContainText(/linked/i);
+
+  await chatTargetBtn.click();
+  const chooser = page.getByRole('dialog', { name: 'Choose agent' });
+  await chooser.getByRole('button', { name: /dev/i }).click();
+  await expect(chooser).toHaveCount(0);
+
+  await expect
+    .poll(async () => wqPane.getByTestId('pane-agent-select').inputValue())
+    .toBe('dev');
+
+  await lockBtn.click();
+  await expect(lockBtn).toContainText(/unlocked/i);
+
+  await chatTargetBtn.click();
+  const secondChooser = page.getByRole('dialog', { name: 'Choose agent' });
+  await secondChooser.getByRole('button', { name: /main/i }).click();
+  await expect(secondChooser).toHaveCount(0);
+
+  await expect
+    .poll(async () => wqPane.getByTestId('pane-agent-select').inputValue())
+    .toBe('dev');
 });

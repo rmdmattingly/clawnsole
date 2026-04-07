@@ -1425,6 +1425,94 @@ function paneSearchText(pane) {
     .toLowerCase();
 }
 
+function panePairContextKey(pane) {
+  if (!pane) return '';
+  const kind = String(pane.kind || 'chat');
+  if (kind !== 'chat' && kind !== 'workqueue') return '';
+  return normalizeAgentId(pane.agentId || 'main');
+}
+
+function paneCounterpartKind(kind) {
+  if (kind === 'chat') return 'workqueue';
+  if (kind === 'workqueue') return 'chat';
+  return '';
+}
+
+function findPairedPane(sourcePane, panes = [], { contextKey } = {}) {
+  if (!sourcePane) return null;
+  const counterpartKind = paneCounterpartKind(String(sourcePane.kind || ''));
+  if (!counterpartKind) return null;
+  const pairContextKey = contextKey || panePairContextKey(sourcePane);
+  return panes.find((entry) =>
+    entry &&
+    entry !== sourcePane &&
+    String(entry.kind || '') === counterpartKind &&
+    panePairContextKey(entry) === pairContextKey
+  ) || null;
+}
+
+function paneSupportsTargetLock(pane) {
+  if (!pane || pane.role !== 'admin') return false;
+  return pane.kind === 'chat' || pane.kind === 'workqueue';
+}
+
+function renderPaneTargetLockChip(pane) {
+  const chip = pane?.elements?.agentPill;
+  if (!chip) return;
+  if (!paneSupportsTargetLock(pane)) {
+    chip.hidden = true;
+    return;
+  }
+  const locked = !!pane.pairedTargetLock;
+  chip.hidden = false;
+  chip.textContent = locked ? '🔒 Linked' : 'Unlocked';
+  chip.setAttribute('aria-pressed', locked ? 'true' : 'false');
+  chip.setAttribute('aria-label', locked ? 'Target lock enabled; click to unlock' : 'Target lock disabled; click to link paired panes');
+  chip.title = locked
+    ? 'Linked: changing this pane target also retargets its paired pane'
+    : 'Unlocked: this pane target changes independently';
+}
+
+function paneToggleTargetLock(pane) {
+  if (!paneSupportsTargetLock(pane)) return;
+  pane.pairedTargetLock = !pane.pairedTargetLock;
+  renderPaneTargetLockChip(pane);
+  paneManager.persistAdminPanes();
+  toast(pane.pairedTargetLock ? 'Target lock enabled.' : 'Target lock disabled.', 'info');
+}
+
+function syncPairedPaneTarget(sourcePane, nextAgentId, { previousAgentId } = {}) {
+  if (!paneSupportsTargetLock(sourcePane) || !sourcePane.pairedTargetLock) return;
+  const previousContextKey = previousAgentId ? normalizeAgentId(previousAgentId) : '';
+  const paired = findPairedPane(sourcePane, paneManager?.panes || [], {
+    contextKey: previousContextKey || panePairContextKey(sourcePane)
+  });
+  if (!paired || !paneSupportsTargetLock(paired)) {
+    toast('No compatible paired pane to sync.', 'info');
+    return;
+  }
+  paneSetAgent(paired, nextAgentId, {
+    requireDraftConfirm: false,
+    syncFromPaneKey: sourcePane.key
+  });
+}
+
+function focusOrOpenPairedPane(sourcePane) {
+  if (!sourcePane) return;
+  const panes = paneManager?.panes || [];
+  const counterpartKind = paneCounterpartKind(String(sourcePane.kind || ''));
+  if (!counterpartKind) return;
+
+  let paired = findPairedPane(sourcePane, panes);
+  if (!paired) {
+    const contextKey = panePairContextKey(sourcePane) || 'main';
+    paired = paneManager.addPane(counterpartKind, { agentId: contextKey });
+  }
+  if (!paired) return;
+  const idx = (paneManager?.panes || []).findIndex((pane) => pane.key === paired.key);
+  if (idx >= 0) focusPaneIndex(idx);
+}
+
 function paneGroupOrder(kind) {
   const order = { chat: 0, workqueue: 1, cron: 2, timeline: 3 };
   return Number.isInteger(order[kind]) ? order[kind] : 99;
@@ -1532,6 +1620,13 @@ function renderPaneManager() {
         const isDuplicate = duplicateCount > 1;
         const unreadCount = paneUnreadCount(pane);
         const paneIdentity = paneSummaryLabel(pane);
+        const pairedPane = findPairedPane(pane, panes);
+        const hasPaired = !!pairedPane;
+        const canPair = !!paneCounterpartKind(String(pane?.kind || ''));
+        const pairedLabel = canPair ? (hasPaired ? 'Paired' : 'Open paired') : '';
+        const pairedTitle = hasPaired
+          ? `Focus ${paneSummaryLabel(pairedPane)}`
+          : (canPair ? `Open ${paneLabel({ kind: paneCounterpartKind(String(pane?.kind || '')) })} pane for this target` : '');
 
         row.innerHTML = `
           <div class="pane-manager-main">
@@ -1548,6 +1643,7 @@ function renderPaneManager() {
             <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="Move pane up" aria-label="Move pane up" ${visibleIdx === 0 ? 'disabled' : ''}>↑</button>
             <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="Move pane down" aria-label="Move pane down" ${visibleIdx === visibleKeys.length - 1 ? 'disabled' : ''}>↓</button>
             ${isDuplicate ? '<button class="secondary pane-manager-close-others" type="button" data-action="close-others" data-testid="pane-manager-close-others">Close others</button>' : ''}
+            ${canPair ? `<button class="secondary pane-manager-paired" type="button" data-action="paired" data-testid="pane-manager-paired" title="${escapeHtml(pairedTitle)}" aria-label="${escapeHtml(pairedLabel)}">${escapeHtml(pairedLabel)}</button>` : ''}
             <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
             <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
           </div>
@@ -1596,6 +1692,11 @@ function renderPaneManager() {
               } catch {}
             });
             renderPaneManager();
+            return;
+          }
+          if (action === 'paired') {
+            closePaneManager();
+            focusOrOpenPairedPane(pane);
             return;
           }
           closePaneManager();
@@ -1768,6 +1869,18 @@ function buildCommandPaletteItems() {
       )
     );
   });
+
+  const focusedKey = focusedPaneKey();
+  const focusedPane = paneManager.panes.find((p) => p?.key === focusedKey) || paneManager.panes[0] || null;
+  if (paneSupportsTargetLock(focusedPane)) {
+    const nextLabel = focusedPane.pairedTargetLock ? 'Disable' : 'Enable';
+    items.push(withShortcut({
+      id: 'cmd:toggle-target-lock',
+      label: `Pane: ${nextLabel} target lock`,
+      detail: `${paneLabel(focusedPane)} · ${paneTargetLabel(focusedPane)}`,
+      run: () => paneToggleTargetLock(focusedPane)
+    }, '⌘/Ctrl+Shift+L'));
+  }
 
   // Core open actions for all enabled pane types.
   items.push(
@@ -4962,10 +5075,11 @@ function paneSetDestinationStrip(pane) {
   valueEl.textContent = displayText;
 }
 
-function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true } = {}) {
+function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true, syncFromPaneKey = '' } = {}) {
   if (pane.role !== 'admin') return;
   const next = normalizeAgentId(nextAgentId);
   if (next === pane.agentId) return;
+  const previous = pane.agentId;
 
   if (requireDraftConfirm && pane.kind === 'chat' && paneHasDraftChanges(pane)) {
     const nextAgent = getAgentRecord(next);
@@ -4976,21 +5090,37 @@ function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true } = {}) {
 
   pane.agentId = next;
   markAgentSeen(next);
-  storage.set(ADMIN_DEFAULT_AGENT_KEY, next);
+  if (pane.kind === 'chat') {
+    storage.set(ADMIN_DEFAULT_AGENT_KEY, next);
+  }
   try {
+    renderAgentOptions(pane.elements.agentSelect, next);
     if (pane.elements.agentSelect) pane.elements.agentSelect.value = next;
   } catch {}
-  renderPaneAgentIdentity(pane);
 
-  pane.attachments.files = [];
-  paneRenderAttachments(pane);
-  paneStopThinking(pane);
-  paneClearChatHistory(pane, { wipeStorage: false });
-  paneRestoreChatHistory(pane);
-  paneSetChatEnabled(pane);
+  if (pane.kind === 'chat') {
+    renderPaneAgentIdentity(pane);
+    pane.attachments.files = [];
+    paneRenderAttachments(pane);
+    paneStopThinking(pane);
+    paneClearChatHistory(pane, { wipeStorage: false });
+    paneRestoreChatHistory(pane);
+    paneSetChatEnabled(pane);
+  } else {
+    renderPaneIdentity(pane);
+    renderPaneTargetLockChip(pane);
+    if (pane.kind === 'workqueue') {
+      renderWorkqueuePaneItems(pane);
+    }
+  }
 
   paneManager.persistAdminPanes();
-  if (pane.connected) {
+
+  if (!syncFromPaneKey || syncFromPaneKey !== pane.key) {
+    syncPairedPaneTarget(pane, next, { previousAgentId: previous });
+  }
+
+  if (pane.kind === 'chat' && pane.connected) {
     pane.client.request('sessions.resolve', { key: pane.sessionKey() });
   }
 }
@@ -5030,7 +5160,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, cronAgentId, pairedTargetLock = false, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -5045,6 +5175,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     agentButton: root.querySelector('[data-pane-agent-button]'),
     agentLabel: root.querySelector('[data-pane-agent-label]'),
     agentWarning: root.querySelector('[data-pane-agent-warning]'),
+    agentPill: root.querySelector('[data-pane-agent-pill]'),
     status: root.querySelector('[data-pane-status]'),
     helpDetails: root.querySelector('[data-pane-help]'),
     helpPopover: root.querySelector('[data-pane-help-popover]'),
@@ -5094,6 +5225,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     elements,
     chat: { runs: new Map(), history: [] },
     unreadCount: 0,
+    pairedTargetLock: !!pairedTargetLock,
     scroll: { pinned: true },
     thinking: { active: false, timer: null, dotsTimer: null, bubble: null },
     activeRunId: null,
@@ -5233,6 +5365,16 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       value: String(pane.workqueue.queue || 'dev-team'),
       ariaLabel: `Change queue (current: ${String(pane.workqueue.queue || 'dev-team')})`
     });
+    renderAgentOptions(elements.agentSelect, pane.agentId);
+    if (elements.agentSelect) {
+      try {
+        elements.agentSelect.value = pane.agentId;
+      } catch {}
+    }
+    if (elements.agentPill) {
+      elements.agentPill.addEventListener('click', () => paneToggleTargetLock(pane));
+    }
+    renderPaneTargetLockChip(pane);
 
     // Replace thread with workqueue list + inspect.
     elements.thread.classList.add('wq-pane');
@@ -6393,6 +6535,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       paneSetAgent(pane, String(event.target.value || '').trim());
     });
 
+    if (elements.agentPill) {
+      elements.agentPill.addEventListener('click', () => paneToggleTargetLock(pane));
+    }
+    renderPaneTargetLockChip(pane);
+
     paneSetDestinationStrip(pane);
   } else {
     if (elements.agentWrap) elements.agentWrap.hidden = true;
@@ -6478,8 +6625,10 @@ const paneManager = {
         queue: cfg.queue,
         statusFilter: cfg.statusFilter,
         scopeFilter: cfg.scopeFilter,
+        quickFilters: cfg.quickFilters,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
+        pairedTargetLock: cfg.pairedTargetLock,
         closable: true
       })
     );
@@ -6517,6 +6666,7 @@ const paneManager = {
             : 'chat';
         if (!key) return null;
         if (kind === 'workqueue') {
+          const pairedTargetLock = !!item.pairedTargetLock;
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
@@ -6528,17 +6678,17 @@ const paneManager = {
           };
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir };
+          return { key, kind, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, pairedTargetLock };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
         }
         const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
-        return { key, kind: 'chat', agentId };
+        return { key, kind: 'chat', agentId, pairedTargetLock: !!item.pairedTargetLock };
       }
       // Super-legacy format: ['pabc','pdef'] (treat as chat panes)
       if (typeof item === 'string' && item) {
-        return { key: item, kind: 'chat', agentId: defaultAgent };
+        return { key: item, kind: 'chat', agentId: defaultAgent, pairedTargetLock: false };
       }
       return null;
     };
@@ -6576,6 +6726,7 @@ const paneManager = {
         return {
           key: pane.key,
           kind: 'workqueue',
+          pairedTargetLock: !!pane.pairedTargetLock,
           queue: pane.workqueue?.queue || 'dev-team',
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
           scopeFilter: pane.workqueue?.scopeFilter || 'all',
@@ -6590,7 +6741,7 @@ const paneManager = {
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
         return { key: pane.key, kind: pane.kind };
       }
-      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
+      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main', pairedTargetLock: !!pane.pairedTargetLock };
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
@@ -7412,6 +7563,17 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     openFleetPane();
     return;
+  }
+
+  // Cmd/Ctrl+Shift+L toggles paired target lock on focused Chat/Workqueue pane.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'l') {
+    const focusedKey = focusedPaneKey();
+    const pane = paneManager.panes.find((p) => p?.key === focusedKey) || paneManager.panes[0] || null;
+    if (paneSupportsTargetLock(pane)) {
+      event.preventDefault();
+      paneToggleTargetLock(pane);
+      return;
+    }
   }
 
   // Cmd/Ctrl+R refreshes agent list (instead of page reload).
