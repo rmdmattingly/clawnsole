@@ -255,3 +255,49 @@ test('pane manager: supports reordering panes', async ({ page }) => {
   const persisted = await rowKeys();
   expect(persisted).toEqual(after);
 });
+
+test('pane manager: paired focuses existing counterpart pane', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.keyboard.press('Control+P');
+  const workqueueRow = page.locator('.pane-manager-row', { hasText: 'Workqueue' }).first();
+  await workqueueRow.getByTestId('pane-manager-paired').click();
+
+  const focusedPaneKind = await page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    const activePane = panes.find((p) => p === active || (active && p.contains(active)));
+    return activePane?.getAttribute('data-pane-kind') || '';
+  });
+  expect(focusedPaneKind).toBe('chat');
+});
+
+test('pane manager: paired opens counterpart when missing', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.locator('[data-pane][data-pane-kind="workqueue"]').first().locator('[data-pane-close]').click();
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(0);
+
+  await page.keyboard.press('Control+P');
+  const chatRow = page.locator('.pane-manager-row', { hasText: 'Chat' }).first();
+  await expect(chatRow.getByTestId('pane-manager-paired')).toHaveText('Open paired');
+  await chatRow.getByTestId('pane-manager-paired').click();
+
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+});
