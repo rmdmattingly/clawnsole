@@ -397,6 +397,7 @@ let agentAutoRefreshInterval = null;
 let agentsModalAutoRefreshInterval = null;
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
+let agentsModalSelectedAgentId = '';
 
 function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
@@ -2028,8 +2029,36 @@ function openAgentsModal() {
 function closeAgentsModal() {
   globalElements.agentsModal?.classList.remove('open');
   globalElements.agentsModal?.setAttribute('aria-hidden', 'true');
+  agentsModalSelectedAgentId = '';
   stopAgentsModalAutoRefresh();
   stopAgentsModalFreshnessTicker();
+}
+
+function setAgentsModalSelectedAgent(agentId) {
+  agentsModalSelectedAgentId = String(agentId || '').trim();
+  const rows = Array.from(document.querySelectorAll('#agentsList .agents-row[data-agent-row-id]'));
+  rows.forEach((row) => {
+    const id = String(row.getAttribute('data-agent-row-id') || '').trim();
+    const active = !!id && id === agentsModalSelectedAgentId;
+    row.classList.toggle('agents-row-active', active);
+    row.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+}
+
+function moveAgentsModalSelection(delta) {
+  const rows = Array.from(document.querySelectorAll('#agentsList .agents-row[data-agent-row-id]'));
+  if (!rows.length) return;
+
+  let idx = rows.findIndex((row) => String(row.getAttribute('data-agent-row-id') || '') === agentsModalSelectedAgentId);
+  if (idx < 0) idx = 0;
+  const nextIdx = ((idx + Number(delta || 0)) % rows.length + rows.length) % rows.length;
+  const nextRow = rows[nextIdx];
+  const nextId = String(nextRow?.getAttribute('data-agent-row-id') || '').trim();
+  if (!nextId) return;
+  setAgentsModalSelectedAgent(nextId);
+  try {
+    nextRow.scrollIntoView({ block: 'nearest' });
+  } catch {}
 }
 
 function findExistingPane(kind, predicate = null) {
@@ -2169,6 +2198,9 @@ function renderAgentsModalList() {
       const id = String(agent?.id || '').trim();
       const row = document.createElement('div');
       row.className = 'agents-row';
+      row.setAttribute('data-agent-row-id', id);
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', 'false');
 
       const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
@@ -2222,6 +2254,8 @@ function renderAgentsModalList() {
         });
       });
 
+      row.addEventListener('click', () => setAgentsModalSelectedAgent(id));
+
       list.appendChild(row);
     }
 
@@ -2234,6 +2268,19 @@ function renderAgentsModalList() {
 
   const empty = pinned.length === 0 && rest.length === 0;
   if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
+
+  if (empty) {
+    agentsModalSelectedAgentId = '';
+    return;
+  }
+
+  const rows = Array.from(root.querySelectorAll('.agents-row[data-agent-row-id]'));
+  const hasCurrent = rows.some((row) => String(row.getAttribute('data-agent-row-id') || '').trim() === agentsModalSelectedAgentId);
+  if (!hasCurrent) {
+    const firstId = String(rows[0]?.getAttribute('data-agent-row-id') || '').trim();
+    agentsModalSelectedAgentId = firstId;
+  }
+  setAgentsModalSelectedAgent(agentsModalSelectedAgentId);
 }
 
 // Workqueue (admin-only)
@@ -6754,6 +6801,32 @@ globalElements.agentsBtn?.addEventListener('click', () => openAgentsModal());
 globalElements.agentsCloseBtn?.addEventListener('click', () => closeAgentsModal());
 globalElements.agentsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.agentsModal) closeAgentsModal();
+});
+globalElements.agentsModal?.addEventListener('keydown', (event) => {
+  if (!globalElements.agentsModal?.classList?.contains('open')) return;
+
+  const target = event.target;
+  const isEditable =
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable);
+
+  if (!isEditable && !event.metaKey && !event.ctrlKey && !event.altKey && (event.key === 'j' || event.key === 'k')) {
+    event.preventDefault();
+    event.stopPropagation();
+    moveAgentsModalSelection(event.key === 'j' ? 1 : -1);
+    return;
+  }
+
+  if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    const selected = agentsModalSelectedAgentId;
+    if (!selected) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.shiftKey) openAgentWorkqueueFromFleet();
+    else openAgentChatFromFleet(selected);
+  }
 });
 
 globalElements.agentsSearch?.addEventListener('input', () => renderAgentsModalList());

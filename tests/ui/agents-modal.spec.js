@@ -83,3 +83,26 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
 });
+
+test('agents modal keyboard triage loop supports j/k + enter/shift+enter', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  // Ensure key events hit modal container (not the search input).
+  await page.locator('#agentsModal').click();
+
+  await expect(page.locator('#agentsList .agents-row.agents-row-active')).toHaveCount(1);
+
+  await page.keyboard.press('j');
+  await expect(page.locator('#agentsList .agents-row.agents-row-active')).toHaveCount(1);
+
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]').first()).toBeVisible();
+
+  await page.keyboard.press('Shift+Enter');
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+});
