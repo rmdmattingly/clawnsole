@@ -1423,6 +1423,48 @@ function paneSearchText(pane) {
     .toLowerCase();
 }
 
+function panePairContextKey(pane) {
+  if (!pane) return '';
+  const kind = String(pane.kind || 'chat');
+  if (kind !== 'chat' && kind !== 'workqueue') return '';
+  return normalizeAgentId(pane.agentId || 'main');
+}
+
+function paneCounterpartKind(kind) {
+  if (kind === 'chat') return 'workqueue';
+  if (kind === 'workqueue') return 'chat';
+  return '';
+}
+
+function findPairedPane(sourcePane, panes = []) {
+  if (!sourcePane) return null;
+  const counterpartKind = paneCounterpartKind(String(sourcePane.kind || ''));
+  if (!counterpartKind) return null;
+  const contextKey = panePairContextKey(sourcePane);
+  return panes.find((entry) =>
+    entry &&
+    entry !== sourcePane &&
+    String(entry.kind || '') === counterpartKind &&
+    panePairContextKey(entry) === contextKey
+  ) || null;
+}
+
+function focusOrOpenPairedPane(sourcePane) {
+  if (!sourcePane) return;
+  const panes = paneManager?.panes || [];
+  const counterpartKind = paneCounterpartKind(String(sourcePane.kind || ''));
+  if (!counterpartKind) return;
+
+  let paired = findPairedPane(sourcePane, panes);
+  if (!paired) {
+    const contextKey = panePairContextKey(sourcePane) || 'main';
+    paired = paneManager.addPane(counterpartKind, { agentId: contextKey });
+  }
+  if (!paired) return;
+  const idx = (paneManager?.panes || []).findIndex((pane) => pane.key === paired.key);
+  if (idx >= 0) focusPaneIndex(idx);
+}
+
 function paneGroupOrder(kind) {
   const order = { chat: 0, workqueue: 1, cron: 2, timeline: 3 };
   return Number.isInteger(order[kind]) ? order[kind] : 99;
@@ -1528,6 +1570,13 @@ function renderPaneManager() {
         const isDuplicate = duplicateCount > 1;
         const unreadCount = paneUnreadCount(pane);
         const paneIdentity = paneSummaryLabel(pane);
+        const pairedPane = findPairedPane(pane, panes);
+        const hasPaired = !!pairedPane;
+        const canPair = !!paneCounterpartKind(String(pane?.kind || ''));
+        const pairedLabel = canPair ? (hasPaired ? 'Paired' : 'Open paired') : '';
+        const pairedTitle = hasPaired
+          ? `Focus ${paneSummaryLabel(pairedPane)}`
+          : (canPair ? `Open ${paneLabel({ kind: paneCounterpartKind(String(pane?.kind || '')) })} pane for this target` : '');
 
         row.innerHTML = `
           <div class="pane-manager-main">
@@ -1543,6 +1592,7 @@ function renderPaneManager() {
             <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="Move pane up" aria-label="Move pane up" ${visibleIdx === 0 ? 'disabled' : ''}>↑</button>
             <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="Move pane down" aria-label="Move pane down" ${visibleIdx === visibleKeys.length - 1 ? 'disabled' : ''}>↓</button>
             ${isDuplicate ? '<button class="secondary pane-manager-close-others" type="button" data-action="close-others" data-testid="pane-manager-close-others">Close others</button>' : ''}
+            ${canPair ? `<button class="secondary pane-manager-paired" type="button" data-action="paired" data-testid="pane-manager-paired" title="${escapeHtml(pairedTitle)}" aria-label="${escapeHtml(pairedLabel)}">${escapeHtml(pairedLabel)}</button>` : ''}
             <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
             <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
           </div>
@@ -1591,6 +1641,11 @@ function renderPaneManager() {
               } catch {}
             });
             renderPaneManager();
+            return;
+          }
+          if (action === 'paired') {
+            closePaneManager();
+            focusOrOpenPairedPane(pane);
             return;
           }
           closePaneManager();
