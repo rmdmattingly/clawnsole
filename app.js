@@ -967,7 +967,8 @@ function renderPaneManager() {
       </div>
     `;
 
-    row.addEventListener('mousemove', () => {
+    row.addEventListener('mouseenter', () => {
+      if (paneManagerUiState.selectedIndex === idx) return;
       paneManagerUiState.selectedIndex = idx;
       renderPaneManager();
     });
@@ -984,8 +985,12 @@ function renderPaneManager() {
       }
       if (action === 'paired') {
         const ok = paired?.run?.();
-        if (!ok) showToast('No valid Chat/Workqueue pair for this pane.', { kind: 'error', timeoutMs: 2200 });
-        renderPaneManager();
+        if (!ok) {
+          showToast('No valid Chat/Workqueue pair for this pane.', { kind: 'error', timeoutMs: 2200 });
+          renderPaneManager();
+          return;
+        }
+        closePaneManager({ restoreFocus: false });
         return;
       }
       // Default: focus

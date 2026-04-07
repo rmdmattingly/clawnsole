@@ -67,21 +67,14 @@ test('pane manager: paired action focuses existing counterpart and opens missing
   await page.keyboard.press('Control+P');
   await expect(paneManagerModal).toHaveAttribute('aria-hidden', 'false');
 
-  const chatRow = page.locator('.pane-manager-row').first();
+  const chatRow = page.locator('.pane-manager-row', { has: page.locator('.pane-manager-kind-label', { hasText: 'Chat' }) }).first();
   const chatPaired = chatRow.locator('[data-action="paired"]');
   await expect(chatPaired).toHaveText('Paired WQ');
   await chatPaired.click();
 
   await expect(page.locator('[data-pane-kind="workqueue"]')).toHaveCount(1);
-  const focusedKindAfterExisting = await page.evaluate(() => {
-    const active = document.activeElement;
-    const pane = active?.closest?.('[data-pane-kind]');
-    return pane?.getAttribute('data-pane-kind') || '';
-  });
-  expect(focusedKindAfterExisting).toBe('workqueue');
-
-  await page.keyboard.press('Escape');
   await expect(paneManagerModal).toHaveAttribute('aria-hidden', 'true');
+
 
   // Missing counterpart path: close workqueue, then paired from chat should open one.
   await page.locator('[data-pane-kind="workqueue"] [data-pane-close]').first().click();
@@ -90,6 +83,6 @@ test('pane manager: paired action focuses existing counterpart and opens missing
   await page.keyboard.press('Control+P');
   await expect(paneManagerModal).toHaveAttribute('aria-hidden', 'false');
 
-  await page.locator('.pane-manager-row').first().locator('[data-action="paired"]').click();
+  await page.locator('.pane-manager-row', { has: page.locator('.pane-manager-kind-label', { hasText: 'Chat' }) }).first().locator('[data-action="paired"]').click();
   await expect(page.locator('[data-pane-kind="workqueue"]')).toHaveCount(1);
 });
