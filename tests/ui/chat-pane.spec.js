@@ -77,3 +77,28 @@ test('chat pane: stop button can cancel a running response', async ({ page }) =>
   // Cancel should not still emit a completed reply after stream is stopped.
   await expect(pane.locator('.chat-bubble.assistant')).not.toContainText('mock-reply: please stream this', { timeout: 3000 });
 });
+
+test('topbar workqueue action reuses paired pane for active chat target and falls back to modal', async ({ page }) => {
+  test.setTimeout(120000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  // Default layout already has Chat + Workqueue; with active chat focus,
+  // topbar Workqueue should focus/reuse the paired pane (not open modal).
+  const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  await chatPane.locator('[data-pane-input]').focus();
+
+  await page.locator('#workqueueBtn').click();
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('#workqueueModal')).not.toHaveClass(/open/);
+
+  // When a non-chat pane is active, preserve modal fallback behavior.
+  const workqueuePane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await workqueuePane.locator('[data-wq-queue-select]').focus();
+
+  await page.locator('#workqueueBtn').click();
+  await expect(page.locator('#workqueueModal')).toHaveClass(/open/);
+});
