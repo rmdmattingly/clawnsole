@@ -1828,6 +1828,26 @@ kbd {
   background: rgba(127, 209, 185, 0.12);
 }
 
+.wq-all-scope-guardrail {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 193, 102, 0.35);
+  background: rgba(255, 193, 102, 0.12);
+}
+
+.wq-all-scope-guardrail-copy {
+  font-size: 11px;
+  color: var(--text);
+}
+
+.wq-all-scope-guardrail[hidden] {
+  display: none !important;
+}
+
 .wq-enqueue {
   margin-top: 10px;
 }
