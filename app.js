@@ -4273,6 +4273,31 @@ function renderWorkqueuePaneItems(pane) {
     Number(pane.workqueue?.renderLimit || WORKQUEUE_PANE_INITIAL_RENDER_LIMIT)
   );
   const visibleItems = items.slice(0, renderLimit);
+  const scope = pane.workqueue?.scopeFilter || 'all';
+  const guardrailThreshold = getWorkqueueAllScopeGuardrailThreshold();
+
+  const guardrailEl = pane.elements?.thread?.querySelector('[data-wq-all-scope-guardrail]');
+  const shouldShowGuardrail = scope === 'all'
+    && items.length > guardrailThreshold
+    && !pane.workqueue?.allScopeGuardrailDismissed;
+  if (guardrailEl) {
+    if (shouldShowGuardrail) {
+      guardrailEl.hidden = false;
+      const countEl = guardrailEl.querySelector('[data-wq-all-scope-count]');
+      if (countEl) countEl.textContent = String(items.length);
+      if (!pane.workqueue?.allScopeGuardrailShownOnce) {
+        pane.workqueue.allScopeGuardrailShownOnce = true;
+        logWorkqueueGuardrailEvent('shown', {
+          paneId: pane.id,
+          queue: String(pane.workqueue?.queue || 'dev-team'),
+          count: items.length,
+          threshold: guardrailThreshold
+        });
+      }
+    } else {
+      guardrailEl.hidden = true;
+    }
+  }
 
   if (empty) {
     const hasItems = items.length > 0;
@@ -4864,6 +4889,19 @@ const ADMIN_PANES_KEY = 'clawnsole.admin.panes.v1';
 const ADMIN_LAYOUT_MODE_KEY = 'clawnsole.admin.layoutMode';
 const ADMIN_DEFAULT_AGENT_KEY = 'clawnsole.admin.agentId';
 const WORKQUEUE_SCOPE_PREF_KEY = 'clawnsole.admin.workqueue.scope.v1';
+const WORKQUEUE_ALL_SCOPE_GUARDRAIL_THRESHOLD_DEFAULT = 200;
+
+function getWorkqueueAllScopeGuardrailThreshold() {
+  const raw = Number(window?.CLAWNSOLE_CONFIG?.workqueueAllScopeGuardrailThreshold);
+  if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+  return WORKQUEUE_ALL_SCOPE_GUARDRAIL_THRESHOLD_DEFAULT;
+}
+
+function logWorkqueueGuardrailEvent(event, payload = {}) {
+  try {
+    console.info('[workqueue-guardrail]', JSON.stringify({ event, at: new Date().toISOString(), ...payload }));
+  } catch {}
+}
 
 function normalizeWorkqueueScope(scope) {
   return scope === 'assigned' || scope === 'unassigned' ? scope : 'all';
@@ -6299,6 +6337,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       countItems: [],
       selectedItemId: null,
       renderLimit: WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
+      allScopeGuardrailDismissed: false,
+      allScopeGuardrailShownOnce: false,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
       sortDir: sortDir === 'asc' ? 'asc' : 'desc'
     },
@@ -6518,6 +6558,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
           <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
           <button data-wq-clear-quick class="secondary" type="button">Clear filters</button>
+
+          <div class="wq-all-scope-guardrail" data-wq-all-scope-guardrail hidden>
+            <span class="wq-all-scope-guardrail-copy">Viewing all items (<span data-wq-all-scope-count>0</span>). Narrow scope?</span>
+            <button type="button" class="secondary" data-wq-all-scope-action="assigned">Assigned to active target</button>
+            <button type="button" class="secondary" data-wq-all-scope-action="unassigned">Unassigned</button>
+            <button type="button" class="ghost" data-wq-all-scope-dismiss>Dismiss</button>
+          </div>
+
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
 
           <div class="wq-sort" role="group" aria-label="Sort workqueue items">
@@ -6906,6 +6954,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const setScope = (scope) => {
       pane.workqueue.scopeFilter = normalizeWorkqueueScope(scope);
       resetRenderLimit();
+      pane.workqueue.allScopeGuardrailDismissed = false;
+      pane.workqueue.allScopeGuardrailShownOnce = false;
       storage.set(WORKQUEUE_SCOPE_PREF_KEY, pane.workqueue.scopeFilter);
       pane.workqueue.statusCounts = buildWorkqueueStatusCounts(filterWorkqueuePaneItemsByScope(pane, pane.workqueue.countItems));
       if (typeof pane.workqueue.renderStatusMultiSelect === 'function') pane.workqueue.renderStatusMultiSelect();
@@ -6915,6 +6965,28 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     };
     scopeBtns.forEach((btn) => {
       btn.addEventListener('click', () => setScope(btn.getAttribute('data-wq-scope')));
+    });
+
+    const allScopeGuardrailEl = elements.thread.querySelector('[data-wq-all-scope-guardrail]');
+    allScopeGuardrailEl?.querySelectorAll('[data-wq-all-scope-action]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const nextScope = String(btn.getAttribute('data-wq-all-scope-action') || '').trim();
+        logWorkqueueGuardrailEvent('action', {
+          paneId: pane.id,
+          queue: String(pane.workqueue?.queue || 'dev-team'),
+          fromScope: 'all',
+          toScope: nextScope
+        });
+        setScope(nextScope);
+      });
+    });
+    allScopeGuardrailEl?.querySelector('[data-wq-all-scope-dismiss]')?.addEventListener('click', () => {
+      pane.workqueue.allScopeGuardrailDismissed = true;
+      logWorkqueueGuardrailEvent('dismissed', {
+        paneId: pane.id,
+        queue: String(pane.workqueue?.queue || 'dev-team')
+      });
+      renderWorkqueuePaneItems(pane);
     });
     updateScopeUi();
 
