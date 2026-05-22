@@ -1306,8 +1306,9 @@ button.send-btn .btn-icon {
   grid-auto-columns: minmax(250px, 1fr);
   gap: 10px;
   padding: 10px;
-  max-height: 520px;
-  overflow: auto;
+  height: 520px;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .wq-board-col {
@@ -1317,6 +1318,7 @@ button.send-btn .btn-icon {
   display: flex;
   flex-direction: column;
   min-width: 250px;
+  min-height: 0;
 }
 
 .wq-board-col-header {
@@ -1326,6 +1328,9 @@ button.send-btn .btn-icon {
   padding: 10px 10px 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(0, 0, 0, 0.18);
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 .wq-board-col-title {
