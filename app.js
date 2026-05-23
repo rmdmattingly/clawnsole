@@ -1324,8 +1324,21 @@ function renderWorkqueuePaneItems(pane) {
   body.innerHTML = '';
 
   const itemsRaw = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
-  const items = sortWorkqueueItems(itemsRaw, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const scope = pane.workqueue?.scope === 'assigned' || pane.workqueue?.scope === 'unassigned' ? pane.workqueue.scope : 'all';
+  const target = normalizeAgentId(pane.agentId || 'main');
+  const scopedItems = itemsRaw.filter((it) => {
+    const assigned = String(it?.claimedBy || it?.assignedTo || it?.assignee || it?.meta?.assignedTo || it?.meta?.assignee || '').trim();
+    if (scope === 'assigned') return assigned && normalizeAgentId(assigned) === target;
+    if (scope === 'unassigned') return !assigned;
+    return true;
+  });
+  const items = sortWorkqueueItems(scopedItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
   if (empty) empty.hidden = items.length > 0;
+  const statusLine = pane.elements?.thread?.querySelector('[data-wq-statusline]');
+  if (statusLine) {
+    const scopeLabel = scope === 'assigned' ? `assigned:${target}` : scope;
+    statusLine.textContent = `${items.length} shown (${scopeLabel}) / ${itemsRaw.length} total`;
+  }
 
   const now = Date.now();
   for (const it of items) {
@@ -2974,7 +2987,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sortKey, sortDir, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sortKey, sortDir, scope = 'all', closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -3012,6 +3025,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
+      scope: scope === 'assigned' || scope === 'unassigned' ? scope : 'all',
       items: [],
       selectedItemId: null,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'default',
@@ -3099,6 +3113,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
 
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
 
+          <div class="wq-scope" role="group" aria-label="Workqueue scope">
+            <span class="wq-sort-label">Scope</span>
+            <button type="button" class="wq-sort-btn" data-wq-scope="assigned">Assigned</button>
+            <button type="button" class="wq-sort-btn" data-wq-scope="unassigned">Unassigned</button>
+            <button type="button" class="wq-sort-btn" data-wq-scope="all">All</button>
+          </div>
+
           <div class="wq-sort" role="group" aria-label="Sort workqueue items">
             <span class="wq-sort-label">Sort</span>
             <button type="button" class="wq-sort-btn" data-wq-sort="default">Default</button>
@@ -3179,6 +3200,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     const statusDetailsEl = elements.thread.querySelector('[data-wq-status-details]');
     const statusClearBtn = elements.thread.querySelector('[data-wq-status-clear]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
+    const scopeBtns = Array.from(elements.thread.querySelectorAll('[data-wq-scope]'));
 
     const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
 
@@ -3317,6 +3339,24 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
     queueCustomEl?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doRefresh();
     });
+
+    const updateScopeUi = () => {
+      scopeBtns.forEach((btn) => {
+        const isActive = String(btn.getAttribute('data-wq-scope') || 'all') === pane.workqueue.scope;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      });
+    };
+    scopeBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const next = String(btn.getAttribute('data-wq-scope') || 'all');
+        pane.workqueue.scope = next === 'assigned' || next === 'unassigned' ? next : 'all';
+        updateScopeUi();
+        renderWorkqueuePaneItems(pane);
+        paneManager.persistAdminPanes();
+      });
+    });
+    updateScopeUi();
 
     if (statusRootEl) {
       const presetBtns = Array.from(statusRootEl.querySelectorAll('[data-wq-status-preset]'));
@@ -4008,6 +4048,7 @@ const paneManager = {
         agentId: cfg.agentId,
         queue: cfg.queue,
         statusFilter: cfg.statusFilter,
+        scope: cfg.scope,
         closable: true
       })
     );
@@ -4046,7 +4087,8 @@ const paneManager = {
             : ['ready', 'pending', 'claimed', 'in_progress'];
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'default';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, queue, statusFilter, sortKey, sortDir };
+          const scope = item.scope === 'assigned' || item.scope === 'unassigned' ? item.scope : 'all';
+          return { key, kind, queue, statusFilter, sortKey, sortDir, scope };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
@@ -4091,7 +4133,8 @@ const paneManager = {
           queue: pane.workqueue?.queue || 'dev-team',
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
           sortKey: pane.workqueue?.sortKey || 'default',
-          sortDir: pane.workqueue?.sortDir || 'desc'
+          sortDir: pane.workqueue?.sortDir || 'desc',
+          scope: pane.workqueue?.scope || 'all'
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
@@ -4129,6 +4172,7 @@ const paneManager = {
         kind: 'workqueue',
         queue: 'dev-team',
         statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+        scope: 'all',
         closable: true
       });
       this.panes.push(pane);
