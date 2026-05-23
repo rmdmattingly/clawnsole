@@ -75,6 +75,51 @@ test('workqueue pane: queue target supports search + recent persistence', async 
   await expect(secondSelect.locator('option', { hasText: '★ qa-hotfix' })).toHaveCount(1);
 });
 
+test('workqueue pane: scope filter toggles assigned/unassigned/all deterministically', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const queue = `scope-filter-${Date.now()}`;
+  await page.evaluate(async ({ queue }) => {
+    const post = async (url, body) => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error(`${url} failed: ${res.status}`);
+      const data = await res.json();
+      if (!data?.ok) throw new Error(`${url} failed: ${data?.error || 'not ok'}`);
+      return data;
+    };
+
+    await post('/api/workqueue/enqueue', { queue, title: 'scope a', instructions: 'x', priority: 1 });
+    await post('/api/workqueue/enqueue', { queue, title: 'scope b', instructions: 'x', priority: 1 });
+    await post('/api/workqueue/enqueue', { queue, title: 'scope c', instructions: 'x', priority: 1 });
+    await post('/api/workqueue/claim-next', { agentId: 'main', queues: [queue], leaseMs: 900000 });
+  }, { queue });
+
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await wqPane.locator('[data-wq-refresh]').click();
+
+  const rows = wqPane.locator('[data-wq-list-body] .wq-row');
+  await wqPane.locator('[data-wq-scope="all"]').click();
+  await expect(rows).toHaveCount(3);
+  await wqPane.locator('[data-wq-scope="assigned"]').click();
+  await expect(rows).toHaveCount(1);
+  await wqPane.locator('[data-wq-scope="unassigned"]').click();
+  await expect(rows).toHaveCount(2);
+});
+
 test('workqueue pane: source chips + clawnsole preset filter items without reload', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
