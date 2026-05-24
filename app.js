@@ -715,6 +715,8 @@ function closeSettings() {
 // Workqueue (admin-only)
 
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
+const WORKQUEUE_ALL_SCOPE_GUARDRAIL_THRESHOLD_KEY = 'clawnsole.workqueue.allScopeGuardrailThreshold';
+const WORKQUEUE_ALL_SCOPE_GUARDRAIL_DEFAULT_THRESHOLD = 200;
 
 const workqueueState = {
   queues: [],
@@ -1338,6 +1340,24 @@ function renderWorkqueuePaneItems(pane) {
   if (statusLine) {
     const scopeLabel = scope === 'assigned' ? `assigned:${target}` : scope;
     statusLine.textContent = `${items.length} shown (${scopeLabel}) / ${itemsRaw.length} total`;
+  }
+
+  const guardrail = pane.elements?.thread?.querySelector('[data-wq-all-scope-guardrail]');
+  const guardrailText = pane.elements?.thread?.querySelector('[data-wq-all-scope-guardrail-text]');
+  const thresholdRaw = Number(storage.get(WORKQUEUE_ALL_SCOPE_GUARDRAIL_THRESHOLD_KEY, WORKQUEUE_ALL_SCOPE_GUARDRAIL_DEFAULT_THRESHOLD));
+  const threshold = Number.isFinite(thresholdRaw) && thresholdRaw > 0 ? Math.floor(thresholdRaw) : WORKQUEUE_ALL_SCOPE_GUARDRAIL_DEFAULT_THRESHOLD;
+  const isHighVolumeAllScope = scope === 'all' && itemsRaw.length > threshold;
+  if (guardrail && guardrailText) {
+    if (!pane.workqueue.allScopeGuardrailDismissed && isHighVolumeAllScope) {
+      guardrail.hidden = false;
+      guardrailText.textContent = `Viewing all items (${itemsRaw.length}). Narrow scope?`;
+      if (pane.workqueue.allScopeGuardrailLastShownCount !== itemsRaw.length) {
+        pane.workqueue.allScopeGuardrailLastShownCount = itemsRaw.length;
+        addFeed('event', 'workqueue.guardrail', `shown scope=all total=${itemsRaw.length} threshold=${threshold}`);
+      }
+    } else {
+      guardrail.hidden = true;
+    }
   }
 
   const now = Date.now();
@@ -3029,7 +3049,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
       items: [],
       selectedItemId: null,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'default',
-      sortDir: sortDir === 'asc' ? 'asc' : 'desc'
+      sortDir: sortDir === 'asc' ? 'asc' : 'desc',
+      allScopeGuardrailDismissed: false,
+      allScopeGuardrailLastShownCount: 0
     },
     connected: false,
     statusState: 'disconnected',
@@ -3118,6 +3140,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
             <button type="button" class="wq-sort-btn" data-wq-scope="assigned">Assigned</button>
             <button type="button" class="wq-sort-btn" data-wq-scope="unassigned">Unassigned</button>
             <button type="button" class="wq-sort-btn" data-wq-scope="all">All</button>
+            <div class="wq-guardrail" data-wq-all-scope-guardrail hidden>
+              <span class="wq-guardrail-text" data-wq-all-scope-guardrail-text></span>
+              <button type="button" class="wq-sort-btn" data-wq-all-scope-action="assigned">Assigned to active target</button>
+              <button type="button" class="wq-sort-btn" data-wq-all-scope-action="unassigned">Unassigned</button>
+              <button type="button" class="wq-sort-btn" data-wq-all-scope-action="dismiss" aria-label="Dismiss all-scope guardrail">Dismiss</button>
+            </div>
           </div>
 
           <div class="wq-sort" role="group" aria-label="Sort workqueue items">
@@ -3354,6 +3382,27 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         updateScopeUi();
         renderWorkqueuePaneItems(pane);
         paneManager.persistAdminPanes();
+      });
+    });
+    const guardrailActionBtns = Array.from(elements.thread.querySelectorAll('[data-wq-all-scope-action]'));
+    guardrailActionBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const action = String(btn.getAttribute('data-wq-all-scope-action') || '').trim();
+        if (action === 'dismiss') {
+          pane.workqueue.allScopeGuardrailDismissed = true;
+          addFeed('event', 'workqueue.guardrail', 'action=dismiss');
+          renderWorkqueuePaneItems(pane);
+          paneManager.persistAdminPanes();
+          return;
+        }
+        if (action === 'assigned' || action === 'unassigned') {
+          pane.workqueue.scope = action;
+          pane.workqueue.allScopeGuardrailDismissed = true;
+          addFeed('event', 'workqueue.guardrail', `action=${action}`);
+          updateScopeUi();
+          renderWorkqueuePaneItems(pane);
+          paneManager.persistAdminPanes();
+        }
       });
     });
     updateScopeUi();
