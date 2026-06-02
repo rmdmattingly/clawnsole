@@ -78,6 +78,9 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T adds a timeline pane', async ({ page 
 
   await loginAdmin(page, env.serverPort);
 
+  const addBtn = page.locator('#addPaneBtn');
+  await expect(addBtn).toBeVisible();
+
   const countBefore = await page.locator('[data-pane]').count();
 
   await page.evaluate(() => document.activeElement?.blur?.());
@@ -88,6 +91,7 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T adds a timeline pane', async ({ page 
   const tlPane = page.locator('[data-pane][data-pane-kind="timeline"]').last();
   await expect(tlPane).toBeVisible();
 
-  const countAfter = await page.locator('[data-pane]').count();
-  expect(countAfter).toBeGreaterThan(countBefore);
+  await expect
+    .poll(async () => page.locator('[data-pane]').count(), { timeout: 10000 })
+    .toBeGreaterThan(countBefore);
 });
