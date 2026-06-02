@@ -6841,11 +6841,31 @@ let shortcutState = { lastGAtMs: 0 };
 
 function isTypingContext(target) {
   const el = target || document.activeElement;
-  if (!el) return false;
-  const tag = String(el.tagName || '').toUpperCase();
+  if (!el || el === document || el === window) return false;
+
+  const node = el.nodeType === Node.TEXT_NODE ? el.parentElement : el;
+  if (!node) return false;
+
+  const tag = String(node.tagName || '').toUpperCase();
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
-  if (el.isContentEditable) return true;
+  if (node.isContentEditable) return true;
+  if (typeof node.closest === 'function') {
+    if (node.closest('[contenteditable=""], [contenteditable="true"]')) return true;
+    if (node.closest('[role="textbox"], [role="searchbox"]')) return true;
+    if (node.closest('.monaco-editor, .cm-editor, .CodeMirror, .ace_editor, .ProseMirror')) return true;
+  }
   return false;
+}
+
+function isOpenModalContext(target) {
+  const el = target || document.activeElement;
+  if (!el || el === document || el === window) return false;
+  const node = el.nodeType === Node.TEXT_NODE ? el.parentElement : el;
+  return !!node?.closest?.('.modal.open, .login-overlay.open, [aria-modal="true"]');
+}
+
+function shouldIgnoreGlobalPaneShortcut(event) {
+  return isTypingContext(event?.target) || isOpenModalContext(event?.target);
 }
 
 function focusPaneIndex(idx) {
@@ -6921,13 +6941,7 @@ function cycleUnreadPaneFocus(direction = 1) {
 }
 
 window.addEventListener('keydown', (event) => {
-  const isEditableTarget = (() => {
-    const el = event.target;
-    if (!el) return false;
-    if (el.isContentEditable) return true;
-    const tag = String(el.tagName || '').toUpperCase();
-    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
-  })();
+  const isEditableTarget = isTypingContext(event.target);
 
   // If Pane Manager is open, it gets first dibs on keys.
   if (paneManagerHandleKeydown(event)) return;
@@ -6978,8 +6992,8 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Never steal focus / override browser shortcuts while typing.
-  if (isTypingContext(event.target)) return;
+  // Never steal focus / override browser shortcuts while typing or inside focus-trapped overlays.
+  if (shouldIgnoreGlobalPaneShortcut(event)) return;
 
   const key = String(event.key || '');
 
