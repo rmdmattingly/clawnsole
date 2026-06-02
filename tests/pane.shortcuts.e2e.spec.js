@@ -155,7 +155,7 @@ test('add-pane shortcuts do not fire while typing in chat input', async ({ page 
   const panes = page.locator('[data-pane]');
   await expect(panes).toHaveCount(2);
 
-  const input = page.locator('[data-pane-kind="chat"] [data-pane-input]').first();
+  const input = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
   await input.focus();
   await input.fill('typing');
 
@@ -176,7 +176,7 @@ test('fleet quick action button + keyboard shortcut focus existing timeline pane
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   const panes = page.locator('[data-pane]');
-  const timelinePanes = page.locator('[data-pane-kind="timeline"]');
+  const timelinePanes = page.locator('[data-pane][data-pane-kind="timeline"]');
   const fleetBtn = page.locator('#fleetBtn');
 
   await expect(panes).toHaveCount(2);

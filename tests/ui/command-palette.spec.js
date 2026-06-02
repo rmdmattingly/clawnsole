@@ -40,7 +40,7 @@ test('command palette: keyboard flow can open a targeted pane and focus by pane 
   await input.type('open workqueue: dev-team');
   await page.keyboard.press('Enter');
 
-  const wqPane = page.locator('[data-pane-kind="workqueue"]').last();
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
   await expect(wqPane).toBeVisible();
 
   const countAfter = await page.locator('[data-pane]').count();

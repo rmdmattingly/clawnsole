@@ -41,7 +41,7 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
   // Add a workqueue pane and ensure it exists + focus lands on primary control.
   await menu.locator('[data-testid="pane-add-menu-workqueue"]').click();
 
-  const wqPane = page.locator('[data-pane-kind="workqueue"]').last();
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
   await expect(wqPane).toBeVisible();
 
   const queueSelect = wqPane.locator('[data-wq-queue-select]');
@@ -80,10 +80,12 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T adds a timeline pane', async ({ page 
 
   const countBefore = await page.locator('[data-pane]').count();
 
+  await page.evaluate(() => document.activeElement?.blur?.());
+
   // Use a Playwright-friendly cross-platform modifier.
   await page.keyboard.press('ControlOrMeta+Shift+T');
 
-  const tlPane = page.locator('[data-pane-kind="timeline"]').last();
+  const tlPane = page.locator('[data-pane][data-pane-kind="timeline"]').last();
   await expect(tlPane).toBeVisible();
 
   const countAfter = await page.locator('[data-pane]').count();
