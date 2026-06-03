@@ -166,7 +166,11 @@ const test = base.test.extend({
           await page.fill('#loginPassword', password);
           await page.click('#loginBtn');
           await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
-          await page.waitForSelector('[data-pane] [data-pane-input]', { timeout: 90000 });
+          await page.waitForSelector('header.topbar', { timeout: 90000 });
+          await page.waitForFunction(() => {
+            const overlay = document.querySelector('[data-testid="login-overlay"]');
+            return !!overlay && !overlay.classList.contains('open');
+          }, { timeout: 90000 });
         }
       };
 
