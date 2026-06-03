@@ -539,7 +539,10 @@ function setStatusPill(el, state, meta = '') {
 }
 
 function paneIsConnected(pane) {
-  return Boolean((pane && pane.statusState === 'connected') || (pane && pane.connected));
+  if (!pane) return false;
+  if (pane.statusState === 'connected') return true;
+  if (pane.statusState === 'disconnected' || pane.statusState === 'error' || pane.statusState === 'offline') return false;
+  return Boolean(pane.connected);
 }
 
 function updateGlobalStatus() {
@@ -1105,8 +1108,8 @@ function renderWorkqueueInspect(item) {
   const actions = document.createElement('div');
   actions.className = 'wq-inspect-actions';
   actions.innerHTML = `
-    <button type="button" class="btn" data-wq-action="edit">Edit</button>
-    <button type="button" class="btn danger" data-wq-action="delete">Delete</button>
+    <button type="button" class="btn" data-wq-action="edit" data-testid="wq-item-edit">Edit</button>
+    <button type="button" class="btn danger" data-wq-action="delete" data-testid="wq-item-delete">Delete</button>
   `;
 
   const meta = root.querySelector('.wq-inspect-meta');
@@ -1426,6 +1429,7 @@ function renderWorkqueuePaneItems(pane) {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'wq-row';
+    row.setAttribute('data-testid', 'wq-item-row');
     if (it.id && it.id === pane.workqueue.selectedItemId) row.classList.add('selected');
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
@@ -1541,6 +1545,72 @@ function renderWorkqueuePaneInspect(pane, item) {
     </div>
     ${item.lastError ? `<div class="wq-inspect-block"><div class="wq-inspect-label">Last error</div><pre class="wq-inspect-pre">${escapeHtml(String(item.lastError))}</pre></div>` : ''}
   `;
+
+  const actions = document.createElement('div');
+  actions.className = 'wq-inspect-actions';
+  actions.innerHTML = `
+    <button type="button" class="btn" data-wq-action="edit" data-testid="wq-pane-item-edit">Edit</button>
+    <button type="button" class="btn danger" data-wq-action="delete" data-testid="wq-pane-item-delete">Delete</button>
+  `;
+  const meta = root.querySelector('.wq-inspect-meta');
+  if (meta) meta.insertAdjacentElement('afterend', actions);
+  else root.prepend(actions);
+
+  const editBtn = actions.querySelector('[data-wq-action="edit"]');
+  const deleteBtn = actions.querySelector('[data-wq-action="delete"]');
+  editBtn?.addEventListener('click', () => workqueuePaneEditItem(pane, item));
+  deleteBtn?.addEventListener('click', () => workqueuePaneDeleteItem(pane, item));
+}
+
+async function workqueuePaneEditItem(pane, item) {
+  if (!pane || !item || !item.id) return;
+
+  const title = prompt('Edit title', String(item.title || ''));
+  if (title === null) return;
+  const instructions = prompt('Edit instructions', String(item.instructions || ''));
+  if (instructions === null) return;
+  const priorityRaw = prompt('Edit priority (number)', String(item.priority ?? '0'));
+  if (priorityRaw === null) return;
+  const priority = Number(priorityRaw);
+  const status = prompt('Edit status (ready|pending|claimed|in_progress|done|failed)', String(item.status || 'ready'));
+  if (status === null) return;
+
+  try {
+    await workqueueUpdateItem(item.id, {
+      title,
+      instructions,
+      priority: Number.isFinite(priority) ? priority : item.priority,
+      status
+    });
+    await fetchAndRenderWorkqueueItemsForPane(pane);
+    const updated = (Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : []).find((it) => it && it.id === item.id) || null;
+    pane.workqueue.selectedItemId = updated?.id || null;
+    renderWorkqueuePaneItems(pane);
+    renderWorkqueuePaneInspect(pane, updated);
+  } catch (err) {
+    addFeed('err', 'workqueue', 'failed to update item: ' + String(err));
+  }
+}
+
+async function workqueuePaneDeleteItem(pane, item) {
+  if (!pane || !item || !item.id) return;
+  const ok = confirm('Delete workqueue item?\n\n' + String(item.title || '') + '\n' + item.id);
+  if (!ok) return;
+  try {
+    const res = await fetch('/api/workqueue/delete', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId: item.id })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) throw new Error(data?.error || String(res.status));
+    if (pane.workqueue.selectedItemId === item.id) pane.workqueue.selectedItemId = null;
+    await fetchAndRenderWorkqueueItemsForPane(pane);
+    renderWorkqueuePaneInspect(pane, null);
+  } catch (err) {
+    addFeed('err', 'workqueue', 'failed to delete item: ' + String(err));
+  }
 }
 
 function startWorkqueueLeaseTicker() {
@@ -2887,6 +2957,8 @@ function buildClientForPane(pane) {
     onStatus: (state, meta) => {
       pane.statusState = state;
       pane.statusMeta = meta || '';
+      if (state === 'connected') pane.connected = true;
+      if (state === 'disconnected' || state === 'error' || state === 'offline') pane.connected = false;
       setStatusPill(pane.elements.status, state, meta || '');
       if (pane.elements.root) {
         pane.elements.root.dataset.connected = paneIsConnected(pane) ? 'true' : 'false';
@@ -3227,14 +3299,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
         <div class="wq-toolbar-row">
           <label class="wq-field">
             <span class="wq-label">Queue</span>
-            <select data-wq-queue-select aria-label="Select workqueue"></select>
-            <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
+            <select data-wq-queue-select data-testid="wq-pane-queue-select" aria-label="Select workqueue"></select>
+            <input data-wq-queue-custom data-testid="wq-pane-queue-custom" type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
           </label>
 
           <div class="wq-field wq-status-field">
             <span class="wq-label">Status filter</span>
-            <div class="wq-status-multiselect" data-wq-status>
-              <div class="wq-status-selected" data-wq-status-selected aria-live="polite"></div>
+            <div class="wq-status-multiselect" data-wq-status data-testid="wq-pane-status-filter">
+              <div class="wq-status-selected" data-wq-status-selected data-testid="wq-pane-status-selected" aria-live="polite"></div>
               <details class="wq-status-details" data-wq-status-details>
                 <summary type="button">Choose statuses…</summary>
                 <div class="wq-status-menu">
@@ -3251,7 +3323,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
             </div>
           </div>
 
-          <button data-wq-refresh class="secondary" type="button">Refresh</button>
+          <button data-wq-refresh data-testid="wq-pane-refresh" class="secondary" type="button">Refresh</button>
 
           <div class="wq-scope" role="group" aria-label="Workqueue scope">
             <span class="wq-sort-label">Scope</span>
@@ -3339,13 +3411,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, so
             <button type="button" class="wq-list-sort" data-wq-sort="claimedBy">claimedBy</button>
             <div>lease</div>
           </div>
-          <div class="wq-list-body" data-wq-list-body></div>
+          <div class="wq-list-body" data-wq-list-body data-testid="wq-pane-list-body"></div>
           <div data-wq-empty class="hint" style="padding: 10px 12px;" hidden>No items.</div>
         </section>
 
         <section class="wq-inspect" aria-label="Workqueue item details">
           <div class="wq-inspect-header">Inspect</div>
-          <div data-wq-inspect class="wq-inspect-body"></div>
+          <div data-wq-inspect data-testid="wq-pane-inspect" class="wq-inspect-body"></div>
         </section>
       </div>
     `;

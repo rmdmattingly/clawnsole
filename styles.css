@@ -1166,6 +1166,13 @@ button.send-btn .btn-icon {
   flex-wrap: wrap;
 }
 
+[data-wq-source-filters],
+[data-wq-repo-filters] {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .wq-guardrail {
   display: inline-flex;
   align-items: center;
