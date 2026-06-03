@@ -74,14 +74,14 @@ test('command palette: groups core actions and collapses per-agent targets until
   await expect(modal).toBeVisible();
 
   const list = page.locator('#commandPaletteList');
-  await expect(list.getByText('Panes')).toBeVisible();
-  await expect(list.getByText('Navigation')).toBeVisible();
-  await expect(list.getByRole('button', { name: /Agent targets/i })).toBeVisible();
-  await expect(list.getByRole('button', { name: /Timeline targets/i })).toBeVisible();
+  await expect(list.locator('.command-palette-group', { hasText: /^Panes$/ })).toBeVisible();
+  await expect(list.locator('.command-palette-group', { hasText: /^Navigation$/ })).toBeVisible();
+  await expect(list.getByRole('option', { name: /Agent targets/i })).toBeVisible();
+  await expect(list.getByRole('option', { name: /Timeline targets/i })).toBeVisible();
 
-  await expect(list.getByRole('button', { name: /Agent: /i })).toHaveCount(0);
+  await expect(list.getByRole('option', { name: /Agent: /i })).toHaveCount(0);
 
   const input = page.locator('#commandPaletteInput');
   await input.fill('agent: main');
-  await expect(list.getByRole('button', { name: /Agent: main/i })).toBeVisible();
+  await expect(list.getByRole('option', { name: /Agent: main/i })).toBeVisible();
 });

@@ -1872,7 +1872,7 @@ function buildCommandPaletteItems() {
     if (id.startsWith('cmd:add-')) {
       enriched.group = 'Navigation';
       enriched.priority = id.includes(':') ? 55 : 95;
-      if (id.startsWith('cmd:add-timeline:') && id !== 'cmd:add-timeline:all') {
+      if (id.startsWith('cmd:add-timeline:')) {
         enriched.group = 'Agents';
         enriched.subgroup = 'Timeline targets';
         enriched.priority = 45;

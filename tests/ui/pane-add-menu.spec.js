@@ -78,6 +78,10 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T adds a timeline pane', async ({ page 
 
   await loginAdmin(page, env.serverPort);
 
+  while (await page.locator('[data-pane]').count() > 1) {
+    await page.locator('[data-pane] button[aria-label="Close pane"]').last().click();
+  }
+
   const countBefore = await page.locator('[data-pane]').count();
 
   // Use a Playwright-friendly cross-platform modifier.
