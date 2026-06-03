@@ -83,3 +83,22 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
 });
+
+test('agents modal sticky selection bar follows selected row and keeps actions available', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const firstRow = page.locator('#agentsList .agents-row').first();
+  await firstRow.click();
+
+  await expect(firstRow).toHaveClass(/is-selected/);
+  await expect(page.locator('#agentsSelectionTitle')).not.toContainText('No agent selected');
+  await expect(page.locator('#agentsSelectionDetail')).toContainText(/heartbeat/i);
+
+  await page.locator('#agentsSelectionOpenTimeline').click();
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+});
