@@ -1438,17 +1438,45 @@ button.send-btn .btn-icon {
 }
 
 .agents-section-title {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  padding: 0;
+  background: transparent;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted);
   margin-bottom: 8px;
+  text-align: left;
+}
+
+button.agents-section-title {
+  cursor: pointer;
+}
+
+button.agents-section-title:hover {
+  color: var(--text);
+}
+
+.agents-section-toggle {
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
 }
 
 .agents-rows {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.agents-rows[hidden] {
+  display: none;
 }
 
 .agents-row {

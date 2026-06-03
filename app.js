@@ -215,6 +215,8 @@ const ADMIN_AGENT_LAST_SEEN_KEY = 'clawnsole.admin.agentLastSeenAtMs';
 const ADMIN_AGENT_FILTER_KEY = 'clawnsole.admin.agents.filter';
 const ADMIN_AGENT_SORT_KEY = 'clawnsole.admin.agents.sort';
 const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
+const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
+const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
 const WQ_RECENT_TARGETS_MAX = 6;
 
@@ -2316,17 +2318,38 @@ function renderAgentsModalList() {
   const filtered = baseAgents.filter(matches);
   const pinned = sortAgents(filtered.filter((a) => pins.has(String(a?.id || '').trim())));
   const rest = sortAgents(filtered.filter((a) => !pins.has(String(a?.id || '').trim())));
+  const ordered = [...pinned, ...rest];
+  const needsAttention = ordered.filter((agent) => classify(agent?.id).bucket !== 'active');
+  const healthy = ordered.filter((agent) => classify(agent?.id).bucket === 'active');
+  const healthyCollapseDefault = baseAgents.length > ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD;
+  const healthyCollapsed = String(storage.get(ADMIN_AGENT_HEALTHY_COLLAPSED_KEY, healthyCollapseDefault ? '1' : '0')) === '1';
 
   root.innerHTML = '';
 
-  const renderSection = (title, agents) => {
-    if (!agents || agents.length === 0) return;
+  const renderSection = (title, agents, { collapsible = false, collapsed = false } = {}) => {
     const section = document.createElement('div');
     section.className = 'agents-section';
-    section.innerHTML = `<div class="agents-section-title">${escapeHtml(title)}</div>`;
+    section.classList.toggle('is-collapsed', collapsible && collapsed);
+
+    const header = document.createElement(collapsible ? 'button' : 'div');
+    header.className = 'agents-section-title';
+    header.innerHTML = `
+      <span>${escapeHtml(title)} (${agents.length})</span>
+      ${collapsible ? `<span class="agents-section-toggle">${collapsed ? 'Show' : 'Hide'}</span>` : ''}
+    `;
+    if (collapsible) {
+      header.type = 'button';
+      header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      header.addEventListener('click', () => {
+        storage.set(ADMIN_AGENT_HEALTHY_COLLAPSED_KEY, collapsed ? '0' : '1');
+        renderAgentsModalList();
+      });
+    }
+    section.appendChild(header);
 
     const list = document.createElement('div');
     list.className = 'agents-rows';
+    if (collapsible && collapsed) list.hidden = true;
 
     for (const agent of agents) {
       const id = String(agent?.id || '').trim();
@@ -2392,10 +2415,10 @@ function renderAgentsModalList() {
     root.appendChild(section);
   };
 
-  renderSection('Pinned', pinned);
-  renderSection('Agents', rest);
+  renderSection('Needs attention', needsAttention);
+  renderSection('Healthy', healthy, { collapsible: true, collapsed: healthyCollapsed });
 
-  const empty = pinned.length === 0 && rest.length === 0;
+  const empty = ordered.length === 0;
   if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
 }
 
