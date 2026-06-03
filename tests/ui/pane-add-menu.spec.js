@@ -83,6 +83,7 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T adds a timeline pane', async ({ page 
   }
 
   const countBefore = await page.locator('[data-pane]').count();
+  await page.evaluate(() => document.activeElement?.blur?.());
 
   await page.evaluate(() => document.activeElement?.blur?.());
 
