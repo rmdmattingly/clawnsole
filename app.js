@@ -7687,6 +7687,10 @@ let shortcutState = { lastGAtMs: 0 };
 function isTypingContext(target) {
   const el = target || document.activeElement;
   if (!el) return false;
+  try {
+    if (el.hidden || el.disabled) return false;
+    if (el.getClientRects && el.getClientRects().length === 0) return false;
+  } catch {}
   const tag = String(el.tagName || '').toUpperCase();
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
   if (el.isContentEditable) return true;
