@@ -75,6 +75,54 @@ test('workqueue pane: queue target supports search + recent persistence', async 
   await expect(secondSelect.locator('option', { hasText: '★ qa-hotfix' })).toHaveCount(1);
 });
 
+test('workqueue pane: enqueue assignee picker supports search, keyboard select, and recents', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const firstPane = page.locator('[data-pane]').last();
+  await firstPane.locator('details.wq-enqueue > summary').click();
+
+  const search = firstPane.locator('[data-wq-enqueue-agent-search]');
+  await expect(search).toBeVisible();
+  await expect(firstPane.locator('[data-wq-claim-agent]')).toBeHidden();
+
+  await search.fill('main');
+  await expect(firstPane.locator('[data-wq-enqueue-agent-option]', { hasText: 'main' })).toBeVisible();
+  await search.press('Enter');
+  await expect(firstPane.locator('[data-wq-claim-agent]')).toHaveValue('main');
+
+  const queue = `enqueue-assignee-picker-${Date.now()}`;
+  await firstPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await firstPane.locator('[data-wq-queue-custom]').fill(queue);
+  await firstPane.locator('[data-wq-queue-custom]').press('Enter');
+
+  const title = `enqueue-assignee-picker-${Date.now()}`;
+  await firstPane.locator('[data-wq-enqueue-title]').fill(title);
+  await firstPane.locator('[data-wq-enqueue-instructions]').fill('verify searchable assignee picker');
+
+  const enqueueResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/enqueue') && res.request().method() === 'POST');
+  await firstPane.locator('[data-wq-enqueue-submit]').click();
+  const enqueueRes = await enqueueResP;
+  expect(enqueueRes.ok()).toBeTruthy();
+  expect(enqueueRes.request().postDataJSON()).not.toHaveProperty('claimAgentId');
+  await expect(firstPane.locator('[data-wq-enqueue-status]')).toContainText('Queued for main');
+
+  const workqueuePanes = page.locator('[data-pane][data-pane-kind="workqueue"]');
+  await workqueuePanes.first().locator('[data-pane-close]').click();
+  await expect(workqueuePanes).toHaveCount(0);
+
+  await addPane(page, 'Workqueue pane');
+  const secondPane = page.locator('[data-pane]').last();
+  await secondPane.locator('details.wq-enqueue > summary').click();
+  await expect(secondPane.locator('.wq-target-group', { hasText: 'Recent' })).toBeVisible();
+  await expect(secondPane.locator('[data-wq-enqueue-agent-option]').first()).toContainText('★ main');
+});
+
 test('workqueue pane: scope filter toggles assigned/unassigned/all deterministically', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
