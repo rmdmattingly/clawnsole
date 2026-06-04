@@ -141,6 +141,64 @@ test('alt+1..3 focuses panes by visible order and does not fire while typing', a
   await expect.poll(activePaneIndex).toBe(0);
 });
 
+test('global pane shortcuts are ignored while typing or in modal fields', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await expect(page.locator('[data-pane]')).toHaveCount(2);
+
+  const activePaneIndex = () =>
+    page.evaluate(() => {
+      const active = document.activeElement;
+      const panes = Array.from(document.querySelectorAll('[data-pane]'));
+      return panes.findIndex((pane) => pane === active || (active && pane.contains(active)));
+    });
+
+  const composer = page.locator('[data-pane-input]').first();
+  await composer.focus();
+  await expect(composer).toBeFocused();
+  expect(await activePaneIndex()).toBe(0);
+
+  await page.keyboard.press('ControlOrMeta+2');
+  expect(await activePaneIndex()).toBe(0);
+
+  await page.keyboard.press('ControlOrMeta+Shift+K');
+  expect(await activePaneIndex()).toBe(0);
+
+  await page.keyboard.press('g');
+  await page.keyboard.press('w');
+  await expect(page.locator('#workqueueModal')).toHaveAttribute('aria-hidden', 'true');
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('ControlOrMeta+2');
+  expect(await activePaneIndex()).toBe(1);
+
+  await page.click('#agentsBtn');
+  const agentsSearch = page.locator('#agentsSearch');
+  await agentsSearch.click();
+  await expect(agentsSearch).toBeFocused();
+  await page.keyboard.press('ControlOrMeta+1');
+  await expect(agentsSearch).toBeFocused();
+  await expect(page.locator('#agentsModal')).toHaveAttribute('aria-hidden', 'false');
+
+  await page.locator('#agentsModal button[aria-label="Close agents"]').click();
+  await expect(page.locator('#agentsModal')).toHaveAttribute('aria-hidden', 'true');
+
+  await page.click('#workqueueBtn');
+  const enqueueTitle = page.locator('#wqEnqueueTitle');
+  await enqueueTitle.click();
+  await expect(enqueueTitle).toBeFocused();
+  await page.keyboard.press('ControlOrMeta+1');
+  await expect(enqueueTitle).toBeFocused();
+  await expect(page.locator('#workqueueModal')).toHaveAttribute('aria-hidden', 'false');
+});
+
 test('add-pane shortcuts do not fire while typing in chat input', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
