@@ -98,13 +98,19 @@ test('deriveAuthOverlayState captures auth/role transition flags', () => {
     stopAgentAutoRefresh: false,
     rolePillText: 'signed in',
     rolePillAdmin: true,
+    rolePillLocked: false,
     showAdminControls: true,
+    showUnlockedStatus: true,
+    showLogoutAction: true,
     logoutEnabled: true,
     logoutOpacity: '1'
   });
 
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).startAgentAutoRefresh, false);
   assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest' }).rolePillText, 'guest');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).rolePillText, 'Locked');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).showUnlockedStatus, false);
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).showLogoutAction, false);
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '0.5');
 });
 
@@ -141,8 +147,8 @@ test('normalizeHistoryEntries supports gateway payload variants', () => {
 
 test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard error transitions', () => {
   assert.deepEqual(deriveGlobalConnectionState({ authed: false, panes: [{ connected: true }] }), {
-    state: 'disconnected',
-    meta: 'sign in required'
+    state: 'locked',
+    meta: ''
   });
 
   assert.deepEqual(deriveGlobalConnectionState({ authed: true, panes: [] }), {

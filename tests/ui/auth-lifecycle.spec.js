@@ -7,7 +7,11 @@ test('visiting /admin without auth shows login overlay', async ({ page, clawnsol
 
   await page.goto(clawnsole.adminUrl);
   await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
-  await expect(page.getByTestId('role-pill')).toContainText('signed out');
+  await expect(page.getByTestId('role-pill')).toHaveText('Locked');
+  await expect(page.getByTestId('connection-status')).toBeHidden();
+  await expect(page.getByTestId('panes-indicator')).toBeHidden();
+  await expect(page.locator('#logoutBtn')).toBeHidden();
+  await expect(page.getByTestId('login-button')).toBeVisible();
 });
 
 test('after successful login, reload stays authed; clearing cookies forces re-login', async ({ page, context, clawnsole }) => {
@@ -15,6 +19,9 @@ test('after successful login, reload stays authed; clearing cookies forces re-lo
 
   await clawnsole.gotoAndLoginAdmin(page);
   await expect(page.getByTestId('login-overlay')).not.toHaveClass(/open/);
+  await expect(page.getByTestId('role-pill')).toContainText('signed in');
+  await expect(page.getByTestId('connection-status')).toBeVisible();
+  await expect(page.locator('#logoutBtn')).toBeVisible();
 
   await page.reload();
   await expect(page.getByTestId('login-overlay')).not.toHaveClass(/open/);
