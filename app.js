@@ -19,6 +19,7 @@ const globalElements = {
   recurringPromptHistoryRows: document.getElementById('recurringPromptHistoryRows'),
   recurringPromptHistoryEmpty: document.getElementById('recurringPromptHistoryEmpty'),
   status: document.getElementById('connectionStatus'),
+  activePaneChip: document.getElementById('activePaneChip'),
   paneManagerBtn: document.getElementById('paneManagerBtn'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
@@ -1383,6 +1384,8 @@ function paneDuplicateKey(pane) {
 }
 
 function focusedPaneKey() {
+  const explicit = String(paneManager?.activePaneKey || '').trim();
+  if (explicit) return explicit;
   const active = document.activeElement;
   const panes = paneManager?.panes || [];
   const pane = panes.find((entry) => {
@@ -1390,6 +1393,32 @@ function focusedPaneKey() {
     return !!(root && active && (root === active || root.contains(active)));
   });
   return pane?.key || '';
+}
+
+function renderGlobalActivePaneChip() {
+  const chip = globalElements.activePaneChip;
+  if (!chip) return;
+  const key = String(paneManager?.activePaneKey || focusedPaneKey() || '').trim();
+  const pane = (paneManager?.panes || []).find((entry) => entry?.key === key) || null;
+  chip.textContent = `Active: ${pane ? paneSummaryLabel(pane) : '—'}`;
+}
+
+function updatePaneActiveVisualState() {
+  const activeKey = String(paneManager?.activePaneKey || '').trim();
+  (paneManager?.panes || []).forEach((pane) => {
+    const isActive = !!activeKey && pane?.key === activeKey;
+    pane?.elements?.root?.setAttribute('data-active', isActive ? 'true' : 'false');
+  });
+  renderGlobalActivePaneChip();
+}
+
+function setActivePaneKey(paneKey, { persist = true } = {}) {
+  const key = String(paneKey || '').trim();
+  if (!key) return;
+  if (!(paneManager?.panes || []).some((pane) => pane?.key === key)) return;
+  paneManager.activePaneKey = key;
+  if (persist && roleState.role === 'admin') storage.set(ADMIN_ACTIVE_PANE_KEY, key);
+  updatePaneActiveVisualState();
 }
 
 function paneUnreadCount(pane) {
@@ -3612,6 +3641,7 @@ renderPulse();
 // Panes
 
 const ADMIN_PANES_KEY = 'clawnsole.admin.panes.v1';
+const ADMIN_ACTIVE_PANE_KEY = 'clawnsole.admin.activePane.v1';
 // Layout is inferred from pane count; no manual layout toggle.
 const ADMIN_DEFAULT_AGENT_KEY = 'clawnsole.admin.agentId';
 const WORKQUEUE_SCOPE_PREF_KEY = 'clawnsole.admin.workqueue.scope.v1';
@@ -5170,8 +5200,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   }
 
   elements.root?.addEventListener('focusin', () => {
+    setActivePaneKey(pane.key);
     clearPaneUnread(pane);
   });
+  elements.root?.addEventListener('pointerdown', () => setActivePaneKey(pane.key));
 
   // WORKQUEUE PANE
   if (pane.role === 'admin' && pane.kind === 'workqueue') {
@@ -6312,6 +6344,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 /* inlined to AppCore */
 const paneManager = {
   panes: [],
+  activePaneKey: '',
   maxPanes: 6,
   init() {
     this.destroyAll();
@@ -6341,6 +6374,8 @@ const paneManager = {
       })
     );
     this.panes.forEach((pane) => globalElements.paneGrid.appendChild(pane.elements.root));
+    const storedActiveKey = String(storage.get(ADMIN_ACTIVE_PANE_KEY, '') || '').trim();
+    setActivePaneKey(storedActiveKey || this.panes[0]?.key || '', { persist: false });
     this.updatePaneLabels();
     this.updateCloseButtons();
     this.applyInferredLayout();
@@ -6356,6 +6391,8 @@ const paneManager = {
       } catch {}
     });
     this.panes = [];
+    this.activePaneKey = '';
+    updatePaneActiveVisualState();
   },
   loadAdminPanes() {
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
@@ -6539,6 +6576,7 @@ const paneManager = {
   },
   focusPanePrimary(pane) {
     if (!pane?.elements?.root) return;
+    setActivePaneKey(pane.key);
 
     // Defer until DOM has painted.
     setTimeout(() => {
@@ -6739,6 +6777,13 @@ const paneManager = {
     this.updateCloseButtons();
     this.applyInferredLayout();
     this.persistAdminPanes();
+    if (this.activePaneKey === key) {
+      const fallback = this.panes[Math.max(0, idx - 1)] || this.panes[0] || null;
+      setActivePaneKey(fallback?.key || '', { persist: true });
+      if (fallback) this.focusPanePrimary(fallback);
+    } else {
+      updatePaneActiveVisualState();
+    }
     updateGlobalStatus();
     updateConnectionControls();
   },
@@ -6768,6 +6813,7 @@ const paneManager = {
   updatePaneLabels() {
     this.panes.forEach((pane) => renderPaneIdentity(pane));
     this.updatePaneGridLabel();
+    updatePaneActiveVisualState();
   },
   updatePaneGridLabel() {
     const grid = globalElements.paneGrid;
@@ -7041,6 +7087,28 @@ function isTypingContext(target) {
   return false;
 }
 
+function isTypingShortcutExempt(event) {
+  const key = String(event.key || '').toLowerCase();
+  if (!event.metaKey && !event.ctrlKey) return false;
+  if (event.altKey) return false;
+  if (event.shiftKey && ['c', 'w', 'r', 't', 'n'].includes(key)) return true;
+  if (!event.shiftKey && ['k', 'p'].includes(key)) return true;
+  return false;
+}
+
+function isBlockingOverlayOpenForPaneShortcuts() {
+  const blockers = [
+    globalElements.loginOverlay,
+    globalElements.settingsModal,
+    globalElements.shortcutsModal,
+    globalElements.commandPaletteModal,
+    globalElements.paneManagerModal,
+    globalElements.workqueueModal,
+    globalElements.agentsModal
+  ];
+  return blockers.some((el) => !!el?.classList?.contains('open'));
+}
+
 function focusPaneIndex(idx) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
@@ -7125,18 +7193,21 @@ window.addEventListener('keydown', (event) => {
   // If Pane Manager is open, it gets first dibs on keys.
   if (paneManagerHandleKeydown(event)) return;
 
+  // Never fire admin shortcuts while typing unless explicitly exempted.
+  if (isTypingContext(event.target) && !isTypingShortcutExempt(event)) return;
+
   // Add-pane shortcuts (admin-only)
   // Ctrl/Cmd+Shift+C → new chat
   // Ctrl/Cmd+Shift+W → new workqueue
   // Ctrl/Cmd+Shift+R → new cron
   // Ctrl/Cmd+Shift+T → new timeline
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey;
-  if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target)) {
+  if (isAccel && roleState.role === 'admin') {
     const key = String(event.key || '').toLowerCase();
     const map = { c: 'chat', w: 'workqueue', r: 'cron', t: 'timeline' };
     const kind = map[key];
     if (kind) {
-      // Don't hijack add-pane shortcuts while typing in inputs/editors.
+      if (isBlockingOverlayOpenForPaneShortcuts()) return;
       event.preventDefault();
       paneManager.closeAddPaneMenu();
       paneManager.addPane(kind);
@@ -7418,8 +7489,8 @@ window.addEventListener('load', () => {
 
       const isTouch = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
       if (!isTouch) {
-        const firstPane = paneManager.panes[0];
-        firstPane?.elements.input?.focus();
+        const activePane = paneManager.panes.find((pane) => pane.key === paneManager.activePaneKey) || paneManager.panes[0];
+        paneManager.focusPanePrimary(activePane);
       }
     })
     .catch(() => {

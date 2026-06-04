@@ -193,3 +193,36 @@ test('fleet quick action button + keyboard shortcut focus existing timeline pane
   await fleetBtn.click({ modifiers: ['Alt'] });
   await expect(timelinePanes).toHaveCount(2);
 });
+
+test('active pane visual + topbar Active chip track keyboard cycling', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  const activeChip = page.getByTestId('active-pane-chip');
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    return panes.findIndex((pane) => pane.getAttribute('data-active') === 'true');
+  });
+
+  await expect.poll(activePaneIndex).toBe(2);
+  await expect(activeChip).toContainText('Active: C');
+
+  // Ensure shortcuts are not blocked by typing context.
+  await activeChip.click();
+  await page.keyboard.press('Control+Shift+K');
+  await expect.poll(activePaneIndex).toBe(0);
+  await expect(activeChip).toContainText('Active: A');
+
+});
