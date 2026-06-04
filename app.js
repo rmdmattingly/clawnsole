@@ -6453,11 +6453,33 @@ const paneManager = {
   },
   addPane(kind = 'chat', options = {}) {
     if (roleState.role !== 'admin') return;
-    if (this.panes.length >= this.maxPanes) return;
 
     const normalizedKind = normalizePaneKind(kind);
+    const forceNew = !!options?.forceNew;
     const nextQueue = String(options?.queue || 'dev-team').trim() || 'dev-team';
     const nextCronAgentId = String(options?.cronAgentId || '').trim();
+
+    if (normalizedKind === 'workqueue' || normalizedKind === 'cron' || normalizedKind === 'timeline') {
+      const existing = this.panes.find((pane) => {
+        if (!pane || pane.kind !== normalizedKind) return false;
+        if (normalizedKind === 'workqueue') {
+          return String(pane.workqueue?.queue || 'dev-team').trim() === nextQueue;
+        }
+        if (normalizedKind === 'cron' || normalizedKind === 'timeline') {
+          return String(pane.cronAgentId || '').trim() === nextCronAgentId;
+        }
+        return false;
+      });
+
+      if (existing && !forceNew) {
+        this.focusPanePrimary(existing);
+        const label = normalizedKind === 'workqueue' ? `workqueue (${nextQueue})` : normalizedKind;
+        showToast(`Reusing existing ${label} pane.`, { kind: 'info', timeoutMs: 1800 });
+        return existing;
+      }
+    }
+
+    if (this.panes.length >= this.maxPanes) return;
 
     if (normalizedKind === 'workqueue') {
       const pane = createPane({
@@ -6580,12 +6602,26 @@ const paneManager = {
       wqBtn.dataset.testid = 'pane-add-menu-workqueue';
       wqBtn.title = 'Shortcut: Ctrl/Cmd+Shift+W';
 
+      const wqForceBtn = document.createElement('button');
+      wqForceBtn.type = 'button';
+      wqForceBtn.className = 'pane-add-menu__item';
+      wqForceBtn.textContent = 'Open anyway: New Workqueue pane';
+      wqForceBtn.dataset.testid = 'pane-add-menu-workqueue-open-anyway';
+      wqForceBtn.hidden = true;
+
       const cronBtn = document.createElement('button');
       cronBtn.type = 'button';
       cronBtn.className = 'pane-add-menu__item';
       cronBtn.textContent = 'New Cron pane';
       cronBtn.dataset.testid = 'pane-add-menu-cron';
       cronBtn.title = 'Shortcut: Ctrl/Cmd+Shift+R';
+
+      const cronForceBtn = document.createElement('button');
+      cronForceBtn.type = 'button';
+      cronForceBtn.className = 'pane-add-menu__item';
+      cronForceBtn.textContent = 'Open anyway: New Cron pane';
+      cronForceBtn.dataset.testid = 'pane-add-menu-cron-open-anyway';
+      cronForceBtn.hidden = true;
 
       const timelineBtn = document.createElement('button');
       timelineBtn.type = 'button';
@@ -6594,19 +6630,29 @@ const paneManager = {
       timelineBtn.dataset.testid = 'pane-add-menu-timeline';
       timelineBtn.title = 'Shortcut: Ctrl/Cmd+Shift+T';
 
+      const timelineForceBtn = document.createElement('button');
+      timelineForceBtn.type = 'button';
+      timelineForceBtn.className = 'pane-add-menu__item';
+      timelineForceBtn.textContent = 'Open anyway: New Timeline pane';
+      timelineForceBtn.dataset.testid = 'pane-add-menu-timeline-open-anyway';
+      timelineForceBtn.hidden = true;
+
       menu.appendChild(chatBtn);
       menu.appendChild(wqBtn);
+      menu.appendChild(wqForceBtn);
       menu.appendChild(cronBtn);
+      menu.appendChild(cronForceBtn);
       menu.appendChild(timelineBtn);
+      menu.appendChild(timelineForceBtn);
 
-      const onMenuAdd = (kind) => (event) => {
+      const onMenuAdd = (kind, paneOptions = {}) => (event) => {
         if (state.menuActionInFlight) return;
         state.menuActionInFlight = true;
         if (event?.preventDefault) event.preventDefault();
         if (event?.stopPropagation) event.stopPropagation();
 
         this.closeAddPaneMenu();
-        this.addPane(kind);
+        this.addPane(kind, paneOptions);
 
         queueMicrotask(() => {
           state.menuActionInFlight = false;
@@ -6616,16 +6662,22 @@ const paneManager = {
       chatBtn.addEventListener('click', onMenuAdd('chat'));
 
       wqBtn.addEventListener('click', onMenuAdd('workqueue'));
+      wqForceBtn.addEventListener('click', onMenuAdd('workqueue', { forceNew: true }));
 
       cronBtn.addEventListener('click', onMenuAdd('cron'));
+      cronForceBtn.addEventListener('click', onMenuAdd('cron', { forceNew: true }));
 
       timelineBtn.addEventListener('click', onMenuAdd('timeline'));
+      timelineForceBtn.addEventListener('click', onMenuAdd('timeline', { forceNew: true }));
 
       state.menuEl = menu;
       state.chatBtn = chatBtn;
       state.wqBtn = wqBtn;
+      state.wqForceBtn = wqForceBtn;
       state.cronBtn = cronBtn;
+      state.cronForceBtn = cronForceBtn;
       state.timelineBtn = timelineBtn;
+      state.timelineForceBtn = timelineForceBtn;
     }
 
     const positionMenu = () => {
@@ -6670,8 +6722,14 @@ const paneManager = {
     const atMax = this.panes.length >= this.maxPanes;
     state.chatBtn.disabled = atMax;
     state.wqBtn.disabled = atMax;
+    state.wqForceBtn.disabled = atMax;
+    state.wqForceBtn.hidden = !this.panes.some((pane) => pane.kind === 'workqueue' && String(pane.workqueue?.queue || 'dev-team').trim() === 'dev-team');
     state.cronBtn.disabled = atMax;
+    state.cronForceBtn.disabled = atMax;
+    state.cronForceBtn.hidden = !this.panes.some((pane) => pane.kind === 'cron' && String(pane.cronAgentId || '').trim() === '');
     state.timelineBtn.disabled = atMax;
+    state.timelineForceBtn.disabled = atMax;
+    state.timelineForceBtn.hidden = !this.panes.some((pane) => pane.kind === 'timeline' && String(pane.cronAgentId || '').trim() === '');
 
     this._addPaneMenuState = state;
   },
