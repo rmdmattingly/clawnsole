@@ -85,6 +85,50 @@ test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane 
   await expect(page.locator('.pane-manager-row .pane-manager-pane-id').first()).toHaveText(/^[a-zA-Z0-9]+$/);
 });
 
+test('add pane menu: reuses existing non-chat panes unless "open anyway" is chosen', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const workqueuePanes = page.locator('[data-pane][data-pane-kind="workqueue"]');
+  await expect(workqueuePanes).toHaveCount(1);
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue').click();
+  await expect(workqueuePanes).toHaveCount(1);
+
+  await page.getByTestId('add-pane-btn').click();
+  await expect(page.getByTestId('pane-add-menu-workqueue-open-anyway')).toBeVisible();
+  await page.getByTestId('pane-add-menu-workqueue-open-anyway').click();
+  await expect(workqueuePanes).toHaveCount(2);
+  await workqueuePanes.last().locator('[data-pane-close]').click();
+  await expect(workqueuePanes).toHaveCount(1);
+
+  const cronPanes = page.locator('[data-pane][data-pane-kind="cron"]');
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(cronPanes).toHaveCount(1);
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(cronPanes).toHaveCount(1);
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-timeline').click();
+  const timelinePanes = page.locator('[data-pane][data-pane-kind="timeline"]');
+  await expect(timelinePanes).toHaveCount(1);
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-timeline').click();
+  await expect(timelinePanes).toHaveCount(1);
+});
+
 test('pane manager: quick-find filters and groups by kind', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
