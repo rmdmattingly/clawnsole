@@ -6894,6 +6894,28 @@ function isTypingContext(target) {
   return false;
 }
 
+function isTypingShortcutExempt(event) {
+  const key = String(event.key || '').toLowerCase();
+  if (!event.metaKey && !event.ctrlKey) return false;
+  if (event.altKey) return false;
+  if (event.shiftKey && ['c', 'w', 'r', 't', 'n'].includes(key)) return true;
+  if (!event.shiftKey && ['k', 'p'].includes(key)) return true;
+  return false;
+}
+
+function isBlockingOverlayOpenForPaneShortcuts() {
+  const blockers = [
+    globalElements.loginOverlay,
+    globalElements.settingsModal,
+    globalElements.shortcutsModal,
+    globalElements.commandPaletteModal,
+    globalElements.paneManagerModal,
+    globalElements.workqueueModal,
+    globalElements.agentsModal
+  ];
+  return blockers.some((el) => !!el?.classList?.contains('open'));
+}
+
 function focusPaneIndex(idx) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
@@ -6978,18 +7000,21 @@ window.addEventListener('keydown', (event) => {
   // If Pane Manager is open, it gets first dibs on keys.
   if (paneManagerHandleKeydown(event)) return;
 
+  // Never fire admin shortcuts while typing unless explicitly exempted.
+  if (isTypingContext(event.target) && !isTypingShortcutExempt(event)) return;
+
   // Add-pane shortcuts (admin-only)
   // Ctrl/Cmd+Shift+C → new chat
   // Ctrl/Cmd+Shift+W → new workqueue
   // Ctrl/Cmd+Shift+R → new cron
   // Ctrl/Cmd+Shift+T → new timeline
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey;
-  if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target)) {
+  if (isAccel && roleState.role === 'admin') {
     const key = String(event.key || '').toLowerCase();
     const map = { c: 'chat', w: 'workqueue', r: 'cron', t: 'timeline' };
     const kind = map[key];
     if (kind) {
-      // Don't hijack add-pane shortcuts while typing in inputs/editors.
+      if (isBlockingOverlayOpenForPaneShortcuts()) return;
       event.preventDefault();
       paneManager.closeAddPaneMenu();
       paneManager.addPane(kind);
