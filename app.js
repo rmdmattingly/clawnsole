@@ -1382,6 +1382,8 @@ function paneDuplicateKey(pane) {
   return `${String(pane?.kind || 'chat')}::${String(paneTargetLabel(pane) || '').trim().toLowerCase()}`;
 }
 
+const paneFocusHistory = [];
+
 function focusedPaneKey() {
   const active = document.activeElement;
   const panes = paneManager?.panes || [];
@@ -1390,6 +1392,25 @@ function focusedPaneKey() {
     return !!(root && active && (root === active || root.contains(active)));
   });
   return pane?.key || '';
+}
+
+function rememberFocusedPane(pane) {
+  const key = String(pane?.key || '');
+  if (!key) return;
+  const idx = paneFocusHistory.indexOf(key);
+  if (idx >= 0) paneFocusHistory.splice(idx, 1);
+  paneFocusHistory.unshift(key);
+  if (paneFocusHistory.length > 24) paneFocusHistory.length = 24;
+}
+
+function forgetFocusedPaneKey(paneKey) {
+  const key = String(paneKey || '');
+  if (!key) return;
+  let idx = paneFocusHistory.indexOf(key);
+  while (idx >= 0) {
+    paneFocusHistory.splice(idx, 1);
+    idx = paneFocusHistory.indexOf(key);
+  }
 }
 
 function paneUnreadCount(pane) {
@@ -1875,6 +1896,10 @@ function buildCommandPaletteItems() {
       '⌘/Ctrl+Shift+J'
     ),
     withShortcut(
+      { id: 'cmd:pane-return-last-chat', label: 'Panes: Return to last active Chat pane', detail: 'Jump back to the most recent chat pane in focus history', run: () => returnToLastActiveChatPane() },
+      'g c'
+    ),
+    withShortcut(
       { id: 'cmd:pane-next-unread', label: 'Panes: Next unread', detail: 'Jump to next pane with unread activity', run: () => cycleUnreadPaneFocus(1) },
       '⌘/Ctrl+Shift+]'
     ),
@@ -1908,7 +1933,7 @@ function buildCommandPaletteItems() {
     const label = String(item.label || '');
     const enriched = { ...item, group: 'Advanced', subgroup: '', priority: 20, kind: 'action' };
 
-    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
+    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-return-last-chat' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
       enriched.group = 'Panes';
       enriched.priority = 110;
       return enriched;
@@ -5170,6 +5195,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   }
 
   elements.root?.addEventListener('focusin', () => {
+    rememberFocusedPane(pane);
     clearPaneUnread(pane);
   });
 
@@ -6728,6 +6754,7 @@ const paneManager = {
     const idx = this.panes.findIndex((pane) => pane.key === key);
     if (idx < 0) return;
     const [pane] = this.panes.splice(idx, 1);
+    forgetFocusedPaneKey(pane?.key || key);
     try {
       pane.client?.disconnect(true);
     } catch {}
@@ -7044,6 +7071,7 @@ function isTypingContext(target) {
 function focusPaneIndex(idx) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
+  rememberFocusedPane(pane);
   clearPaneUnread(pane);
 
   try {
@@ -7080,6 +7108,30 @@ function focusPaneIndex(idx) {
   }
 }
 
+function returnToLastActiveChatPane() {
+  const panes = paneManager?.panes || [];
+  if (!panes.length) return false;
+
+  const activeKey = focusedPaneKey();
+  for (const key of paneFocusHistory) {
+    if (!key || key === activeKey) continue;
+    const idx = panes.findIndex((pane) => pane.key === key && pane.kind === 'chat');
+    if (idx >= 0) {
+      focusPaneIndex(idx);
+      return true;
+    }
+  }
+
+  const fallbackIdx = panes.findIndex((pane) => pane.kind === 'chat' && pane.key !== activeKey);
+  if (fallbackIdx >= 0) {
+    focusPaneIndex(fallbackIdx);
+    return true;
+  }
+
+  toast('No previous chat pane.', 'info');
+  return false;
+}
+
 function cyclePaneFocus() {
   const panes = paneManager.panes;
   if (!panes || panes.length === 0) return;
@@ -7087,6 +7139,16 @@ function cyclePaneFocus() {
   const active = document.activeElement;
   const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
   const next = idx >= 0 ? (idx + 1) % panes.length : 0;
+  focusPaneIndex(next);
+}
+
+function cyclePaneFocusBackward() {
+  const panes = paneManager.panes;
+  if (!panes || panes.length === 0) return;
+
+  const active = document.activeElement;
+  const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
+  const next = idx >= 0 ? (idx - 1 + panes.length) % panes.length : panes.length - 1;
   focusPaneIndex(next);
 }
 
@@ -7251,11 +7313,17 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // 'g w' opens Workqueue modal.
+  // 'g' chords jump between common triage surfaces.
   const now = Date.now();
   if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
     if (key.toLowerCase() === 'g') {
       shortcutState.lastGAtMs = now;
+      return;
+    }
+    if (key.toLowerCase() === 'c' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
+      shortcutState.lastGAtMs = 0;
+      event.preventDefault();
+      returnToLastActiveChatPane();
       return;
     }
     if (key.toLowerCase() === 'w' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {

@@ -85,3 +85,39 @@ test('command palette: groups core actions and collapses per-agent targets until
   await input.fill('agent: main');
   await expect(list.getByRole('option', { name: /Agent: main/i })).toBeVisible();
 });
+
+test('pane navigation: returns to the last active chat pane from shortcut and command palette', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await loginAdmin(page, env.serverPort);
+
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
+  const workqueuePane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  const queueSelect = workqueuePane.locator('[data-wq-queue-select]');
+
+  await expect(chatInput).toBeVisible();
+  await chatInput.click();
+  await expect(chatInput).toBeFocused();
+
+  await expect(queueSelect).toBeVisible();
+  await queueSelect.focus();
+  await expect(queueSelect).toBeFocused();
+
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.press('g');
+  await page.keyboard.press('c');
+  await expect(chatInput).toBeFocused();
+
+  await queueSelect.focus();
+  await expect(queueSelect).toBeFocused();
+
+  await page.keyboard.press('ControlOrMeta+K');
+  const input = page.locator('#commandPaletteInput');
+  await expect(input).toBeVisible();
+  await input.fill('return last active chat');
+  await page.keyboard.press('Enter');
+
+  await expect(chatInput).toBeFocused();
+});
