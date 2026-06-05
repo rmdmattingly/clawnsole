@@ -79,6 +79,7 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T adds a timeline pane', async ({ page 
   await loginAdmin(page, env.serverPort);
 
   const countBefore = await page.locator('[data-pane]').count();
+  await page.evaluate(() => document.activeElement?.blur?.());
 
   // Use a Playwright-friendly cross-platform modifier.
   await page.keyboard.press('ControlOrMeta+Shift+T');

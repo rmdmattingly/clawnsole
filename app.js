@@ -6952,7 +6952,7 @@ window.addEventListener('keydown', (event) => {
   // Ctrl/Cmd+Shift+R → new cron
   // Ctrl/Cmd+Shift+T → new timeline
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey;
-  if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target)) {
+  if (isAccel && roleState.role === 'admin' && !shouldIgnoreGlobalPaneShortcut(event)) {
     const key = String(event.key || '').toLowerCase();
     const map = { c: 'chat', w: 'workqueue', r: 'cron', t: 'timeline' };
     const kind = map[key];
