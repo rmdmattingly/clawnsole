@@ -363,3 +363,45 @@ test('agents modal compact density tightens rows and persists', async ({ page, c
   await expect(page.locator('#agentsList')).toHaveClass(/compact/);
   await expect(page.getByRole('button', { name: 'Compact' })).toHaveAttribute('aria-pressed', 'true');
 });
+
+test('fleet pauses scheduled refresh during row interaction and catches up after resume', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [{ id: 'agent-1', name: 'agent-1', displayName: 'agent-1' }];
+  let agentRequests = 0;
+
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    agentRequests += 1;
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+  await expect(page.locator('#agentsList .agents-row')).toHaveCount(1);
+  await expect(page.locator('#agentsList .agents-row').first()).toHaveAttribute('data-agent-id', 'agent-1');
+
+  const requestsBeforeLock = agentRequests;
+  const row = page.locator('#agentsList .agents-row').first();
+  await row.click();
+  await expect(row).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#agentsRefreshPaused')).toContainText('Refresh paused');
+
+  agents = [{ id: 'agent-2', name: 'agent-2', displayName: 'agent-2' }];
+  await page.evaluate(() => window.refreshAgents({ reason: 'fleet_auto_refresh' }));
+
+  expect(agentRequests).toBe(requestsBeforeLock);
+  await expect(page.locator('#agentsList .agents-row').first()).toHaveAttribute('data-agent-id', 'agent-1');
+  await expect(page.locator('#agentsRefreshPaused')).toContainText('update waiting');
+  await expect(row).toHaveAttribute('aria-selected', 'true');
+
+  const catchup = page.waitForResponse((res) => res.url().includes('/agents') && res.ok(), { timeout: 15000 });
+  await page.mouse.move(0, 0);
+  await page.locator('#agentsSearch').focus();
+  await catchup;
+
+  await expect(page.locator('#agentsRefreshPaused')).toBeHidden();
+  await expect(page.locator('#agentsList .agents-row')).toHaveCount(1);
+  await expect(page.locator('#agentsList .agents-row').first()).toHaveAttribute('data-agent-id', 'agent-2');
+});

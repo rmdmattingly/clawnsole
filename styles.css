@@ -1454,6 +1454,21 @@ button.send-btn .btn-icon {
   color: var(--muted);
 }
 
+.agents-refresh-paused {
+  grid-column: 1 / -1;
+  width: fit-content;
+  border: 1px solid rgba(255, 179, 71, 0.36);
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: rgba(255, 179, 71, 0.1);
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.agents-refresh-paused[hidden] {
+  display: none;
+}
+
 .agents-field {
   display: flex;
   flex-direction: column;
@@ -1687,6 +1702,11 @@ button.agents-section-title:hover {
   gap: 8px;
   border-radius: 10px;
   padding: 3px 8px;
+}
+
+.agents-row[aria-selected="true"] {
+  border-color: rgba(127, 209, 185, 0.42);
+  background: rgba(127, 209, 185, 0.08);
 }
 
 .agents-pin {

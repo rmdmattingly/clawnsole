@@ -38,6 +38,7 @@ const globalElements = {
   agentsSortIndicator: document.getElementById('agentsSortIndicator'),
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
+  agentsRefreshPaused: document.getElementById('agentsRefreshPaused'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
   toastHost: document.getElementById('toastHost'),
@@ -630,6 +631,85 @@ let agentAutoRefreshInterval = null;
 let agentsModalAutoRefreshInterval = null;
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
+const agentsRefreshPauseState = {
+  lockedAtMs: 0,
+  deferredReason: '',
+  catchupTimer: null
+};
+
+function isAgentsModalOpen() {
+  return !!globalElements.agentsModal?.classList?.contains('open');
+}
+
+function isAgentsRefreshLocked() {
+  return isAgentsModalOpen() && agentsRefreshPauseState.lockedAtMs > 0;
+}
+
+function renderAgentsRefreshPaused() {
+  const el = globalElements.agentsRefreshPaused;
+  if (!el) return;
+  if (!isAgentsRefreshLocked()) {
+    el.hidden = true;
+    el.textContent = 'Refresh paused';
+    return;
+  }
+  el.hidden = false;
+  const age = formatRelativeAge(Date.now() - agentsRefreshPauseState.lockedAtMs);
+  el.textContent = agentsRefreshPauseState.deferredReason
+    ? `Refresh paused • ${age} • update waiting`
+    : `Refresh paused • ${age}`;
+}
+
+function lockAgentsRefresh() {
+  if (!isAgentsModalOpen()) return;
+  if (!agentsRefreshPauseState.lockedAtMs) {
+    agentsRefreshPauseState.lockedAtMs = Date.now();
+  }
+  renderAgentsRefreshPaused();
+}
+
+function clearAgentsRefreshPause() {
+  agentsRefreshPauseState.lockedAtMs = 0;
+  agentsRefreshPauseState.deferredReason = '';
+  if (agentsRefreshPauseState.catchupTimer) {
+    clearTimeout(agentsRefreshPauseState.catchupTimer);
+    agentsRefreshPauseState.catchupTimer = null;
+  }
+  renderAgentsRefreshPaused();
+}
+
+function isAgentsListInteracting() {
+  const root = globalElements.agentsList;
+  if (!root) return false;
+  const active = document.activeElement;
+  return !!(
+    root.matches(':hover') ||
+    (active && root.contains(active)) ||
+    root.querySelector('details[open]')
+  );
+}
+
+function unlockAgentsRefreshIfIdle() {
+  if (isAgentsListInteracting()) {
+    renderAgentsRefreshPaused();
+    return;
+  }
+  const deferredReason = agentsRefreshPauseState.deferredReason;
+  agentsRefreshPauseState.lockedAtMs = 0;
+  agentsRefreshPauseState.deferredReason = '';
+  renderAgentsRefreshPaused();
+  if (!deferredReason || agentsRefreshPauseState.catchupTimer) return;
+  agentsRefreshPauseState.catchupTimer = setTimeout(() => {
+    agentsRefreshPauseState.catchupTimer = null;
+    refreshAgents({ reason: `fleet_catchup_after_${deferredReason}` }).catch(() => {});
+  }, 250);
+}
+
+function deferAgentsRefresh(reason) {
+  lockAgentsRefresh();
+  agentsRefreshPauseState.deferredReason = String(reason || 'refresh');
+  renderAgentsRefreshPaused();
+}
 
 function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
@@ -667,7 +747,7 @@ function renderAgentsLastRefreshed() {
 function startAgentsModalAutoRefresh() {
   if (agentsModalAutoRefreshInterval) return;
   agentsModalAutoRefreshInterval = setInterval(() => {
-    if (!globalElements.agentsModal?.classList?.contains('open')) return;
+    if (!isAgentsModalOpen()) return;
     if (document.hidden) return;
     refreshAgents({ reason: 'fleet_auto_refresh' }).catch(() => {});
   }, 10_000);
@@ -682,8 +762,13 @@ function stopAgentsModalAutoRefresh() {
 function startAgentsModalFreshnessTicker() {
   if (agentsModalFreshnessTicker) return;
   agentsModalFreshnessTicker = setInterval(() => {
-    if (!globalElements.agentsModal?.classList?.contains('open')) return;
+    if (!isAgentsModalOpen()) return;
     renderAgentsLastRefreshed();
+    renderAgentsRefreshPaused();
+    if (isAgentsRefreshLocked()) {
+      refreshAgentAgeChips();
+      return;
+    }
     renderAgentsModalList();
   }, 1000);
 }
@@ -697,6 +782,13 @@ function stopAgentsModalFreshnessTicker() {
 async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {}) {
   if (roleState.role !== 'admin') return uiState.agents;
   if (!uiState.authed) return uiState.agents;
+
+  const isManual = reason === 'manual';
+  if (isManual) clearAgentsRefreshPause();
+  if (!isManual && isAgentsRefreshLocked()) {
+    deferAgentsRefresh(reason);
+    return uiState.agents;
+  }
 
   if (agentRefreshInFlight) return agentRefreshInFlight;
 
@@ -2993,6 +3085,7 @@ function resetFleetSort() {
 function closeAgentsModal() {
   globalElements.agentsModal?.classList.remove('open');
   globalElements.agentsModal?.setAttribute('aria-hidden', 'true');
+  clearAgentsRefreshPause();
   stopAgentsModalAutoRefresh();
   stopAgentsModalFreshnessTicker();
 }
@@ -3183,6 +3276,19 @@ function openTopbarWorkqueueAction() {
   openWorkqueue();
 }
 
+function refreshAgentAgeChips() {
+  const root = globalElements.agentsList;
+  if (!root) return;
+  const lastSeenMap = getAgentLastSeenMap();
+  root.querySelectorAll('.agents-row[data-agent-id]').forEach((row) => {
+    const id = String(row.getAttribute('data-agent-id') || '').trim();
+    const chip = row.querySelector('.agents-age-chip');
+    if (!id || !chip) return;
+    const heartbeatTs = Number(lastSeenMap[id]) || 0;
+    chip.textContent = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
+  });
+}
+
 function renderAgentsModalList() {
   const root = globalElements.agentsList;
   if (!root) return;
@@ -3331,6 +3437,9 @@ function renderAgentsModalList() {
       const id = String(agent?.id || '').trim();
       const row = document.createElement('div');
       row.className = 'agents-row';
+      row.tabIndex = 0;
+      row.setAttribute('data-agent-id', id);
+      row.setAttribute('aria-selected', 'false');
 
       const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
@@ -3387,6 +3496,22 @@ function renderAgentsModalList() {
           else if (action === 'open-chat') openAgentChatFromFleet(id);
           else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
           else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(id);
+        });
+      });
+
+      row.addEventListener('focusin', () => lockAgentsRefresh());
+      row.addEventListener('mouseenter', () => lockAgentsRefresh());
+      row.addEventListener('click', () => {
+        root.querySelectorAll('.agents-row[aria-selected="true"]').forEach((selected) => {
+          if (selected !== row) selected.setAttribute('aria-selected', 'false');
+        });
+        row.setAttribute('aria-selected', 'true');
+        lockAgentsRefresh();
+      });
+      row.querySelectorAll('details').forEach((details) => {
+        details.addEventListener('toggle', () => {
+          if (details.open) lockAgentsRefresh();
+          else setTimeout(unlockAgentsRefreshIfIdle, 0);
         });
       });
 
@@ -8483,6 +8608,15 @@ globalElements.agentsModal?.addEventListener('keydown', (event) => {
   event.preventDefault();
   if (event.shiftKey || getFleetSort() !== 'heartbeat_age_desc') setFleetHeartbeatSort();
   else resetFleetSort();
+});
+
+globalElements.agentsList?.addEventListener('mouseenter', () => lockAgentsRefresh());
+globalElements.agentsList?.addEventListener('mouseleave', () => {
+  setTimeout(unlockAgentsRefreshIfIdle, 0);
+});
+globalElements.agentsList?.addEventListener('focusin', () => lockAgentsRefresh());
+globalElements.agentsList?.addEventListener('focusout', () => {
+  setTimeout(unlockAgentsRefreshIfIdle, 0);
 });
 
 globalElements.agentsSearch?.addEventListener('input', () => renderAgentsModalList());
