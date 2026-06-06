@@ -2226,6 +2226,7 @@ function openAgentChatFromFleet(agentId) {
   if (!pane) return;
   paneSetAgent(pane, target);
   paneManager.focusPanePrimary(pane);
+  return pane;
 }
 
 function openAgentTimelineFromFleet(agentId) {
@@ -2266,19 +2267,48 @@ function openFleetPane({ forceNew = false } = {}) {
   paneManager.focusPanePrimary(pane);
 }
 
-function openAgentWorkqueueFromFleet() {
+function openAgentWorkqueueFromFleet(agentId, { scope = null } = {}) {
+  const target = normalizeAgentId(agentId || 'main');
   const preferredQueue =
     String(workqueueState?.selectedQueue || '').trim() ||
     String(findExistingPane('workqueue')?.workqueue?.queue || '').trim() ||
     'dev-team';
 
   const pane =
-    findExistingPane('workqueue', (p) => String(p.workqueue?.queue || '').trim() === preferredQueue) ||
+    findExistingPane(
+      'workqueue',
+      (p) => String(p.workqueue?.queue || '').trim() === preferredQueue && normalizeAgentId(p.agentId || 'main') === target
+    ) ||
     findExistingPane('workqueue') ||
-    paneManager.addPane('workqueue', { queue: preferredQueue });
+    paneManager.addPane('workqueue', { queue: preferredQueue, agentId: target });
   if (!pane) return;
 
+  pane.agentId = target;
+  if (pane.workqueue) {
+    pane.workqueue.queue = preferredQueue;
+    if (scope) pane.workqueue.scopeFilter = normalizeWorkqueueScope(scope);
+  }
+  paneManager.persistAdminPanes();
+  try {
+    const currentScope = pane.workqueue?.scopeFilter || 'all';
+    const scopeBtns = Array.from(pane.elements?.thread?.querySelectorAll?.('[data-wq-scope]') || []);
+    scopeBtns.forEach((btn) => {
+      const key = btn.getAttribute('data-wq-scope') || '';
+      const active = key && key === currentScope;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    renderWorkqueuePaneItems(pane);
+    if (isPaneManagerOpen()) renderPaneManager();
+  } catch {}
   paneManager.focusPanePrimary(pane);
+  return pane;
+}
+
+function openAgentTriageFromFleet(agentId) {
+  const chatPane = openAgentChatFromFleet(agentId);
+  const workqueuePane = openAgentWorkqueueFromFleet(agentId, { scope: 'assigned' });
+  return { chatPane, workqueuePane };
 }
 
 function renderAgentsModalList() {
@@ -2384,6 +2414,7 @@ function renderAgentsModalList() {
           <div class="agents-row-meta">${escapeHtml(id)} · ${escapeHtml(bucketLabel)} · <span class="agents-age-chip">${escapeHtml(heartbeatAge)}</span>${statusSnippetHtml}</div>
         </div>
         <div class="agents-row-actions agents-row-actions-inline" role="group" aria-label="Quick actions for ${escapeHtml(label)}">
+          <button type="button" class="secondary agents-action-btn agents-action-primary" data-agent-action="triage" data-agent-id="${escapeHtml(id)}" title="Triage agent" aria-label="Triage agent ${escapeHtml(label)}">Triage</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Chat</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Timeline</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Workqueue</button>
@@ -2391,6 +2422,7 @@ function renderAgentsModalList() {
         <details class="agents-row-actions-overflow">
           <summary class="secondary" aria-label="More actions for ${escapeHtml(label)}" title="More actions">⋯</summary>
           <div class="agents-row-actions-menu" role="group" aria-label="Quick actions for ${escapeHtml(label)}">
+            <button type="button" class="secondary agents-action-btn" data-agent-action="triage" data-agent-id="${escapeHtml(id)}" title="Triage agent" aria-label="Triage agent ${escapeHtml(label)}">Triage agent</button>
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Open Chat</button>
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Open Timeline</button>
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Open Workqueue</button>
@@ -2414,9 +2446,10 @@ function renderAgentsModalList() {
           e.preventDefault();
           e.stopPropagation();
           const action = String(btn.getAttribute('data-agent-action') || '').trim();
-          if (action === 'open-chat') openAgentChatFromFleet(id);
+          if (action === 'triage') openAgentTriageFromFleet(id);
+          else if (action === 'open-chat') openAgentChatFromFleet(id);
           else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
-          else if (action === 'open-workqueue') openAgentWorkqueueFromFleet();
+          else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(id);
         });
       });
 
@@ -6387,13 +6420,14 @@ const paneManager = {
         if (!key) return null;
         if (kind === 'workqueue') {
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
+          const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'claimed', 'in_progress'];
           const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, queue, statusFilter, scopeFilter, sortKey, sortDir };
+          return { key, kind, agentId, queue, statusFilter, scopeFilter, sortKey, sortDir };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
@@ -6441,6 +6475,7 @@ const paneManager = {
         return {
           key: pane.key,
           kind: 'workqueue',
+          agentId: pane.agentId || 'main',
           queue: pane.workqueue?.queue || 'dev-team',
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
           scopeFilter: pane.workqueue?.scopeFilter || 'all',
@@ -6519,6 +6554,7 @@ const paneManager = {
         key: `p${randomId().slice(0, 8)}`,
         role: 'admin',
         kind: 'workqueue',
+        agentId: options?.agentId,
         queue: nextQueue,
         statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
         scopeFilter: getDefaultWorkqueueScope(),

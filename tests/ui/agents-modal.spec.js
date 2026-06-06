@@ -108,6 +108,7 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await expect(page.locator('#agentsModal')).toHaveClass(/open/);
 
   const firstRow = page.locator('#agentsList .agents-row').first();
+  await expect(firstRow.locator('[data-agent-action="triage"]').first()).toBeVisible();
   await expect(firstRow.locator('[data-agent-action="open-chat"]').first()).toBeVisible();
   await expect(firstRow.locator('[data-agent-action="open-timeline"]').first()).toBeVisible();
   await expect(firstRow.locator('[data-agent-action="open-workqueue"]').first()).toBeVisible();
@@ -123,4 +124,59 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
 
   await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+});
+
+test('agents modal triage action opens missing counterpart from minimal layout', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  while ((await page.locator('[data-pane]').count()) > 1) {
+    await page.locator('[data-pane] [data-pane-close]').first().click();
+  }
+  await expect(page.locator('[data-pane]')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  const firstRow = page.locator('#agentsList .agents-row').first();
+  const agentId = await firstRow.locator('[data-agent-action="triage"]').first().getAttribute('data-agent-id');
+
+  await firstRow.locator('[data-agent-action="triage"]').first().click();
+
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-scope="assigned"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-queue-select]')).toBeFocused();
+
+  const panes = await page.evaluate(() => JSON.parse(localStorage.getItem('clawnsole.admin.panes.v1') || '[]'));
+  const workqueuePane = panes.find((pane) => pane.kind === 'workqueue');
+  expect(workqueuePane?.agentId).toBe(agentId);
+  expect(workqueuePane?.scopeFilter).toBe('assigned');
+});
+
+test('agents modal triage action reuses existing chat and workqueue panes', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  const firstRow = page.locator('#agentsList .agents-row').first();
+  const agentId = await firstRow.locator('[data-agent-action="triage"]').first().getAttribute('data-agent-id');
+
+  await firstRow.locator('[data-agent-action="triage"]').first().click();
+  await firstRow.locator('[data-agent-action="triage"]').first().click();
+
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-scope="assigned"]')).toHaveAttribute('aria-pressed', 'true');
+
+  const panes = await page.evaluate(() => JSON.parse(localStorage.getItem('clawnsole.admin.panes.v1') || '[]'));
+  const chatPanes = panes.filter((pane) => pane.kind === 'chat');
+  const workqueuePanes = panes.filter((pane) => pane.kind === 'workqueue');
+  expect(chatPanes).toHaveLength(1);
+  expect(workqueuePanes).toHaveLength(1);
+  expect(chatPanes[0]?.agentId).toBe(agentId);
+  expect(workqueuePanes[0]?.agentId).toBe(agentId);
+  expect(workqueuePanes[0]?.scopeFilter).toBe('assigned');
 });
