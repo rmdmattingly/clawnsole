@@ -36,6 +36,9 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await expect(modal).toContainText('Pane focus/navigation');
   await expect(modal).toContainText('Pane actions');
   await expect(modal).toContainText('Workqueue actions');
+  await expect(modal).toContainText('Focus Workqueue queue search');
+  await expect(modal).toContainText('Focus Workqueue item search');
+  await expect(modal).toContainText('Focus Workqueue status filter');
   await expect(modal).toContainText('disabled while typing');
 
   await page.keyboard.press('Escape');
@@ -162,6 +165,50 @@ test('add-pane shortcuts do not fire while typing in chat input', async ({ page 
   await page.keyboard.press('Control+Shift+W');
 
   await expect(panes).toHaveCount(2);
+});
+
+test('workqueue shortcuts focus queue search, item search, status filter, and blocked states', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await expect(wqPane).toBeVisible();
+
+  await page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first().focus();
+  await page.keyboard.press('ControlOrMeta+Shift+Q');
+  await expect(page.getByTestId('toast').last()).toContainText('Workqueue shortcut blocked: focus a Workqueue pane first.');
+
+  const queueSelect = wqPane.locator('[data-wq-queue-select]');
+  await queueSelect.focus();
+  await expect(queueSelect).toBeFocused();
+
+  await page.keyboard.press('ControlOrMeta+Shift+Q');
+  await expect(wqPane.locator('[data-wq-queue-search]')).toBeFocused();
+
+  await page.keyboard.press('ControlOrMeta+Shift+I');
+  await expect(wqPane.locator('[data-wq-item-search]')).toBeFocused();
+
+  await page.keyboard.press('ControlOrMeta+Shift+S');
+  await expect(wqPane.locator('[data-wq-status-details] > summary')).toBeFocused();
+
+  await page.evaluate(() => {
+    document.querySelector('[data-pane][data-pane-kind="workqueue"] [data-wq-queue-search]')?.setAttribute('hidden', '');
+  });
+  await page.keyboard.press('ControlOrMeta+Shift+Q');
+  await expect(page.getByTestId('toast').last()).toContainText('Workqueue shortcut blocked: target control is hidden.');
+
+  await page.evaluate(() => {
+    document.querySelector('[data-pane][data-pane-kind="workqueue"] [data-wq-item-search]')?.setAttribute('aria-disabled', 'true');
+  });
+  await page.keyboard.press('ControlOrMeta+Shift+I');
+  await expect(page.getByTestId('toast').last()).toContainText('Workqueue shortcut blocked: target control is disabled.');
 });
 
 test('fleet quick action button + keyboard shortcut focus existing timeline pane without duplicates', async ({ page }) => {
