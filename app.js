@@ -2255,7 +2255,7 @@ function openAgentTimelineFromFleet(agentId) {
 function openFleetPane({ forceNew = false } = {}) {
   const target = 'all';
   const pane = forceNew
-    ? paneManager.addPane('timeline', { cronAgentId: target })
+    ? paneManager.addPane('timeline', { cronAgentId: target, forceNew: true })
     : findExistingPane('timeline', (p) => String(p.cronAgentId || '').trim() === target) ||
       findExistingPane('timeline') ||
       paneManager.addPane('timeline', { cronAgentId: target });
