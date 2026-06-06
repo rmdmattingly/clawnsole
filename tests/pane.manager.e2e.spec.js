@@ -85,6 +85,42 @@ test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane 
   await expect(page.locator('.pane-manager-row .pane-manager-pane-id').first()).toHaveText(/^[a-zA-Z0-9]+$/);
 });
 
+test('pane nicknames: edit, persist, and match quick switch search', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('Pane nickname');
+    await dialog.accept('Queue triage');
+  });
+  await chatPane.getByTestId('pane-nickname').click();
+
+  await expect(chatPane.getByTestId('pane-type-label')).toContainText('Queue triage');
+
+  await page.keyboard.press('Control+P');
+  await page.getByTestId('pane-manager-search').fill('queue triage');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(1);
+  await expect(page.getByTestId('pane-manager-nickname')).toHaveText('Queue triage');
+  await page.keyboard.press('Escape');
+
+  await page.keyboard.press('Control+K');
+  await page.locator('#commandPaletteInput').fill('queue triage');
+  await expect(page.locator('.command-palette-item').first()).toContainText('Queue triage');
+  await page.keyboard.press('Escape');
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]').first().getByTestId('pane-type-label')).toContainText('Queue triage');
+});
+
 test('pane manager: quick-find filters and groups by kind', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);

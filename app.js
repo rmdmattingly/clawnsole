@@ -1366,16 +1366,25 @@ function paneTargetLabel(pane) {
   return String(pane.agentId || 'main');
 }
 
-function paneIdentityLabel(pane, { includeUnread = false } = {}) {
+function normalizePaneNickname(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+}
+
+function paneNickname(pane) {
+  return normalizePaneNickname(pane?.nickname || '');
+}
+
+function paneIdentityLabel(pane, { includeUnread = false, includeNickname = true } = {}) {
   const letter = paneHeaderLetter(pane);
   const type = paneLabel(pane);
   const target = paneTargetLabel(pane);
+  const nickname = includeNickname ? paneNickname(pane) : '';
   const unread = paneUnreadCount(pane);
-  return `${letter} ${type} · ${target}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
+  return `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
 }
 
 function paneSummaryLabel(pane) {
-  return paneIdentityLabel(pane, { includeUnread: false });
+  return paneIdentityLabel(pane, { includeUnread: false, includeNickname: false });
 }
 
 function paneDuplicateKey(pane) {
@@ -1419,6 +1428,7 @@ function paneSearchText(pane) {
     paneSummaryLabel(pane),
     paneLabel(pane),
     paneTargetLabel(pane),
+    paneNickname(pane),
     pane?.kind || ''
   ]
     .join(' ')
@@ -1532,12 +1542,14 @@ function renderPaneManager() {
         const isDuplicate = duplicateCount > 1;
         const unreadCount = paneUnreadCount(pane);
         const paneIdentity = paneSummaryLabel(pane);
+        const nickname = paneNickname(pane);
 
         row.innerHTML = `
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
               <span class="pane-manager-accent" data-pane-manager-accent="${escapeHtml(String(pane.kind || 'chat'))}" aria-hidden="true"></span>
               <span class="pane-manager-kind-label">${escapeHtml(paneIdentity)}</span>
+              ${nickname ? `<span class="pane-manager-nickname" data-testid="pane-manager-nickname">${escapeHtml(nickname)}</span>` : ''}
               <span class="pane-manager-pane-id" title="Internal pane id">${escapeHtml(String(pane?.key || ''))}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
               ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
@@ -1548,6 +1560,7 @@ function renderPaneManager() {
             <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="Move pane up" aria-label="Move pane up" ${visibleIdx === 0 ? 'disabled' : ''}>↑</button>
             <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="Move pane down" aria-label="Move pane down" ${visibleIdx === visibleKeys.length - 1 ? 'disabled' : ''}>↓</button>
             ${isDuplicate ? '<button class="secondary pane-manager-close-others" type="button" data-action="close-others" data-testid="pane-manager-close-others">Close others</button>' : ''}
+            <button class="secondary pane-manager-edit-nickname" type="button" data-action="edit-nickname" data-testid="pane-manager-edit-nickname">Nickname</button>
             <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
             <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
           </div>
@@ -1595,6 +1608,11 @@ function renderPaneManager() {
                 paneManager.removePane(entry.key);
               } catch {}
             });
+            renderPaneManager();
+            return;
+          }
+          if (action === 'edit-nickname') {
+            editPaneNickname(pane);
             renderPaneManager();
             return;
           }
@@ -1756,12 +1774,13 @@ function buildCommandPaletteItems() {
     const letter = paneHeaderLetter(pane);
     const type = paneLabel(pane);
     const target = paneTargetLabel(pane);
+    const nickname = paneNickname(pane);
     items.push(
       withShortcut(
         {
           id: `cmd:focus-pane-${pane.key}`,
           label: `Focus pane ${letter}`,
-          detail: `${type} · ${target}`,
+          detail: `${type} · ${target}${nickname ? ` · ${nickname}` : ''}`,
           run: () => focusPaneIndex(idx)
         },
         idx < 9 ? `⌘/Ctrl+${idx + 1}` : ''
@@ -4719,6 +4738,24 @@ function paneHeaderLetter(pane) {
 function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
   pane.elements.name.textContent = paneIdentityLabel(pane, { includeUnread: true });
+  if (pane?.elements?.nicknameBtn) {
+    const nickname = paneNickname(pane);
+    pane.elements.nicknameBtn.classList.toggle('active', !!nickname);
+    pane.elements.nicknameBtn.title = nickname ? `Edit pane nickname: ${nickname}` : 'Edit pane nickname';
+    pane.elements.nicknameBtn.setAttribute('aria-label', nickname ? `Edit pane nickname: ${nickname}` : 'Edit pane nickname');
+  }
+}
+
+function editPaneNickname(pane) {
+  if (roleState.role !== 'admin' || !pane) return;
+  const current = paneNickname(pane);
+  const next = window.prompt('Pane nickname (optional)', current);
+  if (next === null) return;
+  pane.nickname = normalizePaneNickname(next);
+  renderPaneIdentity(pane);
+  paneManager.persistAdminPanes();
+  if (isPaneManagerOpen()) renderPaneManager();
+  if (commandPaletteState.open) filterCommandPalette(commandPaletteState.query);
 }
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
@@ -4998,7 +5035,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, sortKey, sortDir, cronAgentId, nickname, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -5016,6 +5053,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     status: root.querySelector('[data-pane-status]'),
     helpDetails: root.querySelector('[data-pane-help]'),
     helpPopover: root.querySelector('[data-pane-help-popover]'),
+    nicknameBtn: root.querySelector('[data-pane-nickname]'),
     closeBtn: root.querySelector('[data-pane-close]'),
     thread: root.querySelector('[data-pane-thread]'),
     scrollDownBtn: root.querySelector('[data-pane-scroll-down]'),
@@ -5052,6 +5090,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       sortDir: sortDir === 'asc' ? 'asc' : 'desc'
     },
     cronAgentId: typeof cronAgentId === 'string' ? cronAgentId.trim() : '',
+    nickname: normalizePaneNickname(nickname),
     connected: false,
     statusState: 'disconnected',
     statusMeta: '',
@@ -5092,6 +5131,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       elements.typePill.dataset.paneAccent = pane.kind;
       elements.typePill.dataset.testid = 'pane-type-accent';
     }
+  } catch {}
+
+  try {
+    elements.nicknameBtn?.addEventListener?.('click', () => editPaneNickname(pane));
   } catch {}
 
   // Per-pane inline help popover ("What is this pane?")
@@ -6349,6 +6392,8 @@ const paneManager = {
         scopeFilter: cfg.scopeFilter,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
+        cronAgentId: cfg.cronAgentId,
+        nickname: cfg.nickname,
         closable: true
       })
     );
@@ -6385,6 +6430,7 @@ const paneManager = {
             ? rawMode
             : 'chat';
         if (!key) return null;
+        const nickname = normalizePaneNickname(item.nickname);
         if (kind === 'workqueue') {
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
           const statusFilter = Array.isArray(item.statusFilter)
@@ -6393,17 +6439,18 @@ const paneManager = {
           const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, queue, statusFilter, scopeFilter, sortKey, sortDir };
+          return { key, kind, queue, statusFilter, scopeFilter, sortKey, sortDir, nickname };
         }
         if (kind === 'cron' || kind === 'timeline') {
-          return { key, kind };
+          const cronAgentId = typeof item.cronAgentId === 'string' ? item.cronAgentId.trim() : '';
+          return { key, kind, cronAgentId, nickname };
         }
         const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
-        return { key, kind: 'chat', agentId };
+        return { key, kind: 'chat', agentId, nickname };
       }
       // Super-legacy format: ['pabc','pdef'] (treat as chat panes)
       if (typeof item === 'string' && item) {
-        return { key: item, kind: 'chat', agentId: defaultAgent };
+        return { key: item, kind: 'chat', agentId: defaultAgent, nickname: '' };
       }
       return null;
     };
@@ -6437,9 +6484,10 @@ const paneManager = {
   persistAdminPanes() {
     if (roleState.role !== 'admin') return;
     const payload = this.panes.map((pane) => {
+      const base = { key: pane.key, nickname: paneNickname(pane) };
       if (pane.kind === 'workqueue') {
         return {
-          key: pane.key,
+          ...base,
           kind: 'workqueue',
           queue: pane.workqueue?.queue || 'dev-team',
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
@@ -6449,9 +6497,9 @@ const paneManager = {
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
-        return { key: pane.key, kind: pane.kind };
+        return { ...base, kind: pane.kind, cronAgentId: pane.cronAgentId || '' };
       }
-      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
+      return { ...base, kind: 'chat', agentId: pane.agentId || 'main' };
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
