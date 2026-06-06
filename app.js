@@ -14342,7 +14342,7 @@ function isTypingShortcutExempt(event) {
     const target = event?.target;
     if (target instanceof Element && target.closest?.('[data-pane-kind="workqueue"] select')) return true;
   }
-  return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'p' || key === 'k' || key === 'l');
+  return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'p' || key === 'l');
 }
 
 function isNonTrivialGlobalShortcut(event) {
@@ -14835,8 +14835,8 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Cmd/Ctrl+K opens command palette (even while typing).
-  if (matchesKeybind(event, 'command.palette')) {
+  // Cmd/Ctrl+K opens command palette when focus is outside editable fields.
+  if (matchesKeybind(event, 'command.palette') && !isTypingContext(event.target)) {
     event.preventDefault();
     openCommandPalette();
     return;
