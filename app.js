@@ -3055,7 +3055,28 @@ function renderWorkqueuePaneItems(pane) {
     if (scope === 'assigned') return !!activeTarget && owner === activeTarget;
     return true;
   });
-  const items = sortWorkqueueItems(scopedItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const searchQuery = String(pane.workqueue?.searchQuery || '').trim().toLowerCase();
+  const searchedItems = !searchQuery
+    ? scopedItems
+    : scopedItems.filter((it) => {
+      const haystack = [
+        it?.title,
+        it?.instructions,
+        it?.id,
+        it?.queue,
+        it?.status,
+        it?.claimedBy,
+        it?.assignee,
+        it?.assignedTo,
+        it?.agentId,
+        it?.source,
+        it?.dedupeKey,
+        it?.meta?.repo,
+        it?.meta?.issueNumber
+      ].map((v) => String(v || '').toLowerCase()).join(' ');
+      return haystack.includes(searchQuery);
+    });
+  const items = sortWorkqueueItems(searchedItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
 
   if (empty) {
     const hasItems = items.length > 0;
@@ -3065,10 +3086,11 @@ function renderWorkqueuePaneItems(pane) {
       const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
       const statusLabel = statuses.length ? statuses.join(', ') : 'default';
       const scopeLabel = pane.workqueue?.scopeFilter || 'all';
+      const searchLabel = String(pane.workqueue?.searchQuery || '').trim();
       empty.innerHTML = `
         <div class="empty-state">
           <div style="font-weight:700; margin-bottom:6px;">No items in this queue.</div>
-          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
+          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span>${searchLabel ? ` · Search: <span class="mono">${escapeHtml(searchLabel)}</span>` : ''}</div>
           <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
             <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
             <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
@@ -5237,6 +5259,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <button type="button" class="wq-scope-btn" data-wq-scope="all">All</button>
           </div>
 
+          <label class="wq-field">
+            <span class="wq-label">Search items</span>
+            <input data-wq-item-search type="search" placeholder="Search items" aria-label="Search workqueue items" autocomplete="off" />
+          </label>
+
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
 
           <div class="wq-sort" role="group" aria-label="Sort workqueue items">
@@ -5315,6 +5342,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const queueSearchEl = elements.thread.querySelector('[data-wq-queue-search]');
     const queueSelectEl = elements.thread.querySelector('[data-wq-queue-select]');
     const queueCustomEl = elements.thread.querySelector('[data-wq-queue-custom]');
+    const itemSearchEl = elements.thread.querySelector('[data-wq-item-search]');
 
     // Make header pill focus the queue selector in the body (no duplicated selector state).
     paneSetHeaderTarget(pane, {
@@ -5527,7 +5555,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     });
 
     renderStatusMultiSelect();
+    if (itemSearchEl) itemSearchEl.value = String(pane.workqueue?.searchQuery || '').trim();
     populateQueueSelect().then(() => doRefresh());
+
+    itemSearchEl?.addEventListener('input', () => {
+      pane.workqueue.searchQuery = String(itemSearchEl.value || '').trim();
+      renderWorkqueuePaneItems(pane);
+      paneManager.persistAdminPanes();
+    });
 
     refreshBtn?.addEventListener('click', () => doRefresh());
     queueCustomEl?.addEventListener('keydown', (e) => {
@@ -7073,6 +7108,62 @@ function isTypingContext(target) {
   return false;
 }
 
+function isPaneElementVisible(el) {
+  if (!(el instanceof HTMLElement)) return false;
+  try {
+    if (el.hidden) return false;
+    if (el.getClientRects && el.getClientRects().length === 0) return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function getActivePaneByFocus() {
+  const active = document.activeElement;
+  if (!active) return null;
+  return (Array.isArray(paneManager?.panes) ? paneManager.panes : []).find((pane) =>
+    pane?.elements?.root && (pane.elements.root === active || pane.elements.root.contains(active))
+  ) || null;
+}
+
+function focusWorkqueueControlByShortcut(target) {
+  const activePane = getActivePaneByFocus();
+  if (activePane?.kind !== 'workqueue') {
+    showToast('Workqueue shortcut blocked: focus a Workqueue pane first.', { kind: 'info', timeoutMs: 2200 });
+    return false;
+  }
+
+  const thread = activePane.elements?.thread;
+  const selectorByTarget = {
+    queueSearch: '[data-wq-queue-search]',
+    itemSearch: '[data-wq-item-search]',
+    statusFilter: '[data-wq-status-details] > summary'
+  };
+  const selector = selectorByTarget[target] || '';
+  const control = selector ? thread?.querySelector?.(selector) : null;
+
+  if (!(control instanceof HTMLElement)) {
+    showToast('Workqueue shortcut blocked: target control is unavailable.', { kind: 'info', timeoutMs: 2200 });
+    return false;
+  }
+  if (!isPaneElementVisible(control)) {
+    showToast('Workqueue shortcut blocked: target control is hidden.', { kind: 'info', timeoutMs: 2200 });
+    return false;
+  }
+  if (control.disabled || String(control.getAttribute('aria-disabled') || '').toLowerCase() === 'true') {
+    showToast('Workqueue shortcut blocked: target control is disabled.', { kind: 'info', timeoutMs: 2200 });
+    return false;
+  }
+
+  try { activePane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); } catch {}
+  control.focus();
+  if (target === 'queueSearch' || target === 'itemSearch') {
+    try { control.select?.(); } catch {}
+  }
+  return true;
+}
+
 function focusPaneIndex(idx) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
@@ -7201,6 +7292,17 @@ window.addEventListener('keydown', (event) => {
       event.preventDefault();
     }
     return;
+  }
+
+  // Explicit Workqueue focus accelerators are safe to use even from another input.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey) {
+    const keyLower = String(event.key || '').toLowerCase();
+    if (keyLower === 'q' || keyLower === 'i' || keyLower === 's') {
+      event.preventDefault();
+      const target = keyLower === 'q' ? 'queueSearch' : keyLower === 'i' ? 'itemSearch' : 'statusFilter';
+      focusWorkqueueControlByShortcut(target);
+      return;
+    }
   }
 
   // Never steal focus / override browser shortcuts while typing.
