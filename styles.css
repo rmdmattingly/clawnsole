@@ -2038,13 +2038,17 @@ kbd {
 }
 
 .wq-list-header {
+  position: sticky;
+  top: 0;
+  z-index: 4;
   padding: 10px 12px;
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--panel);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .wq-list-body {
