@@ -75,6 +75,46 @@ test('workqueue pane: queue target supports search + recent persistence', async 
   await expect(secondSelect.locator('option', { hasText: '★ qa-hotfix' })).toHaveCount(1);
 });
 
+test('workqueue pane: source chips + clawnsole preset filter items without reload', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+
+  const enqueue = async (title, instructions) => {
+    await page.evaluate(async ({ title, instructions }) => {
+      await fetch('/api/workqueue/enqueue', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queue: 'dev-team', title, instructions, priority: 50 })
+      });
+    }, { title, instructions });
+  };
+
+  await enqueue('[ISSUE] clawnsole issue item', 'https://github.com/rmdmattingly/clawnsole/issues/177');
+  await enqueue('[ROUTINE] speechee routine item', 'https://github.com/rmdmattingly/speechee/pull/37');
+
+  await pane.locator('[data-wq-refresh]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(2);
+
+  await pane.locator('[data-wq-source="issue"]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(1);
+  await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
+
+  await pane.locator('[data-wq-clear-quick]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(2);
+
+  await pane.locator('[data-wq-preset-clawnsole]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(1);
+  await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
+});
+
 test('workqueue pane: controls toolbar is sticky and list scrolls independently', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
