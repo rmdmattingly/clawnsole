@@ -84,6 +84,8 @@ test('normalizePaneKind handles aliases safely', () => {
   assert.equal(normalizePaneKind('chat'), 'chat');
   assert.equal(normalizePaneKind('workqueue'), 'workqueue');
   assert.equal(normalizePaneKind('w'), 'workqueue');
+  assert.equal(normalizePaneKind('fleet'), 'fleet');
+  assert.equal(normalizePaneKind('fl'), 'fleet');
   assert.equal(normalizePaneKind('cron'), 'cron');
   assert.equal(normalizePaneKind('cr'), 'cron');
   assert.equal(normalizePaneKind('timeline'), 'timeline');
