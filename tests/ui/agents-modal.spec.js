@@ -124,3 +124,46 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
 });
+
+test('fleet copy agent id action supports keyboard triage flow', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text) => {
+          window.__clawnsoleCopiedText = String(text || '');
+        },
+        readText: async () => window.__clawnsoleCopiedText || ''
+      }
+    });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const firstRow = page.locator('#agentsList .agents-row').first();
+  await firstRow.click();
+  await expect(firstRow).toBeFocused();
+
+  await page.keyboard.press('j');
+  const selectedRow = page.locator('#agentsList .agents-row[aria-selected="true"]').first();
+  await expect(selectedRow).toBeVisible();
+  await expect(selectedRow).toBeFocused();
+  const selectedAgentId = (await selectedRow.getAttribute('data-agent-id')) || 'main';
+
+  await expect(selectedRow.locator('[data-agent-action="copy-agent-id"]').first()).toBeVisible();
+  await page.keyboard.press('y');
+  await expect(page.getByTestId('toast').last()).toContainText(`Copied agent id: ${selectedAgentId}`);
+  await expect(selectedRow).toBeFocused();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(selectedAgentId);
+
+  const rowActionAgentId = (await firstRow.getAttribute('data-agent-id')) || 'main';
+  await firstRow.locator('[data-agent-action="copy-agent-id"]').first().click();
+  await expect(page.getByTestId('toast').last()).toContainText(`Copied agent id: ${rowActionAgentId}`);
+  await expect(firstRow).toBeFocused();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(rowActionAgentId);
+});

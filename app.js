@@ -220,6 +220,10 @@ const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
 const WQ_RECENT_TARGETS_MAX = 6;
 
+const agentsModalState = {
+  selectedAgentId: ''
+};
+
 function readJsonFromStorage(key, fallback) {
   try {
     const raw = storage.get(key, '');
@@ -391,6 +395,31 @@ function showToast(message, { kind = 'info', timeoutMs = 2600 } = {}) {
     clearTimeout(timer);
     remove();
   });
+}
+
+async function copyTextToClipboard(text) {
+  const value = String(text || '').trim();
+  if (!value) return false;
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = value;
+    ta.setAttribute('readonly', 'true');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return !!ok;
+  } catch {
+    return false;
+  }
 }
 
 let agentRefreshTimer = null;
@@ -2209,6 +2238,105 @@ function closeAgentsModal() {
   stopAgentsModalFreshnessTicker();
 }
 
+function getAgentsModalRows() {
+  return Array.from(globalElements.agentsList?.querySelectorAll?.('.agents-row[data-agent-id]') || []);
+}
+
+function focusAgentsModalRow(row, { preventScroll = true } = {}) {
+  if (!row) return;
+  try {
+    row.focus({ preventScroll });
+  } catch {
+    try { row.focus(); } catch {}
+  }
+}
+
+function selectAgentsModalRowByIndex(index, { scroll = true, focus = false } = {}) {
+  const rows = getAgentsModalRows();
+  if (!rows.length) {
+    agentsModalState.selectedAgentId = '';
+    return null;
+  }
+  const safe = Math.max(0, Math.min(rows.length - 1, Number(index) || 0));
+  const next = rows[safe];
+  const agentId = String(next?.dataset?.agentId || '').trim();
+  agentsModalState.selectedAgentId = agentId;
+
+  rows.forEach((row, idx) => {
+    const selected = idx === safe;
+    row.classList.toggle('is-selected', selected);
+    row.setAttribute('aria-selected', selected ? 'true' : 'false');
+    row.setAttribute('tabindex', selected ? '0' : '-1');
+  });
+
+  if (scroll) {
+    try {
+      next?.scrollIntoView?.({ block: 'nearest' });
+    } catch {}
+  }
+  if (focus) focusAgentsModalRow(next, { preventScroll: true });
+  return next || null;
+}
+
+function selectAgentsModalRowByAgentId(agentId, { fallbackToFirst = true, scroll = false, focus = false } = {}) {
+  const rows = getAgentsModalRows();
+  if (!rows.length) {
+    agentsModalState.selectedAgentId = '';
+    return null;
+  }
+  const id = String(agentId || '').trim();
+  let index = rows.findIndex((row) => String(row.dataset.agentId || '').trim() === id);
+  if (index < 0 && fallbackToFirst) index = 0;
+  if (index < 0) {
+    agentsModalState.selectedAgentId = '';
+    return null;
+  }
+  return selectAgentsModalRowByIndex(index, { scroll, focus });
+}
+
+function copyFleetAgentId(agentIdInput) {
+  const agentId = String(agentIdInput || '').trim();
+  if (!agentId) {
+    showToast('Fleet: select an agent first.', { kind: 'info', timeoutMs: 1800 });
+    return false;
+  }
+  void copyTextToClipboard(agentId).then((ok) => {
+    if (ok) showToast(`Copied agent id: ${agentId}`, { kind: 'info', timeoutMs: 1800 });
+    else showToast('Could not copy agent id.', { kind: 'error', timeoutMs: 2200 });
+  });
+  return true;
+}
+
+function agentsModalHandleKeydown(event) {
+  if (!globalElements.agentsModal?.classList.contains('open')) return false;
+  if (!event || event.defaultPrevented) return false;
+
+  const target = event.target;
+  const tag = String(target?.tagName || '').toUpperCase();
+  if (target?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return false;
+
+  const key = String(event.key || '');
+  const lower = key.toLowerCase();
+  if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && (lower === 'j' || lower === 'k' || key === 'ArrowDown' || key === 'ArrowUp')) {
+    event.preventDefault();
+    const rows = getAgentsModalRows();
+    if (!rows.length) return true;
+    const currentIndex = Math.max(0, rows.findIndex((row) => String(row.dataset.agentId || '').trim() === String(agentsModalState.selectedAgentId || '').trim()));
+    const delta = (lower === 'j' || key === 'ArrowDown') ? 1 : -1;
+    selectAgentsModalRowByIndex(Math.max(0, Math.min(rows.length - 1, currentIndex + delta)), { focus: true });
+    return true;
+  }
+
+  if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && lower === 'y') {
+    event.preventDefault();
+    const row = selectAgentsModalRowByAgentId(agentsModalState.selectedAgentId, { fallbackToFirst: true, scroll: false, focus: true });
+    copyFleetAgentId(String(row?.dataset?.agentId || '').trim());
+    return true;
+  }
+
+  return false;
+}
+
 function findExistingPane(kind, predicate = null) {
   const list = Array.isArray(paneManager?.panes) ? paneManager.panes : [];
   for (const pane of list) {
@@ -2367,6 +2495,10 @@ function renderAgentsModalList() {
       const id = String(agent?.id || '').trim();
       const row = document.createElement('div');
       row.className = 'agents-row';
+      row.dataset.agentId = id;
+      row.setAttribute('role', 'option');
+      row.setAttribute('tabindex', '-1');
+      row.setAttribute('aria-selected', 'false');
 
       const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
@@ -2387,6 +2519,7 @@ function renderAgentsModalList() {
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Chat</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Timeline</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Workqueue</button>
+          <button type="button" class="secondary agents-action-btn" data-agent-action="copy-agent-id" data-agent-id="${escapeHtml(id)}" title="Copy agent id (y)" aria-label="Copy agent id for ${escapeHtml(label)}">Copy ID</button>
         </div>
         <details class="agents-row-actions-overflow">
           <summary class="secondary" aria-label="More actions for ${escapeHtml(label)}" title="More actions">⋯</summary>
@@ -2394,6 +2527,7 @@ function renderAgentsModalList() {
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Open Chat</button>
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Open Timeline</button>
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Open Workqueue</button>
+            <button type="button" class="secondary agents-action-btn" data-agent-action="copy-agent-id" data-agent-id="${escapeHtml(id)}" title="Copy agent id (y)" aria-label="Copy agent id for ${escapeHtml(label)}">Copy agent id</button>
           </div>
         </details>
       `;
@@ -2408,6 +2542,10 @@ function renderAgentsModalList() {
         renderAgentsModalList();
       });
 
+      row.addEventListener('click', () => {
+        selectAgentsModalRowByAgentId(id, { fallbackToFirst: true, scroll: false, focus: true });
+      });
+
       const actionButtons = Array.from(row.querySelectorAll('[data-agent-action]'));
       actionButtons.forEach((btn) => {
         btn.addEventListener('click', (e) => {
@@ -2417,6 +2555,10 @@ function renderAgentsModalList() {
           if (action === 'open-chat') openAgentChatFromFleet(id);
           else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
           else if (action === 'open-workqueue') openAgentWorkqueueFromFleet();
+          else if (action === 'copy-agent-id') {
+            selectAgentsModalRowByAgentId(id, { fallbackToFirst: true, scroll: false, focus: true });
+            copyFleetAgentId(id);
+          }
         });
       });
 
@@ -2432,6 +2574,8 @@ function renderAgentsModalList() {
 
   const empty = ordered.length === 0;
   if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
+  if (!empty) selectAgentsModalRowByAgentId(agentsModalState.selectedAgentId, { fallbackToFirst: true, scroll: false });
+  else agentsModalState.selectedAgentId = '';
 }
 
 // Workqueue (admin-only)
@@ -7292,6 +7436,8 @@ window.addEventListener('keydown', (event) => {
     const tag = String(el.tagName || '').toUpperCase();
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
   })();
+
+  if (agentsModalHandleKeydown(event)) return;
 
   // If Pane Manager is open, it gets first dibs on keys.
   if (paneManagerHandleKeydown(event)) return;
