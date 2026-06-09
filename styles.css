@@ -1929,6 +1929,27 @@ kbd {
   background: rgba(127, 209, 185, 0.12);
 }
 
+.wq-all-scope-guardrail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 179, 71, 0.38);
+  border-radius: 8px;
+  background: rgba(255, 179, 71, 0.1);
+}
+
+.wq-all-scope-guardrail[hidden] {
+  display: none;
+}
+
+.wq-all-scope-guardrail-text {
+  font-size: 12px;
+  color: var(--text);
+}
+
 .wq-enqueue {
   margin-top: 10px;
 }
