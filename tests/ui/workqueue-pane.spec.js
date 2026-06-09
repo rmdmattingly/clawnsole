@@ -218,13 +218,14 @@ test('workqueue pane: repetitive routine items collapse into expandable group ro
         instructions: 'routine test item',
         priority: 50
       },
-      headers: { Cookie: 'admin=1' }
+      headers: { Cookie: 'clawnsole_auth=' + Buffer.from('admin::test', 'utf8').toString('base64') }
     });
     expect(res.ok()).toBeTruthy();
   };
 
-  await addRoutine('A');
-  await addRoutine('B');
+  for (let i = 0; i < 51; i++) {
+    await addRoutine(String(i).padStart(2, '0'));
+  }
 
   await addPane(page, 'Workqueue pane');
   const wqPane = page.locator('[data-pane]').last();
@@ -235,8 +236,15 @@ test('workqueue pane: repetitive routine items collapse into expandable group ro
 
   const groupRows = wqPane.locator('[data-wq-group-row="routine"]');
   await expect(groupRows.first()).toBeVisible();
+  await expect(groupRows.first().locator('.wq-group-count')).toHaveText('51 items');
+  await expect(groupRows.first().locator('.wq-group-signals')).toContainText('prio 50');
+  await expect(groupRows.first().locator('.wq-group-signals')).toContainText('ready');
 
   await expect(wqPane.locator('.wq-row.wq-row-nested')).toHaveCount(0);
-  await groupRows.first().click();
-  await expect(wqPane.locator('.wq-row.wq-row-nested')).toHaveCount(2);
+  await groupRows.first().evaluate((el) => el.click());
+  await expect(wqPane.locator('.wq-row.wq-row-nested')).toHaveCount(51);
+
+  await wqPane.locator('[data-wq-group-mode="off"]').click();
+  await expect(wqPane.locator('[data-wq-group-row="routine"]')).toHaveCount(0);
+  await expect(wqPane.locator('.wq-row')).toHaveCount(51);
 });

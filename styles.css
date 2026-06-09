@@ -1884,20 +1884,23 @@ kbd {
   color: var(--muted);
 }
 
-.wq-sort {
+.wq-sort,
+.wq-group-mode {
   display: flex;
   gap: 6px;
   align-items: center;
   flex-wrap: wrap;
 }
 
-.wq-sort-label {
+.wq-sort-label,
+.wq-group-mode-label {
   font-size: 11px;
   color: var(--muted);
   margin-right: 4px;
 }
 
 .wq-sort-btn,
+.wq-group-mode-btn,
 .wq-list-sort {
   font-size: 11px;
   letter-spacing: 0.02em;
@@ -1910,6 +1913,7 @@ kbd {
 }
 
 .wq-sort-btn.active,
+.wq-group-mode-btn.active,
 .wq-list-sort.active {
   border-color: rgba(127, 209, 185, 0.5);
   background: rgba(127, 209, 185, 0.12);
@@ -2014,7 +2018,8 @@ kbd {
 }
 
 .wq-list-sort:focus-visible,
-.wq-sort-btn:focus-visible {
+.wq-sort-btn:focus-visible,
+.wq-group-mode-btn:focus-visible {
   outline: 2px solid rgba(127, 209, 185, 0.7);
   outline-offset: 2px;
 }
@@ -2195,6 +2200,7 @@ kbd {
   text-align: left;
   cursor: pointer;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  scroll-margin-top: 96px;
 }
 
 .wq-row:hover {
@@ -2222,6 +2228,7 @@ kbd {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  scroll-margin-top: 96px;
 }
 
 .wq-group-row:hover {
@@ -2243,6 +2250,16 @@ kbd {
 .wq-group-count {
   font-size: 11px;
   color: var(--muted);
+}
+
+.wq-group-signals {
+  min-width: 0;
+  flex: 1;
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wq-col {

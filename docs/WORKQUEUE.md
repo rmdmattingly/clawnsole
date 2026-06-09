@@ -72,6 +72,10 @@ clawnsole workqueue claim-next --agent dev-3
 clawnsole workqueue claim-next --agent dev-3 --queues dev-team
 ```
 
+## Clawnsole UI grouping
+
+Workqueue panes default routine grouping to `Auto`. In auto mode, repetitive routine rows are collapsed once more than 50 rows are visible after the pane's queue, status, scope, and sort filters are applied. Operators can switch the pane control to `On` or `Off` when they need forced grouping or a fully expanded list.
+
 ## Examples
 
 ### Single-agent worker (recommended)
