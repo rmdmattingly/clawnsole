@@ -5115,6 +5115,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     elements.root.dataset.paneKind = pane.kind;
     elements.root.dataset.paneAccentKind = pane.kind;
     elements.root.classList.add(`pane-kind-${pane.kind}`);
+    elements.root.addEventListener('focusin', () => paneRememberFocused(pane));
   } catch {}
 
   // Pane header: kind label + type pill (icon + text)
@@ -7202,6 +7203,9 @@ globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFro
 globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFromUi());
 
 let shortcutState = { lastGAtMs: 0 };
+let paneFocusMru = [];
+let paneMruTraversal = null;
+let suppressPaneFocusRemember = false;
 
 function isTypingContext(target) {
   const el = target || document.activeElement;
@@ -7212,42 +7216,76 @@ function isTypingContext(target) {
   return false;
 }
 
-function focusPaneIndex(idx) {
+function paneRememberFocused(pane) {
+  if (suppressPaneFocusRemember) return;
+  const key = String(pane?.key || '').trim();
+  if (!key) return;
+  paneMruTraversal = null;
+  paneFocusMru = [key, ...paneFocusMru.filter((entry) => entry !== key)].slice(0, 32);
+}
+
+function paneByKey(key) {
+  const paneKey = String(key || '').trim();
+  if (!paneKey) return null;
+  return paneManager.panes.find((pane) => String(pane?.key || '') === paneKey) || null;
+}
+
+function focusPaneIndex(idx, { remember = true } = {}) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
   clearPaneUnread(pane);
 
-  try {
-    pane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-  } catch {}
+  if (remember) paneRememberFocused(pane);
+  const previousSuppressPaneFocusRemember = suppressPaneFocusRemember;
+  if (!remember) suppressPaneFocusRemember = true;
 
-  // Prefer focusing the chat input when available (and visible).
-  const input = pane.elements?.input;
-  if (input && typeof input.focus === 'function') {
-    const isVisible = (() => {
-      try {
-        if (input.disabled) return false;
-        if (input.hidden) return false;
-        if (input.getClientRects && input.getClientRects().length === 0) return false;
-        return true;
-      } catch {
-        return true;
-      }
-    })();
-    if (isVisible) {
-      input.focus();
+  try {
+    try {
+      pane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    } catch {}
+
+    if (!remember && pane.elements?.root && typeof pane.elements.root.focus === 'function') {
+      if (!pane.elements.root.hasAttribute('tabindex')) pane.elements.root.setAttribute('tabindex', '-1');
+      pane.elements.root.focus({ preventScroll: true });
       return;
     }
-  }
 
-  // Fallback: focus first focusable control inside the pane.
-  const root = pane.elements?.root;
-  const focusable =
-    root &&
-    root.querySelector &&
-    root.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
-  if (focusable && typeof focusable.focus === 'function') {
-    focusable.focus();
+    // Prefer focusing the chat input when available (and visible).
+    const input = pane.elements?.input;
+    if (input && typeof input.focus === 'function') {
+      const isVisible = (() => {
+        try {
+          if (input.disabled) return false;
+          if (input.hidden) return false;
+          if (input.getClientRects && input.getClientRects().length === 0) return false;
+          return true;
+        } catch {
+          return true;
+        }
+      })();
+      if (isVisible) {
+        input.focus();
+        return true;
+      }
+    }
+
+    // Fallback: focus first focusable control inside the pane.
+    const root = pane.elements?.root;
+    const focusable =
+      root &&
+      root.querySelector &&
+      root.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (focusable && typeof focusable.focus === 'function') {
+      focusable.focus();
+    }
+  } finally {
+    if (remember) {
+      suppressPaneFocusRemember = previousSuppressPaneFocusRemember;
+    } else {
+      setTimeout(() => {
+        suppressPaneFocusRemember = previousSuppressPaneFocusRemember;
+      }, 0);
+    }
   }
 }
 
@@ -7259,6 +7297,42 @@ function cyclePaneFocus() {
   const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
   const next = idx >= 0 ? (idx + 1) % panes.length : 0;
   focusPaneIndex(next);
+}
+
+function cyclePaneFocusByMru({ backward = false } = {}) {
+  const panes = paneManager.panes;
+  if (!panes || panes.length < 2) return;
+
+  const fallback = panes.map((pane) => String(pane?.key || '')).filter(Boolean);
+  const mru = [...paneFocusMru.filter((key) => paneByKey(key)), ...fallback.filter((key) => !paneFocusMru.includes(key))];
+  if (mru.length < 2) return;
+
+  const active = document.activeElement;
+  const activePane = panes.find((pane) => pane.elements?.root && (pane.elements.root === active || pane.elements.root.contains(active)));
+  const activeKey = String(activePane?.key || mru[0] || '');
+  const activePos = Math.max(0, mru.indexOf(activeKey));
+  if (
+    !paneMruTraversal ||
+    !Array.isArray(paneMruTraversal.order) ||
+    paneMruTraversal.order.length !== mru.length ||
+    !paneMruTraversal.order.includes(activeKey)
+  ) {
+    paneMruTraversal = { order: mru, index: activePos };
+  }
+
+  const order = paneMruTraversal.order;
+  const currentPos = Math.max(0, order.indexOf(activeKey));
+  const nextPos = backward ? (currentPos - 1 + order.length) % order.length : (currentPos + 1) % order.length;
+  paneMruTraversal.index = nextPos;
+
+  const target = paneByKey(order[nextPos]);
+  if (!target) return;
+  const targetIdx = panes.indexOf(target);
+  if (targetIdx < 0) return;
+
+  focusPaneIndex(targetIdx, { remember: false });
+  const summary = paneDestinationSummary(target);
+  toast(`${summary.letter} ${summary.kind} · ${summary.target}`, 'info');
 }
 
 function cycleUnreadPaneFocus(direction = 1) {
@@ -7362,6 +7436,13 @@ window.addEventListener('keydown', (event) => {
       focusPaneIndex(n - 1);
       return;
     }
+  }
+
+  // Ctrl/Cmd+Tab switches pane focus by MRU order.
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && key === 'Tab') {
+    event.preventDefault();
+    cyclePaneFocusByMru({ backward: !!event.shiftKey });
+    return;
   }
 
   // Cmd/Ctrl+1..4 focuses a pane.
