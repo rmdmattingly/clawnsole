@@ -182,7 +182,7 @@ test('ctrl/cmd+tab switches panes by MRU and is blocked while typing', async ({ 
   await expect.poll(activePaneIndex).toBe(1);
 
   await page.keyboard.press('ControlOrMeta+Tab');
-  await expect.poll(activePaneIndex).toBe(2);
+  await expect.poll(activePaneIndex).toBe(0);
 
   await page.keyboard.press('ControlOrMeta+Shift+Tab');
   await expect.poll(activePaneIndex).toBe(1);

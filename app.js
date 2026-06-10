@@ -6819,6 +6819,8 @@ globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFro
 
 let shortcutState = { lastGAtMs: 0 };
 let paneFocusMru = [];
+let paneMruTraversal = null;
+let suppressPaneFocusRemember = false;
 
 function isTypingContext(target) {
   const el = target || document.activeElement;
@@ -6830,8 +6832,10 @@ function isTypingContext(target) {
 }
 
 function paneRememberFocused(pane) {
+  if (suppressPaneFocusRemember) return;
   const key = String(pane?.key || '').trim();
   if (!key) return;
+  paneMruTraversal = null;
   paneFocusMru = [key, ...paneFocusMru.filter((entry) => entry !== key)].slice(0, 32);
 }
 
@@ -6847,38 +6851,56 @@ function focusPaneIndex(idx, { remember = true } = {}) {
   clearPaneUnread(pane);
 
   if (remember) paneRememberFocused(pane);
+  const previousSuppressPaneFocusRemember = suppressPaneFocusRemember;
+  if (!remember) suppressPaneFocusRemember = true;
 
   try {
-    pane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-  } catch {}
+    try {
+      pane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    } catch {}
 
-  // Prefer focusing the chat input when available (and visible).
-  const input = pane.elements?.input;
-  if (input && typeof input.focus === 'function') {
-    const isVisible = (() => {
-      try {
-        if (input.disabled) return false;
-        if (input.hidden) return false;
-        if (input.getClientRects && input.getClientRects().length === 0) return false;
-        return true;
-      } catch {
-        return true;
-      }
-    })();
-    if (isVisible) {
-      input.focus();
+    if (!remember && pane.elements?.root && typeof pane.elements.root.focus === 'function') {
+      if (!pane.elements.root.hasAttribute('tabindex')) pane.elements.root.setAttribute('tabindex', '-1');
+      pane.elements.root.focus({ preventScroll: true });
       return;
     }
-  }
 
-  // Fallback: focus first focusable control inside the pane.
-  const root = pane.elements?.root;
-  const focusable =
-    root &&
-    root.querySelector &&
-    root.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
-  if (focusable && typeof focusable.focus === 'function') {
-    focusable.focus();
+    // Prefer focusing the chat input when available (and visible).
+    const input = pane.elements?.input;
+    if (input && typeof input.focus === 'function') {
+      const isVisible = (() => {
+        try {
+          if (input.disabled) return false;
+          if (input.hidden) return false;
+          if (input.getClientRects && input.getClientRects().length === 0) return false;
+          return true;
+        } catch {
+          return true;
+        }
+      })();
+      if (isVisible) {
+        input.focus();
+        return true;
+      }
+    }
+
+    // Fallback: focus first focusable control inside the pane.
+    const root = pane.elements?.root;
+    const focusable =
+      root &&
+      root.querySelector &&
+      root.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (focusable && typeof focusable.focus === 'function') {
+      focusable.focus();
+    }
+  } finally {
+    if (remember) {
+      suppressPaneFocusRemember = previousSuppressPaneFocusRemember;
+    } else {
+      setTimeout(() => {
+        suppressPaneFocusRemember = previousSuppressPaneFocusRemember;
+      }, 0);
+    }
   }
 }
 
@@ -6904,14 +6926,26 @@ function cyclePaneFocusByMru({ backward = false } = {}) {
   const activePane = panes.find((pane) => pane.elements?.root && (pane.elements.root === active || pane.elements.root.contains(active)));
   const activeKey = String(activePane?.key || mru[0] || '');
   const activePos = Math.max(0, mru.indexOf(activeKey));
-  const nextPos = backward ? (activePos - 1 + mru.length) % mru.length : (activePos + 1) % mru.length;
+  if (
+    !paneMruTraversal ||
+    !Array.isArray(paneMruTraversal.order) ||
+    paneMruTraversal.order.length !== mru.length ||
+    !paneMruTraversal.order.includes(activeKey)
+  ) {
+    paneMruTraversal = { order: mru, index: activePos };
+  }
 
-  const target = paneByKey(mru[nextPos]);
+  const order = paneMruTraversal.order;
+  const currentPos = Math.max(0, order.indexOf(activeKey));
+  const nextPos = backward ? (currentPos - 1 + order.length) % order.length : (currentPos + 1) % order.length;
+  paneMruTraversal.index = nextPos;
+
+  const target = paneByKey(order[nextPos]);
   if (!target) return;
   const targetIdx = panes.indexOf(target);
   if (targetIdx < 0) return;
 
-  focusPaneIndex(targetIdx);
+  focusPaneIndex(targetIdx, { remember: false });
   const summary = paneDestinationSummary(target);
   toast(`${summary.letter} ${summary.kind} · ${summary.target}`, 'info');
 }
