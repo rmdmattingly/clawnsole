@@ -152,11 +152,12 @@ test('ctrl/cmd+tab switches panes by MRU and is blocked while typing', async ({ 
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
+  const panes = page.locator('[data-pane]');
+  await expect(panes).toHaveCount(2);
+
   await page.getByTestId('add-pane-btn').click();
   await page.getByTestId('pane-add-menu-workqueue').click();
-  await page.getByTestId('add-pane-btn').click();
-  await page.getByTestId('pane-add-menu-cron').click();
-  await expect(page.locator('[data-pane]')).toHaveCount(4);
+  await expect(panes).toHaveCount(3);
 
   const activePaneIndex = async () => page.evaluate(() => {
     const panes = Array.from(document.querySelectorAll('[data-pane]'));
