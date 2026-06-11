@@ -80,8 +80,8 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T adds a timeline pane', async ({ page 
 
   const countBefore = await page.locator('[data-pane]').count();
 
-  // Use a Playwright-friendly cross-platform modifier.
-  await page.keyboard.press('ControlOrMeta+Shift+T');
+  await page.locator('body').click({ position: { x: 1, y: 1 } });
+  await page.keyboard.press('Control+Shift+T');
 
   const tlPane = page.locator('[data-pane-kind="timeline"]').last();
   await expect(tlPane).toBeVisible();
