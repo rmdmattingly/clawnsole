@@ -2254,18 +2254,28 @@ function openFleetPane({ forceNew = false } = {}) {
   paneManager.focusPanePrimary(pane);
 }
 
-function openAgentWorkqueueFromFleet() {
+function openAgentWorkqueueFromFleet(agentId) {
+  const target = normalizeAgentId(agentId || 'main');
   const preferredQueue =
     String(workqueueState?.selectedQueue || '').trim() ||
     String(findExistingPane('workqueue')?.workqueue?.queue || '').trim() ||
     'dev-team';
 
   const pane =
+    findExistingPane('workqueue', (p) => String(p.workqueue?.queue || '').trim() === preferredQueue && normalizeAgentId(p.agentId || 'main') === target) ||
     findExistingPane('workqueue', (p) => String(p.workqueue?.queue || '').trim() === preferredQueue) ||
     findExistingPane('workqueue') ||
-    paneManager.addPane('workqueue', { queue: preferredQueue });
+    paneManager.addPane('workqueue', { queue: preferredQueue, agentId: target });
   if (!pane) return;
 
+  pane.agentId = target;
+  try {
+    const claimAgentSelect = pane.elements?.thread?.querySelector?.('[data-wq-claim-agent]');
+    if (claimAgentSelect && Array.from(claimAgentSelect.options || []).some((opt) => String(opt.value || '') === target)) {
+      claimAgentSelect.value = target;
+    }
+  } catch {}
+  paneManager.persistAdminPanes();
   paneManager.focusPanePrimary(pane);
 }
 
@@ -2404,7 +2414,7 @@ function renderAgentsModalList() {
           const action = String(btn.getAttribute('data-agent-action') || '').trim();
           if (action === 'open-chat') openAgentChatFromFleet(id);
           else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
-          else if (action === 'open-workqueue') openAgentWorkqueueFromFleet();
+          else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(id);
         });
       });
 
@@ -5605,6 +5615,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         opt.textContent = formatAgentLabel(a);
         claimAgentSelect.appendChild(opt);
       }
+      const selectedAgent = normalizeAgentId(pane.agentId || 'main');
+      if (Array.from(claimAgentSelect.options || []).some((opt) => String(opt.value || '') === selectedAgent)) {
+        claimAgentSelect.value = selectedAgent;
+      }
     }
 
     // Enqueue (inline form).
@@ -6375,13 +6389,14 @@ const paneManager = {
         if (!key) return null;
         if (kind === 'workqueue') {
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
+          const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'claimed', 'in_progress'];
           const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, queue, statusFilter, scopeFilter, sortKey, sortDir };
+          return { key, kind, agentId, queue, statusFilter, scopeFilter, sortKey, sortDir };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
@@ -6429,6 +6444,7 @@ const paneManager = {
         return {
           key: pane.key,
           kind: 'workqueue',
+          agentId: pane.agentId || 'main',
           queue: pane.workqueue?.queue || 'dev-team',
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
           scopeFilter: pane.workqueue?.scopeFilter || 'all',
@@ -6480,6 +6496,7 @@ const paneManager = {
 
     const normalizedKind = normalizePaneKind(kind);
     const nextQueue = String(options?.queue || 'dev-team').trim() || 'dev-team';
+    const nextAgentId = normalizeAgentId(options?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
     const nextCronAgentId = String(options?.cronAgentId || '').trim();
 
     if (normalizedKind === 'workqueue') {
@@ -6487,6 +6504,7 @@ const paneManager = {
         key: `p${randomId().slice(0, 8)}`,
         role: 'admin',
         kind: 'workqueue',
+        agentId: nextAgentId,
         queue: nextQueue,
         statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
         scopeFilter: getDefaultWorkqueueScope(),
