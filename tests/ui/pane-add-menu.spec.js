@@ -154,3 +154,37 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T reuses timeline pane; Alt adds anyway
   const countAfterForce = await page.locator('[data-pane]').count();
   expect(countAfterForce).toBe(countAfter + 1);
 });
+
+test('pane pair cues: Chat and Workqueue siblings share header and manager markers', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+
+  await expect(chatPane.getByTestId('pane-pair-cue')).toBeVisible();
+  await expect(wqPane.getByTestId('pane-pair-cue')).toBeVisible();
+
+  const chatCue = await chatPane.getByTestId('pane-pair-cue').textContent();
+  const wqCue = await wqPane.getByTestId('pane-pair-cue').textContent();
+  expect(String(chatCue || '').trim()).toBeTruthy();
+  expect(String(wqCue || '').trim()).toBe(String(chatCue || '').trim());
+
+  await chatPane.locator('.pane-header').hover();
+  await expect(wqPane).toHaveClass(/pane-pair-revealed/);
+
+  await page.mouse.move(1, 1);
+  await expect(wqPane).not.toHaveClass(/pane-pair-revealed/);
+
+  await chatPane.locator('[data-pane-agent-button]').focus();
+  await expect(wqPane).toHaveClass(/pane-pair-revealed/);
+
+  await page.getByTestId('panes-indicator').click();
+  const manager = page.getByTestId('pane-manager-modal');
+  await expect(manager).toBeVisible();
+  await expect(manager.getByTestId('pane-manager-pair-cue')).toHaveCount(2);
+});

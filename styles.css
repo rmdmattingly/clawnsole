@@ -717,6 +717,43 @@ body::before {
   display: none !important;
 }
 
+.pane-pair-cue,
+.pane-manager-pair-cue {
+  --pane-pair-color: #7dd3fc;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 82px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--pane-pair-color) 72%, transparent);
+  background: color-mix(in srgb, var(--pane-pair-color) 18%, transparent);
+  color: color-mix(in srgb, var(--pane-pair-color) 84%, white);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pane-pair-cue.solo,
+.pane-manager-pair-cue.solo {
+  border-style: dashed;
+  opacity: 0.62;
+}
+
+.pane.pane-paired .pane-header {
+  box-shadow: inset 3px 0 0 var(--pane-pair-color);
+}
+
+.pane.pane-pair-revealed .pane-header {
+  border-color: color-mix(in srgb, var(--pane-pair-color) 64%, rgba(255, 255, 255, 0.14));
+  background: color-mix(in srgb, var(--pane-pair-color) 12%, rgba(255, 255, 255, 0.03));
+}
+
 .pane-help {
   position: relative;
 }

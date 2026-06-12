@@ -1988,6 +1988,50 @@ function paneDisplayTargetLabel(pane) {
   return ordinal > 0 ? `${target} (${ordinal})` : target;
 }
 
+const PANE_PAIR_COLORS = ['#7dd3fc', '#86efac', '#fbbf24', '#f0abfc', '#fca5a5', '#c4b5fd'];
+
+function panePairTarget(pane) {
+  const kind = String(pane?.kind || 'chat');
+  if (kind !== 'chat' && kind !== 'workqueue') return '';
+  return normalizeAgentId(pane?.agentId || 'main');
+}
+
+function panePairColor(target) {
+  const text = String(target || 'main');
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+  }
+  return PANE_PAIR_COLORS[Math.abs(hash) % PANE_PAIR_COLORS.length];
+}
+
+function panePairInfo(pane) {
+  const target = panePairTarget(pane);
+  const kind = String(pane?.kind || 'chat');
+  if (!target || (kind !== 'chat' && kind !== 'workqueue')) return null;
+  const siblingKind = kind === 'chat' ? 'workqueue' : 'chat';
+  const siblings = (paneManager?.panes || []).filter((candidate) => (
+    candidate &&
+    candidate !== pane &&
+    String(candidate.kind || '') === siblingKind &&
+    panePairTarget(candidate) === target
+  ));
+  return {
+    target,
+    color: panePairColor(target),
+    hasSibling: siblings.length > 0,
+    siblings
+  };
+}
+
+function setPanePairReveal(pane, reveal = false) {
+  const info = panePairInfo(pane);
+  if (!info?.siblings?.length) return;
+  info.siblings.forEach((sibling) => {
+    sibling.elements?.root?.classList.toggle('pane-pair-revealed', !!reveal);
+  });
+}
+
 function focusedPaneKey() {
   const active = document.activeElement;
   const panes = paneManager?.panes || [];
@@ -2315,12 +2359,14 @@ function renderPaneManager() {
         const isDuplicate = duplicateCount > 1;
         const unreadCount = paneUnreadCount(pane);
         const paneIdentity = paneSummaryLabel(pane);
+        const pair = panePairInfo(pane);
 
         row.innerHTML = `
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
               ${paneTypeBadgeMarkup(pane, { extraClass: 'pane-manager-type-badge', testId: 'pane-manager-type-badge' })}
               <span class="pane-manager-kind-label">${paneManagerHighlightHtml(paneIdentity, query)}</span>
+              ${pair ? `<span class="pane-manager-pair-cue${pair.hasSibling ? '' : ' solo'}" data-testid="pane-manager-pair-cue" style="--pane-pair-color:${escapeHtml(pair.color)}" title="${escapeHtml(pair.hasSibling ? `Paired ${paneLabel(pane)} target: ${pair.target}` : `No paired sibling for target: ${pair.target}`)}">${paneManagerHighlightHtml(pair.target.slice(0, 10), query)}</span>` : ''}
               <span class="pane-manager-pane-id" title="Internal pane id">${paneManagerHighlightHtml(String(pane?.key || ''), query)}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
               ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
@@ -6827,6 +6873,35 @@ function renderPaneIdentity(pane) {
   }
   const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
   if (activeKey && String(pane.key || '') === activeKey) updateBrowserTitle(pane);
+  const pair = panePairInfo(pane);
+  if (pane.elements.root) {
+    pane.elements.root.classList.toggle('pane-paired', !!pair?.hasSibling);
+    pane.elements.root.classList.toggle('pane-pair-solo', !!pair && !pair.hasSibling);
+    if (pair) {
+      pane.elements.root.dataset.panePairTarget = pair.target;
+      pane.elements.root.style.setProperty('--pane-pair-color', pair.color);
+    } else {
+      delete pane.elements.root.dataset.panePairTarget;
+      pane.elements.root.style.removeProperty('--pane-pair-color');
+    }
+  }
+  if (pane.elements.pairCue) {
+    if (pair) {
+      pane.elements.pairCue.hidden = false;
+      pane.elements.pairCue.textContent = pair.target.slice(0, 10);
+      pane.elements.pairCue.classList.toggle('solo', !pair.hasSibling);
+      pane.elements.pairCue.title = pair.hasSibling
+        ? `Paired Chat + Workqueue target: ${pair.target}`
+        : `No paired sibling for target: ${pair.target}`;
+      pane.elements.pairCue.setAttribute('aria-label', pane.elements.pairCue.title);
+      pane.elements.pairCue.style.setProperty('--pane-pair-color', pair.color);
+    } else {
+      pane.elements.pairCue.hidden = true;
+      pane.elements.pairCue.textContent = '';
+      pane.elements.pairCue.removeAttribute('aria-label');
+      pane.elements.pairCue.style.removeProperty('--pane-pair-color');
+    }
+  }
 }
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
@@ -7121,9 +7196,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
     root,
+    header: root.querySelector('.pane-header'),
     name: root.querySelector('[data-pane-name]'),
     nameToken: root.querySelector('[data-pane-name-token]'),
     nameTarget: root.querySelector('[data-pane-name-target]'),
+    pairCue: root.querySelector('[data-pane-pair-cue]'),
     typePill: root.querySelector('[data-pane-type-pill]'),
     typeIcon: root.querySelector('[data-pane-type-icon]'),
     typeText: root.querySelector('[data-pane-type-text]'),
@@ -7332,6 +7409,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       paneAbortRun(pane);
     });
   }
+
+  elements.header?.addEventListener('mouseenter', () => setPanePairReveal(pane, true));
+  elements.header?.addEventListener('mouseleave', () => setPanePairReveal(pane, false));
+  elements.header?.addEventListener('focusin', () => setPanePairReveal(pane, true));
+  elements.header?.addEventListener('focusout', () => setPanePairReveal(pane, false));
 
   elements.root?.addEventListener('focusin', () => {
     notePaneFocused(pane);
