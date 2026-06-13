@@ -165,8 +165,9 @@ test('pane manager: unread-only filter toggle', async ({ page }) => {
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.keyboard.press('Control+P');
-  await page.getByTestId('pane-manager-unread-only').check();
+  await page.getByTestId('panes-indicator').click();
+  await expect(page.getByTestId('pane-manager-modal')).toHaveAttribute('aria-hidden', 'false');
+  await page.locator('.pane-manager-unread-only').click();
   await expect(page.locator('.pane-manager-row')).toHaveCount(0);
 
   await page.keyboard.press('Escape');
