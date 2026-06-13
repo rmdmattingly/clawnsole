@@ -53,7 +53,32 @@
               <option value="3">3-up</option>
             </select>
           </div>
-          <div class="role-pill" id="rolePill" data-testid="role-pill">signed out</div>
+          <div class="session-chip-wrap">
+            <button class="role-pill" id="rolePill" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="authSessionPopover" data-testid="role-pill">
+              <span class="session-chip-state" data-testid="session-chip-state">Signed out</span>
+              <span class="session-chip-principal" data-testid="session-chip-principal">No active session</span>
+              <span class="session-chip-env" data-testid="session-chip-env">local</span>
+            </button>
+            <div class="auth-session-popover" id="authSessionPopover" role="dialog" aria-hidden="true" aria-label="Session details" data-testid="auth-session-popover">
+              <div class="auth-session-row">
+                <span>State</span>
+                <strong data-testid="auth-session-state">Signed out</strong>
+              </div>
+              <div class="auth-session-row">
+                <span>Principal</span>
+                <strong data-testid="auth-session-principal">No active session</strong>
+              </div>
+              <div class="auth-session-row">
+                <span>Role</span>
+                <strong data-testid="auth-session-role">none</strong>
+              </div>
+              <div class="auth-session-row">
+                <span>Mode</span>
+                <strong data-testid="auth-session-env">local</strong>
+              </div>
+              <button id="authSessionSignOutBtn" class="auth-session-signout" type="button" data-testid="auth-session-signout">Sign out</button>
+            </div>
+          </div>
           <button id="refreshAgentsBtn" class="icon-btn action-btn" type="button" aria-label="Refresh agent list" title="Refresh (Ctrl/Cmd+R)" hidden>
             <span class="btn-icon" aria-hidden="true">⟳</span>
             <span class="btn-label">Refresh</span>
