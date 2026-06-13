@@ -7261,6 +7261,16 @@ function cyclePaneFocus() {
   focusPaneIndex(next);
 }
 
+function cyclePaneFocusBackward() {
+  const panes = paneManager.panes;
+  if (!panes || panes.length === 0) return;
+
+  const active = document.activeElement;
+  const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
+  const prev = idx >= 0 ? (idx - 1 + panes.length) % panes.length : panes.length - 1;
+  focusPaneIndex(prev);
+}
+
 function cycleUnreadPaneFocus(direction = 1) {
   const panes = paneManager?.panes || [];
   if (!panes.length) return false;
