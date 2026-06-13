@@ -2684,7 +2684,7 @@ function buildCommandPaletteItems() {
     const label = String(item.label || '');
     const enriched = { ...item, group: 'Advanced', subgroup: '', priority: 20, kind: 'action' };
 
-    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-return-last-chat' || id === 'cmd:pane-mru-next' || id === 'cmd:pane-mru-prev' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
+    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-return-last-chat' || id === 'cmd:pane-mru-next' || id === 'cmd:pane-mru-prev' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread' || id === 'cmd:pane-toggle-paired') {
       enriched.group = 'Panes';
       enriched.priority = id.startsWith('cmd:focus-pane-') ? 130 : 110;
       return enriched;
@@ -9049,10 +9049,19 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
+  const key = String(event.key || '');
+
+  // Cmd/Ctrl+Shift+Y toggles paired pane (Chat ↔ Workqueue) for active target.
+  // This intentionally works while the chat composer is focused because that is
+  // the common case where the active Chat pane target is unambiguous.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === ADMIN_SHORTCUTS.togglePairedPane) {
+    event.preventDefault();
+    togglePairedPane();
+    return;
+  }
+
   // Never steal focus / override browser shortcuts while typing.
   if (isTypingContext(event.target)) return;
-
-  const key = String(event.key || '');
 
   // Ctrl+Tab walks panes in most-recently-used order; Shift reverses the traversal.
   if (event.ctrlKey && !event.metaKey && !event.altKey && key === 'Tab') {
@@ -9138,13 +9147,6 @@ window.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'f') {
     event.preventDefault();
     openFleetPane();
-    return;
-  }
-
-  // Cmd/Ctrl+Shift+Y toggles paired pane (Chat ↔ Workqueue) for active target.
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === ADMIN_SHORTCUTS.togglePairedPane) {
-    event.preventDefault();
-    togglePairedPane();
     return;
   }
 
