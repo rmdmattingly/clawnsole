@@ -1776,16 +1776,28 @@ function buildCommandPaletteItems() {
       '⌘/Ctrl+Shift+C'
     ),
     withShortcut(
-      { id: 'cmd:add-workqueue', label: 'Open pane: Workqueue', detail: 'Create a new Workqueue pane', run: () => paneManager.addPane('workqueue') },
+      { id: 'cmd:add-workqueue', label: 'Open pane: Workqueue', detail: 'Focus matching Workqueue pane target (or create one)', run: () => paneManager.addPane('workqueue') },
       '⌘/Ctrl+Shift+W'
     ),
     withShortcut(
-      { id: 'cmd:add-cron', label: 'Open pane: Cron', detail: 'Create a new Cron pane', run: () => paneManager.addPane('cron') },
+      { id: 'cmd:add-workqueue-force', label: 'Open pane: Workqueue (open anyway)', detail: 'Create a new Workqueue pane even if matching target exists', run: () => paneManager.addPane('workqueue', { forceNew: true }) },
+      ''
+    ),
+    withShortcut(
+      { id: 'cmd:add-cron', label: 'Open pane: Cron', detail: 'Focus matching Cron pane target (or create one)', run: () => paneManager.addPane('cron') },
       '⌘/Ctrl+Shift+R'
     ),
     withShortcut(
-      { id: 'cmd:add-timeline', label: 'Open pane: Timeline', detail: 'Create a new Timeline pane', run: () => paneManager.addPane('timeline') },
+      { id: 'cmd:add-cron-force', label: 'Open pane: Cron (open anyway)', detail: 'Create a new Cron pane even if matching target exists', run: () => paneManager.addPane('cron', { forceNew: true }) },
+      ''
+    ),
+    withShortcut(
+      { id: 'cmd:add-timeline', label: 'Open pane: Timeline', detail: 'Focus matching Timeline pane target (or create one)', run: () => paneManager.addPane('timeline') },
       '⌘/Ctrl+Shift+T'
+    ),
+    withShortcut(
+      { id: 'cmd:add-timeline-force', label: 'Open pane: Timeline (open anyway)', detail: 'Create a new Timeline pane even if matching target exists', run: () => paneManager.addPane('timeline', { forceNew: true }) },
+      ''
     ),
     withShortcut(
       { id: 'cmd:open-fleet', label: 'Open pane: Fleet', detail: 'Focus existing Fleet pane or open one', run: () => openFleetPane() },
@@ -2243,7 +2255,7 @@ function openAgentTimelineFromFleet(agentId) {
 function openFleetPane({ forceNew = false } = {}) {
   const target = 'all';
   const pane = forceNew
-    ? paneManager.addPane('timeline', { cronAgentId: target })
+    ? paneManager.addPane('timeline', { cronAgentId: target, forceNew: true })
     : findExistingPane('timeline', (p) => String(p.cronAgentId || '').trim() === target) ||
       findExistingPane('timeline') ||
       paneManager.addPane('timeline', { cronAgentId: target });
@@ -3008,6 +3020,37 @@ async function renderWorkqueuePane(rootEl, { queue = '' } = {}) {
 window.__debug = window.__debug || {};
 window.__debug.renderWorkqueuePane = renderWorkqueuePane;
 
+function getWorkqueueItemRepo(item) {
+  const repo = String(item?.meta?.repo || '').trim();
+  if (repo) return repo;
+
+  const candidates = [String(item?.meta?.url || ''), String(item?.meta?.issueUrl || ''), String(item?.instructions || '')];
+  for (const text of candidates) {
+    const match = text.match(/github\.com\/([^\s/]+\/[^\s/#?]+)/i);
+    if (match?.[1]) return String(match[1]).trim();
+  }
+  return '';
+}
+
+function getWorkqueueItemSource(item) {
+  const kind = String(item?.meta?.kind || '').trim().toLowerCase();
+  const title = String(item?.title || '').trim().toLowerCase();
+  if (kind.includes('coordination') || title.startsWith('[coordination]')) return 'coordination';
+  if (kind.includes('issue') || title.startsWith('[issue]')) return 'issue';
+  if (kind.includes('routine') || kind.includes('pr-review') || title.startsWith('[routine]')) return 'routine';
+  return 'other';
+}
+
+function applyWorkqueueQuickFilters(items, quickFilters) {
+  const sourceSet = new Set(Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((x) => String(x || '').trim()).filter(Boolean) : []);
+  const repoSet = new Set(Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((x) => String(x || '').trim()).filter(Boolean) : []);
+
+  return (Array.isArray(items) ? items : []).filter((it) => {
+    if (sourceSet.size && !sourceSet.has(getWorkqueueItemSource(it))) return false;
+    if (repoSet.size && !repoSet.has(getWorkqueueItemRepo(it))) return false;
+    return true;
+  });
+}
 
 async function fetchAndRenderWorkqueueItemsForPane(pane) {
   if (!pane || pane.kind !== 'workqueue') return;
@@ -3053,7 +3096,8 @@ function renderWorkqueuePaneItems(pane) {
     if (scope === 'assigned') return !!activeTarget && owner === activeTarget;
     return true;
   });
-  const items = sortWorkqueueItems(scopedItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
+  const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
 
   if (empty) {
     const hasItems = items.length > 0;
@@ -4996,7 +5040,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, cronAgentId, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -5044,6 +5088,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
       scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScope()),
+      quickFilters: {
+        sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
+        repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
+      },
       items: [],
       selectedItemId: null,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
@@ -5235,6 +5283,23 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <button type="button" class="wq-scope-btn" data-wq-scope="all">All</button>
           </div>
 
+          <div class="wq-field" data-wq-source-group role="group" aria-label="Filter by source">
+            <span class="wq-label">Source</span>
+            <div class="wq-scope">
+              <button type="button" class="wq-scope-btn" data-wq-source="issue">Issue</button>
+              <button type="button" class="wq-scope-btn" data-wq-source="routine">Routine</button>
+              <button type="button" class="wq-scope-btn" data-wq-source="coordination">Coordination</button>
+              <button type="button" class="wq-scope-btn" data-wq-source="other">Other</button>
+            </div>
+          </div>
+
+          <div class="wq-field" data-wq-repo-group role="group" aria-label="Filter by repo">
+            <span class="wq-label">Repo</span>
+            <div class="wq-scope" data-wq-repo-chips></div>
+          </div>
+
+          <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
+          <button data-wq-clear-quick class="secondary" type="button">Clear filters</button>
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
 
           <div class="wq-sort" role="group" aria-label="Sort workqueue items">
@@ -5331,6 +5396,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const statusOptionsEl = elements.thread.querySelector('[data-wq-status-options]');
     const statusDetailsEl = elements.thread.querySelector('[data-wq-status-details]');
     const statusClearBtn = elements.thread.querySelector('[data-wq-status-clear]');
+    const sourceBtns = Array.from(elements.thread.querySelectorAll('[data-wq-source]'));
+    const repoChipsEl = elements.thread.querySelector('[data-wq-repo-chips]');
+    const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
+    const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
 
     const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
@@ -5347,6 +5416,47 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       return sel;
     };
 
+    const initQuick = pane.workqueue?.quickFilters || {};
+    const sourceSet = new Set(Array.isArray(initQuick.sources) ? initQuick.sources.map((x) => String(x || '').trim()).filter(Boolean) : []);
+    const repoSet = new Set(Array.isArray(initQuick.repos) ? initQuick.repos.map((x) => String(x || '').trim()).filter(Boolean) : []);
+
+    const persistQuickFilters = () => {
+      pane.workqueue.quickFilters = { sources: Array.from(sourceSet), repos: Array.from(repoSet) };
+      paneManager.persistAdminPanes();
+    };
+
+    const updateQuickFilterUi = () => {
+      sourceBtns.forEach((btn) => {
+        const key = String(btn.getAttribute('data-wq-source') || '').trim();
+        const active = sourceSet.has(key);
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+
+      const repos = Array.from(new Set((Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : []).map(getWorkqueueItemRepo).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+      if (repoChipsEl) {
+        repoChipsEl.innerHTML = '';
+        for (const repo of repos) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'wq-scope-btn';
+          btn.setAttribute('data-wq-repo', repo);
+          btn.textContent = repo;
+          const active = repoSet.has(repo);
+          btn.classList.toggle('active', active);
+          btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+          btn.addEventListener('click', () => {
+            if (repoSet.has(repo)) repoSet.delete(repo);
+            else repoSet.add(repo);
+            persistQuickFilters();
+            updateQuickFilterUi();
+            renderWorkqueuePaneItems(pane);
+          });
+          repoChipsEl.appendChild(btn);
+        }
+      }
+    };
+
     const applyStatuses = async (next, { closeMenu = false } = {}) => {
       statusSet.clear();
       for (const s of next) statusSet.add(s);
@@ -5354,6 +5464,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       renderStatusMultiSelect();
       if (closeMenu) statusDetailsEl?.removeAttribute('open');
       await fetchAndRenderWorkqueueItemsForPane(pane);
+      updateQuickFilterUi();
       paneManager.persistAdminPanes();
     };
 
@@ -5378,6 +5489,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         renderStatusMultiSelect();
       }
       await fetchAndRenderWorkqueueItemsForPane(pane);
+      updateQuickFilterUi();
       paneManager.persistAdminPanes();
     };
 
@@ -5569,6 +5681,37 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       btn.addEventListener('click', () => setScope(btn.getAttribute('data-wq-scope')));
     });
     updateScopeUi();
+
+    sourceBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = String(btn.getAttribute('data-wq-source') || '').trim();
+        if (!key) return;
+        if (sourceSet.has(key)) sourceSet.delete(key);
+        else sourceSet.add(key);
+        persistQuickFilters();
+        updateQuickFilterUi();
+        renderWorkqueuePaneItems(pane);
+      });
+    });
+
+    clawnsoleOnlyBtn?.addEventListener('click', () => {
+      sourceSet.clear();
+      repoSet.clear();
+      repoSet.add('rmdmattingly/clawnsole');
+      persistQuickFilters();
+      updateQuickFilterUi();
+      renderWorkqueuePaneItems(pane);
+    });
+
+    clearQuickBtn?.addEventListener('click', () => {
+      sourceSet.clear();
+      repoSet.clear();
+      persistQuickFilters();
+      updateQuickFilterUi();
+      renderWorkqueuePaneItems(pane);
+    });
+
+    updateQuickFilterUi();
 
     // Sort controls (client-side): stable sorting with a status-grouping default.
     const sortBtns = Array.from(elements.thread.querySelectorAll('[data-wq-sort]'));
@@ -6394,9 +6537,13 @@ const paneManager = {
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'claimed', 'in_progress'];
           const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
+          const quickFilters = {
+            sources: Array.isArray(item?.quickFilters?.sources) ? item.quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
+            repos: Array.isArray(item?.quickFilters?.repos) ? item.quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
+          };
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, agentId, queue, statusFilter, scopeFilter, sortKey, sortDir };
+          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
@@ -6448,6 +6595,10 @@ const paneManager = {
           queue: pane.workqueue?.queue || 'dev-team',
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
           scopeFilter: pane.workqueue?.scopeFilter || 'all',
+          quickFilters: {
+            sources: Array.isArray(pane.workqueue?.quickFilters?.sources) ? pane.workqueue.quickFilters.sources : [],
+            repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos : []
+          },
           sortKey: pane.workqueue?.sortKey || 'priority',
           sortDir: pane.workqueue?.sortDir || 'desc'
         };
@@ -6492,12 +6643,32 @@ const paneManager = {
   },
   addPane(kind = 'chat', options = {}) {
     if (roleState.role !== 'admin') return;
-    if (this.panes.length >= this.maxPanes) return;
 
     const normalizedKind = normalizePaneKind(kind);
     const nextQueue = String(options?.queue || 'dev-team').trim() || 'dev-team';
     const nextAgentId = normalizeAgentId(options?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
     const nextCronAgentId = String(options?.cronAgentId || '').trim();
+    const forceNew = Boolean(options?.forceNew);
+
+    const findMatchingPane = () => {
+      if (normalizedKind === 'workqueue') {
+        return this.panes.find((p) => p?.role === 'admin' && p.kind === 'workqueue' && String(p.workqueue?.queue || '').trim() === nextQueue) || null;
+      }
+      if (normalizedKind === 'cron' || normalizedKind === 'timeline') {
+        return this.panes.find((p) => p?.role === 'admin' && p.kind === normalizedKind && String(p.cronAgentId || '').trim() === nextCronAgentId) || null;
+      }
+      return null;
+    };
+
+    if (!forceNew) {
+      const existing = findMatchingPane();
+      if (existing) {
+        this.focusPanePrimary(existing);
+        return existing;
+      }
+    }
+
+    if (this.panes.length >= this.maxPanes) return;
 
     if (normalizedKind === 'workqueue') {
       const pane = createPane({
@@ -6619,21 +6790,21 @@ const paneManager = {
       wqBtn.className = 'pane-add-menu__item';
       wqBtn.textContent = 'New Workqueue pane';
       wqBtn.dataset.testid = 'pane-add-menu-workqueue';
-      wqBtn.title = 'Shortcut: Ctrl/Cmd+Shift+W';
+      wqBtn.title = 'Shortcut: Ctrl/Cmd+Shift+W (Alt/Option+click = Open anyway)';
 
       const cronBtn = document.createElement('button');
       cronBtn.type = 'button';
       cronBtn.className = 'pane-add-menu__item';
       cronBtn.textContent = 'New Cron pane';
       cronBtn.dataset.testid = 'pane-add-menu-cron';
-      cronBtn.title = 'Shortcut: Ctrl/Cmd+Shift+R';
+      cronBtn.title = 'Shortcut: Ctrl/Cmd+Shift+R (Alt/Option+click = Open anyway)';
 
       const timelineBtn = document.createElement('button');
       timelineBtn.type = 'button';
       timelineBtn.className = 'pane-add-menu__item';
       timelineBtn.textContent = 'New Timeline pane';
       timelineBtn.dataset.testid = 'pane-add-menu-timeline';
-      timelineBtn.title = 'Shortcut: Ctrl/Cmd+Shift+T';
+      timelineBtn.title = 'Shortcut: Ctrl/Cmd+Shift+T (Alt/Option+click = Open anyway)';
 
       menu.appendChild(chatBtn);
       menu.appendChild(wqBtn);
@@ -6647,7 +6818,7 @@ const paneManager = {
         if (event?.stopPropagation) event.stopPropagation();
 
         this.closeAddPaneMenu();
-        this.addPane(kind);
+        this.addPane(kind, { forceNew: !!event?.altKey });
 
         queueMicrotask(() => {
           state.menuActionInFlight = false;
@@ -7145,10 +7316,10 @@ window.addEventListener('keydown', (event) => {
 
   // Add-pane shortcuts (admin-only)
   // Ctrl/Cmd+Shift+C → new chat
-  // Ctrl/Cmd+Shift+W → new workqueue
-  // Ctrl/Cmd+Shift+R → new cron
-  // Ctrl/Cmd+Shift+T → new timeline
-  const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey;
+  // Ctrl/Cmd+Shift+W → focus matching workqueue target (Alt/Option adds anyway)
+  // Ctrl/Cmd+Shift+R → focus matching cron target (Alt/Option adds anyway)
+  // Ctrl/Cmd+Shift+T → focus matching timeline target (Alt/Option adds anyway)
+  const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey;
   if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target)) {
     const key = String(event.key || '').toLowerCase();
     const map = { c: 'chat', w: 'workqueue', r: 'cron', t: 'timeline' };
@@ -7157,7 +7328,7 @@ window.addEventListener('keydown', (event) => {
       // Don't hijack add-pane shortcuts while typing in inputs/editors.
       event.preventDefault();
       paneManager.closeAddPaneMenu();
-      paneManager.addPane(kind);
+      paneManager.addPane(kind, { forceNew: !!event.altKey });
       return;
     }
   }

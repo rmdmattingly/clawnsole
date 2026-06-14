@@ -18,7 +18,7 @@ test.afterEach(async ({ page }) => {
   }
 });
 
-test('command palette: keyboard flow can open a targeted pane and focus by pane letter', async ({ page }) => {
+test('command palette: keyboard flow can reuse a targeted pane and focus by pane letter', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
 
@@ -42,9 +42,10 @@ test('command palette: keyboard flow can open a targeted pane and focus by pane 
 
   const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
   await expect(wqPane).toBeVisible();
+  await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
 
   const countAfter = await page.locator('[data-pane]').count();
-  expect(countAfter).toBeGreaterThan(countBefore);
+  expect(countAfter).toBe(countBefore);
 
   await page.keyboard.press('ControlOrMeta+K');
   await expect(input).toBeVisible();
