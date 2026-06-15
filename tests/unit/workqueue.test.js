@@ -4,7 +4,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { enqueueItem, claimNext, loadState, saveState, transitionItem } = require('../../lib/workqueue');
+const {
+  enqueueItem,
+  claimNext,
+  loadState,
+  saveState,
+  transitionItem,
+  normalizeIssueDedupeKey
+} = require('../../lib/workqueue');
 
 function withFakeNow(ms, fn) {
   const realNow = Date.now;
@@ -255,4 +262,49 @@ test('workqueue: enqueue supports dedupeKey idempotency', () => {
 
   const state = loadState(root);
   assert.equal(state.items.length, 1);
+});
+
+test('workqueue: canonicalizes issue-backed dedupe key variants', () => {
+  assert.equal(normalizeIssueDedupeKey('rmdmattingly/clawnsole#398'), 'issue:rmdmattingly/clawnsole#398');
+  assert.equal(normalizeIssueDedupeKey('rmdmattingly/clawnsole:398'), 'issue:rmdmattingly/clawnsole#398');
+  assert.equal(normalizeIssueDedupeKey('issue:rmdmattingly/clawnsole:398'), 'issue:rmdmattingly/clawnsole#398');
+  assert.equal(normalizeIssueDedupeKey('https://github.com/rmdmattingly/clawnsole/issues/398'), 'issue:rmdmattingly/clawnsole#398');
+  assert.equal(normalizeIssueDedupeKey('hourly-pr-review:2026-02-08T21'), 'hourly-pr-review:2026-02-08T21');
+});
+
+test('workqueue: issue-backed dedupe variants upsert one active item', () => {
+  const root = tempRoot();
+
+  const first = enqueueItem(root, {
+    queue: 'dev',
+    title: 'Issue 398 from cron',
+    instructions: 'cron triage',
+    priority: 0,
+    dedupeKey: 'issue:rmdmattingly/clawnsole:398'
+  });
+
+  const second = enqueueItem(root, {
+    queue: 'dev',
+    title: 'Issue 398 from follow-up',
+    instructions: 'issue follow-up',
+    priority: 0,
+    dedupeKey: 'rmdmattingly/clawnsole#398'
+  });
+
+  const third = enqueueItem(root, {
+    queue: 'dev',
+    title: 'Issue 398 from URL producer',
+    instructions: 'coverage',
+    priority: 0,
+    dedupeKey: 'https://github.com/rmdmattingly/clawnsole/issues/398'
+  });
+
+  assert.equal(second.id, first.id);
+  assert.equal(third.id, first.id);
+  assert.equal(second._deduped, true);
+  assert.equal(third._deduped, true);
+
+  const state = loadState(root);
+  assert.equal(state.items.length, 1);
+  assert.equal(state.items[0].dedupeKey, 'issue:rmdmattingly/clawnsole#398');
 });
