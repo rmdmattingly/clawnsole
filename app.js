@@ -1401,6 +1401,7 @@ function clearPaneUnread(pane) {
   if (!pane.unreadCount) return;
   pane.unreadCount = 0;
   renderPaneIdentity(pane);
+  paneManager?.persistAdminPanes?.();
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -1411,7 +1412,21 @@ function markPaneUnread(pane, increment = 1) {
   const next = paneUnreadCount(pane) + Math.max(1, Number(increment || 1));
   pane.unreadCount = next;
   renderPaneIdentity(pane);
+  paneManager?.persistAdminPanes?.();
   if (isPaneManagerOpen()) renderPaneManager();
+}
+
+function workqueueItemsSignature(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => [
+      item?.id || '',
+      item?.status || '',
+      item?.updatedAt || '',
+      item?.claimedBy || '',
+      item?.title || ''
+    ].map((part) => String(part || '')).join(':'))
+    .sort()
+    .join('|');
 }
 
 function paneSearchText(pane) {
@@ -1540,7 +1555,7 @@ function renderPaneManager() {
               <span class="pane-manager-kind-label">${escapeHtml(paneIdentity)}</span>
               <span class="pane-manager-pane-id" title="Internal pane id">${escapeHtml(String(pane?.key || ''))}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
-              ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
+              ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread activity item${unreadCount === 1 ? '' : 's'}`)}" aria-label="${escapeHtml(`${unreadCount} unread activity item${unreadCount === 1 ? '' : 's'}`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
             </div>
             <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
           </div>
@@ -3062,7 +3077,15 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
     const items = Array.isArray(data.items) ? data.items : [];
+    const previousSignature = pane.workqueue._itemsSignature || '';
+    const nextSignature = workqueueItemsSignature(items);
+    const hadLoadedItems = pane.workqueue._hasLoadedItems === true;
     pane.workqueue.items = items;
+    pane.workqueue._itemsSignature = nextSignature;
+    pane.workqueue._hasLoadedItems = true;
+    if (hadLoadedItems && previousSignature !== nextSignature) {
+      markPaneUnread(pane, 1);
+    }
     if (statusLine) statusLine.textContent = `${items.length} item(s)`;
     renderWorkqueuePaneItems(pane);
   } catch (err) {
@@ -5030,7 +5053,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, cronAgentId, unreadCount = 0, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -5093,7 +5116,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     statusMeta: '',
     elements,
     chat: { runs: new Map(), history: [] },
-    unreadCount: 0,
+    unreadCount: Math.max(0, Number(unreadCount || 0)),
     scroll: { pinned: true },
     thinking: { active: false, timer: null, dotsTimer: null, bubble: null },
     activeRunId: null,
@@ -6480,6 +6503,8 @@ const paneManager = {
         scopeFilter: cfg.scopeFilter,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
+        cronAgentId: cfg.cronAgentId,
+        unreadCount: cfg.unreadCount,
         closable: true
       })
     );
@@ -6516,6 +6541,7 @@ const paneManager = {
             ? rawMode
             : 'chat';
         if (!key) return null;
+        const unreadCount = Math.max(0, Number(item.unreadCount || 0));
         if (kind === 'workqueue') {
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
           const statusFilter = Array.isArray(item.statusFilter)
@@ -6528,13 +6554,13 @@ const paneManager = {
           };
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir };
+          return { key, kind, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, unreadCount };
         }
         if (kind === 'cron' || kind === 'timeline') {
-          return { key, kind };
+          return { key, kind, unreadCount };
         }
         const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
-        return { key, kind: 'chat', agentId };
+        return { key, kind: 'chat', agentId, unreadCount };
       }
       // Super-legacy format: ['pabc','pdef'] (treat as chat panes)
       if (typeof item === 'string' && item) {
@@ -6584,13 +6610,14 @@ const paneManager = {
             repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos : []
           },
           sortKey: pane.workqueue?.sortKey || 'priority',
-          sortDir: pane.workqueue?.sortDir || 'desc'
+          sortDir: pane.workqueue?.sortDir || 'desc',
+          unreadCount: paneUnreadCount(pane)
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
-        return { key: pane.key, kind: pane.kind };
+        return { key: pane.key, kind: pane.kind, unreadCount: paneUnreadCount(pane) };
       }
-      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
+      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main', unreadCount: paneUnreadCount(pane) };
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
