@@ -201,3 +201,50 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
   });
   expect(['auto', 'scroll']).toContain(listStyles.overflowY);
 });
+
+test('workqueue pane: repetitive routine items collapse into expandable group rows', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  const addRoutine = async (suffix) => {
+    const res = await page.request.post(`http://127.0.0.1:${env.serverPort}/api/workqueue/enqueue`, {
+      data: {
+        queue: 'dev-team',
+        title: `[routine] PR review sweep ${suffix}`,
+        instructions: 'routine test item',
+        priority: 50
+      },
+      headers: { Cookie: 'clawnsole_auth=' + Buffer.from('admin::test', 'utf8').toString('base64') }
+    });
+    expect(res.ok()).toBeTruthy();
+  };
+
+  for (let i = 0; i < 51; i++) {
+    await addRoutine(String(i).padStart(2, '0'));
+  }
+
+  await addPane(page, 'Workqueue pane');
+  const wqPane = page.locator('[data-pane]').last();
+
+  const itemsResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
+  await wqPane.locator('[data-wq-refresh]').click();
+  await itemsResP;
+
+  const groupRows = wqPane.locator('[data-wq-group-row="routine"]');
+  await expect(groupRows.first()).toBeVisible();
+  await expect(groupRows.first().locator('.wq-group-count')).toHaveText('51 items');
+  await expect(groupRows.first().locator('.wq-group-signals')).toContainText('prio 50');
+  await expect(groupRows.first().locator('.wq-group-signals')).toContainText('ready');
+
+  await expect(wqPane.locator('.wq-row.wq-row-nested')).toHaveCount(0);
+  await groupRows.first().evaluate((el) => el.click());
+  await expect(wqPane.locator('.wq-row.wq-row-nested')).toHaveCount(51);
+
+  await wqPane.locator('[data-wq-group-mode="off"]').click();
+  await expect(wqPane.locator('[data-wq-group-row="routine"]')).toHaveCount(0);
+  await expect(wqPane.locator('.wq-row')).toHaveCount(51);
+});
