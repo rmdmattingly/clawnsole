@@ -124,3 +124,22 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
 });
+
+test('agents modal can return focus to the triage row after quick actions', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const firstRow = page.locator('#agentsList .agents-row').first();
+  const agentId = await firstRow.evaluate((row) => row.getAttribute('data-agent-row-id'));
+  await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
+
+  await page.keyboard.press('ControlOrMeta+Shift+B');
+
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-agent-row-id') || ''))
+    .toBe(agentId);
+});

@@ -399,6 +399,7 @@ let agentAutoRefreshInterval = null;
 let agentsModalAutoRefreshInterval = null;
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
+let triageReturnAnchor = null;
 
 function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
@@ -1879,6 +1880,15 @@ function buildCommandPaletteItems() {
       'g a'
     ),
     withShortcut(
+      {
+        id: 'cmd:return-triage-source',
+        label: 'Agents: Return to previous triage context',
+        detail: 'Refocus the agent row used to open Chat, Timeline, or Workqueue',
+        run: () => returnToTriageSource()
+      },
+      '⌘/Ctrl+Shift+B'
+    ),
+    withShortcut(
       { id: 'cmd:pane-cycle', label: 'Panes: Cycle focus', detail: 'Move focus to next pane', run: () => cyclePaneFocus() },
       '⌘/Ctrl+Shift+K'
     ),
@@ -1953,6 +1963,11 @@ function buildCommandPaletteItems() {
     if (id === 'cmd:refresh-agents') {
       enriched.group = 'Agents';
       enriched.priority = 90;
+      return enriched;
+    }
+    if (id === 'cmd:return-triage-source') {
+      enriched.group = 'Agents';
+      enriched.priority = 88;
       return enriched;
     }
     if (id.startsWith('agent:') || label.startsWith('Agent: ')) {
@@ -2209,6 +2224,41 @@ function closeAgentsModal() {
   stopAgentsModalFreshnessTicker();
 }
 
+function captureAgentsModalTriageAnchor(agentId) {
+  const id = String(agentId || '').trim();
+  if (!id || !globalElements.agentsModal?.classList?.contains('open')) return;
+  triageReturnAnchor = {
+    source: 'agents-modal',
+    agentId: id
+  };
+}
+
+function returnToTriageSource() {
+  const anchor = triageReturnAnchor;
+  if (!anchor || anchor.source !== 'agents-modal' || !anchor.agentId) {
+    toast('No previous triage context.', 'info');
+    return false;
+  }
+  if (!globalElements.agentsModal?.classList?.contains('open')) {
+    toast('Previous triage context is no longer open.', 'error');
+    return false;
+  }
+
+  renderAgentsModalList();
+  const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(anchor.agentId) : anchor.agentId.replace(/"/g, '\\"');
+  const row = globalElements.agentsList?.querySelector?.(`[data-agent-row-id="${escaped}"]`);
+  if (!row) {
+    toast('Previous triage agent is not visible.', 'error');
+    return false;
+  }
+
+  row.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  row.focus?.({ preventScroll: true });
+  row.classList.add('agents-row-returned');
+  setTimeout(() => row.classList.remove('agents-row-returned'), 1200);
+  return true;
+}
+
 function findExistingPane(kind, predicate = null) {
   const list = Array.isArray(paneManager?.panes) ? paneManager.panes : [];
   for (const pane of list) {
@@ -2220,6 +2270,7 @@ function findExistingPane(kind, predicate = null) {
 
 function openAgentChatFromFleet(agentId) {
   const target = normalizeAgentId(agentId || 'main');
+  captureAgentsModalTriageAnchor(target);
   const pane =
     findExistingPane('chat', (p) => normalizeAgentId(p.agentId || 'main') === target) ||
     paneManager.addPane('chat');
@@ -2230,6 +2281,7 @@ function openAgentChatFromFleet(agentId) {
 
 function openAgentTimelineFromFleet(agentId) {
   const target = String(agentId || '').trim() || 'all';
+  captureAgentsModalTriageAnchor(target);
   const pane =
     findExistingPane('timeline', (p) => String(p.cronAgentId || '').trim() === target) ||
     paneManager.addPane('timeline', { cronAgentId: target });
@@ -2266,7 +2318,8 @@ function openFleetPane({ forceNew = false } = {}) {
   paneManager.focusPanePrimary(pane);
 }
 
-function openAgentWorkqueueFromFleet() {
+function openAgentWorkqueueFromFleet(agentId = '') {
+  captureAgentsModalTriageAnchor(agentId);
   const preferredQueue =
     String(workqueueState?.selectedQueue || '').trim() ||
     String(findExistingPane('workqueue')?.workqueue?.queue || '').trim() ||
@@ -2367,6 +2420,8 @@ function renderAgentsModalList() {
       const id = String(agent?.id || '').trim();
       const row = document.createElement('div');
       row.className = 'agents-row';
+      row.tabIndex = -1;
+      row.dataset.agentRowId = id;
 
       const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
@@ -2416,7 +2471,7 @@ function renderAgentsModalList() {
           const action = String(btn.getAttribute('data-agent-action') || '').trim();
           if (action === 'open-chat') openAgentChatFromFleet(id);
           else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
-          else if (action === 'open-workqueue') openAgentWorkqueueFromFleet();
+          else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(id);
         });
       });
 
@@ -7411,6 +7466,13 @@ window.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'f') {
     event.preventDefault();
     openFleetPane();
+    return;
+  }
+
+  // Cmd/Ctrl+Shift+B returns to the agent row that launched triage.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'b') {
+    event.preventDefault();
+    returnToTriageSource();
     return;
   }
 
