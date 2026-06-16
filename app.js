@@ -73,6 +73,15 @@ const globalElements = {
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   rolePill: document.getElementById('rolePill'),
+  authSessionPopover: document.getElementById('authSessionPopover'),
+  authSessionState: document.querySelector('[data-testid="auth-session-state"]'),
+  authSessionPrincipal: document.querySelector('[data-testid="auth-session-principal"]'),
+  authSessionRole: document.querySelector('[data-testid="auth-session-role"]'),
+  authSessionEnv: document.querySelector('[data-testid="auth-session-env"]'),
+  authSessionSignOutBtn: document.getElementById('authSessionSignOutBtn'),
+  sessionChipState: document.querySelector('[data-testid="session-chip-state"]'),
+  sessionChipPrincipal: document.querySelector('[data-testid="session-chip-principal"]'),
+  sessionChipEnv: document.querySelector('[data-testid="session-chip-env"]'),
   loginOverlay: document.getElementById('loginOverlay'),
   loginPassword: document.getElementById('loginPassword'),
   loginBtn: document.getElementById('loginBtn'),
@@ -131,16 +140,31 @@ const normalizePaneKind = __appCore.normalizePaneKind || ((rawKind) => {
             ? 'timeline'
             : 'chat';
 });
-const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => ({
-  isAdmin: String(state?.role || '') === 'admin',
-  startAgentAutoRefresh: String(state?.role || '') === 'admin' && !!state?.authed,
-  stopAgentAutoRefresh: String(state?.role || '') !== 'admin' || !state?.authed,
-  rolePillText: String(state?.role || '') === 'admin' ? 'signed in' : (state?.role || 'signed out'),
-  rolePillAdmin: String(state?.role || '') === 'admin',
-  showAdminControls: String(state?.role || '') === 'admin',
-  logoutEnabled: !!state?.authed,
-  logoutOpacity: !!state?.authed ? '1' : '0.5'
-}));
+const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => {
+  const role = String(state?.role || '');
+  const isAdmin = role === 'admin';
+  const authed = !!state?.authed;
+  const authStateText = authed ? 'Signed in' : role ? 'Locked' : 'Signed out';
+  const principalLabel = authed ? (isAdmin ? 'Admin session' : `${role || 'User'} session`) : role ? `${role} session locked` : 'No active session';
+  const environmentLabel = String(state?.environment || '').trim() || 'local';
+  return {
+    isAdmin,
+    startAgentAutoRefresh: isAdmin && authed,
+    stopAgentAutoRefresh: !isAdmin || !authed,
+    rolePillText: `${authStateText} · ${principalLabel}`,
+    authStateText,
+    principalLabel,
+    environmentLabel,
+    roleLabel: role || 'none',
+    sessionTitle: `${authStateText}: ${principalLabel} (${environmentLabel})`,
+    rolePillAdmin: isAdmin,
+    rolePillLocked: !authed && !!role,
+    rolePillSignedOut: !authed && !role,
+    showAdminControls: isAdmin,
+    logoutEnabled: authed,
+    logoutOpacity: authed ? '1' : '0.5'
+  };
+});
 const deriveGlobalConnectionState = __appCore.deriveGlobalConnectionState || ((state) => {
   if (!state?.authed) return { state: 'disconnected', meta: 'sign in required' };
   const panes = Array.isArray(state?.panes) ? state.panes : [];
@@ -850,9 +874,51 @@ function updateConnectionControls() {
   globalElements.disconnectBtn.textContent = control.text;
 }
 
+function getSessionEnvironmentLabel() {
+  const host = String(window.location?.hostname || '').trim().toLowerCase();
+  if (!host || host === 'localhost' || host === '127.0.0.1' || host === '::1') return 'local';
+  return host;
+}
+
+function getAuthUiState({ authed = uiState.authed, role = roleState.role } = {}) {
+  return deriveAuthOverlayState({ authed, role, environment: getSessionEnvironmentLabel() });
+}
+
+function setAuthSessionPopoverOpen(open) {
+  const isOpen = !!open;
+  if (globalElements.authSessionPopover) {
+    globalElements.authSessionPopover.classList.toggle('open', isOpen);
+    globalElements.authSessionPopover.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  }
+  if (globalElements.rolePill) {
+    globalElements.rolePill.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+}
+
+function updateAuthSessionUi(authUi = getAuthUiState()) {
+  if (globalElements.rolePill) {
+    globalElements.rolePill.title = authUi.sessionTitle || '';
+    globalElements.rolePill.setAttribute('aria-label', authUi.sessionTitle || authUi.rolePillText || 'Session details');
+    globalElements.rolePill.classList.toggle('admin', !!authUi.rolePillAdmin);
+    globalElements.rolePill.classList.toggle('locked', !!authUi.rolePillLocked);
+    globalElements.rolePill.classList.toggle('signed-out', !!authUi.rolePillSignedOut);
+  }
+  if (globalElements.sessionChipState) globalElements.sessionChipState.textContent = authUi.authStateText || '';
+  if (globalElements.sessionChipPrincipal) globalElements.sessionChipPrincipal.textContent = authUi.principalLabel || '';
+  if (globalElements.sessionChipEnv) globalElements.sessionChipEnv.textContent = authUi.environmentLabel || '';
+  if (globalElements.authSessionState) globalElements.authSessionState.textContent = authUi.authStateText || '';
+  if (globalElements.authSessionPrincipal) globalElements.authSessionPrincipal.textContent = authUi.principalLabel || '';
+  if (globalElements.authSessionRole) globalElements.authSessionRole.textContent = authUi.roleLabel || 'none';
+  if (globalElements.authSessionEnv) globalElements.authSessionEnv.textContent = authUi.environmentLabel || '';
+  if (globalElements.authSessionSignOutBtn) {
+    globalElements.authSessionSignOutBtn.disabled = !authUi.logoutEnabled;
+  }
+}
+
 function setAuthState(authed) {
   uiState.authed = authed;
-  const authUi = deriveAuthOverlayState({ authed, role: roleState.role });
+  const authUi = getAuthUiState({ authed, role: roleState.role });
+  updateAuthSessionUi(authUi);
   updateGlobalStatus();
   updateConnectionControls();
   paneManager.refreshChatEnabled();
@@ -871,11 +937,8 @@ function setAuthState(authed) {
 
 function setRole(role) {
   roleState.role = role;
-  const authUi = deriveAuthOverlayState({ authed: uiState.authed, role });
-  if (globalElements.rolePill) {
-    globalElements.rolePill.textContent = authUi.rolePillText;
-    globalElements.rolePill.classList.toggle('admin', authUi.rolePillAdmin);
-  }
+  const authUi = getAuthUiState({ authed: uiState.authed, role });
+  updateAuthSessionUi(authUi);
 
   const isAdmin = authUi.isAdmin;
   const visibleOpacity = isAdmin ? '1' : '0.5';
@@ -935,10 +998,7 @@ function showLogin(message = '') {
   // Guest role selection removed.
 
   setAuthState(false);
-  if (globalElements.rolePill) {
-    globalElements.rolePill.textContent = 'signed out';
-    globalElements.rolePill.classList.remove('admin');
-  }
+  setAuthSessionPopoverOpen(false);
   globalElements.settingsBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
   globalElements.shortcutsBtn?.setAttribute('disabled', 'disabled');
@@ -7516,7 +7576,7 @@ globalElements.loginPassword?.addEventListener('keydown', (event) => {
   }
 });
 
-globalElements.logoutBtn?.addEventListener('click', async () => {
+async function logoutCurrentSession() {
   try {
     await fetch('/auth/logout', { method: 'POST' });
   } catch {}
@@ -7524,7 +7584,37 @@ globalElements.logoutBtn?.addEventListener('click', async () => {
   paneManager.disconnectAll({ silent: true });
   roleState.role = null;
   window.location.replace('/');
+}
+
+globalElements.rolePill?.addEventListener('click', (event) => {
+  event.preventDefault();
+  const isOpen = globalElements.rolePill.getAttribute('aria-expanded') === 'true';
+  setAuthSessionPopoverOpen(!isOpen);
 });
+
+globalElements.rolePill?.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    setAuthSessionPopoverOpen(false);
+    globalElements.rolePill.focus();
+  }
+});
+
+document.addEventListener('click', (event) => {
+  if (
+    globalElements.authSessionPopover?.classList?.contains('open') &&
+    !globalElements.authSessionPopover.contains(event.target) &&
+    !globalElements.rolePill?.contains(event.target)
+  ) {
+    setAuthSessionPopoverOpen(false);
+  }
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') setAuthSessionPopoverOpen(false);
+});
+
+globalElements.logoutBtn?.addEventListener('click', logoutCurrentSession);
+globalElements.authSessionSignOutBtn?.addEventListener('click', logoutCurrentSession);
 
 globalElements.addPaneBtn?.addEventListener('click', (event) => {
   event?.preventDefault?.();

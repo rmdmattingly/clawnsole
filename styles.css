@@ -211,21 +211,122 @@ body::before {
   padding: 0 12px;
 }
 
+.session-chip-wrap {
+  position: relative;
+}
+
 .role-pill {
-  padding: 6px 12px;
-  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  max-width: 320px;
+  padding: 6px 10px;
+  border-radius: 12px;
   background: rgba(255, 179, 71, 0.18);
   border: 1px solid rgba(255, 179, 71, 0.45);
   font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-family: inherit;
+  letter-spacing: 0;
   color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.role-pill:hover,
+.role-pill[aria-expanded="true"] {
+  background: rgba(255, 179, 71, 0.24);
+  border-color: rgba(255, 179, 71, 0.65);
 }
 
 .role-pill.admin {
   background: rgba(127, 209, 185, 0.18);
   border-color: rgba(127, 209, 185, 0.45);
   color: var(--accent-2);
+}
+
+.role-pill.admin:hover,
+.role-pill.admin[aria-expanded="true"] {
+  background: rgba(127, 209, 185, 0.24);
+  border-color: rgba(127, 209, 185, 0.65);
+}
+
+.role-pill.locked {
+  background: rgba(255, 107, 107, 0.16);
+  border-color: rgba(255, 107, 107, 0.5);
+  color: var(--warning);
+}
+
+.session-chip-state {
+  font-weight: 700;
+}
+
+.session-chip-principal {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.session-chip-env {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.auth-session-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 80;
+  width: min(280px, calc(100vw - 32px));
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(12, 15, 20, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: var(--shadow);
+  display: none;
+}
+
+.auth-session-popover.open {
+  display: grid;
+  gap: 8px;
+}
+
+.auth-session-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.auth-session-row span {
+  color: var(--muted);
+}
+
+.auth-session-row strong {
+  color: var(--text);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.auth-session-signout {
+  margin-top: 4px;
+  min-height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 107, 107, 0.45);
+  background: rgba(255, 107, 107, 0.14);
+  color: #ffd6d6;
+  font: inherit;
+  cursor: pointer;
+}
+
+.auth-session-signout:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .channel-switch select {
@@ -2915,6 +3016,21 @@ kbd {
     padding: 4px 8px;
     font-size: 9px;
     letter-spacing: 0.06em;
+  }
+
+  .role-pill {
+    max-width: 150px;
+    gap: 5px;
+    letter-spacing: 0;
+  }
+
+  .session-chip-principal {
+    display: none;
+  }
+
+  .session-chip-env {
+    font-size: 9px;
+    padding: 1px 5px;
   }
 
   .icon-btn {

@@ -7,7 +7,8 @@ test('visiting /admin without auth shows login overlay', async ({ page, clawnsol
 
   await page.goto(clawnsole.adminUrl);
   await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
-  await expect(page.getByTestId('role-pill')).toContainText('signed out');
+  await expect(page.getByTestId('role-pill')).toContainText('Signed out');
+  await expect(page.getByTestId('session-chip-principal')).toContainText('No active session');
 });
 
 test('after successful login, reload stays authed; clearing cookies forces re-login', async ({ page, context, clawnsole }) => {
@@ -15,13 +16,23 @@ test('after successful login, reload stays authed; clearing cookies forces re-lo
 
   await clawnsole.gotoAndLoginAdmin(page);
   await expect(page.getByTestId('login-overlay')).not.toHaveClass(/open/);
+  await expect(page.getByTestId('role-pill')).toContainText('Signed in');
+  await expect(page.getByTestId('role-pill')).toContainText('Admin session');
+
+  await page.getByTestId('role-pill').click();
+  await expect(page.getByTestId('auth-session-popover')).toHaveClass(/open/);
+  await expect(page.getByTestId('auth-session-state')).toContainText('Signed in');
+  await expect(page.getByTestId('auth-session-principal')).toContainText('Admin session');
+  await expect(page.getByTestId('auth-session-role')).toContainText('admin');
 
   await page.reload();
   await expect(page.getByTestId('login-overlay')).not.toHaveClass(/open/);
+  await expect(page.getByTestId('role-pill')).toContainText('Signed in');
 
   await context.clearCookies();
   await page.goto(clawnsole.adminUrl);
   await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
+  await expect(page.getByTestId('role-pill')).toContainText('Signed out');
 });
 
 test('authVersion rotation invalidates existing cookies (forces re-login)', async ({ page, clawnsole }) => {
