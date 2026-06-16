@@ -7,6 +7,7 @@ const {
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
+  paneIsConnected,
   deriveAuthOverlayState,
   deriveGlobalConnectionState,
   deriveDisconnectButtonState,
@@ -89,6 +90,30 @@ test('normalizePaneKind handles aliases safely', () => {
   assert.equal(normalizePaneKind('timeline'), 'timeline');
   assert.equal(normalizePaneKind('ti'), 'timeline');
   assert.equal(normalizePaneKind('x'), 'chat');
+});
+
+test('paneIsConnected prefers explicit websocket status over stale connected flag', () => {
+  assert.equal(paneIsConnected({ connected: true, statusState: 'disconnected' }), false);
+  assert.equal(paneIsConnected({ connected: true, statusState: 'error' }), false);
+  assert.equal(paneIsConnected({ connected: false, statusState: 'connected' }), true);
+  assert.equal(paneIsConnected({ connected: true, statusState: 'reconnecting' }), true);
+  assert.equal(paneIsConnected({ connected: false, statusState: 'reconnecting' }), false);
+});
+
+test('deriveGlobalConnectionState uses websocket status source of truth', () => {
+  const disconnected = deriveGlobalConnectionState({
+    authed: true,
+    panes: [{ connected: true, statusState: 'disconnected' }]
+  });
+  assert.equal(disconnected.state, 'disconnected');
+  assert.equal(disconnected.meta, 'panes: 0/1 connected');
+
+  const connected = deriveGlobalConnectionState({
+    authed: true,
+    panes: [{ connected: false, statusState: 'connected' }]
+  });
+  assert.equal(connected.state, 'connected');
+  assert.equal(connected.meta, 'panes: 1/1 connected');
 });
 
 test('deriveAuthOverlayState captures auth/role transition flags', () => {
