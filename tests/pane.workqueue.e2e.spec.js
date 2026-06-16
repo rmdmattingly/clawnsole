@@ -124,7 +124,7 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await wqPane.locator('[data-wq-enqueue-submit]').click();
   const enqueueRes = await enqueueResP;
   expect(enqueueRes.ok()).toBeTruthy();
-  await expect(wqPane.locator('[data-wq-enqueue-status]')).toContainText('Queued as Unassigned');
+  await expect(wqPane.locator('[data-wq-enqueue-status]')).toContainText('Queued for main');
 
   // Close the enqueue details so it can't block clicks on the list.
   await wqPane.locator('details.wq-enqueue > summary').click();
