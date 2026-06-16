@@ -1490,6 +1490,14 @@ button.agents-section-title:hover {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.agents-row:focus-visible,
+.agents-row.agents-row-returned {
+  outline: 2px solid rgba(125, 211, 252, 0.88);
+  outline-offset: 2px;
+  border-color: rgba(125, 211, 252, 0.62);
+  background: rgba(125, 211, 252, 0.08);
+}
+
 .agents-pin {
   width: 36px;
   height: 36px;
