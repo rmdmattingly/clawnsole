@@ -232,6 +232,70 @@ test('/token returns token_not_found when gateway token missing', async () => {
   assert.equal(JSON.parse(res.body.toString('utf8')).error, 'token_not_found');
 });
 
+test('recurring prompts API supports create, update, list, and delete', async () => {
+  const { homeDir, openclawDir } = makeTempHome();
+  writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
+
+  const promptsPath = path.join(openclawDir, 'recurring-prompts-test.json');
+  const { handleRequest } = createClawnsoleServer({ homeDir, recurringPromptsPath: promptsPath });
+
+  const login = await invoke(handleRequest, {
+    url: '/auth/login',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: 'admin' })
+  });
+  const cookieHeader = parseCookiesFromSetCookie(login.headers['set-cookie']);
+
+  const create = await invoke(handleRequest, {
+    url: '/api/recurring-prompts',
+    method: 'POST',
+    headers: { cookie: cookieHeader, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      title: 'Daily ops',
+      agentId: 'dev',
+      message: 'Review the daily checklist.',
+      intervalMinutes: 30,
+      enabled: true
+    })
+  });
+  assert.equal(create.statusCode, 200);
+  const created = JSON.parse(create.body.toString('utf8')).prompt;
+  assert.equal(created.title, 'Daily ops');
+  assert.equal(created.agentId, 'dev');
+  assert.equal(created.intervalMinutes, 30);
+  assert.equal(created.enabled, true);
+
+  const update = await invoke(handleRequest, {
+    url: `/api/recurring-prompts/${created.id}`,
+    method: 'PUT',
+    headers: { cookie: cookieHeader, 'content-type': 'application/json' },
+    body: JSON.stringify({ enabled: false, intervalMinutes: 45 })
+  });
+  assert.equal(update.statusCode, 200);
+  const updated = JSON.parse(update.body.toString('utf8')).prompt;
+  assert.equal(updated.enabled, false);
+  assert.equal(updated.intervalMinutes, 45);
+
+  const list = await invoke(handleRequest, { url: '/api/recurring-prompts', headers: { cookie: cookieHeader } });
+  assert.equal(list.statusCode, 200);
+  const listed = JSON.parse(list.body.toString('utf8')).prompts;
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].id, created.id);
+  assert.equal(listed[0].enabled, false);
+
+  const del = await invoke(handleRequest, {
+    url: `/api/recurring-prompts/${created.id}`,
+    method: 'DELETE',
+    headers: { cookie: cookieHeader }
+  });
+  assert.equal(del.statusCode, 200);
+
+  const listAfterDelete = await invoke(handleRequest, { url: '/api/recurring-prompts', headers: { cookie: cookieHeader } });
+  assert.deepEqual(JSON.parse(listAfterDelete.body.toString('utf8')).prompts, []);
+});
+
 test('authVersion rotation invalidates existing cookies', async () => {
   const { homeDir, openclawDir } = makeTempHome();
   const cfgPath = path.join(openclawDir, 'clawnsole.json');

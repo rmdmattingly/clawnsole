@@ -72,6 +72,15 @@ const globalElements = {
   settingsBtn: document.getElementById('settingsBtn'),
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
+  recurringPromptTitle: document.getElementById('recurringPromptTitle'),
+  recurringPromptAgent: document.getElementById('recurringPromptAgent'),
+  recurringPromptInterval: document.getElementById('recurringPromptInterval'),
+  recurringPromptEnabled: document.getElementById('recurringPromptEnabled'),
+  recurringPromptMessage: document.getElementById('recurringPromptMessage'),
+  recurringPromptCreateBtn: document.getElementById('recurringPromptCreateBtn'),
+  recurringPromptRefreshBtn: document.getElementById('recurringPromptRefreshBtn'),
+  recurringPromptStatus: document.getElementById('recurringPromptStatus'),
+  recurringPromptList: document.getElementById('recurringPromptList'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
   loginPassword: document.getElementById('loginPassword'),
@@ -2442,6 +2451,197 @@ function renderAgentsModalList() {
 
   const empty = ordered.length === 0;
   if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
+}
+
+function setRecurringPromptStatus(message, kind = 'info') {
+  const root = globalElements.recurringPromptStatus;
+  if (!root) return;
+  root.textContent = String(message || '');
+  root.classList.toggle('error', kind === 'error');
+}
+
+function formatRecurringPromptTime(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 'never';
+  try {
+    return new Date(n).toLocaleString();
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function loadRecurringPromptAgents() {
+  const select = globalElements.recurringPromptAgent;
+  if (!select) return;
+
+  const current = select.value || 'main';
+  const agents = Array.isArray(uiState.agents) && uiState.agents.length
+    ? uiState.agents
+    : await refreshAgents({ reason: 'recurring-prompts' }).catch(() => []);
+
+  select.innerHTML = '';
+  const seen = new Set();
+  const addOption = (id, label) => {
+    const cleanId = normalizeAgentId(id || 'main');
+    if (seen.has(cleanId)) return;
+    seen.add(cleanId);
+    const option = document.createElement('option');
+    option.value = cleanId;
+    option.textContent = label || cleanId;
+    select.appendChild(option);
+  };
+
+  addOption('main', 'main');
+  (Array.isArray(agents) ? agents : []).forEach((agent) => {
+    const id = normalizeAgentId(agent?.id || 'main');
+    addOption(id, formatAgentLabel(agent, { includeId: true }));
+  });
+  select.value = seen.has(current) ? current : 'main';
+}
+
+async function recurringPromptRequest(url, options = {}) {
+  const res = await fetch(url, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.ok === false) throw new Error(String(data?.error || res.status));
+  return data;
+}
+
+function renderRecurringPrompts(prompts) {
+  const root = globalElements.recurringPromptList;
+  if (!root) return;
+  root.innerHTML = '';
+
+  const items = Array.isArray(prompts) ? prompts : [];
+  if (!items.length) {
+    root.innerHTML = '<div class="hint">No recurring prompts configured.</div>';
+    return;
+  }
+
+  items
+    .slice()
+    .sort((a, b) => String(a?.title || '').localeCompare(String(b?.title || '')))
+    .forEach((prompt) => {
+      const card = document.createElement('article');
+      card.className = 'recurring-prompt-card';
+      const status = String(prompt?.lastStatus || 'never');
+      const enabled = prompt?.enabled !== false;
+      const id = String(prompt?.id || '');
+      card.innerHTML = `
+        <div class="recurring-prompt-card-main">
+          <div class="recurring-prompt-card-title">${escapeHtml(String(prompt?.title || 'Recurring prompt'))}</div>
+          <div class="recurring-prompt-card-meta">
+            <span>${escapeHtml(String(prompt?.agentId || 'main'))}</span>
+            <span>${escapeHtml(String(prompt?.intervalMinutes || 60))}m</span>
+            <span>${enabled ? 'enabled' : 'disabled'}</span>
+            <span>${escapeHtml(status)}</span>
+          </div>
+          <div class="recurring-prompt-card-times">
+            Last: ${escapeHtml(formatRecurringPromptTime(prompt?.lastRunAt))}
+            <span>Next: ${escapeHtml(formatRecurringPromptTime(prompt?.nextRunAt))}</span>
+          </div>
+          ${prompt?.lastError ? `<div class="recurring-prompt-error">${escapeHtml(String(prompt.lastError))}</div>` : ''}
+        </div>
+        <div class="recurring-prompt-card-actions">
+          <button class="secondary" type="button" data-rp-action="toggle">${enabled ? 'Disable' : 'Enable'}</button>
+          <button class="secondary" type="button" data-rp-action="edit">Edit</button>
+          <button class="secondary danger" type="button" data-rp-action="delete">Delete</button>
+        </div>
+      `;
+
+      card.querySelector('[data-rp-action="toggle"]')?.addEventListener('click', async () => {
+        try {
+          await recurringPromptRequest(`/api/recurring-prompts/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            body: JSON.stringify({ enabled: !enabled })
+          });
+          await loadRecurringPrompts();
+        } catch (err) {
+          setRecurringPromptStatus(`Toggle failed: ${String(err)}`, 'error');
+        }
+      });
+
+      card.querySelector('[data-rp-action="edit"]')?.addEventListener('click', async () => {
+        const title = prompt('Edit title', String(prompt?.title || 'Recurring prompt'));
+        if (title === null) return;
+        const intervalRaw = prompt('Edit interval in minutes', String(prompt?.intervalMinutes || 60));
+        if (intervalRaw === null) return;
+        const message = prompt('Edit prompt text', String(prompt?.message || ''));
+        if (message === null) return;
+        const intervalMinutes = Number(intervalRaw);
+        try {
+          await recurringPromptRequest(`/api/recurring-prompts/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            body: JSON.stringify({
+              title,
+              intervalMinutes: Number.isFinite(intervalMinutes) ? intervalMinutes : prompt?.intervalMinutes,
+              message
+            })
+          });
+          await loadRecurringPrompts();
+        } catch (err) {
+          setRecurringPromptStatus(`Edit failed: ${String(err)}`, 'error');
+        }
+      });
+
+      card.querySelector('[data-rp-action="delete"]')?.addEventListener('click', async () => {
+        if (!confirm(`Delete recurring prompt?\n\n${String(prompt?.title || id)}`)) return;
+        try {
+          await recurringPromptRequest(`/api/recurring-prompts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+          await loadRecurringPrompts();
+        } catch (err) {
+          setRecurringPromptStatus(`Delete failed: ${String(err)}`, 'error');
+        }
+      });
+
+      root.appendChild(card);
+    });
+}
+
+async function loadRecurringPrompts() {
+  if (!globalElements.recurringPromptList) return;
+  setRecurringPromptStatus('Loading recurring prompts...');
+  try {
+    const data = await recurringPromptRequest('/api/recurring-prompts');
+    renderRecurringPrompts(data.prompts);
+    setRecurringPromptStatus('');
+  } catch (err) {
+    renderRecurringPrompts([]);
+    setRecurringPromptStatus(`Load failed: ${String(err)}`, 'error');
+  }
+}
+
+async function createRecurringPromptFromUi() {
+  const message = String(globalElements.recurringPromptMessage?.value || '').trim();
+  if (!message) {
+    setRecurringPromptStatus('Prompt text is required.', 'error');
+    return;
+  }
+
+  const intervalMinutes = Number(globalElements.recurringPromptInterval?.value || 60);
+  const payload = {
+    title: String(globalElements.recurringPromptTitle?.value || '').trim() || 'Recurring prompt',
+    agentId: normalizeAgentId(globalElements.recurringPromptAgent?.value || 'main'),
+    intervalMinutes: Number.isFinite(intervalMinutes) ? intervalMinutes : 60,
+    enabled: globalElements.recurringPromptEnabled?.checked !== false,
+    message
+  };
+
+  try {
+    await recurringPromptRequest('/api/recurring-prompts', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    if (globalElements.recurringPromptTitle) globalElements.recurringPromptTitle.value = '';
+    if (globalElements.recurringPromptMessage) globalElements.recurringPromptMessage.value = '';
+    await loadRecurringPrompts();
+    setRecurringPromptStatus('Created recurring prompt.');
+  } catch (err) {
+    setRecurringPromptStatus(`Create failed: ${String(err)}`, 'error');
+  }
 }
 
 // Workqueue (admin-only)
