@@ -149,6 +149,16 @@ const test = base.test.extend({
       const adminUrl = `${serverUrl}/admin`;
       const guestUrl = `${serverUrl}/guest`;
 
+      const waitForAdminUiReady = async (page) => {
+        await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+        await page.waitForFunction(() => {
+          const overlay = document.querySelector('#loginOverlay');
+          if (!overlay) return false;
+          return overlay.getAttribute('aria-hidden') === 'true' && !overlay.classList.contains('open');
+        }, { timeout: 90000 });
+        await page.locator('#addPaneBtn').waitFor({ state: 'visible', timeout: 90000 });
+      };
+
       const api = {
         tempHome,
         serverPort,
@@ -161,12 +171,12 @@ const test = base.test.extend({
           serverProc,
           gatewayProc
         },
+        waitForAdminUiReady,
         async gotoAndLoginAdmin(page, password = 'admin') {
           await page.goto(`${serverUrl}/`);
           await page.fill('#loginPassword', password);
           await page.click('#loginBtn');
-          await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
-          await page.waitForSelector('[data-pane] [data-pane-input]', { timeout: 90000 });
+          await waitForAdminUiReady(page);
         }
       };
 

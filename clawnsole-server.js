@@ -186,6 +186,53 @@ function createClawnsoleServer(options = {}) {
     return { title, agentId, message, intervalMinutes, intervalMs, enabled, nextRunAt };
   }
 
+  function normalizeRecurringRuns(input) {
+    if (!Array.isArray(input)) return [];
+    return input
+      .map((row) => {
+        if (!row || typeof row !== 'object') return null;
+        const tsRaw = Number(row.ts ?? row.at ?? row.lastRunAt ?? 0);
+        const ts = Number.isFinite(tsRaw) && tsRaw > 0 ? tsRaw : null;
+        if (!ts) return null;
+        const status = String(row.status || row.lastStatus || 'unknown').trim() || 'unknown';
+        const error = String(row.error || row.lastError || '').trim();
+        return { ts, status, error };
+      })
+      .filter(Boolean)
+      .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+  }
+
+  function scheduleSummaryForPrompt(prompt) {
+    const mins = Math.max(1, Number(prompt?.intervalMinutes) || 60);
+    return `every ${mins} minute${mins === 1 ? '' : 's'}`;
+  }
+
+  function serializeRecurringPrompt(prompt) {
+    const runHistory = normalizeRecurringRuns(prompt?.runHistory);
+    const lastRunTs = Number(prompt?.lastRunAt);
+    const fallbackLast = Number.isFinite(lastRunTs) && lastRunTs > 0
+      ? {
+          ts: lastRunTs,
+          status: String(prompt?.lastStatus || 'unknown').trim() || 'unknown',
+          error: String(prompt?.lastError || '').trim()
+        }
+      : null;
+    const runs = runHistory.length ? runHistory : fallbackLast ? [fallbackLast] : [];
+    const lastRun = runs.length ? runs[0] : null;
+
+    return {
+      ...prompt,
+      runHistory: runs,
+      source: 'admin/system-prompt',
+      target: String(prompt?.agentId || 'main').trim() || 'main',
+      timezone: 'local',
+      scheduleSummary: scheduleSummaryForPrompt(prompt),
+      promptText: String(prompt?.message || ''),
+      nextRun: Number.isFinite(Number(prompt?.nextRunAt)) ? Number(prompt.nextRunAt) : null,
+      lastRun
+    };
+  }
+
   function safeFilename(name) {
     const cleaned = name.replace(/[^a-zA-Z0-9._-]/g, '_');
     return cleaned || 'upload';
@@ -392,7 +439,7 @@ function createClawnsoleServer(options = {}) {
 
       if (req.method === 'GET') {
         const state = readRecurringPrompts();
-        sendJson(res, 200, { ok: true, prompts: state.prompts });
+        sendJson(res, 200, { ok: true, prompts: state.prompts.map((p) => serializeRecurringPrompt(p)) });
         return;
       }
 
@@ -433,15 +480,63 @@ function createClawnsoleServer(options = {}) {
             lastRunAt: null,
             nextRunAt: cleaned.nextRunAt,
             lastStatus: 'never',
-            lastError: ''
+            lastError: '',
+            runHistory: []
           };
 
           state.prompts.push(prompt);
           writeRecurringPrompts(state);
-          sendJson(res, 200, { ok: true, prompt });
+          sendJson(res, 200, { ok: true, prompt: serializeRecurringPrompt(prompt) });
         } catch (err) {
           sendJson(res, 400, { ok: false, error: 'invalid_request' });
         }
+      });
+      return;
+    }
+
+    if (req.url.startsWith('/api/recurring-prompts/') && req.url.includes('/runs')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      const parsed = new URL(req.url, 'http://127.0.0.1');
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      const id = parts[2] || '';
+      if (!id || parts[3] !== 'runs') {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      const limitRaw = Number(parsed.searchParams.get('limit'));
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(200, Math.floor(limitRaw))) : 50;
+
+      const state = readRecurringPrompts();
+      const prompt = state.prompts.find((p) => p && p.id === id);
+      if (!prompt) {
+        sendJson(res, 404, { ok: false, error: 'not_found' });
+        return;
+      }
+
+      const rows = normalizeRecurringRuns(prompt.runHistory);
+      const lastRunAt = Number(prompt.lastRunAt);
+      if (!rows.length && Number.isFinite(lastRunAt) && lastRunAt > 0) {
+        rows.push({
+          ts: lastRunAt,
+          status: String(prompt.lastStatus || 'unknown').trim() || 'unknown',
+          error: String(prompt.lastError || '').trim()
+        });
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        source: 'admin/system-prompt',
+        promptId: id,
+        runs: rows.slice(0, limit)
       });
       return;
     }
@@ -507,11 +602,12 @@ function createClawnsoleServer(options = {}) {
             intervalMinutes: cleaned.intervalMinutes,
             enabled: cleaned.enabled,
             nextRunAt: cleaned.nextRunAt,
+            runHistory: normalizeRecurringRuns(existing.runHistory),
             updatedAt: now
           };
           state.prompts[idx] = updated;
           writeRecurringPrompts(state);
-          sendJson(res, 200, { ok: true, prompt: updated });
+          sendJson(res, 200, { ok: true, prompt: serializeRecurringPrompt(updated) });
         } catch (err) {
           sendJson(res, 400, { ok: false, error: 'invalid_request' });
         }

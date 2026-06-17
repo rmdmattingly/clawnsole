@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 
-const { startTestEnv, loginAdmin, attachConsoleErrorAsserts } = require('./_helpers');
+const { startTestEnv, loginAdmin, attachConsoleErrorAsserts, addPane } = require('./_helpers');
 
 let env;
 
@@ -27,8 +27,9 @@ test('chat pane: send/receive + upload attachment', async ({ page }, testInfo) =
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
   await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
 
-  const pane = page.locator('[data-pane]').first();
+  const pane = page.locator('[data-pane][data-pane-kind="chat"]').last();
   await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
 
   // Send/receive.
@@ -46,4 +47,33 @@ test('chat pane: send/receive + upload attachment', async ({ page }, testInfo) =
   await pane.locator('[data-pane-input]').fill('with file');
   await pane.locator('[data-pane-send]').click();
   await expect(pane.locator('[data-chat-role="user"]').last()).toContainText('with file');
+});
+
+test('chat pane: stop button can cancel a running response', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
+
+  const pane = page.locator('[data-pane][data-pane-kind="chat"]').last();
+  await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+
+  await pane.locator('[data-pane-input]').fill('please stream this');
+  await pane.locator('[data-pane-send]').click();
+
+  // Streaming begins immediately in mock gateway.
+  await expect(pane.locator('.chat-bubble.assistant', { hasText: 'mock-stream: please stream' })).toBeVisible();
+
+  const stopBtn = pane.locator('[data-pane-stop]');
+  await expect(stopBtn).toBeVisible();
+  await stopBtn.click();
+
+  await expect(stopBtn).toHaveAttribute('aria-label', 'Canceling…');
+  await expect(pane.locator('.chat-bubble.assistant').last()).toContainText('(canceled)', { ignoreCase: true, timeout: 5000 });
+
+  // Cancel should not still emit a completed reply after stream is stopped.
+  await expect(pane.locator('.chat-bubble.assistant')).not.toContainText('mock-reply: please stream this', { timeout: 3000 });
 });

@@ -188,6 +188,9 @@ async function runOnce({ promptsPath, openclawConfigPath, deviceLabel, dryRun = 
     due.forEach((p) => {
       p.lastStatus = 'error';
       p.lastError = message;
+      if (!Array.isArray(p.runHistory)) p.runHistory = [];
+      p.runHistory.unshift({ ts: now, status: 'error', error: message });
+      if (p.runHistory.length > 200) p.runHistory = p.runHistory.slice(0, 200);
       p.lastRunAt = now;
       p.updatedAt = now;
       const minutes = Number(p.intervalMinutes) || 60;
@@ -213,6 +216,14 @@ async function runOnce({ promptsPath, openclawConfigPath, deviceLabel, dryRun = 
       prompt.lastStatus = 'error';
       prompt.lastError = String(err || 'delivery failed');
     }
+
+    if (!Array.isArray(prompt.runHistory)) prompt.runHistory = [];
+    prompt.runHistory.unshift({
+      ts: now,
+      status: prompt.lastStatus,
+      error: String(prompt.lastError || '')
+    });
+    if (prompt.runHistory.length > 200) prompt.runHistory = prompt.runHistory.slice(0, 200);
 
     prompt.lastRunAt = now;
     prompt.nextRunAt = nextRunAt;

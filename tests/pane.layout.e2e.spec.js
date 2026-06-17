@@ -33,6 +33,10 @@ test('layout: default admin layout is 2 panes (Chat + Workqueue)', async ({ page
   await expect(wqPane).toHaveAttribute('data-pane-kind', 'workqueue');
   await expect(wqPane.locator('.wq-pane')).toHaveCount(1);
   await expect(wqPane.locator('[data-pane-input]')).toBeHidden();
+
+  // Regression guard: pane header pill should reflect Workqueue (not Chat).
+  await expect(wqPane.locator('[data-pane-type-text]')).toHaveText('WORKQUEUE');
+  await expect(wqPane.locator('[data-pane-type-text]')).not.toHaveText('CHAT');
 });
 
 test('layout: reset layout restores default (Chat + Workqueue)', async ({ page }) => {
