@@ -6,7 +6,7 @@ const path = require('node:path');
 const http = require('node:http');
 
 const { createClawnsoleServer } = require('../../clawnsole-server');
-const { enqueueItem } = require('../../lib/workqueue');
+const { enqueueItem, loadState } = require('../../lib/workqueue');
 
 function mkTempEnv() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawnsole-wq-api-'));
@@ -161,6 +161,52 @@ test('workqueue API: enqueue creates item', async () => {
     assert.equal(res.json?.ok, true);
     assert.equal(res.json?.item?.queue, 'dev-team');
     assert.equal(res.json?.item?.dedupeKey, 'k1');
+  } finally {
+    server.close();
+  }
+});
+
+test('workqueue API: enqueue canonicalizes issue-backed dedupe variants', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+    const headers = { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' };
+    const first = await httpPostJson(
+      'http://127.0.0.1:' + port + '/api/workqueue/enqueue',
+      {
+        queue: 'dev-team',
+        title: 'from cron',
+        instructions: 'x',
+        priority: 1,
+        dedupeKey: 'issue:rmdmattingly/clawnsole:398'
+      },
+      headers
+    );
+    const second = await httpPostJson(
+      'http://127.0.0.1:' + port + '/api/workqueue/enqueue',
+      {
+        queue: 'dev-team',
+        title: 'from follow-up',
+        instructions: 'y',
+        priority: 1,
+        dedupeKey: 'rmdmattingly/clawnsole#398'
+      },
+      headers
+    );
+
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(second.json?.item?.id, first.json?.item?.id);
+    assert.equal(second.json?.item?._deduped, true);
+    assert.equal(second.json?.item?.dedupeKey, 'issue:rmdmattingly/clawnsole#398');
+
+    const state = loadState();
+    assert.equal(state.items.length, 1);
+    assert.equal(state.items[0].dedupeKey, 'issue:rmdmattingly/clawnsole#398');
   } finally {
     server.close();
   }
