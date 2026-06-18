@@ -782,6 +782,9 @@ function createClawnsoleServer(options = {}) {
           const instructions = String(payload.instructions || '').trim();
           const priority = Number.isFinite(Number(payload.priority)) ? Number(payload.priority) : 0;
           const dedupeKey = String(payload.dedupeKey || '').trim();
+          const meta = payload.meta && typeof payload.meta === 'object' && !Array.isArray(payload.meta) ? payload.meta : {};
+          const repo = String(payload.repo ?? meta.repo ?? '').trim();
+          const issueNumber = payload.issueNumber ?? meta.issueNumber ?? meta.issue;
 
           if (!queue) {
             sendJson(res, 400, { ok: false, error: 'queue_required' });
@@ -789,8 +792,9 @@ function createClawnsoleServer(options = {}) {
           }
 
           const { enqueueItem } = require('./lib/workqueue');
-          const item = enqueueItem(null, { queue, title, instructions, priority, dedupeKey });
-          sendJson(res, 200, { ok: true, item });
+          const item = enqueueItem(null, { queue, title, instructions, priority, dedupeKey, repo, issueNumber, meta });
+          const enqueueResult = item && item._enqueueAction === 'updated_existing' ? 'updated_existing' : 'created';
+          sendJson(res, 200, { ok: true, result: enqueueResult, item });
         } catch (err) {
           sendJson(res, 400, { ok: false, error: 'invalid_request' });
         }
