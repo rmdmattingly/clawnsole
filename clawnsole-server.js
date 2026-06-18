@@ -1324,10 +1324,14 @@ function createClawnsoleServer(options = {}) {
     }
 
 
+    let requestPath = req.url;
+    try {
+      requestPath = new URL(req.url, 'http://127.0.0.1').pathname;
+    } catch {}
     const urlPath =
-      req.url === '/' || req.url === '/admin' || req.url === '/admin/'
+      requestPath === '/' || requestPath === '/admin' || requestPath.startsWith('/admin/')
         ? '/index.html'
-        : req.url;
+        : requestPath;
     const filePath = path.join(root, decodeURIComponent(urlPath));
     if (!filePath.startsWith(root)) {
       res.writeHead(403);

@@ -131,6 +131,32 @@ const normalizePaneKind = __appCore.normalizePaneKind || ((rawKind) => {
             ? 'timeline'
             : 'chat';
 });
+const normalizeAdminDestination = __appCore.normalizeAdminDestination || ((candidate, { origin = '', now = Date.now(), ttlMs = 10 * 60 * 1000 } = {}) => {
+  const value = candidate && typeof candidate === 'object' ? candidate : {};
+  const href = typeof value.href === 'string' ? value.href.trim() : '';
+  if (!href) return { ok: false, reason: 'missing' };
+  const createdAt = Number(value.createdAt || 0);
+  if (createdAt > 0 && Number.isFinite(ttlMs) && ttlMs > 0 && now - createdAt > ttlMs) return { ok: false, reason: 'stale' };
+  let url;
+  try {
+    url = new URL(href, origin || 'http://127.0.0.1');
+  } catch {
+    return { ok: false, reason: 'invalid' };
+  }
+  if (origin) {
+    try {
+      if (url.origin !== new URL(origin).origin) return { ok: false, reason: 'external' };
+    } catch {
+      return { ok: false, reason: 'invalid_origin' };
+    }
+  }
+  if (!(url.pathname === '/admin' || url.pathname.startsWith('/admin/'))) return { ok: false, reason: 'outside_admin' };
+  return {
+    ok: true,
+    href: `${url.pathname}${url.search}${url.hash}` || '/admin',
+    activePaneKey: typeof value.activePaneKey === 'string' ? value.activePaneKey : ''
+  };
+});
 const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => ({
   isAdmin: String(state?.role || '') === 'admin',
   startAgentAutoRefresh: String(state?.role || '') === 'admin' && !!state?.authed,
@@ -217,6 +243,10 @@ const ADMIN_AGENT_SORT_KEY = 'clawnsole.admin.agents.sort';
 const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
+const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
+const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
+const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
+const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
 const WQ_RECENT_TARGETS_MAX = 6;
 
@@ -236,6 +266,95 @@ function writeJsonToStorage(key, value) {
   } catch {
     // ignore storage failures
   }
+}
+
+function getActiveAdminPaneKey() {
+  try {
+    const active = document.activeElement;
+    const pane = active?.closest?.('[data-pane]');
+    return typeof pane?.dataset?.paneKey === 'string' ? pane.dataset.paneKey : '';
+  } catch {
+    return '';
+  }
+}
+
+function readStoredAdminDestination(key = ADMIN_AUTH_DESTINATION_KEY) {
+  const value = readJsonFromStorage(key, null);
+  return normalizeAdminDestination(value, {
+    origin: window.location.origin,
+    now: Date.now(),
+    ttlMs: ADMIN_AUTH_DESTINATION_TTL_MS
+  });
+}
+
+function captureAdminAuthDestination() {
+  try {
+    const current = normalizeAdminDestination(
+      {
+        href: `${window.location.pathname || '/'}${window.location.search || ''}${window.location.hash || ''}`,
+        createdAt: Date.now(),
+        activePaneKey: getActiveAdminPaneKey()
+      },
+      { origin: window.location.origin, now: Date.now(), ttlMs: ADMIN_AUTH_DESTINATION_TTL_MS }
+    );
+    if (!current.ok) return;
+
+    const existing = readStoredAdminDestination();
+    if (existing.ok) return;
+
+    writeJsonToStorage(ADMIN_AUTH_DESTINATION_KEY, {
+      href: current.href,
+      createdAt: Date.now(),
+      activePaneKey: current.activePaneKey
+    });
+  } catch {}
+}
+
+function consumeAdminAuthDestination() {
+  const raw = readJsonFromStorage(ADMIN_AUTH_DESTINATION_KEY, null);
+  storage.remove(ADMIN_AUTH_DESTINATION_KEY);
+  return normalizeAdminDestination(raw, {
+    origin: window.location.origin,
+    now: Date.now(),
+    ttlMs: ADMIN_AUTH_DESTINATION_TTL_MS
+  });
+}
+
+function buildDefaultAdminPanes(defaultAgent = 'main') {
+  const agentId = defaultAgent || 'main';
+  return [
+    { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId },
+    {
+      key: `p${randomId().slice(0, 8)}`,
+      kind: 'workqueue',
+      queue: 'dev-team',
+      statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+      scopeFilter: getDefaultWorkqueueScope(),
+      sortKey: 'priority',
+      sortDir: 'desc'
+    }
+  ];
+}
+
+function fallbackToDefaultAdminDestination() {
+  const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
+  storage.set(ADMIN_PANES_KEY, JSON.stringify(buildDefaultAdminPanes(storedDefault || 'main')));
+  storage.set(ADMIN_AUTH_RESTORE_NOTICE_KEY, 'Saved admin destination expired. Restored the default admin layout.');
+  return '/admin';
+}
+
+function applyPendingAdminRestore() {
+  const pending = readStoredAdminDestination(ADMIN_AUTH_RESTORE_PENDING_KEY);
+  storage.remove(ADMIN_AUTH_RESTORE_PENDING_KEY);
+
+  const notice = storage.get(ADMIN_AUTH_RESTORE_NOTICE_KEY, '');
+  storage.remove(ADMIN_AUTH_RESTORE_NOTICE_KEY);
+  if (notice) showToast(notice, { kind: 'info', timeoutMs: 4200 });
+
+  if (!pending.ok || !pending.activePaneKey) return;
+  const pane = paneManager.panes.find((p) => p.key === pending.activePaneKey);
+  if (!pane) return;
+  paneManager.focusPanePrimary(pane);
 }
 
 function readRecentWorkqueueTargets() {
@@ -927,6 +1046,7 @@ function setRole(role) {
 }
 
 function showLogin(message = '') {
+  captureAdminAuthDestination();
   globalElements.loginOverlay.classList.add('open');
   globalElements.loginOverlay.setAttribute('aria-hidden', 'false');
   globalElements.loginError.textContent = message;
@@ -977,7 +1097,19 @@ async function attemptLogin() {
       return;
     }
     await res.json();
-    window.location.replace('/admin');
+    const destination = consumeAdminAuthDestination();
+    let nextHref = '/admin';
+    if (destination.ok) {
+      nextHref = destination.href || '/admin';
+      writeJsonToStorage(ADMIN_AUTH_RESTORE_PENDING_KEY, {
+        href: nextHref,
+        createdAt: Date.now(),
+        activePaneKey: destination.activePaneKey || ''
+      });
+    } else {
+      nextHref = fallbackToDefaultAdminDestination();
+    }
+    window.location.replace(nextHref);
   } catch {
     showLogin('Login failed. Please retry.');
   }
@@ -6570,17 +6702,7 @@ const paneManager = {
     } catch {}
 
     // Default: Chat + Workqueue.
-    const paneA = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: defaultAgent };
-    const paneB = {
-      key: `p${randomId().slice(0, 8)}`,
-      kind: 'workqueue',
-      queue: 'dev-team',
-      statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
-      scopeFilter: getDefaultWorkqueueScope(),
-      sortKey: 'priority',
-      sortDir: 'desc'
-    };
-    const list = [paneA, paneB].slice(0, this.maxPanes);
+    const list = buildDefaultAdminPanes(defaultAgent).slice(0, this.maxPanes);
     storage.set(ADMIN_PANES_KEY, JSON.stringify(list));
     return list;
   },
@@ -6619,17 +6741,7 @@ const paneManager = {
 
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
     const defaultAgent = normalizeAgentId(storedDefault || 'main');
-    const paneA = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: defaultAgent };
-    const paneB = {
-      key: `p${randomId().slice(0, 8)}`,
-      kind: 'workqueue',
-      queue: 'dev-team',
-      statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
-      scopeFilter: getDefaultWorkqueueScope(),
-      sortKey: 'priority',
-      sortDir: 'desc'
-    };
-    storage.set(ADMIN_PANES_KEY, JSON.stringify([paneA, paneB]));
+    storage.set(ADMIN_PANES_KEY, JSON.stringify(buildDefaultAdminPanes(defaultAgent)));
 
     this.init();
 
@@ -7594,6 +7706,7 @@ window.addEventListener('load', () => {
       }
 
       paneManager.init();
+      applyPendingAdminRestore();
 
       // Update agent options now that we have a definitive list.
       if (role === 'admin') {
