@@ -219,6 +219,9 @@ const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollaps
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
 const WQ_RECENT_TARGETS_MAX = 6;
+const POST_UNLOCK_INTENT_KEY = 'clawnsole.admin.postUnlockIntent';
+const POST_UNLOCK_NOTICE_KEY = 'clawnsole.admin.postUnlockNotice';
+const POST_UNLOCK_INTENT_MAX_AGE_MS = 30 * 60 * 1000;
 
 function readJsonFromStorage(key, fallback) {
   try {
@@ -236,6 +239,66 @@ function writeJsonToStorage(key, value) {
   } catch {
     // ignore storage failures
   }
+}
+
+function isSafeAdminPath(path) {
+  return path === '/admin' || path === '/admin/';
+}
+
+function readPostUnlockIntent() {
+  const intent = readJsonFromStorage(POST_UNLOCK_INTENT_KEY, null);
+  if (!intent || typeof intent !== 'object') return { ok: false, reason: 'missing' };
+
+  const ts = Number(intent.ts);
+  if (!Number.isFinite(ts) || Date.now() - ts > POST_UNLOCK_INTENT_MAX_AGE_MS) {
+    return { ok: false, reason: 'expired' };
+  }
+
+  const path = typeof intent.path === 'string' ? intent.path : '';
+  if (!isSafeAdminPath(path)) return { ok: false, reason: 'invalid' };
+
+  const search = typeof intent.search === 'string' && intent.search.startsWith('?') ? intent.search : '';
+  const hash = typeof intent.hash === 'string' && intent.hash.startsWith('#') ? intent.hash : '';
+  return { ok: true, url: `${path}${search}${hash}` };
+}
+
+function capturePostUnlockIntent() {
+  try {
+    const path = window.location.pathname || '';
+    if (!isSafeAdminPath(path)) return;
+    writeJsonToStorage(POST_UNLOCK_INTENT_KEY, {
+      path,
+      search: window.location.search || '',
+      hash: window.location.hash || '',
+      ts: Date.now()
+    });
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function consumePostUnlockDestination() {
+  const result = readPostUnlockIntent();
+  storage.remove(POST_UNLOCK_INTENT_KEY);
+  if (result.ok) return result.url;
+
+  if (result.reason === 'expired' || result.reason === 'invalid') {
+    storage.remove(ADMIN_PANES_KEY);
+    storage.set(
+      POST_UNLOCK_NOTICE_KEY,
+      result.reason === 'expired'
+        ? 'Saved admin destination expired. Restored default Chat + Workqueue.'
+        : 'Saved admin destination was not safe. Restored default Chat + Workqueue.'
+    );
+  }
+  return '/admin';
+}
+
+function showPostUnlockNotice() {
+  const message = storage.get(POST_UNLOCK_NOTICE_KEY, '');
+  if (!message) return;
+  storage.remove(POST_UNLOCK_NOTICE_KEY);
+  showToast(message, { kind: 'info', timeoutMs: 6000 });
 }
 
 function readRecentWorkqueueTargets() {
@@ -927,6 +990,7 @@ function setRole(role) {
 }
 
 function showLogin(message = '') {
+  capturePostUnlockIntent();
   globalElements.loginOverlay.classList.add('open');
   globalElements.loginOverlay.setAttribute('aria-hidden', 'false');
   globalElements.loginError.textContent = message;
@@ -977,7 +1041,13 @@ async function attemptLogin() {
       return;
     }
     await res.json();
-    window.location.replace('/admin');
+    const destination = consumePostUnlockDestination();
+    const current = `${window.location.pathname || ''}${window.location.search || ''}${window.location.hash || ''}`;
+    if (destination === current) {
+      window.location.reload();
+      return;
+    }
+    window.location.replace(destination);
   } catch {
     showLogin('Login failed. Please retry.');
   }
@@ -7604,6 +7674,7 @@ window.addEventListener('load', () => {
 
       setAuthState(true);
       paneManager.connectAll();
+      showPostUnlockNotice();
 
       const isTouch = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
       if (!isTouch) {

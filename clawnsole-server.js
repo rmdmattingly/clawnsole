@@ -1323,11 +1323,17 @@ function createClawnsoleServer(options = {}) {
       return;
     }
 
-
+    const staticPath = (() => {
+      try {
+        return new URL(req.url, 'http://127.0.0.1').pathname;
+      } catch {
+        return req.url;
+      }
+    })();
     const urlPath =
-      req.url === '/' || req.url === '/admin' || req.url === '/admin/'
+      staticPath === '/' || staticPath === '/admin' || staticPath === '/admin/'
         ? '/index.html'
-        : req.url;
+        : staticPath;
     const filePath = path.join(root, decodeURIComponent(urlPath));
     if (!filePath.startsWith(root)) {
       res.writeHead(403);

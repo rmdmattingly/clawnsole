@@ -331,6 +331,10 @@ test('GET /admin serves the kiosk shell (index.html); /guest returns 404', async
   assert.match(String(admin.headers['content-type'] || ''), /text\/html/);
   assert.match(admin.body.toString('utf8'), /<title>Clawnsole<\/title>/);
 
+  const adminWithQuery = await invoke(handleRequest, { url: '/admin?pane=workqueue' });
+  assert.equal(adminWithQuery.statusCode, 200);
+  assert.match(adminWithQuery.body.toString('utf8'), /<title>Clawnsole<\/title>/);
+
   const guest = await invoke(handleRequest, { url: '/guest' });
   assert.equal(guest.statusCode, 404);
 });

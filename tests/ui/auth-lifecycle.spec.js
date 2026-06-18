@@ -2,12 +2,75 @@ const fs = require('fs');
 const path = require('path');
 const { test, expect } = require('./fixtures');
 
+async function loginFromOverlay(page) {
+  await page.waitForLoadState('load');
+  await expect(page.locator('#loginBtn')).toBeEnabled();
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForFunction(() => {
+    const overlay = document.querySelector('#loginOverlay');
+    return overlay && overlay.getAttribute('aria-hidden') === 'true' && !overlay.classList.contains('open');
+  }, { timeout: 90000 });
+}
+
 test('visiting /admin without auth shows login overlay', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
   await page.goto(clawnsole.adminUrl);
   await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
   await expect(page.getByTestId('role-pill')).toContainText('signed out');
+});
+
+test('post-unlock intent restores a safe admin destination', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.goto(`${clawnsole.adminUrl}?pane=workqueue#queue-dev`);
+  await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
+
+  await loginFromOverlay(page);
+
+  await expect(page).toHaveURL(`${clawnsole.adminUrl}?pane=workqueue#queue-dev`);
+  const storedIntent = await page.evaluate(() => localStorage.getItem('clawnsole.admin.postUnlockIntent'));
+  expect(storedIntent).toBeNull();
+});
+
+test('stale post-unlock intent falls back to default admin layout with notice', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.goto(clawnsole.serverUrl);
+  await page.evaluate(() => {
+    localStorage.setItem(
+      'clawnsole.admin.postUnlockIntent',
+      JSON.stringify({ path: '/admin', search: '?pane=workqueue', hash: '#stale', ts: Date.now() - 31 * 60 * 1000 })
+    );
+    localStorage.setItem('clawnsole.admin.panes.v1', JSON.stringify([{ key: 'pstale', kind: 'cron' }]));
+  });
+
+  await loginFromOverlay(page);
+
+  await expect(page).toHaveURL(`${clawnsole.adminUrl}`);
+  await expect(page.getByTestId('toast')).toContainText(/expired.*default Chat \+ Workqueue/i);
+  await expect(page.locator('[data-pane]')).toHaveCount(2);
+  await expect(page.locator('[data-pane]').nth(0)).toHaveAttribute('data-pane-kind', 'chat');
+  await expect(page.locator('[data-pane]').nth(1)).toHaveAttribute('data-pane-kind', 'workqueue');
+});
+
+test('unsafe post-unlock intent cannot redirect outside the admin app', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.goto(clawnsole.serverUrl);
+  await page.evaluate(() => {
+    localStorage.setItem(
+      'clawnsole.admin.postUnlockIntent',
+      JSON.stringify({ path: 'https://evil.example/admin', search: '', hash: '', ts: Date.now() })
+    );
+  });
+
+  await loginFromOverlay(page);
+
+  await expect(page).toHaveURL(`${clawnsole.adminUrl}`);
+  await expect(page.getByTestId('toast')).toContainText(/not safe.*default Chat \+ Workqueue/i);
+  expect(new URL(page.url()).origin).toBe(clawnsole.serverUrl);
 });
 
 test('after successful login, reload stays authed; clearing cookies forces re-login', async ({ page, context, clawnsole }) => {
