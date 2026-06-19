@@ -294,7 +294,7 @@
       </div>
     </div>
 
-    <div id="workqueueModal" class="modal" aria-hidden="true">
+    <div id="workqueueModal" class="modal" aria-hidden="true" data-testid="wq-modal">
       <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="workqueueTitle">
         <div class="modal-header">
           <h2 id="workqueueTitle">Workqueue</h2>
@@ -306,11 +306,11 @@
           <div class="wq-toolbar">
             <label class="wq-field">
               Queue
-              <select id="wqQueueSelect" aria-label="Select workqueue"></select>
+              <select id="wqQueueSelect" aria-label="Select workqueue" data-testid="wq-modal-queue-select"></select>
             </label>
             <div class="wq-field">
               Status
-              <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters"></div>
+              <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters" data-testid="wq-modal-status-filters"></div>
             </div>
             <label class="wq-field">
               Auto-refresh
@@ -384,13 +384,13 @@
                 <button type="button" class="wq-list-sort" data-wq-modal-sort="claimedBy">Claimed By</button>
                 <button type="button" class="wq-list-sort" data-wq-modal-sort="leaseUntil">Lease</button>
               </div>
-              <div id="wqListBody" class="wq-list-body"></div>
+              <div id="wqListBody" class="wq-list-body" data-testid="wq-modal-list"></div>
               <div id="wqListEmpty" class="hint" hidden>No items match.</div>
             </div>
 
             <div class="wq-inspect" aria-label="Inspect workqueue item">
               <div class="wq-inspect-header">Item</div>
-              <div id="wqInspectBody" class="wq-inspect-body">
+              <div id="wqInspectBody" class="wq-inspect-body" data-testid="wq-modal-inspect">
                 <div class="hint">Select an item to inspect.</div>
               </div>
             </div>

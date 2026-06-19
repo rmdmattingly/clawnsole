@@ -2619,6 +2619,7 @@ function renderWorkqueueStatusFilters() {
     const id = `wq-status-${s}`;
     const label = document.createElement('label');
     label.className = 'wq-status-chip';
+    label.dataset.testid = `wq-modal-status-filter-${s}`;
     label.innerHTML = `<input type="checkbox" id="${id}" ${workqueueState.statusFilter.has(s) ? 'checked' : ''} /> <span>${escapeHtml(s)}</span>`;
     const checkbox = label.querySelector('input');
     checkbox.addEventListener('change', () => {
@@ -2831,6 +2832,7 @@ function renderWorkqueueItems() {
     const col = document.createElement('section');
     col.className = 'wq-board-col';
     col.setAttribute('data-wq-col', colDef.status);
+    col.dataset.testid = `wq-modal-col-${colDef.status}`;
 
     const colItems = Array.isArray(itemsByStatus[colDef.status]) ? itemsByStatus[colDef.status] : [];
 
@@ -2843,6 +2845,7 @@ function renderWorkqueueItems() {
 
     const lane = document.createElement('div');
     lane.className = 'wq-board-lane';
+    lane.dataset.testid = `wq-modal-lane-${colDef.status}`;
 
     // Drag/drop: drop a card to change status.
     lane.addEventListener('dragover', (e) => {
@@ -2867,6 +2870,7 @@ function renderWorkqueueItems() {
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'wq-card';
+      card.dataset.testid = 'wq-modal-card';
       if (it.id && it.id === workqueueState.selectedItemId) card.classList.add('selected');
       if (it.id) card.setAttribute('data-wq-item', it.id);
 
@@ -2957,6 +2961,8 @@ function renderWorkqueueInspect(item) {
 
   const editBtn = actions.querySelector('[data-wq-action="edit"]');
   const deleteBtn = actions.querySelector('[data-wq-action="delete"]');
+  editBtn?.setAttribute('data-testid', 'wq-modal-edit');
+  deleteBtn?.setAttribute('data-testid', 'wq-modal-delete');
 
   editBtn?.addEventListener('click', () => workqueueEditItem(item));
   deleteBtn?.addEventListener('click', () => workqueueDeleteItem(item));
