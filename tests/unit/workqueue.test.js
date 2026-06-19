@@ -256,3 +256,65 @@ test('workqueue: enqueue supports dedupeKey idempotency', () => {
   const state = loadState(root);
   assert.equal(state.items.length, 1);
 });
+
+test('workqueue: issue-backed automated enqueue upserts one live item', () => {
+  const root = tempRoot();
+
+  let latest;
+  for (let i = 0; i < 10; i++) {
+    latest = enqueueItem(root, {
+      queue: 'dev-team',
+      title: `Issue coverage pass ${i}`,
+      instructions: `Ship https://github.com/rmdmattingly/clawnsole/issues/392`,
+      priority: i,
+      repo: 'RMDMATTINGLY/CLAWNSOLE',
+      issueNumber: 392,
+      meta: {
+        source: 'hourly-auto-enqueue'
+      }
+    });
+  }
+
+  assert.equal(latest._enqueueAction, 'updated_existing');
+  assert.equal(latest._deduped, true);
+  assert.equal(latest.priority, 9);
+  assert.equal(latest.dedupeKey, 'rmdmattingly/clawnsole#392');
+  assert.equal(latest.meta.repo, 'rmdmattingly/clawnsole');
+  assert.equal(latest.meta.issueNumber, '392');
+
+  const state = loadState(root);
+  assert.equal(state.items.length, 1);
+  assert.equal(state.items[0].title, 'Issue coverage pass 9');
+  assert.equal(state.items[0].priority, 9);
+});
+
+test('workqueue: issue-backed enqueue creates new row when only terminal matches exist', () => {
+  const root = tempRoot();
+
+  const first = enqueueItem(root, {
+    queue: 'dev-team',
+    title: 'Terminal issue task',
+    instructions: 'Done work',
+    priority: 1,
+    repo: 'rmdmattingly/clawnsole',
+    issueNumber: 392
+  });
+
+  const state = loadState(root);
+  state.items[0].status = 'done';
+  saveState(root, state);
+
+  const second = enqueueItem(root, {
+    queue: 'dev-team',
+    title: 'Fresh issue task',
+    instructions: 'New work',
+    priority: 2,
+    repo: 'rmdmattingly/clawnsole',
+    issueNumber: 392
+  });
+
+  assert.notEqual(second.id, first.id);
+  assert.equal(second._enqueueAction, 'created');
+  assert.equal(second.dedupeKey, 'rmdmattingly/clawnsole#392');
+  assert.equal(loadState(root).items.length, 2);
+});

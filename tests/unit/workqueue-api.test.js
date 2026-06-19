@@ -166,6 +166,48 @@ test('workqueue API: enqueue creates item', async () => {
   }
 });
 
+test('workqueue API: issue-backed enqueue reports updated_existing for repeated automation', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+    const headers = { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' };
+    let latest = null;
+
+    for (let i = 0; i < 10; i++) {
+      latest = await httpPostJson(
+        'http://127.0.0.1:' + port + '/api/workqueue/enqueue',
+        {
+          queue: 'dev-team',
+          title: `Automated issue enqueue ${i}`,
+          instructions: 'Ship issue-backed work',
+          priority: i,
+          repo: 'rmdmattingly/clawnsole',
+          issueNumber: 392,
+          meta: { source: 'hourly-auto-enqueue' }
+        },
+        headers
+      );
+      assert.equal(latest.status, 200);
+      assert.equal(latest.json?.ok, true);
+    }
+
+    assert.equal(latest.json?.result, 'updated_existing');
+    assert.equal(latest.json?.item?.dedupeKey, 'rmdmattingly/clawnsole#392');
+    assert.equal(latest.json?.item?.priority, 9);
+
+    const list = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/items?queue=dev-team`, headers);
+    assert.equal(list.status, 200);
+    assert.equal(list.json?.items?.length, 1);
+    assert.equal(list.json?.items?.[0]?.title, 'Automated issue enqueue 9');
+  } finally {
+    server.close();
+  }
+});
+
 test('workqueue API: claim-next claims a ready item', async () => {
   const { openclawHome } = mkTempEnv();
   fs.mkdirSync(openclawHome, { recursive: true });

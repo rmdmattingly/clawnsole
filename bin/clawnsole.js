@@ -53,7 +53,7 @@ Usage:
   clawnsole workqueue <command> [options]
 
 Workqueue commands:
-  enqueue            --queue <name> --title <t> --instructions <text> [--priority <n>] [--dedupeKey <k>]
+  enqueue            --queue <name> --title <t> --instructions <text> [--priority <n>] [--dedupeKey <k>] [--repo <owner/name> --issueNumber <n>]
   claim-next         --agent <id> [--queues <q1,q2>] [--leaseMs <ms>]
   done               <itemId> --agent <id> [--result <json|@file>]
   fail               <itemId> --agent <id> --error <text>
@@ -117,10 +117,13 @@ async function main() {
     const instructions = args.instructions;
     const priority = args.priority !== undefined ? Number(args.priority) : 0;
     const dedupeKey = args.dedupeKey !== undefined ? String(args.dedupeKey) : '';
+    const repo = args.repo !== undefined ? String(args.repo) : '';
+    const issueNumber = args.issueNumber !== undefined ? args.issueNumber : undefined;
     if (!queue) die('enqueue requires --queue');
     if (!instructions) die('enqueue requires --instructions');
-    const item = enqueueItem(null, { queue, title, instructions, priority, dedupeKey });
-    printJson({ ok: true, item });
+    const item = enqueueItem(null, { queue, title, instructions, priority, dedupeKey, repo, issueNumber });
+    const result = item && item._enqueueAction === 'updated_existing' ? 'updated_existing' : 'created';
+    printJson({ ok: true, result, item });
     return;
   }
 
