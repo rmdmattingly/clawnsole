@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');
+const { createRecurringPromptsStore, randomId } = require('../lib/recurring-prompts-db');
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -38,22 +39,6 @@ function readJsonFile(filePath, fallback) {
     return safeJsonParse(fs.readFileSync(filePath, 'utf8'), fallback);
   } catch {
     return fallback;
-  }
-}
-
-function writeJsonAtomic(filePath, value) {
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true });
-  const tmp = filePath + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n', 'utf8');
-  fs.renameSync(tmp, filePath);
-}
-
-function randomId() {
-  try {
-    return require('crypto').randomUUID();
-  } catch {
-    return String(Date.now()) + '-' + Math.random().toString(16).slice(2) + '-' + Math.random().toString(16).slice(2);
   }
 }
 
@@ -164,13 +149,14 @@ function findDuePrompts(prompts, now) {
   });
 }
 
-async function runOnce({ promptsPath, openclawConfigPath, deviceLabel, dryRun = false }) {
-  const state = readJsonFile(promptsPath, { prompts: [] });
-  const prompts = Array.isArray(state?.prompts) ? state.prompts : [];
+async function runOnce({ promptsPath, promptsDbPath, openclawConfigPath, deviceLabel, dryRun = false }) {
+  const store = createRecurringPromptsStore({ dbPath: promptsDbPath, legacyJsonPath: promptsPath });
+  const prompts = store.listPrompts();
   const now = Date.now();
 
   const due = findDuePrompts(prompts, now);
   if (due.length === 0) {
+    store.close();
     return { ok: true, delivered: 0, due: 0 };
   }
 
@@ -186,52 +172,41 @@ async function runOnce({ promptsPath, openclawConfigPath, deviceLabel, dryRun = 
     // mark all due as failed
     const message = String(err || 'gateway connect failed');
     due.forEach((p) => {
-      p.lastStatus = 'error';
-      p.lastError = message;
-      if (!Array.isArray(p.runHistory)) p.runHistory = [];
-      p.runHistory.unshift({ ts: now, status: 'error', error: message });
-      if (p.runHistory.length > 200) p.runHistory = p.runHistory.slice(0, 200);
-      p.lastRunAt = now;
-      p.updatedAt = now;
-      const minutes = Number(p.intervalMinutes) || 60;
-      p.nextRunAt = now + Math.max(1, minutes) * 60 * 1000;
+      store.triggerPrompt(p.id, {
+        status: 'error',
+        error: message,
+        idempotencyKey: `scheduler:${now}:${p.id}`,
+        now
+      });
     });
-    writeJsonAtomic(promptsPath, { prompts });
+    store.close();
     return { ok: false, delivered: 0, due: due.length, error: message };
   }
 
   let delivered = 0;
   for (const prompt of due) {
-    const minutes = Math.max(1, Number(prompt.intervalMinutes) || 60);
-    const nextRunAt = now + minutes * 60 * 1000;
-
+    let status = dryRun ? 'dry_run' : 'ok';
+    let error = '';
     try {
       if (!dryRun) {
         await deliverPrompt(gateway, { agentId: prompt.agentId || 'main', message: prompt.message || '', deviceLabel });
       }
-      prompt.lastStatus = dryRun ? 'dry_run' : 'ok';
-      prompt.lastError = '';
       delivered += 1;
     } catch (err) {
-      prompt.lastStatus = 'error';
-      prompt.lastError = String(err || 'delivery failed');
+      status = 'error';
+      error = String(err || 'delivery failed');
     }
 
-    if (!Array.isArray(prompt.runHistory)) prompt.runHistory = [];
-    prompt.runHistory.unshift({
-      ts: now,
-      status: prompt.lastStatus,
-      error: String(prompt.lastError || '')
+    store.triggerPrompt(prompt.id, {
+      status,
+      error,
+      idempotencyKey: `scheduler:${now}:${prompt.id}`,
+      now
     });
-    if (prompt.runHistory.length > 200) prompt.runHistory = prompt.runHistory.slice(0, 200);
-
-    prompt.lastRunAt = now;
-    prompt.nextRunAt = nextRunAt;
-    prompt.updatedAt = now;
   }
 
-  writeJsonAtomic(promptsPath, { prompts });
   gateway.close();
+  store.close();
 
   return { ok: true, delivered, due: due.length };
 }
@@ -242,6 +217,7 @@ async function main() {
   const homeDir = process.env.HOME || '';
   const openclawHome = process.env.OPENCLAW_HOME || path.join(homeDir, '.openclaw');
   const promptsPath = args.promptsPath || args.prompts || process.env.CLAWNSOLE_RECURRING_PROMPTS_PATH || path.join(openclawHome, 'clawnsole-recurring-prompts.json');
+  const promptsDbPath = args.promptsDb || args.promptsDbPath || process.env.CLAWNSOLE_RECURRING_PROMPTS_DB || path.join(openclawHome, 'clawnsole-recurring-prompts.sqlite');
   const openclawConfigPath = args.openclawConfig || process.env.OPENCLAW_CONFIG || path.join(openclawHome, 'openclaw.json');
   const deviceLabel = args.deviceLabel || 'scheduler';
   const loopSeconds = Number(args.loopSeconds || 60) || 60;
@@ -249,7 +225,7 @@ async function main() {
   const dryRun = Boolean(args.dryRun);
 
   const tick = async () => {
-    const result = await runOnce({ promptsPath, openclawConfigPath, deviceLabel, dryRun });
+    const result = await runOnce({ promptsPath, promptsDbPath, openclawConfigPath, deviceLabel, dryRun });
     const summary = `[recurring-prompts] ok=${result.ok} due=${result.due} delivered=${result.delivered}${result.error ? ' err=' + result.error : ''}`;
     console.log(summary);
   };
