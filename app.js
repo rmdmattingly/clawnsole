@@ -1524,6 +1524,84 @@ function focusedPaneKey() {
   return pane?.key || '';
 }
 
+let paneFocusMruKeys = [];
+let paneMruTraversal = null;
+let paneMruSuppressFocusEvents = false;
+
+function paneMruOrder() {
+  const panes = paneManager?.panes || [];
+  const liveKeys = new Set(panes.map((pane) => String(pane?.key || '')).filter(Boolean));
+  paneFocusMruKeys = paneFocusMruKeys.filter((key) => liveKeys.has(key));
+  panes.forEach((pane) => {
+    const key = String(pane?.key || '');
+    if (key && !paneFocusMruKeys.includes(key)) paneFocusMruKeys.push(key);
+  });
+  return paneFocusMruKeys.slice();
+}
+
+function notePaneFocused(pane) {
+  if (paneMruSuppressFocusEvents) return;
+  const key = String(pane?.key || '');
+  if (!key) return;
+  paneMruTraversal = null;
+  paneMruOrder();
+  paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
+}
+
+function paneIndexByKey(key) {
+  return (paneManager?.panes || []).findIndex((pane) => String(pane?.key || '') === String(key || ''));
+}
+
+function currentFocusedPaneIndex() {
+  const active = document.activeElement;
+  const panes = paneManager?.panes || [];
+  return panes.findIndex((pane) => {
+    const root = pane?.elements?.root;
+    return !!(root && active && (root === active || root.contains(active)));
+  });
+}
+
+function switchPaneByMru(direction = 1) {
+  const panes = paneManager?.panes || [];
+  if (panes.length < 2) return false;
+
+  const now = Date.now();
+  const currentIdx = currentFocusedPaneIndex();
+  const currentKey = currentIdx >= 0 ? panes[currentIdx]?.key : '';
+  const baseOrder = paneMruOrder();
+  const orderedKeys = currentKey
+    ? [currentKey, ...baseOrder.filter((key) => key !== currentKey)]
+    : baseOrder;
+
+  if (orderedKeys.length < 2) return false;
+
+  const canContinue =
+    paneMruTraversal &&
+    now - Number(paneMruTraversal.updatedAt || 0) < 1500 &&
+    Array.isArray(paneMruTraversal.order) &&
+    paneMruTraversal.order.length === orderedKeys.length &&
+    paneMruTraversal.order.every((key) => orderedKeys.includes(key));
+
+  const traversal = canContinue
+    ? paneMruTraversal
+    : { order: orderedKeys, index: 0, updatedAt: now };
+
+  const step = direction >= 0 ? 1 : -1;
+  const nextIndex = (Number(traversal.index || 0) + step + traversal.order.length) % traversal.order.length;
+  const nextKey = traversal.order[nextIndex];
+  const paneIdx = paneIndexByKey(nextKey);
+  if (paneIdx < 0) return false;
+
+  traversal.index = nextIndex;
+  traversal.updatedAt = now;
+  paneMruTraversal = traversal;
+
+  focusPaneIndex(paneIdx, { trackMru: false });
+  const pane = panes[paneIdx];
+  if (pane) showToast(`Switched to ${paneIdentityLabel(pane)}`, { kind: 'info', timeoutMs: 1400 });
+  return true;
+}
+
 function paneUnreadCount(pane) {
   return Math.max(0, Number(pane?.unreadCount || 0));
 }
@@ -2019,6 +2097,14 @@ function buildCommandPaletteItems() {
       '⌘/Ctrl+Shift+J'
     ),
     withShortcut(
+      { id: 'cmd:pane-mru-next', label: 'Panes: Switch to previous MRU pane', detail: 'Move through panes by most-recent focus order', run: () => switchPaneByMru(1) },
+      'Ctrl+Tab'
+    ),
+    withShortcut(
+      { id: 'cmd:pane-mru-prev', label: 'Panes: Reverse MRU switch', detail: 'Reverse most-recent pane traversal', run: () => switchPaneByMru(-1) },
+      'Ctrl+Shift+Tab'
+    ),
+    withShortcut(
       { id: 'cmd:pane-next-unread', label: 'Panes: Next unread', detail: 'Jump to next pane with unread activity', run: () => cycleUnreadPaneFocus(1) },
       '⌘/Ctrl+Shift+]'
     ),
@@ -2052,7 +2138,7 @@ function buildCommandPaletteItems() {
     const label = String(item.label || '');
     const enriched = { ...item, group: 'Advanced', subgroup: '', priority: 20, kind: 'action' };
 
-    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
+    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-mru-next' || id === 'cmd:pane-mru-prev' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
       enriched.group = 'Panes';
       enriched.priority = 110;
       return enriched;
@@ -5259,6 +5345,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     elements.root.classList.add(`pane-kind-${pane.kind}`);
   } catch {}
 
+  elements.root.addEventListener('click', () => notePaneFocused(pane));
+
   // Pane header: kind label + type pill (icon + text)
   try {
     if (elements.name) elements.name.textContent = paneLabel(pane);
@@ -6840,6 +6928,7 @@ const paneManager = {
   },
   focusPanePrimary(pane) {
     if (!pane?.elements?.root) return;
+    notePaneFocused(pane);
 
     // Defer until DOM has painted.
     setTimeout(() => {
@@ -7342,10 +7431,11 @@ function isTypingContext(target) {
   return false;
 }
 
-function focusPaneIndex(idx) {
+function focusPaneIndex(idx, { trackMru = true } = {}) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
   clearPaneUnread(pane);
+  if (trackMru) notePaneFocused(pane);
 
   try {
     pane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
@@ -7365,7 +7455,18 @@ function focusPaneIndex(idx) {
       }
     })();
     if (isVisible) {
-      input.focus();
+      if (trackMru) {
+        input.focus();
+      } else {
+        paneMruSuppressFocusEvents = true;
+        try {
+          input.focus();
+        } finally {
+          queueMicrotask(() => {
+            paneMruSuppressFocusEvents = false;
+          });
+        }
+      }
       return;
     }
   }
@@ -7377,7 +7478,18 @@ function focusPaneIndex(idx) {
     root.querySelector &&
     root.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
   if (focusable && typeof focusable.focus === 'function') {
-    focusable.focus();
+    if (trackMru) {
+      focusable.focus();
+    } else {
+      paneMruSuppressFocusEvents = true;
+      try {
+        focusable.focus();
+      } finally {
+        queueMicrotask(() => {
+          paneMruSuppressFocusEvents = false;
+        });
+      }
+    }
   }
 }
 
@@ -7388,6 +7500,16 @@ function cyclePaneFocus() {
   const active = document.activeElement;
   const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
   const next = idx >= 0 ? (idx + 1) % panes.length : 0;
+  focusPaneIndex(next);
+}
+
+function cyclePaneFocusBackward() {
+  const panes = paneManager.panes;
+  if (!panes || panes.length === 0) return;
+
+  const active = document.activeElement;
+  const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
+  const next = idx >= 0 ? (idx - 1 + panes.length) % panes.length : panes.length - 1;
   focusPaneIndex(next);
 }
 
@@ -7476,6 +7598,13 @@ window.addEventListener('keydown', (event) => {
   if (isTypingContext(event.target)) return;
 
   const key = String(event.key || '');
+
+  // Ctrl+Tab walks panes in most-recently-used order; Shift reverses the traversal.
+  if (event.ctrlKey && !event.metaKey && !event.altKey && key === 'Tab') {
+    event.preventDefault();
+    switchPaneByMru(event.shiftKey ? -1 : 1);
+    return;
+  }
 
   const isQuestion = key === '?' || (key === '/' && event.shiftKey);
   if (isQuestion && !event.metaKey && !event.ctrlKey && !event.altKey) {
