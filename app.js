@@ -1548,6 +1548,16 @@ function notePaneFocused(pane) {
   paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
 }
 
+function forgetFocusedPaneKey(paneKey) {
+  const key = String(paneKey || '');
+  if (!key) return;
+  paneFocusMruKeys = paneFocusMruKeys.filter((entry) => entry !== key);
+  if (paneMruTraversal?.order) {
+    paneMruTraversal.order = paneMruTraversal.order.filter((entry) => entry !== key);
+    if (paneMruTraversal.order.length < 2) paneMruTraversal = null;
+  }
+}
+
 function paneIndexByKey(key) {
   return (paneManager?.panes || []).findIndex((pane) => String(pane?.key || '') === String(key || ''));
 }
@@ -2097,6 +2107,10 @@ function buildCommandPaletteItems() {
       '⌘/Ctrl+Shift+J'
     ),
     withShortcut(
+      { id: 'cmd:pane-return-last-chat', label: 'Panes: Return to last active Chat pane', detail: 'Jump back to the most recent chat pane in focus history', run: () => returnToLastActiveChatPane() },
+      'g c'
+    ),
+    withShortcut(
       { id: 'cmd:pane-mru-next', label: 'Panes: Switch to previous MRU pane', detail: 'Move through panes by most-recent focus order', run: () => switchPaneByMru(1) },
       'Ctrl+Tab'
     ),
@@ -2138,7 +2152,7 @@ function buildCommandPaletteItems() {
     const label = String(item.label || '');
     const enriched = { ...item, group: 'Advanced', subgroup: '', priority: 20, kind: 'action' };
 
-    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-mru-next' || id === 'cmd:pane-mru-prev' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
+    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-return-last-chat' || id === 'cmd:pane-mru-next' || id === 'cmd:pane-mru-prev' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
       enriched.group = 'Panes';
       enriched.priority = 110;
       return enriched;
@@ -5448,6 +5462,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   }
 
   elements.root?.addEventListener('focusin', () => {
+    notePaneFocused(pane);
     clearPaneUnread(pane);
   });
 
@@ -7118,6 +7133,7 @@ const paneManager = {
     const idx = this.panes.findIndex((pane) => pane.key === key);
     if (idx < 0) return;
     const [pane] = this.panes.splice(idx, 1);
+    forgetFocusedPaneKey(pane?.key || key);
     try {
       pane.client?.disconnect(true);
     } catch {}
@@ -7493,6 +7509,30 @@ function focusPaneIndex(idx, { trackMru = true } = {}) {
   }
 }
 
+function returnToLastActiveChatPane() {
+  const panes = paneManager?.panes || [];
+  if (!panes.length) return false;
+
+  const activeKey = focusedPaneKey();
+  for (const key of paneMruOrder()) {
+    if (!key || key === activeKey) continue;
+    const idx = panes.findIndex((pane) => pane.key === key && pane.kind === 'chat');
+    if (idx >= 0) {
+      focusPaneIndex(idx);
+      return true;
+    }
+  }
+
+  const fallbackIdx = panes.findIndex((pane) => pane.kind === 'chat' && pane.key !== activeKey);
+  if (fallbackIdx >= 0) {
+    focusPaneIndex(fallbackIdx);
+    return true;
+  }
+
+  toast('No previous chat pane.', 'info');
+  return false;
+}
+
 function cyclePaneFocus() {
   const panes = paneManager.panes;
   if (!panes || panes.length === 0) return;
@@ -7601,6 +7641,7 @@ window.addEventListener('keydown', (event) => {
 
   // Ctrl+Tab walks panes in most-recently-used order; Shift reverses the traversal.
   if (event.ctrlKey && !event.metaKey && !event.altKey && key === 'Tab') {
+    if (isTypingContext(document.activeElement) && !paneMruTraversal) return;
     event.preventDefault();
     switchPaneByMru(event.shiftKey ? -1 : 1);
     return;
@@ -7681,11 +7722,17 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // 'g w' opens Workqueue modal.
+  // 'g' chords jump between common triage surfaces.
   const now = Date.now();
   if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
     if (key.toLowerCase() === 'g') {
       shortcutState.lastGAtMs = now;
+      return;
+    }
+    if (key.toLowerCase() === 'c' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
+      shortcutState.lastGAtMs = 0;
+      event.preventDefault();
+      returnToLastActiveChatPane();
       return;
     }
     if (key.toLowerCase() === 'w' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
