@@ -504,6 +504,49 @@ body::before {
   font-weight: 650;
 }
 
+.pane-unread-badges,
+.pane-manager-unread-badges {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.pane-unread-badges[hidden] {
+  display: none;
+}
+
+.pane-unread-badge,
+.pane-manager-unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--pane-accent-rgb, 255, 255, 255), 0.42);
+  background: rgba(var(--pane-accent-rgb, 255, 255, 255), 0.16);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pane-unread-badge[data-unread-type="chat"],
+.pane-manager-unread-badge[data-unread-type="chat"] {
+  border-color: rgba(var(--pane-accent-chat-rgb), 0.58);
+  background: rgba(var(--pane-accent-chat-rgb), 0.16);
+}
+
+.pane-unread-badge[data-unread-type="workqueue"],
+.pane-manager-unread-badge[data-unread-type="workqueue"] {
+  border-color: rgba(var(--pane-accent-workqueue-rgb), 0.62);
+  background: rgba(var(--pane-accent-workqueue-rgb), 0.17);
+}
+
 /* Per-pane subtle treatment */
 .pane-kind-chat {
   --pane-accent-rgb: var(--pane-accent-chat-rgb);
@@ -1349,21 +1392,6 @@ button.send-btn .btn-icon {
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-}
-
-.pane-manager-unread-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 7px;
-  border-radius: 999px;
-  border: 1px solid rgba(239, 68, 68, 0.45);
-  background: rgba(239, 68, 68, 0.14);
-  color: #fecaca;
-  font-size: 10px;
-  font-weight: 700;
 }
 
 .pane-manager-state {

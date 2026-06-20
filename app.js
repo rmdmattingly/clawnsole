@@ -1524,26 +1524,104 @@ function focusedPaneKey() {
   return pane?.key || '';
 }
 
+const PANE_UNREAD_TYPES = {
+  chat: { label: 'Chat message', shortLabel: 'Chat' },
+  workqueue: { label: 'Workqueue item change', shortLabel: 'WQ' }
+};
+
+function normalizePaneUnreadType(type) {
+  const t = String(type || '').trim().toLowerCase();
+  return PANE_UNREAD_TYPES[t] ? t : 'chat';
+}
+
+function normalizePaneUnreadCounts(value) {
+  const out = {};
+  if (value && typeof value === 'object') {
+    Object.keys(PANE_UNREAD_TYPES).forEach((type) => {
+      const count = Math.max(0, Number(value[type] || 0));
+      if (count > 0) out[type] = count;
+    });
+  } else {
+    const legacy = Math.max(0, Number(value || 0));
+    if (legacy > 0) out.chat = legacy;
+  }
+  return out;
+}
+
 function paneUnreadCount(pane) {
-  return Math.max(0, Number(pane?.unreadCount || 0));
+  const counts = normalizePaneUnreadCounts(pane?.unreadCounts ?? pane?.unreadCount);
+  return Object.values(counts).reduce((sum, count) => sum + Math.max(0, Number(count || 0)), 0);
+}
+
+function paneUnreadBadgeEntries(pane) {
+  const counts = normalizePaneUnreadCounts(pane?.unreadCounts ?? pane?.unreadCount);
+  return Object.entries(counts)
+    .filter(([, count]) => Number(count) > 0)
+    .sort(([a], [b]) => {
+      const order = { chat: 0, workqueue: 1 };
+      return (order[a] ?? 99) - (order[b] ?? 99);
+    });
+}
+
+function paneUnreadSummaryLabel(pane) {
+  const entries = paneUnreadBadgeEntries(pane);
+  if (!entries.length) return '';
+  return entries
+    .map(([type, count]) => {
+      const meta = PANE_UNREAD_TYPES[type] || PANE_UNREAD_TYPES.chat;
+      const suffix = Number(count) === 1 ? '' : 's';
+      return `${count} unread ${meta.label.toLowerCase()}${suffix}`;
+    })
+    .join(', ');
+}
+
+function paneUnreadBadgesHtml(pane, className = 'pane-unread-badge') {
+  return paneUnreadBadgeEntries(pane)
+    .map(([type, count]) => {
+      const meta = PANE_UNREAD_TYPES[type] || PANE_UNREAD_TYPES.chat;
+      const label = `${count} unread ${meta.label.toLowerCase()}${Number(count) === 1 ? '' : 's'}`;
+      return `<span class="${escapeHtml(className)}" data-unread-type="${escapeHtml(type)}" data-testid="${escapeHtml(className)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${escapeHtml(meta.shortLabel)} ${escapeHtml(String(count))}</span>`;
+    })
+    .join('');
+}
+
+function renderPaneUnreadBadges(pane) {
+  const el = pane?.elements?.unreadBadges;
+  if (!el) return;
+  const html = paneUnreadBadgesHtml(pane);
+  el.innerHTML = html;
+  const label = paneUnreadSummaryLabel(pane);
+  el.hidden = !html;
+  if (label) el.setAttribute('aria-label', label);
+  else el.removeAttribute('aria-label');
 }
 
 function clearPaneUnread(pane) {
   if (!pane) return;
-  if (!pane.unreadCount) return;
+  if (!paneUnreadCount(pane)) return;
+  pane.unreadCounts = {};
   pane.unreadCount = 0;
   renderPaneIdentity(pane);
   if (isPaneManagerOpen()) renderPaneManager();
+  paneManager?.persistAdminPanes?.();
 }
 
-function markPaneUnread(pane, increment = 1) {
+function markPaneUnread(pane, type = 'chat', increment = 1) {
   if (!pane) return;
+  if (typeof type === 'number') {
+    increment = type;
+    type = 'chat';
+  }
   const activeKey = focusedPaneKey();
   if (activeKey && activeKey === pane.key) return;
-  const next = paneUnreadCount(pane) + Math.max(1, Number(increment || 1));
-  pane.unreadCount = next;
+  const unreadType = normalizePaneUnreadType(type);
+  const counts = normalizePaneUnreadCounts(pane.unreadCounts ?? pane.unreadCount);
+  counts[unreadType] = Math.max(0, Number(counts[unreadType] || 0)) + Math.max(1, Number(increment || 1));
+  pane.unreadCounts = counts;
+  pane.unreadCount = paneUnreadCount(pane);
   renderPaneIdentity(pane);
   if (isPaneManagerOpen()) renderPaneManager();
+  paneManager?.persistAdminPanes?.();
 }
 
 function paneSearchText(pane) {
@@ -1664,6 +1742,9 @@ function renderPaneManager() {
         const isDuplicate = duplicateCount > 1;
         const unreadCount = paneUnreadCount(pane);
         const paneIdentity = paneSummaryLabel(pane);
+        const unreadBadges = unreadCount > 0
+          ? `<span class="pane-manager-unread-badges" aria-label="${escapeHtml(paneUnreadSummaryLabel(pane))}">${paneUnreadBadgesHtml(pane, 'pane-manager-unread-badge')}</span>`
+          : '';
 
         row.innerHTML = `
           <div class="pane-manager-main">
@@ -1672,7 +1753,7 @@ function renderPaneManager() {
               <span class="pane-manager-kind-label">${escapeHtml(paneIdentity)}</span>
               <span class="pane-manager-pane-id" title="Internal pane id">${escapeHtml(String(pane?.key || ''))}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
-              ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
+              ${unreadBadges}
             </div>
             <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
           </div>
@@ -3184,6 +3265,25 @@ function applyWorkqueueQuickFilters(items, quickFilters) {
   });
 }
 
+function workqueueItemActivitySignature(items) {
+  if (!Array.isArray(items)) return '[]';
+  return JSON.stringify(
+    items
+      .map((it) => ({
+        id: String(it?.id || ''),
+        title: String(it?.title || ''),
+        status: String(it?.status || ''),
+        claimedBy: String(it?.claimedBy || ''),
+        priority: String(it?.priority ?? ''),
+        attempts: String(it?.attempts ?? ''),
+        updatedAt: String(it?.updatedAt || ''),
+        lastNote: String(it?.lastNote || ''),
+        lastError: String(it?.lastError || '')
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id))
+  );
+}
+
 async function fetchAndRenderWorkqueueItemsForPane(pane) {
   if (!pane || pane.kind !== 'workqueue') return;
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
@@ -3204,7 +3304,13 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
     const items = Array.isArray(data.items) ? data.items : [];
+    const nextSignature = workqueueItemActivitySignature(items);
+    const prevSignature = String(pane.workqueue?.itemsSignature || '');
     pane.workqueue.items = items;
+    pane.workqueue.itemsSignature = nextSignature;
+    if (prevSignature && prevSignature !== nextSignature) {
+      markPaneUnread(pane, 'workqueue', 1);
+    }
     if (statusLine) statusLine.textContent = `${items.length} item(s)`;
     renderWorkqueuePaneItems(pane);
   } catch (err) {
@@ -4893,6 +4999,7 @@ function paneHeaderLetter(pane) {
 function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
   pane.elements.name.textContent = paneIdentityLabel(pane, { includeUnread: true });
+  renderPaneUnreadBadges(pane);
 }
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
@@ -5172,7 +5279,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, cronAgentId, unreadCounts, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -5181,6 +5288,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     typePill: root.querySelector('[data-pane-type-pill]'),
     typeIcon: root.querySelector('[data-pane-type-icon]'),
     typeText: root.querySelector('[data-pane-type-text]'),
+    unreadBadges: root.querySelector('[data-pane-unread-badges]'),
     agentSelect: root.querySelector('[data-pane-agent-select]'),
     agentWrap: root.querySelector('[data-pane-agent-wrap]') || root.querySelector('.pane-agent'),
     targetLabel: root.querySelector('[data-pane-target-label]') || root.querySelector('.agent-label'),
@@ -5226,6 +5334,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       },
       items: [],
       selectedItemId: null,
+      itemsSignature: '',
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
       sortDir: sortDir === 'asc' ? 'asc' : 'desc'
     },
@@ -5235,7 +5344,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     statusMeta: '',
     elements,
     chat: { runs: new Map(), history: [] },
-    unreadCount: 0,
+    unreadCounts: normalizePaneUnreadCounts(unreadCounts),
+    unreadCount: paneUnreadCount({ unreadCounts }),
     scroll: { pinned: true },
     thinking: { active: false, timer: null, dotsTimer: null, bubble: null },
     activeRunId: null,
@@ -5969,6 +6079,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     setTimeout(() => {
       if (uiState.authed) doRefresh();
     }, 0);
+    pane.workqueue.refreshTimer = setInterval(() => {
+      if (!uiState.authed) return;
+      if (!document.body.contains(pane.elements?.root)) return;
+      doRefresh();
+    }, 15000);
 
     pane.client = null;
     pane.connected = true;
@@ -6626,6 +6741,7 @@ const paneManager = {
         scopeFilter: cfg.scopeFilter,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
+        unreadCounts: cfg.unreadCounts,
         closable: true
       })
     );
@@ -6639,6 +6755,10 @@ const paneManager = {
       try {
         pane.client?.disconnect(true);
       } catch {}
+      if (pane.workqueue?.refreshTimer) {
+        clearInterval(pane.workqueue.refreshTimer);
+        pane.workqueue.refreshTimer = null;
+      }
       paneStopThinking(pane);
       try {
         pane.elements.root.remove();
@@ -6675,13 +6795,16 @@ const paneManager = {
           };
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir };
+          const unreadCounts = normalizePaneUnreadCounts(item.unreadCounts ?? item.unreadCount);
+          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, unreadCounts };
         }
         if (kind === 'cron' || kind === 'timeline') {
-          return { key, kind };
+          const unreadCounts = normalizePaneUnreadCounts(item.unreadCounts ?? item.unreadCount);
+          return { key, kind, unreadCounts };
         }
         const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
-        return { key, kind: 'chat', agentId };
+        const unreadCounts = normalizePaneUnreadCounts(item.unreadCounts ?? item.unreadCount);
+        return { key, kind: 'chat', agentId, unreadCounts };
       }
       // Super-legacy format: ['pabc','pdef'] (treat as chat panes)
       if (typeof item === 'string' && item) {
@@ -6722,13 +6845,14 @@ const paneManager = {
             repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos : []
           },
           sortKey: pane.workqueue?.sortKey || 'priority',
-          sortDir: pane.workqueue?.sortDir || 'desc'
+          sortDir: pane.workqueue?.sortDir || 'desc',
+          unreadCounts: normalizePaneUnreadCounts(pane.unreadCounts)
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
-        return { key: pane.key, kind: pane.kind };
+        return { key: pane.key, kind: pane.kind, unreadCounts: normalizePaneUnreadCounts(pane.unreadCounts) };
       }
-      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
+      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main', unreadCounts: normalizePaneUnreadCounts(pane.unreadCounts) };
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
@@ -7032,6 +7156,10 @@ const paneManager = {
     try {
       pane.client?.disconnect(true);
     } catch {}
+    if (pane.workqueue?.refreshTimer) {
+      clearInterval(pane.workqueue.refreshTimer);
+      pane.workqueue.refreshTimer = null;
+    }
     paneStopThinking(pane);
     try {
       pane.elements.root.remove();
