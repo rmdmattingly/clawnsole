@@ -208,6 +208,60 @@ test('workqueue API: issue-backed enqueue reports updated_existing for repeated 
   }
 });
 
+test('workqueue API: issue-backed enqueue canonicalizes payload dedupe variants', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+    const headers = { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' };
+    const payloads = [
+      {
+        queue: 'dev-team',
+        title: 'Colon issue key',
+        instructions: 'Ship issue work',
+        priority: 1,
+        dedupeKey: 'issue:rmdmattingly/clawnsole:392'
+      },
+      {
+        queue: 'dev-team',
+        title: 'Meta issue key',
+        instructions: 'Ship issue work',
+        priority: 2,
+        meta: { dedupeKey: 'rmdmattingly/clawnsole#392' }
+      },
+      {
+        queue: 'dev-team',
+        title: 'Explicit issue',
+        instructions: 'Ship issue work',
+        priority: 3,
+        repo: 'rmdmattingly/clawnsole',
+        issueNumber: 392
+      }
+    ];
+
+    let latest = null;
+    for (const payload of payloads) {
+      latest = await httpPostJson('http://127.0.0.1:' + port + '/api/workqueue/enqueue', payload, headers);
+      assert.equal(latest.status, 200);
+      assert.equal(latest.json?.ok, true);
+    }
+
+    assert.equal(latest.json?.result, 'updated_existing');
+    assert.equal(latest.json?.item?.dedupeKey, 'rmdmattingly/clawnsole#392');
+    assert.equal(latest.json?.item?.title, 'Explicit issue');
+
+    const list = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/items?queue=dev-team`, headers);
+    assert.equal(list.status, 200);
+    assert.equal(list.json?.items?.length, 1);
+    assert.equal(list.json?.items?.[0]?.dedupeKey, 'rmdmattingly/clawnsole#392');
+  } finally {
+    server.close();
+  }
+});
+
 test('workqueue API: claim-next claims a ready item', async () => {
   const { openclawHome } = mkTempEnv();
   fs.mkdirSync(openclawHome, { recursive: true });
