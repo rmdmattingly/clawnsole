@@ -288,6 +288,57 @@ test('workqueue: issue-backed automated enqueue upserts one live item', () => {
   assert.equal(state.items[0].priority, 9);
 });
 
+test('workqueue: issue-backed enqueue canonicalizes producer dedupe variants', () => {
+  const root = tempRoot();
+
+  const variants = [
+    {
+      title: 'Colon key producer',
+      instructions: 'Ship queued issue',
+      dedupeKey: 'issue:rmdmattingly/clawnsole:392',
+      priority: 1
+    },
+    {
+      title: 'Hash key producer',
+      instructions: 'Ship queued issue',
+      dedupeKey: 'issue:RMDMATTINGLY/CLAWNSOLE#392',
+      priority: 2
+    },
+    {
+      title: 'Meta key producer',
+      instructions: 'Ship queued issue',
+      priority: 3,
+      meta: { dedupeKey: 'rmdmattingly/clawnsole:392', source: 'coverage' }
+    },
+    {
+      title: 'URL producer',
+      instructions: 'Ship https://github.com/rmdmattingly/clawnsole/issues/392',
+      priority: 4
+    },
+    {
+      title: 'Explicit issue producer',
+      instructions: 'Ship queued issue',
+      priority: 5,
+      repo: 'rmdmattingly/clawnsole',
+      issueNumber: 392
+    }
+  ];
+
+  const results = variants.map((input) => enqueueItem(root, { queue: 'dev-team', ...input }));
+  const latest = results.at(-1);
+
+  assert.equal(latest._enqueueAction, 'updated_existing');
+  assert.equal(latest._deduped, true);
+  assert.equal(latest.dedupeKey, 'rmdmattingly/clawnsole#392');
+  assert.equal(latest.title, 'Explicit issue producer');
+  assert.equal(latest.priority, 5);
+
+  const state = loadState(root);
+  assert.equal(state.items.length, 1);
+  assert.equal(state.items[0].dedupeKey, 'rmdmattingly/clawnsole#392');
+  assert.equal(state.items[0].title, 'Explicit issue producer');
+});
+
 test('workqueue: issue-backed enqueue creates new row when only terminal matches exist', () => {
   const root = tempRoot();
 
