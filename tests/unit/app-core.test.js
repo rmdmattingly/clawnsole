@@ -7,6 +7,7 @@ const {
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
+  normalizeAdminDestination,
   deriveAuthOverlayState,
   deriveGlobalConnectionState,
   deriveDisconnectButtonState,
@@ -29,6 +30,32 @@ test('fmtRemaining formats remaining time', () => {
   assert.equal(fmtRemaining(61_000), '1m 1s');
   assert.equal(fmtRemaining(3_600_000), '1h 0m');
   assert.equal(fmtRemaining(3_660_000), '1h 1m');
+});
+
+test('normalizeAdminDestination accepts only fresh same-origin admin destinations', () => {
+  const origin = 'https://clawnsole.test';
+  const now = 2_000_000;
+
+  assert.deepEqual(
+    normalizeAdminDestination(
+      { href: '/admin?pane=workqueue#item-1', activePaneKey: 'pabc', createdAt: now - 1000 },
+      { origin, now }
+    ),
+    { ok: true, href: '/admin?pane=workqueue#item-1', activePaneKey: 'pabc' }
+  );
+
+  assert.equal(
+    normalizeAdminDestination({ href: 'https://evil.test/admin', createdAt: now }, { origin, now }).reason,
+    'external'
+  );
+  assert.equal(
+    normalizeAdminDestination({ href: '/settings', createdAt: now }, { origin, now }).reason,
+    'outside_admin'
+  );
+  assert.equal(
+    normalizeAdminDestination({ href: '/admin', createdAt: now - 700_000 }, { origin, now, ttlMs: 600_000 }).reason,
+    'stale'
+  );
 });
 
 test('sortWorkqueueItems default groups by status then priority then timestamps', () => {

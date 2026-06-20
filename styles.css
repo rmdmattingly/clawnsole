@@ -1805,11 +1805,26 @@ kbd {
   flex-wrap: wrap;
 }
 
+.wq-pane .wq-toolbar-row {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  scrollbar-gutter: stable;
+}
+
 .wq-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 180px;
+}
+
+.wq-pane .wq-field,
+.wq-pane .wq-scope,
+.wq-pane .wq-sort,
+.wq-pane .wq-toolbar-row > button {
+  flex: 0 0 auto;
 }
 
 .wq-status-field {

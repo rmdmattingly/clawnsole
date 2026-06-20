@@ -111,6 +111,7 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await expect(firstRow.locator('[data-agent-action="open-chat"]').first()).toBeVisible();
   await expect(firstRow.locator('[data-agent-action="open-timeline"]').first()).toBeVisible();
   await expect(firstRow.locator('[data-agent-action="open-workqueue"]').first()).toBeVisible();
+  const agentId = await firstRow.locator('[data-agent-action="open-workqueue"]').first().getAttribute('data-agent-id');
 
   await firstRow.locator('[data-agent-action="open-chat"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="chat"]').first()).toBeVisible();
@@ -123,4 +124,5 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
 
   await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue(agentId || 'main');
 });
