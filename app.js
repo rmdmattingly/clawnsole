@@ -1489,6 +1489,15 @@ function paneIcon(pane) {
   return '💬';
 }
 
+function paneTypeBadgeMarkup(pane, { extraClass = '', testId = '' } = {}) {
+  const kind = String(pane?.kind || 'chat');
+  const label = paneLabel(pane);
+  const icon = paneIcon(pane);
+  const classes = ['pane-type-badge', `pane-type-${kind}`, extraClass].filter(Boolean).join(' ');
+  const testAttr = testId ? ` data-testid="${escapeHtml(testId)}"` : '';
+  return `<span class="${escapeHtml(classes)}" data-pane-type-badge data-pane-accent="${escapeHtml(kind)}"${testAttr} aria-label="${escapeHtml(`Pane type: ${label}`)}"><span class="pane-type-icon" aria-hidden="true">${escapeHtml(icon)}</span><span class="pane-type-text">${escapeHtml(label)}</span></span>`;
+}
+
 function paneTargetLabel(pane) {
   if (!pane) return '';
   const current = String(pane?.elements?.agentLabel?.textContent || '').trim();
@@ -1756,7 +1765,7 @@ function renderPaneManager() {
         row.innerHTML = `
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
-              <span class="pane-manager-accent" data-pane-manager-accent="${escapeHtml(String(pane.kind || 'chat'))}" aria-hidden="true"></span>
+              ${paneTypeBadgeMarkup(pane, { extraClass: 'pane-manager-type-badge', testId: 'pane-manager-type-badge' })}
               <span class="pane-manager-kind-label">${escapeHtml(paneIdentity)}</span>
               <span class="pane-manager-pane-id" title="Internal pane id">${escapeHtml(String(pane?.key || ''))}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
@@ -5368,9 +5377,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     if (elements.typeText) elements.typeText.textContent = String(paneLabel(pane) || pane.kind || 'chat').toUpperCase();
     if (elements.typePill) {
       elements.typePill.setAttribute('aria-label', `Pane type: ${paneLabel(pane)}`);
+      elements.typePill.classList.add('pane-type-badge');
       elements.typePill.classList.add(`pane-type-${pane.kind}`);
       elements.typePill.dataset.paneAccent = pane.kind;
-      elements.typePill.dataset.testid = 'pane-type-accent';
     }
   } catch {}
 

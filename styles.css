@@ -479,7 +479,7 @@ body::before {
   white-space: nowrap;
 }
 
-.pane-type-pill {
+.pane-type-badge {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -493,6 +493,7 @@ body::before {
   letter-spacing: 0.1em;
   line-height: 1;
   user-select: none;
+  white-space: nowrap;
 }
 
 .pane-type-icon {
@@ -502,6 +503,10 @@ body::before {
 
 .pane-type-text {
   font-weight: 650;
+}
+
+.pane-type-pill {
+  flex: 0 0 auto;
 }
 
 /* Per-pane subtle treatment */
@@ -1298,13 +1303,11 @@ button.send-btn .btn-icon {
   min-width: 0;
 }
 
-.pane-manager-accent {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  flex: 0 0 auto;
-  background: rgba(var(--pane-accent-rgb, 255, 255, 255), 0.95);
-  box-shadow: 0 0 0 1px rgba(8, 10, 14, 0.55);
+.pane-manager-type-badge {
+  padding: 4px 8px;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
 }
 
 .pane-manager-letter {
