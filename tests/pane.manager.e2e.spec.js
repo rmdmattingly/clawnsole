@@ -165,8 +165,9 @@ test('pane manager: unread-only filter toggle', async ({ page }) => {
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.keyboard.press('Control+P');
-  await page.getByTestId('pane-manager-unread-only').check();
+  await page.getByTestId('panes-indicator').click();
+  await expect(page.getByTestId('pane-manager-modal')).toHaveAttribute('aria-hidden', 'false');
+  await page.locator('.pane-manager-unread-only').click();
   await expect(page.locator('.pane-manager-row')).toHaveCount(0);
 
   await page.keyboard.press('Escape');
@@ -189,9 +190,13 @@ test('pane manager: status stays in sync with pane header while modal is open', 
 
   const chatHeaderStatus = page.locator('[data-pane][data-pane-kind="chat"]').first().getByTestId('pane-connection-status');
   const chatManagerState = page.locator('.pane-manager-row', { hasText: 'Chat · main' }).first().locator('.pane-manager-state');
+  const workqueueHeaderStatus = page.locator('[data-pane][data-pane-kind="workqueue"]').first().getByTestId('pane-connection-status');
+  const workqueueManagerState = page.locator('.pane-manager-row', { hasText: 'Workqueue' }).first().locator('.pane-manager-state');
 
   await expect(chatHeaderStatus).toContainText(/connected|reconnecting/);
   await expect(chatManagerState).toContainText(/connected|reconnecting/);
+  await expect(workqueueHeaderStatus).toHaveText('connected');
+  await expect(workqueueManagerState).toHaveText('connected');
 
   await page.evaluate(() => {
     const btn = document.getElementById('disconnectBtn');

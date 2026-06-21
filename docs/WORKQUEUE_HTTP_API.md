@@ -91,7 +91,9 @@ Create a new item in a queue.
   "title": "Review open PRs",
   "instructions": "Review and ship any safe PRs.",
   "priority": 50,
-  "dedupeKey": "hourly-pr-review:2026-02-09T20" 
+  "dedupeKey": "hourly-pr-review:2026-02-09T20",
+  "repo": "rmdmattingly/clawnsole",
+  "issueNumber": 392
 }
 ```
 
@@ -101,19 +103,23 @@ Fields:
 - `instructions` (string, optional)
 - `priority` (number, optional; defaults to `0`)
 - `dedupeKey` (string, optional): idempotency key scoped to `{queue, dedupeKey}`
+- `repo` + `issueNumber` (optional): canonical issue-backed idempotency source. When both are present, enqueue uses stable key `owner/repo#issueNumber`; repeated non-terminal issue rows are updated instead of duplicated.
+- `meta` (object, optional): stored with the item. `meta.repo` and `meta.issueNumber` are also accepted as issue-backed idempotency inputs.
 
 **Responses:**
 - **200**
 
 ```json
-{ "ok": true, "item": { "id": "...", "queue": "..." } }
+{ "ok": true, "result": "created", "item": { "id": "...", "queue": "..." } }
 ```
 
-If a `dedupeKey` match already exists, the existing item is returned with an `_deduped: true` marker:
+If a non-terminal `dedupeKey` or issue-backed match already exists, the existing item is refreshed and returned with an `_deduped: true` marker:
 
 ```json
-{ "ok": true, "item": { "id": "...", "_deduped": true } }
+{ "ok": true, "result": "updated_existing", "item": { "id": "...", "_deduped": true } }
 ```
+
+If only terminal (`done`/`failed`) matches exist, enqueue creates a new row and returns `result: "created"`.
 
 - **400** on invalid JSON/body:
 
