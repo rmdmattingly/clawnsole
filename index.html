@@ -430,9 +430,22 @@
               <span class="agents-label">Sort</span>
               <select id="agentsSort" aria-label="Sort agents">
                 <option value="recent_desc">Last active (newest first)</option>
+                <option value="heartbeat_age_desc">Heartbeat age (stale first)</option>
                 <option value="agent_id_asc">Agent id (A-Z)</option>
               </select>
             </label>
+            <div class="agents-field agents-heatmap-controls">
+              <span class="agents-label">Heartbeat</span>
+              <div class="agents-heatmap-actions">
+                <label class="agents-toggle">
+                  <input id="agentsHeatmapToggle" type="checkbox" />
+                  <span>Heatmap</span>
+                </label>
+                <button id="agentsHeartbeatSortBtn" type="button" class="agents-chip" title="Sort stale agents first (Cmd/Ctrl+Shift+H)">Stale first</button>
+                <button id="agentsSortResetBtn" type="button" class="agents-chip">Reset sort</button>
+              </div>
+              <div id="agentsSortIndicator" class="agents-sort-indicator" aria-live="polite"></div>
+            </div>
             <label class="agents-field">
               <span class="agents-label">Active window (min)</span>
               <input id="agentsActiveMinutes" type="number" min="1" step="1" value="10" aria-label="Active within minutes" />

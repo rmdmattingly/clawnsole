@@ -1418,6 +1418,36 @@ button.send-btn .btn-icon {
   gap: 8px;
 }
 
+.agents-heatmap-controls {
+  min-width: 280px;
+}
+
+.agents-heatmap-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.agents-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.agents-toggle input {
+  accent-color: #4dc4ff;
+}
+
+.agents-sort-indicator {
+  min-height: 15px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .agents-chip {
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.03);
@@ -1432,6 +1462,11 @@ button.send-btn .btn-icon {
 .agents-chip[aria-pressed="true"] {
   border-color: rgba(77, 196, 255, 0.6);
   background: rgba(77, 196, 255, 0.16);
+}
+
+.agents-chip:disabled {
+  cursor: default;
+  opacity: 0.48;
 }
 
 .agents-list {
@@ -1493,6 +1528,30 @@ button.agents-section-title:hover {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.agents-row-heatmap {
+  border-left-width: 4px;
+}
+
+.agents-row-heatmap[data-heartbeat-bucket="fresh"] {
+  border-color: rgba(86, 211, 100, 0.36);
+  background: linear-gradient(90deg, rgba(86, 211, 100, 0.13), rgba(255, 255, 255, 0.025) 46%);
+}
+
+.agents-row-heatmap[data-heartbeat-bucket="warning"] {
+  border-color: rgba(255, 199, 70, 0.45);
+  background: linear-gradient(90deg, rgba(255, 199, 70, 0.18), rgba(255, 255, 255, 0.026) 50%);
+}
+
+.agents-row-heatmap[data-heartbeat-bucket="stale"] {
+  border-color: rgba(255, 138, 76, 0.55);
+  background: linear-gradient(90deg, rgba(255, 138, 76, 0.24), rgba(255, 255, 255, 0.028) 56%);
+}
+
+.agents-row-heatmap[data-heartbeat-bucket="critical"] {
+  border-color: rgba(255, 93, 116, 0.66);
+  background: linear-gradient(90deg, rgba(255, 93, 116, 0.3), rgba(255, 255, 255, 0.03) 62%);
+}
+
 .agents-pin {
   width: 36px;
   height: 36px;
@@ -1526,6 +1585,22 @@ button.agents-section-title:hover {
   border-radius: 999px;
   padding: 1px 8px;
   color: var(--text);
+}
+
+.agents-age-chip[data-heartbeat-bucket="fresh"] {
+  border-color: rgba(86, 211, 100, 0.45);
+}
+
+.agents-age-chip[data-heartbeat-bucket="warning"] {
+  border-color: rgba(255, 199, 70, 0.5);
+}
+
+.agents-age-chip[data-heartbeat-bucket="stale"] {
+  border-color: rgba(255, 138, 76, 0.58);
+}
+
+.agents-age-chip[data-heartbeat-bucket="critical"] {
+  border-color: rgba(255, 93, 116, 0.66);
 }
 
 .agents-status-snippet {
