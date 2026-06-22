@@ -3284,6 +3284,29 @@ function applyWorkqueueQuickFilters(items, quickFilters) {
   });
 }
 
+function workqueueItemSearchText(item) {
+  const meta = item?.meta && typeof item.meta === 'object' ? JSON.stringify(item.meta) : '';
+  return [
+    item?.id,
+    item?.queue,
+    item?.title,
+    item?.instructions,
+    item?.status,
+    item?.claimedBy,
+    item?.lastError,
+    item?.dedupeKey,
+    meta
+  ]
+    .map((v) => String(v || '').toLowerCase())
+    .join(' ');
+}
+
+function applyWorkqueueItemSearch(items, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return Array.isArray(items) ? items : [];
+  return (Array.isArray(items) ? items : []).filter((item) => workqueueItemSearchText(item).includes(q));
+}
+
 async function fetchAndRenderWorkqueueItemsForPane(pane) {
   if (!pane || pane.kind !== 'workqueue') return;
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
@@ -3328,7 +3351,9 @@ function renderWorkqueuePaneItems(pane) {
     if (scope === 'assigned') return !!activeTarget && owner === activeTarget;
     return true;
   });
-  const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
+  const quickFilteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
+  const itemQuery = String(pane.workqueue?.itemSearchQuery || '').trim();
+  const filteredItems = applyWorkqueueItemSearch(quickFilteredItems, itemQuery);
   const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
 
   if (empty) {
@@ -3339,11 +3364,14 @@ function renderWorkqueuePaneItems(pane) {
       const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
       const statusLabel = statuses.length ? statuses.join(', ') : 'default';
       const scopeLabel = pane.workqueue?.scopeFilter || 'all';
+      const isItemSearchEmpty = !!itemQuery && quickFilteredItems.length > 0;
       empty.innerHTML = `
         <div class="empty-state">
-          <div style="font-weight:700; margin-bottom:6px;">No items in this queue.</div>
+          <div style="font-weight:700; margin-bottom:6px;">${isItemSearchEmpty ? 'No items match your search.' : 'No items in this queue.'}</div>
           <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
+          ${itemQuery ? `<div class="hint" style="margin-top:6px;">Item search: <span class="mono">${escapeHtml(itemQuery)}</span></div>` : ''}
           <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            ${itemQuery ? '<button type="button" class="secondary" data-wq-empty-clear-search>Clear item search</button>' : ''}
             <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
             <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
           </div>
@@ -3354,6 +3382,15 @@ function renderWorkqueuePaneItems(pane) {
       const refreshBtn = pane.elements?.thread?.querySelector('[data-wq-refresh]');
       const enqueueDetails = pane.elements?.thread?.querySelector('details.wq-enqueue');
       empty.querySelector('[data-wq-empty-refresh]')?.addEventListener('click', () => refreshBtn?.click());
+      empty.querySelector('[data-wq-empty-clear-search]')?.addEventListener('click', () => {
+        const input = pane.elements?.thread?.querySelector('[data-wq-item-search]');
+        pane.workqueue.itemSearchQuery = '';
+        if (input) input.value = '';
+        renderWorkqueuePaneItems(pane);
+        try {
+          input?.focus?.();
+        } catch {}
+      });
       empty.querySelector('[data-wq-empty-enqueue]')?.addEventListener('click', () => {
         try {
           enqueueDetails?.setAttribute('open', '');
@@ -5272,7 +5309,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, itemSearchQuery, sortKey, sortDir, cronAgentId, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -5324,6 +5361,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
         repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
       },
+      itemSearchQuery: typeof itemSearchQuery === 'string' ? itemSearchQuery : '',
       items: [],
       selectedItemId: null,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
@@ -5385,6 +5423,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             lines: ['Shows queued work items, grouped by status.', 'Drag cards between columns to change status.', 'Use Refresh when another worker updates the queue.'],
             shortcuts: [
               ['g w', 'open Workqueue modal'],
+              ['/', 'focus item search'],
               ['Cmd/Ctrl+K', 'cycle focus between panes']
             ]
           };
@@ -5486,7 +5525,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         <div class="wq-toolbar-row">
           <label class="wq-field">
             <span class="wq-label">Queue</span>
-            <input data-wq-queue-search type="search" placeholder="Search queues" aria-label="Search queues" autocomplete="off" />
+            <input data-wq-queue-search type="search" placeholder="Filter queue list..." aria-label="Filter queue list" autocomplete="off" />
             <select data-wq-queue-select aria-label="Select workqueue target"></select>
             <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
           </label>
@@ -5591,6 +5630,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
       <div class="wq-layout">
         <section class="wq-list" aria-label="Workqueue items">
+          <div class="wq-item-search-row">
+            <label class="wq-field wq-item-search-field">
+              <span class="wq-label">Items</span>
+              <input data-wq-item-search type="search" placeholder="Search items..." aria-label="Search visible workqueue items" autocomplete="off" value="${escapeHtml(pane.workqueue.itemSearchQuery || '')}" />
+            </label>
+          </div>
           <div class="wq-list-header">
             <button type="button" class="wq-list-sort" data-wq-sort="title">title</button>
             <button type="button" class="wq-list-sort" data-wq-sort="status">status</button>
@@ -5613,6 +5658,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const queueSearchEl = elements.thread.querySelector('[data-wq-queue-search]');
     const queueSelectEl = elements.thread.querySelector('[data-wq-queue-select]');
     const queueCustomEl = elements.thread.querySelector('[data-wq-queue-custom]');
+    const itemSearchEl = elements.thread.querySelector('[data-wq-item-search]');
 
     // Make header pill focus the queue selector in the body (no duplicated selector state).
     paneSetHeaderTarget(pane, {
@@ -5869,6 +5915,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         e.preventDefault();
         doRefresh();
       }
+    });
+
+    itemSearchEl?.addEventListener('input', () => {
+      pane.workqueue.itemSearchQuery = String(itemSearchEl.value || '');
+      renderWorkqueuePaneItems(pane);
     });
 
     renderStatusMultiSelect();
@@ -6730,6 +6781,8 @@ const paneManager = {
         queue: cfg.queue,
         statusFilter: cfg.statusFilter,
         scopeFilter: cfg.scopeFilter,
+        quickFilters: cfg.quickFilters,
+        itemSearchQuery: cfg.itemSearchQuery,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
         closable: true
@@ -6779,9 +6832,10 @@ const paneManager = {
             sources: Array.isArray(item?.quickFilters?.sources) ? item.quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
             repos: Array.isArray(item?.quickFilters?.repos) ? item.quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
           };
+          const itemSearchQuery = typeof item.itemSearchQuery === 'string' ? item.itemSearchQuery : '';
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir };
+          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, itemSearchQuery, sortKey, sortDir };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
@@ -6827,6 +6881,7 @@ const paneManager = {
             sources: Array.isArray(pane.workqueue?.quickFilters?.sources) ? pane.workqueue.quickFilters.sources : [],
             repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos : []
           },
+          itemSearchQuery: pane.workqueue?.itemSearchQuery || '',
           sortKey: pane.workqueue?.sortKey || 'priority',
           sortDir: pane.workqueue?.sortDir || 'desc'
         };
@@ -7579,6 +7634,30 @@ function cycleUnreadPaneFocus(direction = 1) {
   return true;
 }
 
+function focusActiveWorkqueueItemSearch() {
+  const panes = paneManager?.panes || [];
+  if (!panes.length) return false;
+
+  const active = document.activeElement;
+  const activePane = panes.find((pane) => {
+    const root = pane?.elements?.root;
+    return !!(root && active && (root === active || root.contains(active)));
+  });
+
+  if (activePane?.kind !== 'workqueue') return false;
+  const targetPane = activePane;
+  const input = targetPane?.elements?.thread?.querySelector?.('[data-wq-item-search]');
+  if (!input) return false;
+
+  try {
+    input.focus({ preventScroll: true });
+    input.select?.();
+  } catch {
+    input.focus?.();
+  }
+  return true;
+}
+
 window.addEventListener('keydown', (event) => {
   const isEditableTarget = (() => {
     const el = event.target;
@@ -7641,6 +7720,13 @@ window.addEventListener('keydown', (event) => {
   if (isTypingContext(event.target)) return;
 
   const key = String(event.key || '');
+
+  if (key === '/' && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+    if (focusActiveWorkqueueItemSearch()) {
+      event.preventDefault();
+      return;
+    }
+  }
 
   // Ctrl+Tab walks panes in most-recently-used order; Shift reverses the traversal.
   if (event.ctrlKey && !event.metaKey && !event.altKey && key === 'Tab') {

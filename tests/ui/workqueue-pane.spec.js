@@ -60,6 +60,9 @@ test('workqueue pane: queue target supports search + recent persistence', async 
   const search = firstPane.locator('[data-wq-queue-search]');
   const select = firstPane.locator('[data-wq-queue-select]');
 
+  await expect(search).toHaveAttribute('placeholder', 'Filter queue list...');
+  await expect(search).toHaveAttribute('aria-label', 'Filter queue list');
+
   await search.fill('dev');
   const visibleDevOption = select.locator('option:not([hidden])', { hasText: 'dev-team' }).first();
   await expect(visibleDevOption).toHaveCount(1);
@@ -73,6 +76,63 @@ test('workqueue pane: queue target supports search + recent persistence', async 
   const secondPane = page.locator('[data-pane]').last();
   const secondSelect = secondPane.locator('[data-wq-queue-select]');
   await expect(secondSelect.locator('option', { hasText: '★ qa-hotfix' })).toHaveCount(1);
+});
+
+test('workqueue pane: item search filters rows separately from queue filter', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const queue = `item-search-${Date.now()}`;
+  await page.evaluate(async ({ queue }) => {
+    const enqueue = async (title, instructions) => {
+      const res = await fetch('/api/workqueue/enqueue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ queue, title, instructions, priority: 1 })
+      });
+      if (!res.ok) throw new Error(`enqueue failed: ${res.status}`);
+    };
+    await enqueue('needle alpha work', 'repo rmdmattingly/clawnsole');
+    await enqueue('ordinary beta work', 'contains beta-only text');
+  }, { queue });
+
+  const pane = page.locator('[data-pane]').last();
+  const queueSearch = pane.locator('[data-wq-queue-search]');
+  const itemSearch = pane.locator('[data-wq-item-search]');
+  const rows = pane.locator('[data-wq-list-body] .wq-row');
+
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-refresh]').click();
+  await expect(rows).toHaveCount(2);
+
+  await queueSearch.fill('needle alpha');
+  await expect(rows).toHaveCount(2);
+
+  await expect(itemSearch).toHaveAttribute('placeholder', 'Search items...');
+  await itemSearch.fill('needle alpha');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first().locator('.wq-col.title')).toContainText('needle alpha work');
+
+  await itemSearch.fill('no matching item');
+  await expect(rows).toHaveCount(0);
+  await expect(pane.locator('[data-wq-empty]')).toContainText('No items match your search.');
+  await expect(pane.locator('[data-wq-empty]')).toContainText('no matching item');
+
+  await pane.locator('[data-wq-empty-clear-search]').click();
+  await expect(itemSearch).toHaveValue('');
+  await expect(rows).toHaveCount(2);
+
+  await pane.locator('.wq-list-header').click();
+  await page.keyboard.press('/');
+  await expect(itemSearch).toBeFocused();
 });
 
 test('workqueue pane: scope filter toggles assigned/unassigned/all deterministically', async ({ page }) => {
