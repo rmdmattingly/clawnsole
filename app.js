@@ -20,6 +20,9 @@ const globalElements = {
   recurringPromptHistoryEmpty: document.getElementById('recurringPromptHistoryEmpty'),
   status: document.getElementById('connectionStatus'),
   paneManagerBtn: document.getElementById('paneManagerBtn'),
+  activePaneBreadcrumb: document.getElementById('activePaneBreadcrumb'),
+  activePaneBreadcrumbType: document.querySelector('[data-active-pane-breadcrumb-type]'),
+  activePaneBreadcrumbTarget: document.querySelector('[data-active-pane-breadcrumb-target]'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
   fleetBtn: document.getElementById('fleetBtn'),
@@ -854,6 +857,7 @@ function setAuthState(authed) {
   updateGlobalStatus();
   updateConnectionControls();
   paneManager.refreshChatEnabled();
+  updateActivePaneBreadcrumb();
 
   if (authUi.startAgentAutoRefresh) {
     startAgentAutoRefresh();
@@ -1390,6 +1394,29 @@ function focusedPaneKey() {
   return pane?.key || '';
 }
 
+function activePane() {
+  const key = focusedPaneKey();
+  const panes = paneManager?.panes || [];
+  return panes.find((pane) => pane.key === key) || panes[0] || null;
+}
+
+function updateActivePaneBreadcrumb() {
+  const button = globalElements.activePaneBreadcrumb;
+  if (!button) return;
+
+  const pane = roleState.role === 'admin' && uiState.authed ? activePane() : null;
+  button.hidden = !pane;
+  if (!pane) return;
+
+  const identity = paneIdentityLabel(pane, { includeUnread: false });
+  const typeText = `${paneHeaderLetter(pane)} ${paneLabel(pane)}`;
+  const targetText = paneTargetLabel(pane);
+  if (globalElements.activePaneBreadcrumbType) globalElements.activePaneBreadcrumbType.textContent = typeText;
+  if (globalElements.activePaneBreadcrumbTarget) globalElements.activePaneBreadcrumbTarget.textContent = targetText ? `· ${targetText}` : '';
+  button.dataset.paneKey = String(pane.key || '');
+  button.title = `Open Pane Manager: ${identity}`;
+}
+
 function paneUnreadCount(pane) {
   return Math.max(0, Number(pane?.unreadCount || 0));
 }
@@ -1399,6 +1426,7 @@ function clearPaneUnread(pane) {
   if (!pane.unreadCount) return;
   pane.unreadCount = 0;
   renderPaneIdentity(pane);
+  updateActivePaneBreadcrumb();
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -1409,6 +1437,7 @@ function markPaneUnread(pane, increment = 1) {
   const next = paneUnreadCount(pane) + Math.max(1, Number(increment || 1));
   pane.unreadCount = next;
   renderPaneIdentity(pane);
+  updateActivePaneBreadcrumb();
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -1606,7 +1635,7 @@ function renderPaneManager() {
   });
 }
 
-function openPaneManager() {
+function openPaneManager({ paneKey = '' } = {}) {
   if (roleState.role !== 'admin') return;
   if (!uiState.authed) {
     showLogin('Please sign in to continue.');
@@ -1615,13 +1644,20 @@ function openPaneManager() {
   if (!globalElements.paneManagerModal) return;
 
   paneManagerUiState.open = true;
-  paneManagerUiState.selectedIndex = 0;
   paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
   paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
+  const selectedKey = paneKey || activePane()?.key || '';
+  const selectedIndex = (paneManager?.panes || []).findIndex((pane) => pane.key === selectedKey);
+  paneManagerUiState.selectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
 
   globalElements.paneManagerModal.classList.add('open');
   globalElements.paneManagerModal.setAttribute('aria-hidden', 'false');
   renderPaneManager();
+
+  const selectedRow = globalElements.paneManagerList?.querySelector?.('.pane-manager-row[aria-selected="true"]');
+  try {
+    selectedRow?.scrollIntoView?.({ block: 'nearest' });
+  } catch {}
 
   // Focus quick-find for immediate filtering.
   try {
@@ -4521,6 +4557,7 @@ function paneHeaderLetter(pane) {
 function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
   pane.elements.name.textContent = paneIdentityLabel(pane, { includeUnread: true });
+  updateActivePaneBreadcrumb();
 }
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
@@ -6872,6 +6909,7 @@ function focusPaneIndex(idx) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
   clearPaneUnread(pane);
+  updateActivePaneBreadcrumb();
 
   try {
     pane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
@@ -7109,6 +7147,19 @@ globalElements.resetLayoutBtn?.addEventListener('click', () => {
 globalElements.paneManagerBtn?.addEventListener('click', (event) => {
   event?.preventDefault?.();
   openPaneManager();
+});
+
+globalElements.activePaneBreadcrumb?.addEventListener('click', (event) => {
+  event?.preventDefault?.();
+  const paneKey = globalElements.activePaneBreadcrumb?.dataset?.paneKey || activePane()?.key || '';
+  openPaneManager({ paneKey });
+});
+
+document.addEventListener('focusin', (event) => {
+  const target = event?.target;
+  if (!(target instanceof Element)) return;
+  if (!target.closest?.('[data-pane]')) return;
+  updateActivePaneBreadcrumb();
 });
 
 globalElements.paneManagerCloseBtn?.addEventListener('click', () => closePaneManager());

@@ -85,6 +85,33 @@ test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane 
   await expect(page.locator('.pane-manager-row .pane-manager-pane-id').first()).toHaveText(/^[a-zA-Z0-9]+$/);
 });
 
+test('active pane breadcrumb updates and opens manager on the active row', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const breadcrumb = page.getByTestId('active-pane-breadcrumb');
+  await expect(breadcrumb).toBeVisible();
+  await expect(breadcrumb).toContainText('A Chat');
+
+  const workqueuePane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await workqueuePane.locator('[data-wq-queue-select]').focus();
+  await expect(breadcrumb).toContainText('B Workqueue');
+
+  await breadcrumb.click();
+  const modal = page.locator('#paneManagerModal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  const selectedRow = page.locator('.pane-manager-row[aria-selected="true"]');
+  await expect(selectedRow).toContainText('B Workqueue');
+});
+
 test('pane manager: quick-find filters and groups by kind', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
