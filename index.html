@@ -40,6 +40,17 @@
               data-testid="panes-indicator"
             ></button>
           </div>
+          <button
+            id="activePaneBreadcrumb"
+            class="active-pane-breadcrumb"
+            type="button"
+            aria-label="Open pane manager for active pane"
+            data-testid="active-pane-breadcrumb"
+            hidden
+          >
+            <span class="active-pane-breadcrumb__type" data-active-pane-breadcrumb-type>Pane</span>
+            <span class="active-pane-breadcrumb__target" data-active-pane-breadcrumb-target></span>
+          </button>
           <div id="paneControls" class="pane-controls" hidden>
             <div class="pane-add-wrap">
               <button id="addPaneBtn" class="icon-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add pane" data-testid="add-pane-btn">
