@@ -126,3 +126,41 @@ test('pane navigation: returns to the last active chat pane from shortcut and co
 
   await expect(chatInput).toBeFocused();
 });
+
+test('command palette: opens or focuses Workqueue for active chat agent', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await loginAdmin(page, env.serverPort);
+
+  const runCommand = async (query) => {
+    await page.keyboard.press('ControlOrMeta+K');
+    const input = page.locator('#commandPaletteInput');
+    await expect(input).toBeVisible();
+    await input.fill(query);
+    await page.keyboard.press('Enter');
+  };
+
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
+  await expect(chatInput).toBeVisible();
+  await page.locator('[data-pane][data-pane-kind="workqueue"] [data-pane-close]').first().click();
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(0);
+
+  await chatInput.focus();
+  await runCommand('workqueue for active chat agent');
+
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]');
+  await expect(wqPane).toHaveCount(1);
+  await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
+  await expect(wqPane.locator('[data-wq-scope="assigned"]')).toHaveClass(/active/);
+
+  await chatInput.focus();
+  await runCommand('workqueue for active chat agent');
+  await expect(wqPane).toHaveCount(1);
+  await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
+
+  await wqPane.locator('[data-wq-queue-select]').focus();
+  await runCommand('workqueue for active chat agent');
+  await expect(page.getByTestId('toast').last()).toContainText('No active chat agent selected');
+});
