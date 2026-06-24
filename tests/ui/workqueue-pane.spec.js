@@ -120,6 +120,105 @@ test('workqueue pane: scope filter toggles assigned/unassigned/all deterministic
   await expect(rows).toHaveCount(2);
 });
 
+test('workqueue pane: all-scope guardrail appears above threshold and downscopes in one click', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.workqueue.allScopeGuardrailThreshold', '2');
+  });
+  await addPane(page, 'Workqueue pane');
+
+  const queue = `all-scope-guardrail-${Date.now()}`;
+  await page.evaluate(async ({ queue }) => {
+    const post = async (url, body) => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error(`${url} failed: ${res.status}`);
+      const data = await res.json();
+      if (!data?.ok) throw new Error(`${url} failed: ${data?.error || 'not ok'}`);
+      return data;
+    };
+
+    await post('/api/workqueue/enqueue', { queue, title: 'guardrail a', instructions: 'x', priority: 1 });
+    await post('/api/workqueue/enqueue', { queue, title: 'guardrail b', instructions: 'x', priority: 1 });
+    await post('/api/workqueue/enqueue', { queue, title: 'guardrail c', instructions: 'x', priority: 1 });
+    await post('/api/workqueue/claim-next', { agentId: 'main', queues: [queue], leaseMs: 900000 });
+  }, { queue });
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-refresh]').click();
+  await pane.locator('[data-wq-scope="all"]').click();
+
+  const guardrail = pane.locator('[data-wq-all-scope-guardrail]');
+  await expect(guardrail).toBeVisible();
+  await expect(guardrail).toContainText('Viewing all items (3). Narrow scope?');
+
+  await guardrail.getByRole('button', { name: 'Assigned to active target' }).click();
+  await expect(pane.locator('[data-wq-list-body] .wq-row')).toHaveCount(1);
+  await expect(guardrail).toBeHidden();
+
+  const events = await page.evaluate(() => window.__debug?.workqueueGuardrailEvents || []);
+  expect(events.map((event) => event.type)).toEqual(expect.arrayContaining(['shown', 'action']));
+});
+
+test('workqueue pane: all-scope guardrail stays hidden below threshold and after session dismiss', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.workqueue.allScopeGuardrailThreshold', '10');
+  });
+  await addPane(page, 'Workqueue pane');
+
+  const queue = `all-scope-guardrail-hidden-${Date.now()}`;
+  await page.evaluate(async ({ queue }) => {
+    for (const title of ['hidden a', 'hidden b', 'hidden c']) {
+      const res = await fetch('/api/workqueue/enqueue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ queue, title, instructions: 'x', priority: 1 })
+      });
+      if (!res.ok) throw new Error(`enqueue failed: ${res.status}`);
+    }
+  }, { queue });
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-refresh]').click();
+  await pane.locator('[data-wq-scope="all"]').click();
+
+  const guardrail = pane.locator('[data-wq-all-scope-guardrail]');
+  await expect(pane.locator('[data-wq-list-body] .wq-row')).toHaveCount(3);
+  await expect(guardrail).toBeHidden();
+
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.workqueue.allScopeGuardrailThreshold', '2');
+  });
+  await pane.locator('[data-wq-refresh]').click();
+  await expect(guardrail).toBeVisible();
+  await guardrail.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(guardrail).toBeHidden();
+  await pane.locator('[data-wq-refresh]').click();
+  await expect(guardrail).toBeHidden();
+});
+
 test('workqueue pane: source chips + clawnsole preset filter items without reload', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
