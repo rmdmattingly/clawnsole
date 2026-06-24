@@ -7803,7 +7803,7 @@ globalElements.status?.addEventListener('click', () => {
     return;
   }
   paneManager.panes.forEach((pane) => {
-    if (pane.client.manualDisconnect) pane.client.manualDisconnect = false;
+    if (pane?.client?.manualDisconnect) pane.client.manualDisconnect = false;
   });
   paneManager.connectIfNeeded();
 });
