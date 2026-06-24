@@ -1976,6 +1976,56 @@ kbd {
   flex-wrap: wrap;
 }
 
+.wq-target-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: min(280px, 100%);
+}
+
+.wq-target-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 168px;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.wq-target-group {
+  padding: 4px 6px 2px;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.wq-target-option {
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wq-target-option:hover,
+.wq-target-option[aria-selected="true"] {
+  border-color: rgba(127, 209, 185, 0.45);
+  background: rgba(127, 209, 185, 0.12);
+}
+
+.wq-target-empty {
+  padding: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .wq-pane .wq-layout,
 .cron-pane .wq-layout {
   flex: 1;
