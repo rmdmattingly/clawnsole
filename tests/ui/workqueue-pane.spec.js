@@ -47,6 +47,30 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
   await expect(wqPane.locator('[data-pane-input]')).toBeHidden();
 });
 
+test('workqueue pane: pane grid label switches from chat-only to generic panes', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([{ key: 'ptestchat', kind: 'chat', agentId: 'main' }])
+    );
+  });
+
+  await loginAdmin(page, env.serverPort);
+
+  const grid = page.getByTestId('pane-grid');
+  await expect(grid).toHaveAttribute('aria-label', 'Chat panes');
+
+  await addPane(page, 'Workqueue pane');
+
+  await expect(page.locator('[data-pane-kind="workqueue"]').last()).toBeVisible();
+  await expect(grid).toHaveAttribute('aria-label', 'Panes');
+});
+
 test('workqueue pane: queue target supports search + recent persistence', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
