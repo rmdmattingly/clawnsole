@@ -1990,6 +1990,14 @@ kbd {
   min-height: 0;
 }
 
+.wq-item-search-row {
+  padding: 0 0 10px;
+}
+
+.wq-item-search-field {
+  width: min(460px, 100%);
+}
+
 .wq-pane .wq-list-body,
 .cron-pane .wq-list-body {
   flex: 1;
