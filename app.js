@@ -347,7 +347,7 @@ const KEYBIND_CATALOG = [
   { id: 'pane.addChat', group: 'Pane actions', label: 'Add Chat pane (workspace only)', binding: { accel: true, shift: true, key: 'c', display: 'Cmd/Ctrl+Shift+C' } },
   { id: 'pane.addWorkqueue', group: 'Pane actions', label: 'Add Workqueue pane (workspace only)', binding: { accel: true, shift: true, key: 'w', display: 'Cmd/Ctrl+Shift+W' } },
   { id: 'pane.addCron', group: 'Pane actions', label: 'Add Cron pane (workspace only)', binding: { accel: true, shift: true, key: 'r', display: 'Cmd/Ctrl+Shift+R' } },
-  { id: 'pane.addTimeline', group: 'Pane actions', label: 'Add Timeline pane (workspace only)', binding: { accel: true, shift: true, key: 't', display: 'Cmd/Ctrl+Shift+T' } },
+  { id: 'pane.reopenLastClosed', group: 'Pane actions', label: 'Reopen last closed pane', binding: { accel: true, shift: true, key: 't', display: 'Cmd/Ctrl+Shift+T' } },
   {
     id: 'agents.refresh',
     group: 'Pane actions',
@@ -2151,7 +2151,7 @@ function validateShortcutOverrides(overrides) {
     ['accel+shift+c', 'New Chat pane'],
     ['accel+shift+w', 'New Workqueue pane'],
     ['accel+shift+r', 'New Cron pane'],
-    ['accel+shift+t', 'New Timeline pane']
+    ['accel+shift+t', 'Reopen last closed pane']
   ]);
   for (const action of SHORTCUT_OVERRIDE_ACTIONS) {
     const normalized = normalizeShortcutCombo(activeShortcutCombo(action.id, overrides));
@@ -3769,7 +3769,7 @@ function buildCommandPaletteItems() {
         paneMeta: commandPalettePaneMeta({ type: 'Timeline', target: 'gateway', mode: 'create or focus' }),
         run: () => paneManager.addPane('timeline')
       },
-      '⌘/Ctrl+Shift+T'
+      ''
     ),
     withShortcut(
       {
@@ -3800,6 +3800,15 @@ function buildCommandPaletteItems() {
         run: () => openFleetPane({ forceNew: true })
       },
       ''
+    ),
+    withShortcut(
+      {
+        id: 'cmd:pane-reopen-last-closed',
+        label: 'Panes: Reopen last closed',
+        detail: 'Restore the most recently closed pane with local state',
+        run: () => paneManager.reopenLastClosedPane()
+      },
+      '⌘/Ctrl+Shift+T'
     )
   );
 
@@ -3964,7 +3973,7 @@ function buildCommandPaletteItems() {
     const label = String(item.label || '');
     const enriched = { ...item, group: 'Advanced', subgroup: '', priority: 20, kind: 'action' };
 
-    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-return-last-chat' || id === 'cmd:return-triage-source' || id === 'cmd:pane-mru-next' || id === 'cmd:pane-mru-prev' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
+    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-return-last-chat' || id === 'cmd:return-triage-source' || id === 'cmd:pane-mru-next' || id === 'cmd:pane-mru-prev' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread' || id === 'cmd:pane-reopen-last-closed') {
       enriched.group = 'Panes';
       enriched.priority = id.startsWith('cmd:focus-pane-') ? 130 : 110;
       return enriched;
@@ -8471,7 +8480,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, cronAgentId, nickname, pairedTargetLock = false, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, cronAgentId, nickname, pairedTargetLock = false, closable = true, restoredState = null } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   root.tabIndex = -1;
@@ -10067,6 +10076,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     paneUpdateCommandHints(pane);
   });
 
+  if (restoredState && typeof restoredState.draftText === 'string') {
+    elements.input.value = restoredState.draftText;
+    if (restoredState.draftOrigin && typeof restoredState.draftOrigin === 'object') {
+      pane.draftOrigin = { ...restoredState.draftOrigin };
+    }
+    paneUpdateCommandHints(pane);
+  }
+
   elements.attachBtn.addEventListener('click', () => {
     elements.fileInput.click();
   });
@@ -10108,6 +10125,8 @@ const paneManager = {
   maxPanes: 6,
   layoutLocked: false,
   lastFocusedPaneKey: '',
+  reopenStack: [],
+  maxReopenStack: 5,
   init() {
     this.destroyAll();
 
@@ -10279,6 +10298,43 @@ const paneManager = {
   hasUnsentDrafts() {
     return anyPaneHasDraftChanges(this.panes);
   },
+  capturePaneSnapshot(pane, index = 0) {
+    if (!pane || roleState.role !== 'admin') return null;
+    const snapshot = {
+      kind: normalizePaneKind(pane.kind || 'chat'),
+      index: Math.max(0, Number(index || 0)),
+      agentId: pane.agentId || 'main',
+      nickname: paneNickname(pane),
+      pairedTargetLock: !!pane.pairedTargetLock
+    };
+
+    if (pane.kind === 'workqueue') {
+      snapshot.queue = pane.workqueue?.queue || 'dev-team';
+      snapshot.statusFilter = Array.isArray(pane.workqueue?.statusFilter) ? [...pane.workqueue.statusFilter] : [];
+      snapshot.scopeFilter = pane.workqueue?.scopeFilter || getDefaultWorkqueueScope();
+      snapshot.quickFilters = {
+        sources: Array.isArray(pane.workqueue?.quickFilters?.sources) ? [...pane.workqueue.quickFilters.sources] : [],
+        repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? [...pane.workqueue.quickFilters.repos] : [],
+        search: String(pane.workqueue?.quickFilters?.search || '').trim()
+      };
+      snapshot.groupMode = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
+      snapshot.selectedItemId = pane.workqueue?.selectedItemId || null;
+      snapshot.sortKey = pane.workqueue?.sortKey || 'priority';
+      snapshot.sortDir = pane.workqueue?.sortDir === 'asc' ? 'asc' : 'desc';
+    } else if (pane.kind === 'cron' || pane.kind === 'timeline') {
+      snapshot.cronAgentId = pane.cronAgentId || '';
+    } else {
+      snapshot.draftText = String(pane.elements?.input?.value || '');
+      snapshot.draftOrigin = pane.draftOrigin && typeof pane.draftOrigin === 'object' ? { ...pane.draftOrigin } : null;
+    }
+
+    return snapshot;
+  },
+  pushReopenSnapshot(snapshot) {
+    if (!snapshot) return;
+    this.reopenStack.unshift(snapshot);
+    this.reopenStack = this.reopenStack.slice(0, this.maxReopenStack);
+  },
   resetAdminLayoutToDefault({ confirm = true } = {}) {
     if (roleState.role !== 'admin') return;
     if (confirm && this.hasUnsentDrafts()) {
@@ -10309,6 +10365,18 @@ const paneManager = {
     const nextCronAgentId = String(options?.cronAgentId || '').trim();
     const nextScopeFilter = normalizeWorkqueueScope(options?.scopeFilter ?? getDefaultWorkqueueScope());
     const forceNew = Boolean(options?.forceNew);
+    const insertIndex = Number.isFinite(Number(options?.insertIndex)) ? Math.max(0, Math.min(this.panes.length, Number(options.insertIndex))) : this.panes.length;
+
+    const placePane = (pane) => {
+      this.panes.splice(insertIndex, 0, pane);
+      const before = globalElements.paneGrid?.children?.[insertIndex] || null;
+      globalElements.paneGrid.insertBefore(pane.elements.root, before);
+      this.updatePaneLabels();
+      this.updateCloseButtons();
+      this.applyInferredLayout();
+      this.persistAdminPanes();
+      return pane;
+    };
 
     const findMatchingPane = () => {
       if (normalizedKind === 'workqueue') {
@@ -10347,16 +10415,15 @@ const paneManager = {
           ? options.statusFilter
           : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
         scopeFilter: nextScopeFilter,
+        quickFilters: options?.quickFilters,
         groupMode: normalizeWorkqueueGroupMode(options?.groupMode),
+        sortKey: options?.sortKey,
+        sortDir: options?.sortDir,
         nickname: options?.nickname,
         closable: true
       });
-      this.panes.push(pane);
-      globalElements.paneGrid.appendChild(pane.elements.root);
-      this.updatePaneLabels();
-      this.updateCloseButtons();
-      this.applyInferredLayout();
-      this.persistAdminPanes();
+      if (options?.selectedItemId) pane.workqueue.selectedItemId = options.selectedItemId;
+      placePane(pane);
       this.focusPanePrimary(pane);
       return pane;
     }
@@ -10370,12 +10437,7 @@ const paneManager = {
         nickname: options?.nickname,
         closable: true
       });
-      this.panes.push(pane);
-      globalElements.paneGrid.appendChild(pane.elements.root);
-      this.updatePaneLabels();
-      this.updateCloseButtons();
-      this.applyInferredLayout();
-      this.persistAdminPanes();
+      placePane(pane);
       if (uiState.authed) {
         pane.client.connect();
       }
@@ -10384,17 +10446,53 @@ const paneManager = {
     }
 
     const agentId = normalizeAgentId(options?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
-    const pane = createPane({ key: `p${randomId().slice(0, 8)}`, role: 'admin', kind: 'chat', agentId, nickname: options?.nickname, closable: true });
-    this.panes.push(pane);
-    globalElements.paneGrid.appendChild(pane.elements.root);
-    this.updatePaneLabels();
-    this.updateCloseButtons();
-    this.applyInferredLayout();
-    this.persistAdminPanes();
+    const pane = createPane({
+      key: `p${randomId().slice(0, 8)}`,
+      role: 'admin',
+      kind: 'chat',
+      agentId,
+      nickname: options?.nickname,
+      pairedTargetLock: !!options?.pairedTargetLock,
+      closable: true,
+      restoredState: options?.restoredState || null
+    });
+    placePane(pane);
     if (uiState.authed) {
       pane.client.connect();
     }
     this.focusPanePrimary(pane);
+    return pane;
+  },
+  reopenLastClosedPane() {
+    if (roleState.role !== 'admin') return null;
+    const snapshot = this.reopenStack[0];
+    if (!snapshot) {
+      showToast('No recently closed pane.', { kind: 'info', timeoutMs: 1800 });
+      return null;
+    }
+
+    const kind = normalizePaneKind(snapshot.kind || 'chat');
+    const pane = this.addPane(kind, {
+      forceNew: true,
+      insertIndex: snapshot.index,
+      agentId: snapshot.agentId,
+      nickname: snapshot.nickname,
+      pairedTargetLock: snapshot.pairedTargetLock,
+      queue: snapshot.queue,
+      statusFilter: snapshot.statusFilter,
+      scopeFilter: snapshot.scopeFilter,
+      quickFilters: snapshot.quickFilters,
+      groupMode: snapshot.groupMode,
+      selectedItemId: snapshot.selectedItemId,
+      sortKey: snapshot.sortKey,
+      sortDir: snapshot.sortDir,
+      cronAgentId: snapshot.cronAgentId,
+      restoredState: {
+        draftText: snapshot.draftText || '',
+        draftOrigin: snapshot.draftOrigin || null
+      }
+    });
+    if (pane) this.reopenStack.shift();
     return pane;
   },
   focusPanePrimary(pane) {
@@ -10551,7 +10649,7 @@ const paneManager = {
         testId: 'pane-add-menu-timeline',
         title: 'New Timeline pane',
         subtitle: 'Timeline -> gateway',
-        shortcut: 'Shortcut: Ctrl/Cmd+Shift+T (Alt/Option+click = Open anyway)'
+        shortcut: 'Open from menu (Alt/Option+click = Open anyway)'
       });
 
       menu.appendChild(chatBtn);
@@ -10732,7 +10830,9 @@ const paneManager = {
     if (idx < 0) return;
     const candidate = this.panes[idx];
     if (!skipAnchorGuard && this.maybeOfferAnchorReplace(candidate, { source })) return;
+    const snapshot = this.capturePaneSnapshot(candidate, idx);
     const [pane] = this.panes.splice(idx, 1);
+    this.pushReopenSnapshot(snapshot);
     forgetFocusedPaneKey(pane?.key || key);
     try {
       pane.client?.disconnect(true);
@@ -11570,18 +11670,23 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Add-pane shortcuts (admin-only)
+  // Pane shortcuts (admin-only)
   // Ctrl/Cmd+Shift+C → new chat
   // Ctrl/Cmd+Shift+W → focus matching workqueue target (Alt/Option adds anyway)
   // Ctrl/Cmd+Shift+R → focus matching cron target (Alt/Option adds anyway)
-  // Ctrl/Cmd+Shift+T → focus matching timeline target (Alt/Option adds anyway)
+  // Ctrl/Cmd+Shift+T → reopen last closed pane
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey;
   if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target) && !isAnyOverlayOpen()) {
+    if (matchesKeybind(event, 'pane.reopenLastClosed')) {
+      event.preventDefault();
+      paneManager.closeAddPaneMenu();
+      paneManager.reopenLastClosedPane();
+      return;
+    }
     const addPaneShortcuts = [
       ['pane.addChat', 'chat'],
       ['pane.addWorkqueue', 'workqueue'],
-      ['pane.addCron', 'cron'],
-      ['pane.addTimeline', 'timeline']
+      ['pane.addCron', 'cron']
     ];
     const match = addPaneShortcuts.find(([id]) => matchesKeybindWithOptionalAlt(event, id));
     const kind = match?.[1] || '';

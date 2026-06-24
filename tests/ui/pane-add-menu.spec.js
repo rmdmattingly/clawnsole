@@ -107,7 +107,7 @@ test('pane add menu: single click reuses matching non-chat pane target', async (
   expect(countAfterAlt).toBe(countBefore + 1);
 });
 
-test('pane add shortcuts: Ctrl/Cmd+Shift+T reuses timeline pane; Alt adds anyway', async ({ page }) => {
+test('pane shortcut: Ctrl/Cmd+Shift+T reopens last closed pane with draft state', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
 
@@ -121,11 +121,17 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T reuses timeline pane; Alt adds anyway
     await page.locator('[data-pane] button[aria-label="Close pane"]').last().click();
   }
 
-  const countBefore = await page.locator('[data-pane]').count();
-  await page.evaluate(() => document.activeElement?.blur?.());
-  await page.locator('body').click({ position: { x: 4, y: 4 } });
+  await page.locator('#addPaneBtn').click();
+  await page.locator('[data-testid="pane-add-menu-chat"]').click();
 
-  const fireTimelineShortcut = async (forceNew = false) => {
+  const panesBeforeClose = page.locator('[data-pane]');
+  await expect(panesBeforeClose).toHaveCount(2);
+  const draftText = 'draft survives pane reopen';
+  await panesBeforeClose.nth(1).locator('[data-pane-input]').fill(draftText);
+  await panesBeforeClose.nth(1).locator('button[aria-label="Close pane"]').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(1);
+
+  const fireReopenShortcut = async () => {
     await page.evaluate(({ force }) => {
       window.dispatchEvent(new KeyboardEvent('keydown', {
         key: 'T',
@@ -135,22 +141,13 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T reuses timeline pane; Alt adds anyway
         bubbles: true,
         cancelable: true
       }));
-    }, { force: forceNew });
+    }, { force: false });
   };
 
-  await fireTimelineShortcut(false);
+  await fireReopenShortcut();
 
-  const tlPane = page.locator('[data-pane][data-pane-kind="timeline"]').last();
-  await expect(tlPane).toBeVisible();
-
-  const countAfter = await page.locator('[data-pane]').count();
-  expect(countAfter).toBeGreaterThan(countBefore);
-
-  await fireTimelineShortcut(false);
-  const countAfterReuse = await page.locator('[data-pane]').count();
-  expect(countAfterReuse).toBe(countAfter);
-
-  await fireTimelineShortcut(true);
-  const countAfterForce = await page.locator('[data-pane]').count();
-  expect(countAfterForce).toBe(countAfter + 1);
+  const panesAfterReopen = page.locator('[data-pane]');
+  await expect(panesAfterReopen).toHaveCount(2);
+  await expect(panesAfterReopen.nth(1)).toHaveAttribute('data-pane-kind', 'chat');
+  await expect(panesAfterReopen.nth(1).locator('[data-pane-input]')).toHaveValue(draftText);
 });
