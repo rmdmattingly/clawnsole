@@ -1,4 +1,6 @@
 const { test, expect } = require('@playwright/test');
+const fs = require('fs');
+const path = require('path');
 
 const { startTestEnv, loginAdmin, attachConsoleErrorAsserts, addPane } = require('./_helpers');
 
@@ -17,6 +19,20 @@ test.afterEach(async ({ page }) => {
     page.__consoleAsserts.assertNoErrors();
   }
 });
+
+function seedAgentsForWorkqueuePicker() {
+  const configPath = path.join(env.tempHome, '.openclaw', 'openclaw.json');
+  const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  cfg.agents = {
+    ...(cfg.agents || {}),
+    list: [
+      { id: 'main', name: 'main' },
+      { id: 'dev', name: 'Dev' },
+      { id: 'dev-2', name: 'Dev-2' }
+    ]
+  };
+  fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+}
 
 test('workqueue pane: renders + has queue dropdown + does not show chat composer', async ({ page }) => {
   test.setTimeout(180000);
@@ -73,6 +89,37 @@ test('workqueue pane: queue target supports search + recent persistence', async 
   const secondPane = page.locator('[data-pane]').last();
   const secondSelect = secondPane.locator('[data-wq-queue-select]');
   await expect(secondSelect.locator('option', { hasText: '★ qa-hotfix' })).toHaveCount(1);
+});
+
+test('workqueue pane: enqueue assignment target supports search, keyboard select, and recents', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  seedAgentsForWorkqueuePicker();
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const firstPane = page.locator('[data-pane]').last();
+  await firstPane.locator('details.wq-enqueue summary').click();
+
+  const pickerSearch = firstPane.locator('[data-wq-claim-agent-search]');
+  const pickerList = firstPane.locator('[data-wq-claim-agent-list]');
+  await pickerSearch.fill('dev-2');
+  await expect(pickerList.locator('.wq-agent-picker-option')).toHaveCount(1);
+  await expect(pickerList.locator('.wq-agent-picker-option')).toContainText('Dev-2');
+
+  await pickerSearch.press('Enter');
+  await expect(firstPane.locator('[data-wq-claim-agent]')).toHaveValue('dev-2');
+
+  await pickerSearch.click();
+
+  const recentHeading = firstPane.locator('[data-wq-claim-agent-list] .wq-agent-picker-heading', { hasText: 'Recent' });
+  await expect(recentHeading).toBeVisible();
+  const firstRecent = firstPane.locator('[data-wq-claim-agent-list] .wq-agent-picker-option').first();
+  await expect(firstRecent).toContainText('Dev-2');
+  await expect(firstRecent.locator('.wq-agent-picker-badge')).toHaveText('recent');
 });
 
 test('workqueue pane: scope filter toggles assigned/unassigned/all deterministically', async ({ page }) => {
