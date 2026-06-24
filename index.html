@@ -30,6 +30,17 @@
           </div>
         </div>
         <div class="topbar-actions">
+          <button
+            id="activePaneChip"
+            class="active-pane-chip"
+            type="button"
+            aria-label="Open active pane in pane manager"
+            title="Active pane"
+            data-testid="active-pane-chip"
+            hidden
+          >
+            Active: —
+          </button>
           <div class="status compact">
             <div class="status-pill" id="connectionStatus" data-testid="connection-status">disconnected</div>
             <button
