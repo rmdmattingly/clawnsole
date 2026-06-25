@@ -10,6 +10,63 @@ test('visiting /admin without auth shows login overlay', async ({ page, clawnsol
   await expect(page.getByTestId('role-pill')).toContainText('signed out');
 });
 
+test('unlock form autofocuses password and submits with Enter', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.goto(clawnsole.adminUrl);
+
+  const password = page.getByTestId('login-password');
+  await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
+  await expect(password).toBeFocused();
+
+  await password.fill('admin');
+  await password.press('Enter');
+
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await expect(page.getByTestId('login-overlay')).not.toHaveClass(/open/);
+});
+
+test('unlock form shows in-flight state and prevents duplicate submits', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let loginRequests = 0;
+  let releaseLogin;
+  const loginPending = new Promise((resolve) => {
+    releaseLogin = resolve;
+  });
+
+  await page.route('**/auth/login', async (route) => {
+    loginRequests += 1;
+    await loginPending;
+    await route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'invalid password' })
+    });
+  });
+
+  await page.goto(clawnsole.adminUrl);
+
+  const password = page.getByTestId('login-password');
+  const unlock = page.getByTestId('login-button');
+  await password.fill('wrong-password');
+  await password.press('Enter');
+
+  await expect(unlock).toBeDisabled();
+  await expect(unlock).toHaveAttribute('aria-busy', 'true');
+  await expect(unlock).toContainText('Unlocking');
+
+  await password.dispatchEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  await unlock.dispatchEvent('click');
+  expect(loginRequests).toBe(1);
+
+  releaseLogin();
+  await expect(page.getByTestId('login-error')).toContainText('Invalid password');
+  await expect(password).toBeFocused();
+  await expect(password).toBeEnabled();
+  expect(loginRequests).toBe(1);
+});
+
 test('admin login restores the intended in-app destination', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
