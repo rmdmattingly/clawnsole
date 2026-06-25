@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   escapeHtml,
   fmtRemaining,
+  defaultWorkqueueSort,
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
@@ -56,6 +57,10 @@ test('normalizeAdminDestination accepts only fresh same-origin admin destination
     normalizeAdminDestination({ href: '/admin', createdAt: now - 700_000 }, { origin, now, ttlMs: 600_000 }).reason,
     'stale'
   );
+});
+
+test('defaultWorkqueueSort surfaces priority descending as the initial UI sort', () => {
+  assert.deepEqual(defaultWorkqueueSort, { sortKey: 'priority', sortDir: 'desc' });
 });
 
 test('sortWorkqueueItems default groups by status then priority then timestamps', () => {
