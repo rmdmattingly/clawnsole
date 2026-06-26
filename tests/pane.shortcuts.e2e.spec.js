@@ -80,6 +80,7 @@ test('cmd/ctrl+shift+j focuses previous pane with wraparound from unfocused stat
   await page.getByTestId('add-pane-btn').click();
   await page.getByTestId('pane-add-menu-cron').click();
   await expect(page.locator('[data-pane]')).toHaveCount(3);
+  await page.click('#connectionStatus');
 
   const activePaneIndex = async () => page.evaluate(() => {
     const panes = Array.from(document.querySelectorAll('[data-pane]'));
@@ -103,7 +104,7 @@ test('cmd/ctrl+shift+j focuses previous pane with wraparound from unfocused stat
   await expect.poll(activePaneIndex).toBe(2);
 });
 
-test('alt+1..3 focuses panes by visible order and does not fire while typing', async ({ page }) => {
+test('alt+1..3 and cmd/ctrl+1..3 focus panes by visible order; shortcuts do not fire while typing', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
 
@@ -130,14 +131,78 @@ test('alt+1..3 focuses panes by visible order and does not fire while typing', a
   await page.keyboard.press('Alt+2');
   await expect.poll(activePaneIndex).toBe(1);
 
-  await page.keyboard.press('Alt+3');
+  await page.keyboard.press('Control+3');
   await expect.poll(activePaneIndex).toBe(2);
+
+  await page.keyboard.press('Control+1');
+  await expect.poll(activePaneIndex).toBe(0);
 
   const firstPaneInput = page.locator('[data-pane]').first().locator('[data-pane-input]');
   await firstPaneInput.focus();
   await expect(firstPaneInput).toBeFocused();
 
   await page.keyboard.press('Alt+3');
+  await expect.poll(activePaneIndex).toBe(0);
+
+  await page.keyboard.press('Control+3');
+  await expect.poll(activePaneIndex).toBe(0);
+});
+
+test('ctrl+tab switches panes by MRU order and reverses with shift', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+  await page.waitForTimeout(100);
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  const triggerMruShortcut = async ({ shiftKey = false } = {}) => page.evaluate(({ shiftKey }) => {
+    const event = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      ctrlKey: true,
+      shiftKey,
+      bubbles: true,
+      cancelable: true
+    });
+    window.dispatchEvent(event);
+  }, { shiftKey });
+
+  await page.evaluate(() => focusPaneIndex(0));
+  await expect.poll(activePaneIndex).toBe(0);
+  await page.evaluate(() => focusPaneIndex(1));
+  await expect.poll(activePaneIndex).toBe(1);
+  await page.evaluate(() => focusPaneIndex(2));
+  await expect.poll(activePaneIndex).toBe(2);
+
+  await triggerMruShortcut();
+  await expect.poll(activePaneIndex).toBe(1);
+  await expect(page.getByTestId('toast').last()).toContainText('B Workqueue');
+
+  await triggerMruShortcut();
+  await expect.poll(activePaneIndex).toBe(0);
+
+  await triggerMruShortcut({ shiftKey: true });
+  await expect.poll(activePaneIndex).toBe(1);
+
+  const firstPaneInput = page.locator('[data-pane]').first().locator('[data-pane-input]');
+  await firstPaneInput.focus();
+  await expect(firstPaneInput).toBeFocused();
+  await triggerMruShortcut();
   await expect.poll(activePaneIndex).toBe(0);
 });
 
@@ -155,7 +220,7 @@ test('add-pane shortcuts do not fire while typing in chat input', async ({ page 
   const panes = page.locator('[data-pane]');
   await expect(panes).toHaveCount(2);
 
-  const input = page.locator('[data-pane-kind="chat"] [data-pane-input]').first();
+  const input = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
   await input.focus();
   await input.fill('typing');
 
@@ -176,7 +241,7 @@ test('fleet quick action button + keyboard shortcut focus existing timeline pane
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   const panes = page.locator('[data-pane]');
-  const timelinePanes = page.locator('[data-pane-kind="timeline"]');
+  const timelinePanes = page.locator('[data-pane][data-pane-kind="timeline"]');
   const fleetBtn = page.locator('#fleetBtn');
 
   await expect(panes).toHaveCount(2);

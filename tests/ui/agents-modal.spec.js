@@ -58,6 +58,47 @@ test('agents modal quick filter narrows list and Esc clears it', async ({ page, 
   await expect(rows).toHaveCount(initialCount);
 });
 
+test('fleet attention mode sections healthy agents and keeps filters while expanding', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = Array.from({ length: 12 }, (_, index) => {
+    const id = `agent-${index + 1}`;
+    return { id, name: id, displayName: id };
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.evaluate(() => {
+    const now = Date.now();
+    const lastSeen = {};
+    for (let index = 2; index <= 12; index += 1) {
+      lastSeen[`agent-${index}`] = now;
+    }
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify(lastSeen));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  await expect(page.locator('#agentsList .agents-section-title').first()).toContainText('Needs attention (1)');
+  const healthyToggle = page.getByRole('button', { name: /Healthy \(11\) Show/ });
+  await expect(healthyToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
+
+  await healthyToggle.click();
+  await expect(page.getByRole('button', { name: /Healthy \(11\) Hide/ })).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(12);
+
+  await page.getByRole('button', { name: 'Offline/Error' }).click();
+  await expect(page.getByRole('button', { name: 'Offline/Error' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#agentsList .agents-section-title').first()).toContainText('Needs attention (1)');
+  await expect(page.getByRole('button', { name: /Healthy \(0\) Hide/ })).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
+});
+
 test('agents modal quick actions open/reuse chat, timeline, and workqueue context', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
@@ -70,6 +111,7 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await expect(firstRow.locator('[data-agent-action="open-chat"]').first()).toBeVisible();
   await expect(firstRow.locator('[data-agent-action="open-timeline"]').first()).toBeVisible();
   await expect(firstRow.locator('[data-agent-action="open-workqueue"]').first()).toBeVisible();
+  const agentId = await firstRow.locator('[data-agent-action="open-workqueue"]').first().getAttribute('data-agent-id');
 
   await firstRow.locator('[data-agent-action="open-chat"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="chat"]').first()).toBeVisible();
@@ -82,4 +124,5 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
 
   await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue(agentId || 'main');
 });

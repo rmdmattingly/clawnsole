@@ -42,8 +42,9 @@
           </div>
           <div id="paneControls" class="pane-controls" hidden>
             <div class="pane-add-wrap">
-              <button id="addPaneBtn" class="icon-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add pane" data-testid="add-pane-btn">
-                +
+              <button id="addPaneBtn" class="icon-btn action-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add pane" title="Add Pane (Ctrl/Cmd+Shift+N)" data-testid="add-pane-btn">
+                <span class="btn-icon" aria-hidden="true">+</span>
+                <span class="btn-label">Add Pane</span>
               </button>
             </div>
             <select id="layoutSelect" aria-label="Pane layout">
@@ -53,26 +54,31 @@
             </select>
           </div>
           <div class="role-pill" id="rolePill" data-testid="role-pill">signed out</div>
-          <button id="refreshAgentsBtn" class="icon-btn" type="button" aria-label="Refresh agent list" hidden>
-            ⟳
+          <button id="refreshAgentsBtn" class="icon-btn action-btn" type="button" aria-label="Refresh agent list" title="Refresh (Ctrl/Cmd+R)" hidden>
+            <span class="btn-icon" aria-hidden="true">⟳</span>
+            <span class="btn-label">Refresh</span>
           </button>
-          <button id="agentsBtn" class="icon-btn" type="button" aria-label="Open agents" hidden>
-            ★
+          <button id="agentsBtn" class="icon-btn action-btn" type="button" aria-label="Open agents" title="Agents" hidden>
+            <span class="btn-icon" aria-hidden="true">★</span>
+            <span class="btn-label">Agents</span>
           </button>
           <button id="fleetBtn" class="icon-btn" type="button" aria-label="Open fleet pane" title="Open Fleet pane (Cmd/Ctrl+Shift+F)" hidden>
             FL
           </button>
-          <button id="workqueueBtn" class="icon-btn" type="button" aria-label="Open workqueue" hidden>
-            WQ
+          <button id="workqueueBtn" class="icon-btn action-btn" type="button" aria-label="Open workqueue" title="Workqueue (g w)" hidden>
+            <span class="btn-icon" aria-hidden="true">WQ</span>
+            <span class="btn-label">Workqueue</span>
           </button>
-          <button id="shortcutsBtn" class="icon-btn" type="button" aria-label="Open keyboard shortcuts" hidden data-testid="shortcuts-btn">
+          <button id="shortcutsBtn" class="icon-btn" type="button" aria-label="Open keyboard shortcuts" title="Keyboard shortcuts (?)" hidden data-testid="shortcuts-btn">
             ?
           </button>
-          <button id="settingsBtn" class="icon-btn" type="button" aria-label="Open settings">
-            ⚙︎
+          <button id="settingsBtn" class="icon-btn action-btn" type="button" aria-label="Open settings" title="Settings">
+            <span class="btn-icon" aria-hidden="true">⚙︎</span>
+            <span class="btn-label">Settings</span>
           </button>
-          <button id="logoutBtn" class="icon-btn" type="button" aria-label="Log out">
-            ⎋
+          <button id="logoutBtn" class="icon-btn action-btn" type="button" aria-label="Log out" title="Logout">
+            <span class="btn-icon" aria-hidden="true">⎋</span>
+            <span class="btn-label">Logout</span>
           </button>
         </div>
       </header>
@@ -85,11 +91,11 @@
           <section class="chat-panel pane" data-pane data-testid="pane">
             <div class="pane-header">
               <div class="pane-header-left">
-                <div class="pane-name" data-pane-name data-testid="pane-type-label">Pane</div>
-                <div class="pane-type-pill" data-pane-type-pill data-testid="pane-type-pill" aria-label="Pane type">
+                <div class="pane-type-badge pane-type-pill" data-pane-type-pill data-testid="pane-type-pill" aria-label="Pane type">
                   <span class="pane-type-icon" data-pane-type-icon aria-hidden="true">💬</span>
                   <span class="pane-type-text" data-pane-type-text>CHAT</span>
                 </div>
+                <div class="pane-name" data-pane-name data-testid="pane-type-label">Pane</div>
                 <div class="pane-agent" data-pane-agent-wrap>
                   <span class="agent-label" data-pane-target-label data-testid="pane-target-label">Agent</span>
                   <button class="agent-pill-btn" type="button" data-pane-agent-button aria-label="Change agent" data-testid="pane-agent-button">
@@ -247,6 +253,9 @@
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>P</kbd></div><div class="shortcut-desc">Open Pane Manager</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>c</kbd></div><div class="shortcut-desc">Return to last active Chat pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Tab</kbd></div><div class="shortcut-desc">Switch panes by most-recent focus order</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></div><div class="shortcut-desc">Reverse most-recent pane traversal</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>]</kbd></div><div class="shortcut-desc">Next unread pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd></div><div class="shortcut-desc">Previous unread pane</div></div>
           </div>

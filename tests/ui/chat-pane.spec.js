@@ -95,9 +95,9 @@ test('topbar workqueue action reuses paired pane for active chat target and fall
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
   await expect(page.locator('#workqueueModal')).not.toHaveClass(/open/);
 
-  // When a non-chat pane is active, preserve modal fallback behavior.
-  const workqueuePane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
-  await workqueuePane.locator('[data-wq-queue-select]').focus();
+  // Without an active or remembered chat target, preserve modal fallback behavior.
+  await chatPane.locator('[data-pane-close]').click();
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(0);
 
   await page.locator('#workqueueBtn').click();
   await expect(page.locator('#workqueueModal')).toHaveClass(/open/);

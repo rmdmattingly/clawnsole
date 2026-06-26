@@ -9,6 +9,13 @@
   --accent: #ffb347;
   --accent-2: #7fd1b9;
   --warning: #ff6b6b;
+
+  /* Pane-kind accent tokens (AA-conscious in dark mode). */
+  --pane-accent-chat-rgb: 127, 209, 185;
+  --pane-accent-workqueue-rgb: 255, 179, 71;
+  --pane-accent-cron-rgb: 162, 155, 254;
+  --pane-accent-timeline-rgb: 86, 204, 242;
+  --pane-accent-fleet-rgb: 244, 114, 182;
   --glow: rgba(255, 179, 71, 0.35);
   --shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
 }
@@ -188,7 +195,7 @@ body::before {
   font-size: 12px;
 }
 
-/* addPaneBtn uses default .icon-btn styling */
+/* addPaneBtn uses default .icon-btn styling unless promoted to action-btn. */
 .pane-controls .icon-btn {
   width: 36px;
   height: 36px;
@@ -196,6 +203,12 @@ body::before {
   font-size: 18px;
   min-height: 0;
   padding: 0;
+}
+
+.pane-controls .action-btn {
+  width: auto;
+  min-width: 36px;
+  padding: 0 12px;
 }
 
 .role-pill {
@@ -266,6 +279,38 @@ body::before {
 .icon-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
+}
+
+.action-btn {
+  width: auto;
+  min-width: 40px;
+  height: 40px;
+  gap: 8px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.action-btn .btn-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.action-btn .btn-label {
+  white-space: nowrap;
+}
+
+@media (max-width: 920px) {
+  .action-btn {
+    width: 36px;
+    min-width: 36px;
+    padding: 0;
+    gap: 0;
+  }
+
+  .action-btn .btn-label {
+    display: none;
+  }
 }
 
 .status-pill {
@@ -378,6 +423,8 @@ body::before {
   gap: 10px;
   padding: 14px;
   padding-bottom: 6px;
+  border-color: rgba(var(--pane-accent-rgb, 255, 255, 255), 0.28);
+  box-shadow: inset 0 0 0 1px rgba(var(--pane-accent-rgb, 255, 255, 255), 0.14), var(--shadow);
 }
 
 /* Workqueue pane should be full-height: never show chat composer UI in this pane. */
@@ -432,7 +479,7 @@ body::before {
   white-space: nowrap;
 }
 
-.pane-type-pill {
+.pane-type-badge {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -446,6 +493,7 @@ body::before {
   letter-spacing: 0.1em;
   line-height: 1;
   user-select: none;
+  white-space: nowrap;
 }
 
 .pane-type-icon {
@@ -457,45 +505,53 @@ body::before {
   font-weight: 650;
 }
 
+.pane-type-pill {
+  flex: 0 0 auto;
+}
+
 /* Per-pane subtle treatment */
 .pane-kind-chat {
-  --pane-accent: rgba(127, 209, 185, 0.75);
-  --pane-header-tint: rgba(127, 209, 185, 0.08);
+  --pane-accent-rgb: var(--pane-accent-chat-rgb);
+  --pane-accent: rgba(var(--pane-accent-rgb), 0.78);
+  --pane-header-tint: rgba(var(--pane-accent-rgb), 0.1);
 }
 
 .pane-kind-workqueue {
-  --pane-accent: rgba(255, 179, 71, 0.8);
-  --pane-header-tint: rgba(255, 179, 71, 0.09);
+  --pane-accent-rgb: var(--pane-accent-workqueue-rgb);
+  --pane-accent: rgba(var(--pane-accent-rgb), 0.82);
+  --pane-header-tint: rgba(var(--pane-accent-rgb), 0.11);
 }
 
 .pane-kind-cron {
-  --pane-accent: rgba(162, 155, 254, 0.8);
-  --pane-header-tint: rgba(162, 155, 254, 0.09);
+  --pane-accent-rgb: var(--pane-accent-cron-rgb);
+  --pane-accent: rgba(var(--pane-accent-rgb), 0.82);
+  --pane-header-tint: rgba(var(--pane-accent-rgb), 0.1);
 }
 
 .pane-kind-timeline {
-  --pane-accent: rgba(86, 204, 242, 0.78);
-  --pane-header-tint: rgba(86, 204, 242, 0.08);
+  --pane-accent-rgb: var(--pane-accent-timeline-rgb);
+  --pane-accent: rgba(var(--pane-accent-rgb), 0.8);
+  --pane-header-tint: rgba(var(--pane-accent-rgb), 0.1);
 }
 
 .pane-type-chat {
-  border-color: rgba(127, 209, 185, 0.45);
-  background: rgba(127, 209, 185, 0.12);
+  border-color: rgba(var(--pane-accent-chat-rgb), 0.5);
+  background: rgba(var(--pane-accent-chat-rgb), 0.14);
 }
 
 .pane-type-workqueue {
-  border-color: rgba(255, 179, 71, 0.55);
-  background: rgba(255, 179, 71, 0.12);
+  border-color: rgba(var(--pane-accent-workqueue-rgb), 0.58);
+  background: rgba(var(--pane-accent-workqueue-rgb), 0.14);
 }
 
 .pane-type-cron {
-  border-color: rgba(162, 155, 254, 0.55);
-  background: rgba(162, 155, 254, 0.12);
+  border-color: rgba(var(--pane-accent-cron-rgb), 0.58);
+  background: rgba(var(--pane-accent-cron-rgb), 0.14);
 }
 
 .pane-type-timeline {
-  border-color: rgba(86, 204, 242, 0.55);
-  background: rgba(86, 204, 242, 0.12);
+  border-color: rgba(var(--pane-accent-timeline-rgb), 0.58);
+  background: rgba(var(--pane-accent-timeline-rgb), 0.14);
 }
 
 .pane-agent {
@@ -1126,6 +1182,18 @@ button.send-btn .btn-icon {
   color: var(--muted);
 }
 
+.command-palette-group {
+  margin: 8px 4px 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.command-palette-toggle {
+  border-style: dashed;
+}
+
 /* Pane Manager */
 
 .status-meta-btn {
@@ -1211,7 +1279,8 @@ button.send-btn .btn-icon {
   padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.02);
+  border-left: 3px solid var(--pane-accent, rgba(255, 255, 255, 0.2));
+  background: linear-gradient(90deg, rgba(var(--pane-accent-rgb, 255, 255, 255), 0.08), rgba(255, 255, 255, 0.02));
 }
 
 .pane-manager-row[aria-selected="true"] {
@@ -1232,6 +1301,13 @@ button.send-btn .btn-icon {
   gap: 8px;
   align-items: center;
   min-width: 0;
+}
+
+.pane-manager-type-badge {
+  padding: 4px 8px;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
 }
 
 .pane-manager-letter {
@@ -1365,17 +1441,45 @@ button.send-btn .btn-icon {
 }
 
 .agents-section-title {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  padding: 0;
+  background: transparent;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted);
   margin-bottom: 8px;
+  text-align: left;
+}
+
+button.agents-section-title {
+  cursor: pointer;
+}
+
+button.agents-section-title:hover {
+  color: var(--text);
+}
+
+.agents-section-toggle {
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
 }
 
 .agents-rows {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.agents-rows[hidden] {
+  display: none;
 }
 
 .agents-row {
@@ -1704,11 +1808,26 @@ kbd {
   flex-wrap: wrap;
 }
 
+.wq-pane .wq-toolbar-row {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  scrollbar-gutter: stable;
+}
+
 .wq-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 180px;
+}
+
+.wq-pane .wq-field,
+.wq-pane .wq-scope,
+.wq-pane .wq-sort,
+.wq-pane .wq-toolbar-row > button {
+  flex: 0 0 auto;
 }
 
 .wq-status-field {
@@ -1855,6 +1974,88 @@ kbd {
   gap: 10px;
   align-items: end;
   flex-wrap: wrap;
+}
+
+.wq-agent-picker-field {
+  min-width: 240px;
+}
+
+.wq-agent-picker {
+  position: relative;
+}
+
+.wq-agent-picker [data-wq-claim-agent-search] {
+  width: 100%;
+}
+
+.wq-agent-picker-list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  display: none;
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(8, 10, 14, 0.98);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+}
+
+.wq-agent-picker.open .wq-agent-picker-list {
+  display: block;
+}
+
+.wq-agent-picker-heading {
+  padding: 5px 7px 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wq-agent-picker-option {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: 1px 0;
+  padding: 7px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wq-agent-picker-option.active,
+.wq-agent-picker-option:hover {
+  border-color: rgba(127, 209, 185, 0.28);
+  background: rgba(127, 209, 185, 0.1);
+}
+
+.wq-agent-picker-option.selected {
+  color: rgba(240, 246, 255, 0.98);
+}
+
+.wq-agent-picker-badge {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.wq-agent-picker-empty {
+  padding: 8px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .wq-pane .wq-layout,
