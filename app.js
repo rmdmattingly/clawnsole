@@ -248,6 +248,7 @@ const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
 const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
+const WQ_RECENT_ENQUEUE_AGENTS_KEY = 'clawnsole.wq.recentEnqueueAgents';
 const WQ_RECENT_TARGETS_MAX = 6;
 
 function readJsonFromStorage(key, fallback) {
@@ -369,6 +370,20 @@ function rememberRecentWorkqueueTarget(target) {
   if (!next) return;
   const deduped = [next, ...readRecentWorkqueueTargets().filter((v) => v !== next)];
   writeJsonToStorage(WQ_RECENT_TARGETS_KEY, deduped.slice(0, WQ_RECENT_TARGETS_MAX));
+}
+
+function readRecentWorkqueueEnqueueAgents() {
+  const list = readJsonFromStorage(WQ_RECENT_ENQUEUE_AGENTS_KEY, []);
+  return Array.isArray(list)
+    ? list.map((v) => String(v || '').trim()).filter(Boolean).slice(0, WQ_RECENT_TARGETS_MAX)
+    : [];
+}
+
+function rememberRecentWorkqueueEnqueueAgent(agentId) {
+  const next = String(agentId || '').trim();
+  if (!next) return;
+  const deduped = [next, ...readRecentWorkqueueEnqueueAgents().filter((v) => v !== next)];
+  writeJsonToStorage(WQ_RECENT_ENQUEUE_AGENTS_KEY, deduped.slice(0, WQ_RECENT_TARGETS_MAX));
 }
 
 function getPinnedAgentIds() {
@@ -677,9 +692,14 @@ function scheduleAgentRefresh(reason = 'ws_connected') {
 }
 
 function refreshWorkqueueAgentSelects() {
-  const selects = document.querySelectorAll('[data-wq-claim-agent]');
-  if (!selects || selects.length === 0) return;
+  const pickerRoots = document.querySelectorAll('[data-wq-claim-agent-picker]');
+  if (pickerRoots && pickerRoots.length) {
+    pickerRoots.forEach((root) => hydrateWorkqueueClaimAgentPicker(root));
+    return;
+  }
 
+  const selects = document.querySelectorAll('select[data-wq-claim-agent]');
+  if (!selects || selects.length === 0) return;
   const agents = Array.isArray(uiState.agents) ? uiState.agents : [];
   selects.forEach((selectEl) => {
     if (!selectEl) return;
@@ -699,6 +719,160 @@ function refreshWorkqueueAgentSelects() {
       selectEl.value = prior;
     } catch {}
   });
+}
+
+function getWorkqueueClaimAgentOptions() {
+  const agents = Array.isArray(uiState.agents) ? uiState.agents : [];
+  const byId = new Map();
+  for (const agent of agents) {
+    const id = String(agent?.id || '').trim();
+    if (!id) continue;
+    byId.set(id, {
+      id,
+      label: formatAgentLabel(agent, { includeId: true }),
+      shortLabel: formatAgentLabel(agent, { includeId: false }),
+      recent: false
+    });
+  }
+
+  const recent = readRecentWorkqueueEnqueueAgents().filter((id) => byId.has(id));
+  const out = [{ id: '', label: 'Unassigned', shortLabel: 'Unassigned', recent: false }];
+  for (const id of recent) out.push({ ...byId.get(id), recent: true });
+  for (const option of Array.from(byId.values()).sort((a, b) => a.label.localeCompare(b.label))) {
+    if (recent.includes(option.id)) continue;
+    out.push(option);
+  }
+  return out;
+}
+
+function hydrateWorkqueueClaimAgentPicker(root) {
+  if (!root) return;
+  const input = root.querySelector('[data-wq-claim-agent-search]');
+  const list = root.querySelector('[data-wq-claim-agent-list]');
+  const hidden = root.querySelector('[data-wq-claim-agent]');
+  if (!input || !list || !hidden) return;
+
+  if (root.__wqClaimAgentPickerHydrated) {
+    const existing = String(hidden.value || '').trim();
+    hidden.value = getWorkqueueClaimAgentOptions().some((o) => o.id === existing) ? existing : '';
+    const option = getWorkqueueClaimAgentOptions().find((o) => o.id === String(hidden.value || '')) || getWorkqueueClaimAgentOptions()[0];
+    input.value = option?.shortLabel || 'Unassigned';
+    root.__wqClaimAgentPickerRender?.();
+    return;
+  }
+
+  let activeIndex = 0;
+  const setSelected = (id, { close = true, focusTitle = false } = {}) => {
+    hidden.value = String(id || '');
+    const option = getWorkqueueClaimAgentOptions().find((o) => o.id === hidden.value) || getWorkqueueClaimAgentOptions()[0];
+    input.value = option?.shortLabel || 'Unassigned';
+    if (hidden.value) rememberRecentWorkqueueEnqueueAgent(hidden.value);
+    if (close) root.classList.remove('open');
+    if (focusTitle) root.closest('form')?.querySelector('[data-wq-enqueue-title]')?.focus?.();
+    render();
+  };
+
+  const render = () => {
+    const query = root.classList.contains('open') ? String(input.value || '').trim().toLowerCase() : '';
+    const current = String(hidden.value || '');
+    const options = getWorkqueueClaimAgentOptions().filter((option) => {
+      if (!query) return true;
+      return option.label.toLowerCase().includes(query) || option.id.toLowerCase().includes(query);
+    });
+    if (activeIndex >= options.length) activeIndex = Math.max(0, options.length - 1);
+
+    list.innerHTML = '';
+    if (!options.length) {
+      const empty = document.createElement('div');
+      empty.className = 'wq-agent-picker-empty';
+      empty.textContent = 'No matching targets';
+      list.appendChild(empty);
+      return;
+    }
+
+    let priorRecent = null;
+    options.forEach((option, index) => {
+      if (option.recent !== priorRecent) {
+        priorRecent = option.recent;
+        if (option.recent) {
+          const heading = document.createElement('div');
+          heading.className = 'wq-agent-picker-heading';
+          heading.textContent = 'Recent';
+          list.appendChild(heading);
+        } else if (index > 0) {
+          const heading = document.createElement('div');
+          heading.className = 'wq-agent-picker-heading';
+          heading.textContent = 'All targets';
+          list.appendChild(heading);
+        }
+      }
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'wq-agent-picker-option';
+      if (index === activeIndex) btn.classList.add('active');
+      if (option.id === current) btn.classList.add('selected');
+      btn.setAttribute('role', 'option');
+      btn.setAttribute('aria-selected', option.id === current ? 'true' : 'false');
+      btn.dataset.agentId = option.id;
+      btn.innerHTML = `<span>${escapeHtml(option.label)}</span>${option.recent ? '<span class="wq-agent-picker-badge">recent</span>' : ''}`;
+      btn.addEventListener('mousedown', (e) => e.preventDefault());
+      btn.addEventListener('click', () => setSelected(option.id, { focusTitle: true }));
+      list.appendChild(btn);
+    });
+  };
+
+  const open = ({ selectText = false } = {}) => {
+    root.classList.add('open');
+    activeIndex = 0;
+    render();
+    if (selectText) {
+      try {
+        input.select();
+      } catch {}
+    }
+  };
+
+  input.addEventListener('focus', () => open({ selectText: true }));
+  input.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (!root.contains(document.activeElement)) root.classList.remove('open');
+    }, 120);
+  });
+  input.addEventListener('input', () => {
+    root.classList.add('open');
+    activeIndex = 0;
+    render();
+  });
+  input.addEventListener('keydown', (e) => {
+    const options = Array.from(list.querySelectorAll('.wq-agent-picker-option'));
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      root.classList.add('open');
+      const delta = e.key === 'ArrowDown' ? 1 : -1;
+      activeIndex = options.length ? (activeIndex + delta + options.length) % options.length : 0;
+      render();
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const selected = Array.from(list.querySelectorAll('.wq-agent-picker-option'))[activeIndex];
+      if (selected) setSelected(selected.dataset.agentId || '', { focusTitle: true });
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      root.classList.remove('open');
+      const option = getWorkqueueClaimAgentOptions().find((o) => o.id === String(hidden.value || '')) || getWorkqueueClaimAgentOptions()[0];
+      input.value = option?.shortLabel || 'Unassigned';
+    }
+  });
+  const existing = String(hidden.value || '').trim();
+  const fallback = getWorkqueueClaimAgentOptions().some((o) => o.id === existing) ? existing : '';
+  hidden.value = fallback;
+  input.value = (getWorkqueueClaimAgentOptions().find((o) => o.id === fallback)?.shortLabel || 'Unassigned');
+  root.__wqClaimAgentPickerHydrated = true;
+  root.__wqClaimAgentPickerRender = render;
+  render();
 }
 
 
@@ -2523,9 +2697,11 @@ function openAgentWorkqueueFromFleet(agentId) {
 
   pane.agentId = target;
   try {
-    const claimAgentSelect = pane.elements?.thread?.querySelector?.('[data-wq-claim-agent]');
-    if (claimAgentSelect && Array.from(claimAgentSelect.options || []).some((opt) => String(opt.value || '') === target)) {
-      claimAgentSelect.value = target;
+    const claimAgentInput = pane.elements?.thread?.querySelector?.('[data-wq-claim-agent]');
+    const claimAgentPicker = pane.elements?.thread?.querySelector?.('[data-wq-claim-agent-picker]');
+    if (claimAgentInput) {
+      claimAgentInput.value = target;
+      hydrateWorkqueueClaimAgentPicker(claimAgentPicker);
     }
   } catch {}
   paneManager.persistAdminPanes();
@@ -5579,9 +5755,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             </label>
 
             <div class="wq-enqueue-actions">
-              <label class="wq-field">
+              <label class="wq-field wq-agent-picker-field">
                 <span class="wq-label">Assign to</span>
-                <select data-wq-claim-agent></select>
+                <div class="wq-agent-picker" data-wq-claim-agent-picker>
+                  <input data-wq-claim-agent-search type="search" aria-label="Search enqueue assignment target" autocomplete="off" />
+                  <input data-wq-claim-agent type="hidden" value="" />
+                  <div class="wq-agent-picker-list" data-wq-claim-agent-list role="listbox" aria-label="Enqueue assignment targets"></div>
+                </div>
                 <span class="hint">Who should pick this up</span>
               </label>
               <label class="wq-field">
@@ -5987,26 +6167,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     });
     updateSortUi();
 
-    // Agent dropdown (prefer select over free-text).
-    const claimAgentSelect = elements.thread.querySelector('[data-wq-claim-agent]');
-    if (claimAgentSelect) {
-      claimAgentSelect.innerHTML = '';
-      const optNone = document.createElement('option');
-      optNone.value = '';
-      optNone.textContent = '(none)';
-      claimAgentSelect.appendChild(optNone);
-      const agents = Array.isArray(uiState.agents) ? uiState.agents : [];
-      for (const a of agents) {
-        const opt = document.createElement('option');
-        opt.value = a.id;
-        opt.textContent = formatAgentLabel(a);
-        claimAgentSelect.appendChild(opt);
-      }
-      const selectedAgent = normalizeAgentId(pane.agentId || 'main');
-      if (Array.from(claimAgentSelect.options || []).some((opt) => String(opt.value || '') === selectedAgent)) {
-        claimAgentSelect.value = selectedAgent;
-      }
-    }
+    // Enqueue assignment target picker (searchable + recent targets).
+    const claimAgentPicker = elements.thread.querySelector('[data-wq-claim-agent-picker]');
+    const claimAgentHidden = elements.thread.querySelector('[data-wq-claim-agent]');
+    if (claimAgentHidden) claimAgentHidden.value = normalizeAgentId(pane.agentId || 'main');
+    hydrateWorkqueueClaimAgentPicker(claimAgentPicker);
 
     // Enqueue (inline form).
     const enqueueForm = elements.thread.querySelector('[data-wq-enqueue-form]');
