@@ -1,4 +1,6 @@
 const { test, expect } = require('@playwright/test');
+const fs = require('fs');
+const path = require('path');
 
 const { startTestEnv, loginAdmin, attachConsoleErrorAsserts, addPane } = require('./_helpers');
 
@@ -47,6 +49,20 @@ function makeGuardrailItems(count) {
   }));
 }
 
+function seedAgentsForWorkqueuePicker() {
+  const configPath = path.join(env.tempHome, '.openclaw', 'openclaw.json');
+  const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  cfg.agents = {
+    ...(cfg.agents || {}),
+    list: [
+      { id: 'main', name: 'main' },
+      { id: 'dev', name: 'Dev' },
+      { id: 'dev-2', name: 'Dev-2' }
+    ]
+  };
+  fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+}
+
 test('workqueue pane: renders + has queue dropdown + does not show chat composer', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -76,6 +92,30 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
   await expect(wqPane.locator('[data-pane-input]')).toBeHidden();
 });
 
+test('workqueue pane: pane grid label switches from chat-only to generic panes', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([{ key: 'ptestchat', kind: 'chat', agentId: 'main' }])
+    );
+  });
+
+  await loginAdmin(page, env.serverPort);
+
+  const grid = page.getByTestId('pane-grid');
+  await expect(grid).toHaveAttribute('aria-label', 'Chat panes');
+
+  await addPane(page, 'Workqueue pane');
+
+  await expect(page.locator('[data-pane-kind="workqueue"]').last()).toBeVisible();
+  await expect(grid).toHaveAttribute('aria-label', 'Panes');
+});
+
 test('workqueue pane: queue target supports search + recent persistence', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -102,6 +142,37 @@ test('workqueue pane: queue target supports search + recent persistence', async 
   const secondPane = page.locator('[data-pane]').last();
   const secondSelect = secondPane.locator('[data-wq-queue-select]');
   await expect(secondSelect.locator('option', { hasText: '★ qa-hotfix' })).toHaveCount(1);
+});
+
+test('workqueue pane: enqueue assignment target supports search, keyboard select, and recents', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  seedAgentsForWorkqueuePicker();
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const firstPane = page.locator('[data-pane]').last();
+  await firstPane.locator('details.wq-enqueue summary').click();
+
+  const pickerSearch = firstPane.locator('[data-wq-claim-agent-search]');
+  const pickerList = firstPane.locator('[data-wq-claim-agent-list]');
+  await pickerSearch.fill('dev-2');
+  await expect(pickerList.locator('.wq-agent-picker-option')).toHaveCount(1);
+  await expect(pickerList.locator('.wq-agent-picker-option')).toContainText('Dev-2');
+
+  await pickerSearch.press('Enter');
+  await expect(firstPane.locator('[data-wq-claim-agent]')).toHaveValue('dev-2');
+
+  await pickerSearch.click();
+
+  const recentHeading = firstPane.locator('[data-wq-claim-agent-list] .wq-agent-picker-heading', { hasText: 'Recent' });
+  await expect(recentHeading).toBeVisible();
+  const firstRecent = firstPane.locator('[data-wq-claim-agent-list] .wq-agent-picker-option').first();
+  await expect(firstRecent).toContainText('Dev-2');
+  await expect(firstRecent.locator('.wq-agent-picker-badge')).toHaveText('recent');
 });
 
 test('workqueue pane: scope filter toggles assigned/unassigned/all deterministically', async ({ page }) => {
@@ -256,6 +327,37 @@ test('workqueue pane: all-scope guardrail appears over threshold and downscopes'
   await expect(wqPane.locator('[data-wq-scope="unassigned"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(guardrail).toBeHidden();
   await expect(wqPane.locator('[data-wq-list-body] .wq-row')).toHaveCount(2);
+});
+
+test('workqueue pane: all-scope guardrail dismiss is session scoped', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await stubWorkqueueItems(page, makeGuardrailItems(3));
+
+  await loginAdmin(page, env.serverPort);
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.workqueue.scope.v1', 'all');
+    localStorage.setItem('clawnsole.admin.workqueue.allScopeGuardrailThreshold.v1', '2');
+  });
+
+  await addPane(page, 'Workqueue pane');
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-scope="all"]').click();
+  const guardrail = wqPane.locator('[data-wq-all-scope-guardrail]');
+
+  await expect(guardrail).toBeVisible();
+  await guardrail.locator('[data-wq-guardrail-dismiss="true"]').click();
+  await expect(guardrail).toBeHidden();
+
+  await wqPane.locator('[data-wq-refresh]').click();
+  await expect(guardrail).toBeHidden();
+
+  await page.reload();
+  const reloadedPane = page.locator('[data-pane]').last();
+  await reloadedPane.locator('[data-wq-scope="all"]').click();
+  await expect(reloadedPane.locator('[data-wq-all-scope-guardrail]')).toBeVisible();
 });
 
 test('workqueue pane: all-scope guardrail stays hidden below threshold', async ({ page }) => {

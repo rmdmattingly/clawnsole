@@ -158,20 +158,26 @@ test('pane: workqueue scope filter toggles deterministic row counts', async ({ p
 
   const runId = `scope-${Date.now()}`;
   const mkTitle = (s) => `pw-e2e-${runId}-${s}`;
+  const chooseAssignTarget = async (query, expectedValue) => {
+    const pickerSearch = wqPane.locator('[data-wq-claim-agent-search]');
+    await pickerSearch.fill(query);
+    await pickerSearch.press('Enter');
+    await expect(wqPane.locator('[data-wq-claim-agent]')).toHaveValue(expectedValue);
+  };
 
   await wqPane.locator('details.wq-enqueue > summary').click();
 
   // Enqueue one unassigned item.
   await wqPane.locator('[data-wq-enqueue-title]').fill(mkTitle('unassigned'));
   await wqPane.locator('[data-wq-enqueue-instructions]').fill('scope test unassigned');
-  await wqPane.locator('[data-wq-claim-agent]').selectOption('');
+  await chooseAssignTarget('Unassigned', '');
   await wqPane.locator('[data-wq-enqueue-submit]').click();
   await expect(wqPane.locator('[data-wq-enqueue-status]')).toContainText('Queued');
 
   // Enqueue one assigned-to-main item.
   await wqPane.locator('[data-wq-enqueue-title]').fill(mkTitle('assigned-main'));
   await wqPane.locator('[data-wq-enqueue-instructions]').fill('scope test assigned');
-  await wqPane.locator('[data-wq-claim-agent]').selectOption('main');
+  await chooseAssignTarget('main', 'main');
   await wqPane.locator('[data-wq-enqueue-submit]').click();
   await expect(wqPane.locator('[data-wq-enqueue-status]')).toContainText('Queued');
 

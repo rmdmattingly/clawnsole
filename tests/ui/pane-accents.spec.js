@@ -37,6 +37,13 @@ test('pane accents: each pane kind exposes deterministic accent selectors', asyn
   await expect(page.locator('#paneManagerModal')).toHaveClass(/open/);
 
   for (const kind of ['chat', 'workqueue', 'cron', 'timeline']) {
-    await expect(page.locator(`[data-pane-manager-accent="${kind}"]`)).toHaveCount(1);
+    const badge = page.locator(`.pane-manager-row[data-pane-kind="${kind}"] [data-pane-type-badge][data-pane-accent="${kind}"]`);
+    await expect(badge).toHaveCount(1);
+    await expect(badge.locator('.pane-type-text')).toHaveText(paneLabelForKind(kind));
   }
 });
+
+function paneLabelForKind(kind) {
+  if (kind === 'workqueue') return 'Workqueue';
+  return kind.charAt(0).toUpperCase() + kind.slice(1);
+}

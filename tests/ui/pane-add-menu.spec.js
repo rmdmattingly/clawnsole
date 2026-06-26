@@ -92,8 +92,6 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T reuses timeline pane; Alt adds anyway
   const countBefore = await page.locator('[data-pane]').count();
   await page.evaluate(() => document.activeElement?.blur?.());
 
-  await page.evaluate(() => document.activeElement?.blur?.());
-
   const fireTimelineShortcut = async (forceNew = false) => {
     await page.evaluate(({ force }) => {
       window.dispatchEvent(new KeyboardEvent('keydown', {
