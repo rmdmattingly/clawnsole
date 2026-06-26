@@ -1493,6 +1493,17 @@ button.agents-section-title:hover {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.agents-row.selected {
+  border-color: rgba(82, 168, 255, 0.75);
+  background: rgba(82, 168, 255, 0.12);
+  box-shadow: 0 0 0 2px rgba(82, 168, 255, 0.18);
+}
+
+.agents-row:focus-visible {
+  outline: 2px solid rgba(82, 168, 255, 0.85);
+  outline-offset: 2px;
+}
+
 .agents-pin {
   width: 36px;
   height: 36px;

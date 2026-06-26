@@ -533,6 +533,7 @@ let agentAutoRefreshInterval = null;
 let agentsModalAutoRefreshInterval = null;
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
+let agentsModalSelectedAgentId = '';
 
 function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
@@ -2611,9 +2612,9 @@ function openAgentsModal() {
   startAgentsModalAutoRefresh();
   startAgentsModalFreshnessTicker();
 
-  // Focus search by default for fast filtering.
   try {
-    globalElements.agentsSearch?.focus?.();
+    const selected = getAgentsModalSelectedRow();
+    (selected || globalElements.agentsList)?.focus?.({ preventScroll: true });
   } catch {}
 }
 
@@ -2622,6 +2623,63 @@ function closeAgentsModal() {
   globalElements.agentsModal?.setAttribute('aria-hidden', 'true');
   stopAgentsModalAutoRefresh();
   stopAgentsModalFreshnessTicker();
+}
+
+function isAgentsModalShortcutTarget(target) {
+  const el = target instanceof Element ? target : null;
+  if (!el) return true;
+  if (el.isContentEditable) return false;
+  const tag = String(el.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return false;
+  if (el.closest('input, textarea, select, [contenteditable="true"]')) return false;
+  return true;
+}
+
+function getAgentsModalRows() {
+  return Array.from(globalElements.agentsList?.querySelectorAll?.('.agents-row[data-agent-id]') || []).filter((row) => !row.closest('[hidden]'));
+}
+
+function getAgentsModalSelectedRow() {
+  return getAgentsModalRows().find((row) => row.classList.contains('selected')) || null;
+}
+
+function syncAgentsModalSelection({ scroll = false } = {}) {
+  const rows = getAgentsModalRows();
+  if (rows.length === 0) {
+    agentsModalSelectedAgentId = '';
+    return;
+  }
+
+  const hasSelected = rows.some((row) => String(row.getAttribute('data-agent-id') || '') === agentsModalSelectedAgentId);
+  if (!hasSelected) agentsModalSelectedAgentId = String(rows[0].getAttribute('data-agent-id') || '');
+
+  rows.forEach((row) => {
+    const selected = String(row.getAttribute('data-agent-id') || '') === agentsModalSelectedAgentId;
+    row.classList.toggle('selected', selected);
+    row.setAttribute('aria-selected', selected ? 'true' : 'false');
+    row.tabIndex = selected ? 0 : -1;
+    if (selected && scroll) row.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+function moveAgentsModalSelection(delta) {
+  const rows = getAgentsModalRows();
+  if (rows.length === 0) return;
+  const current = Math.max(
+    0,
+    rows.findIndex((row) => String(row.getAttribute('data-agent-id') || '') === agentsModalSelectedAgentId)
+  );
+  const next = Math.min(rows.length - 1, Math.max(0, current + delta));
+  agentsModalSelectedAgentId = String(rows[next].getAttribute('data-agent-id') || '');
+  syncAgentsModalSelection({ scroll: true });
+  rows[next].focus?.({ preventScroll: true });
+}
+
+function openAgentsModalSelection(kind) {
+  const id = String(getAgentsModalSelectedRow()?.getAttribute('data-agent-id') || agentsModalSelectedAgentId || '').trim();
+  if (!id) return;
+  if (kind === 'workqueue') openAgentWorkqueueFromFleet(id);
+  else openAgentChatFromFleet(id);
 }
 
 function findExistingPane(kind, predicate = null) {
@@ -2794,6 +2852,10 @@ function renderAgentsModalList() {
       const id = String(agent?.id || '').trim();
       const row = document.createElement('div');
       row.className = 'agents-row';
+      row.setAttribute('data-agent-id', id);
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', 'false');
+      row.tabIndex = -1;
 
       const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
@@ -2835,6 +2897,12 @@ function renderAgentsModalList() {
         renderAgentsModalList();
       });
 
+      row.addEventListener('click', () => {
+        agentsModalSelectedAgentId = id;
+        syncAgentsModalSelection();
+        row.focus?.({ preventScroll: true });
+      });
+
       const actionButtons = Array.from(row.querySelectorAll('[data-agent-action]'));
       actionButtons.forEach((btn) => {
         btn.addEventListener('click', (e) => {
@@ -2859,6 +2927,7 @@ function renderAgentsModalList() {
 
   const empty = ordered.length === 0;
   if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
+  syncAgentsModalSelection();
 }
 
 // Workqueue (admin-only)
@@ -7530,6 +7599,26 @@ globalElements.agentsBtn?.addEventListener('click', () => openAgentsModal());
 globalElements.agentsCloseBtn?.addEventListener('click', () => closeAgentsModal());
 globalElements.agentsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.agentsModal) closeAgentsModal();
+});
+document.addEventListener('keydown', (event) => {
+  if (!globalElements.agentsModal?.classList?.contains('open')) return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (target && target !== document.body && !globalElements.agentsModal?.contains(target)) return;
+  if (!isAgentsModalShortcutTarget(event.target)) return;
+  if (event.key === 'j' || event.key === 'ArrowDown') {
+    event.preventDefault();
+    moveAgentsModalSelection(1);
+    return;
+  }
+  if (event.key === 'k' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    moveAgentsModalSelection(-1);
+    return;
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    openAgentsModalSelection(event.shiftKey ? 'workqueue' : 'chat');
+  }
 });
 
 globalElements.agentsSearch?.addEventListener('input', () => renderAgentsModalList());

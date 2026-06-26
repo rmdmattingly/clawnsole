@@ -126,3 +126,46 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue(agentId || 'main');
 });
+
+test('agents modal keyboard triage selects rows and opens chat or workqueue', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha-agent', name: 'alpha-agent', displayName: 'Alpha Agent' },
+    { id: 'bravo-agent', name: 'bravo-agent', displayName: 'Bravo Agent' },
+    { id: 'charlie-agent', name: 'charlie-agent', displayName: 'Charlie Agent' }
+  ];
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const rows = page.locator('#agentsList .agents-row');
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0)).toHaveClass(/selected/);
+
+  await page.locator('#agentsSearch').focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(rows.nth(0)).toHaveClass(/selected/);
+
+  await rows.nth(0).click();
+  await page.keyboard.press('j');
+  await expect(rows.nth(1)).toHaveClass(/selected/);
+
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => {
+    return page.locator('[data-pane][data-pane-kind="chat"] [data-pane-agent-select]').evaluateAll((nodes) => nodes.map((node) => node.value));
+  }).toContain('bravo-agent');
+
+  await page.keyboard.press('Shift+Enter');
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue('bravo-agent');
+
+  await page.keyboard.press('ArrowUp');
+  await expect(rows.nth(0)).toHaveClass(/selected/);
+});
