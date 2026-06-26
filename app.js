@@ -3555,15 +3555,24 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
   if (queue) params.set('queue', queue);
   if (statuses.length) params.set('status', statuses.join(','));
   const url = `/api/workqueue/items${params.toString() ? `?${params.toString()}` : ''}`;
+  const allParams = new URLSearchParams();
+  if (queue) allParams.set('queue', queue);
+  const allUrl = `/api/workqueue/items${allParams.toString() ? `?${allParams.toString()}` : ''}`;
 
   const statusLine = pane.elements.thread.querySelector('[data-wq-statusline]');
   if (statusLine) statusLine.textContent = 'Loading...';
 
   try {
-    const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+    const [res, allRes] = await Promise.all([
+      fetch(url, { credentials: 'include', cache: 'no-store' }),
+      fetch(allUrl, { credentials: 'include', cache: 'no-store' })
+    ]);
     if (!res.ok) throw new Error(String(res.status));
+    if (!allRes.ok) throw new Error(String(allRes.status));
     const data = await res.json();
+    const allData = await allRes.json();
     const items = Array.isArray(data.items) ? data.items : [];
+    const allItems = Array.isArray(allData.items) ? allData.items : items;
     const previousSignature = pane.workqueue.itemsSignature || '';
     const nextSignature = JSON.stringify(items.map((it) => [
       it?.id || '',
@@ -3572,15 +3581,45 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
       it?.title || ''
     ]));
     pane.workqueue.items = items;
+    pane.workqueue.allItems = allItems;
     pane.workqueue.itemsSignature = nextSignature;
     if (previousSignature && previousSignature !== nextSignature) {
       markPaneUnread(pane, 1, 'workqueue');
     }
-    if (statusLine) statusLine.textContent = `${items.length} item(s)`;
+    if (statusLine) statusLine.textContent = allItems.length === items.length ? `${items.length} item(s)` : `${items.length} item(s), ${allItems.length} total`;
     renderWorkqueuePaneItems(pane);
   } catch (err) {
     if (statusLine) statusLine.textContent = `Failed to load: ${String(err)}`;
   }
+}
+
+function formatWorkqueueScopeReason(scope, activeTarget) {
+  if (scope === 'assigned') return activeTarget ? `scope=assigned to ${activeTarget}` : 'scope=assigned without active target';
+  if (scope === 'unassigned') return 'scope=unassigned';
+  return '';
+}
+
+function getWorkqueueQuickFilterReason(quickFilters) {
+  const parts = [];
+  const sources = Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((x) => String(x || '').trim()).filter(Boolean) : [];
+  const repos = Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((x) => String(x || '').trim()).filter(Boolean) : [];
+  if (sources.length) parts.push(`source=${sources.join(', ')}`);
+  if (repos.length) parts.push(`repo=${repos.join(', ')}`);
+  return parts.join(' + ');
+}
+
+function composeWorkqueueHiddenReason({ pane, totalRows, statusRows, scopedRows, visibleRows, activeTarget }) {
+  const reasons = [];
+  const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
+  if (statusRows < totalRows) reasons.push(`status=${statuses.length ? statuses.join(', ') : 'default'}`);
+
+  const scopeReason = formatWorkqueueScopeReason(pane.workqueue?.scopeFilter || 'all', activeTarget);
+  if (scopeReason && scopedRows < statusRows) reasons.push(scopeReason);
+
+  const quickReason = getWorkqueueQuickFilterReason(pane.workqueue?.quickFilters);
+  if (quickReason && visibleRows < scopedRows) reasons.push(quickReason);
+
+  return `0 visible of ${totalRows} total${reasons.length ? `; hidden by ${reasons.join(' + ')}` : ''}.`;
 }
 
 function renderWorkqueuePaneItems(pane) {
@@ -3590,6 +3629,7 @@ function renderWorkqueuePaneItems(pane) {
   body.innerHTML = '';
 
   const itemsRaw = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
+  const allItemsRaw = Array.isArray(pane.workqueue?.allItems) ? pane.workqueue.allItems : itemsRaw;
   const scope = pane.workqueue?.scopeFilter || 'all';
   const activeTarget = String(pane.agentId || '').trim();
   const getOwner = (it) => String(it?.claimedBy || it?.assignee || it?.assignedTo || it?.agentId || '').trim();
@@ -3610,7 +3650,30 @@ function renderWorkqueuePaneItems(pane) {
       const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
       const statusLabel = statuses.length ? statuses.join(', ') : 'default';
       const scopeLabel = pane.workqueue?.scopeFilter || 'all';
-      empty.innerHTML = `
+      const totalRows = allItemsRaw.length;
+      if (totalRows > 0) {
+        const reason = composeWorkqueueHiddenReason({
+          pane,
+          totalRows,
+          statusRows: itemsRaw.length,
+          scopedRows: scopedItems.length,
+          visibleRows: items.length,
+          activeTarget
+        });
+        empty.innerHTML = `
+          <div class="empty-state">
+            <div style="font-weight:700; margin-bottom:6px;">No rows match the current filters.</div>
+            <div class="hint" data-wq-empty-reason>${escapeHtml(reason)}</div>
+            <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+              <button type="button" class="secondary" data-wq-empty-action="reset-scope">Reset scope</button>
+              <button type="button" class="secondary" data-wq-empty-action="clear-status">Clear status filters</button>
+              <button type="button" class="secondary" data-wq-empty-action="show-all">Show all rows</button>
+              <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
+            </div>
+          </div>
+        `;
+      } else {
+        empty.innerHTML = `
         <div class="empty-state">
           <div style="font-weight:700; margin-bottom:6px;">No items in this queue.</div>
           <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
@@ -3621,6 +3684,7 @@ function renderWorkqueuePaneItems(pane) {
           <div class="hint" style="margin-top:8px;">Tip: use “Enqueue new item” above, or configure queues on the server.</div>
         </div>
       `;
+      }
 
       const refreshBtn = pane.elements?.thread?.querySelector('[data-wq-refresh]');
       const enqueueDetails = pane.elements?.thread?.querySelector('details.wq-enqueue');
@@ -3631,6 +3695,12 @@ function renderWorkqueuePaneItems(pane) {
           enqueueDetails?.scrollIntoView({ block: 'nearest' });
           pane.elements?.thread?.querySelector('[data-wq-enqueue-title]')?.focus();
         } catch {}
+      });
+      empty.querySelectorAll('[data-wq-empty-action]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const action = String(btn.getAttribute('data-wq-empty-action') || '').trim();
+          pane.elements?.thread?.dispatchEvent(new CustomEvent('wq:recovery-action', { bubbles: true, detail: { action } }));
+        });
       });
     }
   }
@@ -5974,6 +6044,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       }
     };
 
+    const recordWorkqueueRecoveryAction = (action) => {
+      addFeed('info', `workqueue_recovery:${action}`, {
+        action,
+        queue: String(pane.workqueue?.queue || 'dev-team'),
+        totalRows: Array.isArray(pane.workqueue?.allItems) ? pane.workqueue.allItems.length : 0
+      });
+    };
+
     const applyStatuses = async (next, { closeMenu = false } = {}) => {
       statusSet.clear();
       for (const s of next) statusSet.add(s);
@@ -6198,6 +6276,30 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       btn.addEventListener('click', () => setScope(btn.getAttribute('data-wq-scope')));
     });
     updateScopeUi();
+
+    elements.thread.addEventListener('wq:recovery-action', (event) => {
+      const action = String(event?.detail?.action || '').trim();
+      if (!action) return;
+      recordWorkqueueRecoveryAction(action);
+      if (action === 'reset-scope') {
+        setScope(getDefaultWorkqueueScope());
+        return;
+      }
+      if (action === 'clear-status') {
+        applyStatuses(Array.from(WORKQUEUE_STATUSES));
+        return;
+      }
+      if (action === 'show-all') {
+        sourceSet.clear();
+        repoSet.clear();
+        persistQuickFilters();
+        pane.workqueue.scopeFilter = 'all';
+        storage.set(WORKQUEUE_SCOPE_PREF_KEY, pane.workqueue.scopeFilter);
+        updateScopeUi();
+        updateQuickFilterUi();
+        applyStatuses(Array.from(WORKQUEUE_STATUSES));
+      }
+    });
 
     sourceBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
