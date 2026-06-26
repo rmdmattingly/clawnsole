@@ -6898,7 +6898,6 @@ function isTypingShortcutExempt(event) {
   const key = String(event.key || '').toLowerCase();
   if (!event.metaKey && !event.ctrlKey) return false;
   if (event.altKey) return false;
-  if (event.shiftKey && ['c', 'w', 'r', 't', 'n'].includes(key)) return true;
   if (!event.shiftKey && ['k', 'p'].includes(key)) return true;
   return false;
 }
