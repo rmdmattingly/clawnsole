@@ -77,3 +77,35 @@ test('chat pane: stop button can cancel a running response', async ({ page }) =>
   // Cancel should not still emit a completed reply after stream is stopped.
   await expect(pane.locator('.chat-bubble.assistant')).not.toContainText('mock-reply: please stream this', { timeout: 3000 });
 });
+
+test('chat pane: stop control is hidden/untabbable while idle and toggles for active runs', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
+
+  const pane = page.locator('[data-pane][data-pane-kind="chat"]').last();
+  const input = pane.locator('[data-pane-input]');
+  const sendBtn = pane.locator('[data-pane-send]');
+  const stopBtn = pane.locator('[data-pane-stop]');
+
+  await expect(sendBtn).toBeEnabled({ timeout: 90000 });
+  await expect(stopBtn).toBeHidden();
+  await expect(stopBtn).toHaveAttribute('tabindex', '-1');
+
+  await input.fill('normal non-stream reply');
+  await sendBtn.click();
+  await expect(stopBtn).toBeVisible();
+  await expect(stopBtn).toBeEnabled();
+
+  await expect(pane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: normal non-stream reply');
+  await expect(stopBtn).toBeHidden();
+  await expect(stopBtn).toHaveAttribute('tabindex', '-1');
+
+  await input.focus();
+  await page.keyboard.press('Tab');
+  await expect(stopBtn).not.toBeFocused();
+});
