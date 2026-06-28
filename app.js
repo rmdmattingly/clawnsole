@@ -7784,20 +7784,6 @@ window.addEventListener('keydown', (event) => {
     }
   }
 
-  // Cmd/Ctrl+P opens Pane Manager (even while typing).
-  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'p') {
-    event.preventDefault();
-    openPaneManager();
-    return;
-  }
-
-  // Cmd/Ctrl+K opens command palette (even while typing).
-  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'k') {
-    event.preventDefault();
-    openCommandPalette();
-    return;
-  }
-
   if (event.key === 'Escape') {
     closeCommandPalette();
     closePaneManager();
@@ -7815,6 +7801,20 @@ window.addEventListener('keydown', (event) => {
   if (isTypingContext(event.target)) return;
 
   const key = String(event.key || '');
+
+  // Cmd/Ctrl+P opens Pane Manager.
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && key.toLowerCase() === 'p') {
+    event.preventDefault();
+    openPaneManager();
+    return;
+  }
+
+  // Cmd/Ctrl+K opens command palette.
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && key.toLowerCase() === 'k') {
+    event.preventDefault();
+    openCommandPalette();
+    return;
+  }
 
   // Ctrl+Tab walks panes in most-recently-used order; Shift reverses the traversal.
   if (event.ctrlKey && !event.metaKey && !event.altKey && key === 'Tab') {
