@@ -115,7 +115,10 @@ test('workqueue pane: status filter uses human labels and queue-scoped counts', 
 
   const wqPane = page.locator('[data-pane]').last();
   const queueSelect = wqPane.locator('[data-wq-queue-select]');
-  await queueSelect.selectOption('pane-status-dev');
+  const customQueue = wqPane.locator('[data-wq-queue-custom]');
+  await queueSelect.selectOption('__custom__');
+  await customQueue.fill('pane-status-dev');
+  await customQueue.press('Enter');
 
   await expect(wqPane.locator('[data-wq-statusline]')).toContainText('1 item');
   await wqPane.locator('[data-wq-status-details] summary').click();
@@ -124,7 +127,9 @@ test('workqueue pane: status filter uses human labels and queue-scoped counts', 
   await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'in_progress' })).toHaveCount(0);
   await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
 
-  await queueSelect.selectOption('pane-status-qa');
+  await queueSelect.selectOption('__custom__');
+  await customQueue.fill('pane-status-qa');
+  await customQueue.press('Enter');
   await expect(wqPane.locator('[data-wq-statusline]')).toContainText('1 item');
   await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
 });
