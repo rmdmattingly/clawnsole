@@ -2265,7 +2265,7 @@ function buildCommandPaletteItems() {
       '?'
     ),
     withShortcut(
-      { id: 'cmd:open-workqueue', label: 'Workqueue: Open modal', detail: 'Open the Workqueue modal', run: () => openWorkqueue() },
+      { id: 'cmd:open-workqueue', label: 'Workqueue: Open', detail: 'Open Workqueue for the active chat target', run: () => openTopbarWorkqueueAction() },
       'g w'
     ),
     withShortcut(
@@ -2706,6 +2706,49 @@ function openAgentWorkqueueFromFleet(agentId) {
   } catch {}
   paneManager.persistAdminPanes();
   paneManager.focusPanePrimary(pane);
+}
+
+function findActivePaneFromFocus() {
+  const active = document.activeElement;
+  if (!active) return null;
+  return paneManager.panes.find((pane) => {
+    const root = pane?.elements?.root;
+    return !!(root && (root === active || root.contains(active)));
+  }) || null;
+}
+
+function getActiveChatTargetForWorkqueuePairing() {
+  const focusedPane = findActivePaneFromFocus();
+  const rememberedPane = paneMruOrder()
+    .map((key) => paneManager.panes.find((pane) => pane?.key && pane.key === key) || null)
+    .find((pane) => pane?.kind === 'chat') || null;
+  const activePane = focusedPane || rememberedPane;
+  if (activePane?.kind === 'chat') {
+    return normalizeAgentId(activePane.agentId || 'main');
+  }
+  return '';
+}
+
+function openOrFocusPairedWorkqueuePaneForTarget(target) {
+  const nextTarget = normalizeAgentId(target || '');
+  if (!nextTarget) return false;
+
+  const pane =
+    findExistingPane('workqueue', (p) => normalizeAgentId(p?.workqueue?.queue || '') === nextTarget) ||
+    paneManager.addPane('workqueue', { queue: nextTarget });
+  if (!pane) return false;
+
+  pane.workqueue = pane.workqueue || {};
+  pane.workqueue.queue = nextTarget;
+  paneManager.persistAdminPanes();
+  paneManager.focusPanePrimary(pane);
+  return true;
+}
+
+function openTopbarWorkqueueAction() {
+  const activeChatTarget = getActiveChatTargetForWorkqueuePairing();
+  if (activeChatTarget && openOrFocusPairedWorkqueuePaneForTarget(activeChatTarget)) return;
+  openWorkqueue();
 }
 
 function renderAgentsModalList() {
@@ -6882,6 +6925,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 const paneManager = {
   panes: [],
   maxPanes: 6,
+  lastFocusedPaneKey: '',
   init() {
     this.destroyAll();
 
@@ -7579,7 +7623,7 @@ window.addEventListener('focus', () => {
   refreshAgents({ reason: 'fleet_focus_resume' }).catch(() => {});
 });
 
-globalElements.workqueueBtn?.addEventListener('click', () => openWorkqueue());
+globalElements.workqueueBtn?.addEventListener('click', () => openTopbarWorkqueueAction());
 globalElements.fleetBtn?.addEventListener('click', (event) => {
   const forceNew = !!event?.altKey;
   openFleetPane({ forceNew });
@@ -7915,7 +7959,7 @@ window.addEventListener('keydown', (event) => {
     if (key.toLowerCase() === 'w' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
       shortcutState.lastGAtMs = 0;
       event.preventDefault();
-      openWorkqueue();
+      openTopbarWorkqueueAction();
       return;
     }
   }
