@@ -1803,17 +1803,49 @@ function clearPaneUnread(pane) {
   if (!pane) return;
   if (!pane.unreadCount) return;
   pane.unreadCount = 0;
+  pane.unreadKind = '';
   renderPaneIdentity(pane);
+  renderPaneActivityBadge(pane);
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
-function markPaneUnread(pane, increment = 1) {
+function unreadKindLabel(kind) {
+  const k = String(kind || '').trim().toLowerCase();
+  if (k === 'workqueue') return 'workqueue update';
+  if (k === 'activity') return 'activity update';
+  return 'chat message';
+}
+
+function renderPaneActivityBadge(pane) {
+  const badge = pane?.elements?.activityBadge;
+  if (!badge) return;
+
+  const count = paneUnreadCount(pane);
+  if (count <= 0) {
+    badge.hidden = true;
+    badge.textContent = '•';
+    badge.setAttribute('aria-label', 'No unread activity');
+    badge.title = 'No unread activity';
+    return;
+  }
+
+  const kindLabel = unreadKindLabel(pane?.unreadKind);
+  const countLabel = `${count} unread ${kindLabel}${count === 1 ? '' : 's'}`;
+  badge.hidden = false;
+  badge.textContent = count > 99 ? '99+' : String(count);
+  badge.setAttribute('aria-label', countLabel);
+  badge.title = countLabel;
+}
+
+function markPaneUnread(pane, increment = 1, kind = 'chat') {
   if (!pane) return;
   const activeKey = focusedPaneKey();
   if (activeKey && activeKey === pane.key) return;
   const next = paneUnreadCount(pane) + Math.max(1, Number(increment || 1));
   pane.unreadCount = next;
+  pane.unreadKind = String(kind || 'activity');
   renderPaneIdentity(pane);
+  renderPaneActivityBadge(pane);
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -3532,7 +3564,18 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
     const items = Array.isArray(data.items) ? data.items : [];
+    const previousSignature = pane.workqueue.itemsSignature || '';
+    const nextSignature = JSON.stringify(items.map((it) => [
+      it?.id || '',
+      it?.status || '',
+      it?.updatedAt || '',
+      it?.title || ''
+    ]));
     pane.workqueue.items = items;
+    pane.workqueue.itemsSignature = nextSignature;
+    if (previousSignature && previousSignature !== nextSignature) {
+      markPaneUnread(pane, 1, 'workqueue');
+    }
     if (statusLine) statusLine.textContent = `${items.length} item(s)`;
     renderWorkqueuePaneItems(pane);
   } catch (err) {
@@ -4445,8 +4488,8 @@ function paneAddChatMessage(pane, { role, text, runId, streaming = false, persis
   }
 
   pane.elements.thread.appendChild(bubble);
-  if (role === 'assistant') {
-    markPaneUnread(pane, 1);
+  if (role === 'assistant' && !streaming) {
+    markPaneUnread(pane, 1, 'chat');
   }
   pane.scroll.pinned = shouldPin;
   scrollToBottom(pane);
@@ -4476,7 +4519,7 @@ function paneUpdateChatRun(pane, runId, text, done) {
     return;
   }
   if (done) {
-    markPaneUnread(pane, 1);
+    markPaneUnread(pane, 1, 'chat');
   }
   const shouldPin = pane.scroll.pinned || isNearBottom(pane.elements.thread);
   entry.pendingText = text || '';
@@ -5516,6 +5559,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     agentLabel: root.querySelector('[data-pane-agent-label]'),
     agentWarning: root.querySelector('[data-pane-agent-warning]'),
     status: root.querySelector('[data-pane-status]'),
+    activityBadge: root.querySelector('[data-pane-activity-badge]'),
     helpDetails: root.querySelector('[data-pane-help]'),
     helpPopover: root.querySelector('[data-pane-help-popover]'),
     closeBtn: root.querySelector('[data-pane-close]'),
@@ -5564,6 +5608,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     elements,
     chat: { runs: new Map(), history: [] },
     unreadCount: 0,
+    unreadKind: '',
     scroll: { pinned: true },
     thinking: { active: false, timer: null, dotsTimer: null, bubble: null },
     activeRunId: null,
@@ -5693,6 +5738,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     notePaneFocused(pane);
     clearPaneUnread(pane);
   });
+  elements.root?.addEventListener('pointerdown', () => {
+    notePaneFocused(pane);
+    clearPaneUnread(pane);
+  });
+  renderPaneActivityBadge(pane);
 
   // WORKQUEUE PANE
   if (pane.role === 'admin' && pane.kind === 'workqueue') {
