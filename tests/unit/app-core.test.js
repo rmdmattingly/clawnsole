@@ -5,6 +5,8 @@ const {
   escapeHtml,
   fmtRemaining,
   sortWorkqueueItems,
+  buildWorkqueueGroupRows,
+  DEFAULT_WORKQUEUE_GROUP_THRESHOLD,
   inferPaneCols,
   normalizePaneKind,
   normalizeAdminDestination,
@@ -95,6 +97,41 @@ test('sortWorkqueueItems priority sort uses updatedAt desc tie-breaker', () => {
 
   const sorted = sortWorkqueueItems(items, { sortKey: 'priority', sortDir: 'desc' });
   assert.deepEqual(sorted.map((it) => it.id), ['c', 'b', 'a']);
+});
+
+test('buildWorkqueueGroupRows collapses repetitive rows only past the documented threshold', () => {
+  const items = Array.from({ length: DEFAULT_WORKQUEUE_GROUP_THRESHOLD + 1 }, (_, idx) => ({
+    id: `routine-${idx}`,
+    title: `PR review sweep ${idx}`,
+    dedupeKey: `pr-review:2026-06-${String(idx + 1).padStart(2, '0')}T00`,
+    status: idx === 2 ? 'claimed' : 'ready',
+    priority: idx === 5 ? 99 : idx,
+    updatedAt: `2026-06-${String((idx % 9) + 1).padStart(2, '0')}T00:00:00Z`
+  }));
+
+  const belowThreshold = buildWorkqueueGroupRows(items.slice(0, DEFAULT_WORKQUEUE_GROUP_THRESHOLD), { enabled: true });
+  assert.equal(belowThreshold.length, DEFAULT_WORKQUEUE_GROUP_THRESHOLD);
+  assert.equal(belowThreshold.some((row) => row.type === 'group'), false);
+
+  const grouped = buildWorkqueueGroupRows(items, { enabled: true, now: Date.parse('2026-07-01T00:00:00Z') });
+  assert.equal(grouped.length, 1);
+  assert.equal(grouped[0].type, 'group');
+  assert.equal(grouped[0].count, DEFAULT_WORKQUEUE_GROUP_THRESHOLD + 1);
+  assert.equal(grouped[0].priority, 99);
+  assert.equal(grouped[0].status, 'claimed');
+
+  const expanded = buildWorkqueueGroupRows(items, { enabled: true, expandedKeys: [grouped[0].key] });
+  assert.equal(expanded[0].type, 'group');
+  assert.equal(expanded[0].expanded, true);
+  assert.equal(expanded.length, DEFAULT_WORKQUEUE_GROUP_THRESHOLD + 2);
+
+  const titleFallback = buildWorkqueueGroupRows(
+    items.map(({ dedupeKey, ...item }) => item),
+    { enabled: true }
+  );
+  assert.equal(titleFallback.length, 1);
+  assert.equal(titleFallback[0].type, 'group');
+  assert.equal(titleFallback[0].count, DEFAULT_WORKQUEUE_GROUP_THRESHOLD + 1);
 });
 
 test('inferPaneCols maps pane counts to sensible layout widths', () => {

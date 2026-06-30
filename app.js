@@ -109,6 +109,8 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   return `${sec}s`;
 });
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
+const DEFAULT_WORKQUEUE_GROUP_THRESHOLD = __appCore.DEFAULT_WORKQUEUE_GROUP_THRESHOLD || 20;
+const buildWorkqueueGroupRows = __appCore.buildWorkqueueGroupRows || ((items) => (Array.isArray(items) ? items.map((item) => ({ type: 'item', item })) : []));
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
   const n = Number(count);
   if (!Number.isFinite(n) || n <= 1) return 1;
@@ -3601,6 +3603,12 @@ function renderWorkqueuePaneItems(pane) {
   });
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
   const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const rows = buildWorkqueueGroupRows(items, {
+    enabled: pane.workqueue?.groupingEnabled !== false,
+    threshold: DEFAULT_WORKQUEUE_GROUP_THRESHOLD,
+    expandedKeys: pane.workqueue?.expandedGroupKeys,
+    now: Date.now()
+  });
 
   if (empty) {
     const hasItems = items.length > 0;
@@ -3636,10 +3644,12 @@ function renderWorkqueuePaneItems(pane) {
   }
 
   const now = Date.now();
-  for (const it of items) {
+  const expandedGroups = new Set(Array.isArray(pane.workqueue?.expandedGroupKeys) ? pane.workqueue.expandedGroupKeys.map(String) : []);
+  const renderItemRow = (it, { groupChild = false } = {}) => {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'wq-row';
+    if (groupChild) row.classList.add('wq-row-group-child');
     if (it.id && it.id === pane.workqueue.selectedItemId) row.classList.add('selected');
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
@@ -3659,6 +3669,44 @@ function renderWorkqueuePaneItems(pane) {
       pane.workqueue.selectedItemId = it.id || null;
       renderWorkqueuePaneItems(pane);
       renderWorkqueuePaneInspect(pane, it);
+    });
+
+    body.appendChild(row);
+  };
+
+  for (const rowData of rows) {
+    if (rowData?.type !== 'group') {
+      renderItemRow(rowData?.item || rowData, { groupChild: !!rowData?.groupKey });
+      continue;
+    }
+
+    const group = rowData;
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'wq-row wq-row-group';
+    row.setAttribute('data-wq-group-row', group.key);
+    row.setAttribute('aria-expanded', group.expanded ? 'true' : 'false');
+
+    const leaseMs = group.leaseUntil ? Number(group.leaseUntil) - now : NaN;
+    const leaseLabel = group.leaseUntil ? fmtRemaining(leaseMs) : '';
+    const status = String(group.status || 'mixed');
+    const statusText = `${status} / ${group.count}`;
+
+    row.innerHTML = `
+      <div class="wq-col title"><span class="wq-group-caret">${group.expanded ? '▾' : '▸'}</span>${escapeHtml(group.title)} <span class="wq-count-badge mono">×${escapeHtml(String(group.count))}</span></div>
+      <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(statusText)}</span></div>
+      <div class="wq-col prio mono">${escapeHtml(String(group.priority ?? ''))}</div>
+      <div class="wq-col attempts mono">${escapeHtml(String(group.attempts ?? ''))}</div>
+      <div class="wq-col claimedBy">${escapeHtml(String(group.claimedBy || ''))}</div>
+      <div class="wq-col lease mono" data-lease-until="${escapeHtml(String(group.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
+    `;
+
+    row.addEventListener('click', () => {
+      if (expandedGroups.has(group.key)) expandedGroups.delete(group.key);
+      else expandedGroups.add(group.key);
+      pane.workqueue.expandedGroupKeys = Array.from(expandedGroups);
+      renderWorkqueuePaneItems(pane);
+      paneManager.persistAdminPanes();
     });
 
     body.appendChild(row);
@@ -5543,7 +5591,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, groupingEnabled, expandedGroupKeys, cronAgentId, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -5599,7 +5647,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       items: [],
       selectedItemId: null,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
-      sortDir: sortDir === 'asc' ? 'asc' : 'desc'
+      sortDir: sortDir === 'asc' ? 'asc' : 'desc',
+      groupingEnabled: groupingEnabled !== false,
+      expandedGroupKeys: Array.isArray(expandedGroupKeys) ? expandedGroupKeys.map(String).filter(Boolean) : []
     },
     cronAgentId: typeof cronAgentId === 'string' ? cronAgentId.trim() : '',
     connected: false,
@@ -5822,6 +5872,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <button type="button" class="wq-sort-btn" data-wq-sort="updatedAt">Updated</button>
             <button type="button" class="wq-sort-btn" data-wq-sort="createdAt">Created</button>
           </div>
+
+          <label class="wq-group-toggle">
+            <input data-wq-group-toggle type="checkbox" ${pane.workqueue.groupingEnabled !== false ? 'checked' : ''} />
+            <span>Group similar</span>
+          </label>
         </div>
 
         <details class="wq-enqueue">
@@ -5918,6 +5973,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
     const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
+    const groupToggleEl = elements.thread.querySelector('[data-wq-group-toggle]');
 
     const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
 
@@ -6259,6 +6315,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       btn.addEventListener('click', () => setSort(btn.getAttribute('data-wq-sort')));
     });
     updateSortUi();
+
+    groupToggleEl?.addEventListener('change', () => {
+      pane.workqueue.groupingEnabled = !!groupToggleEl.checked;
+      if (!pane.workqueue.groupingEnabled) pane.workqueue.expandedGroupKeys = [];
+      renderWorkqueuePaneItems(pane);
+      paneManager.persistAdminPanes();
+    });
 
     // Enqueue assignment target picker (searchable + recent targets).
     const claimAgentPicker = elements.thread.querySelector('[data-wq-claim-agent-picker]');
@@ -7049,7 +7112,9 @@ const paneManager = {
           };
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir };
+          const groupingEnabled = item.groupingEnabled !== false;
+          const expandedGroupKeys = Array.isArray(item.expandedGroupKeys) ? item.expandedGroupKeys.map((s) => String(s || '').trim()).filter(Boolean) : [];
+          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, groupingEnabled, expandedGroupKeys };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
@@ -7096,7 +7161,9 @@ const paneManager = {
             repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos : []
           },
           sortKey: pane.workqueue?.sortKey || 'priority',
-          sortDir: pane.workqueue?.sortDir || 'desc'
+          sortDir: pane.workqueue?.sortDir || 'desc',
+          groupingEnabled: pane.workqueue?.groupingEnabled !== false,
+          expandedGroupKeys: Array.isArray(pane.workqueue?.expandedGroupKeys) ? pane.workqueue.expandedGroupKeys : []
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {

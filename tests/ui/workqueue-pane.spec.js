@@ -231,6 +231,56 @@ test('workqueue pane: source chips + clawnsole preset filter items without reloa
   await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
 });
 
+test('workqueue pane: groups repetitive routine rows and expands in place', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const queue = `routine-group-${Date.now()}`;
+  await page.evaluate(async ({ queue }) => {
+    for (let idx = 0; idx < 21; idx += 1) {
+      const res = await fetch('/api/workqueue/enqueue', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          queue,
+          title: `PR review sweep ${idx}`,
+          instructions: 'routine check',
+          priority: idx === 10 ? 50 : 1,
+          dedupeKey: `pr-review:2026-06-${String(idx + 1).padStart(2, '0')}T00`
+        })
+      });
+      if (!res.ok) throw new Error(`enqueue failed ${res.status}`);
+    }
+  }, { queue });
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-scope="all"]').click();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-refresh]').click();
+
+  const rows = pane.locator('[data-wq-list-body] .wq-row');
+  await expect(pane.locator('[data-wq-group-row]')).toHaveCount(1);
+  await expect(rows).toHaveCount(1);
+  await expect(pane.locator('[data-wq-group-row] .wq-count-badge')).toHaveText('×21');
+
+  await pane.locator('[data-wq-group-row]').click();
+  await expect(pane.locator('[data-wq-group-row]')).toHaveAttribute('aria-expanded', 'true');
+  await expect(rows).toHaveCount(22);
+  await expect(pane.locator('.wq-row-group-child')).toHaveCount(21);
+
+  await pane.locator('[data-wq-group-toggle]').uncheck();
+  await expect(pane.locator('[data-wq-group-row]')).toHaveCount(0);
+  await expect(rows).toHaveCount(21);
+});
+
 test('workqueue pane: controls toolbar is sticky and list scrolls independently', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);

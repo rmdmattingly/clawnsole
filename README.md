@@ -103,6 +103,11 @@ See also:
 Clawnsole's workqueue supports assigning agents to queues, and letting `claim-next`
 resolve queues automatically when you omit them.
 
+The workqueue pane groups similar routine rows by default when the visible list has
+more than 20 items. Grouping prefers stable dedupe-key prefixes and falls back to
+normalized title prefixes; use the "Group similar" checkbox in the pane toolbar to
+show every row individually.
+
 ### Defaults
 
 - `CLAWNSOLE_DEFAULT_QUEUES` (comma-separated, default: `dev-team`)
