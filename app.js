@@ -2939,6 +2939,32 @@ function renderAgentsModalList() {
 // Workqueue (admin-only)
 
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
+const WORKQUEUE_STATUS_LABELS = {
+  ready: 'Ready',
+  pending: 'Pending',
+  claimed: 'Claimed',
+  in_progress: 'In progress',
+  done: 'Done',
+  failed: 'Failed'
+};
+
+function workqueueStatusLabel(status) {
+  const key = String(status || '').trim();
+  return WORKQUEUE_STATUS_LABELS[key] || key || 'Unknown';
+}
+
+function countWorkqueueItemsByStatus(items) {
+  const counts = Object.create(null);
+  WORKQUEUE_STATUSES.forEach((status) => {
+    counts[status] = 0;
+  });
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const status = String(item?.status || '').trim();
+    if (!status) return;
+    counts[status] = Number(counts[status] || 0) + 1;
+  });
+  return counts;
+}
 
 const workqueueState = {
   queues: [],
@@ -2974,12 +3000,13 @@ function closeWorkqueue() {
 function renderWorkqueueStatusFilters() {
   const root = globalElements.wqStatusFilters;
   if (!root) return;
+  const counts = countWorkqueueItemsByStatus(workqueueState.items);
   root.innerHTML = '';
   for (const s of WORKQUEUE_STATUSES) {
     const id = `wq-status-${s}`;
     const label = document.createElement('label');
     label.className = 'wq-status-chip';
-    label.innerHTML = `<input type="checkbox" id="${id}" ${workqueueState.statusFilter.has(s) ? 'checked' : ''} /> <span>${escapeHtml(s)}</span>`;
+    label.innerHTML = `<input type="checkbox" id="${id}" ${workqueueState.statusFilter.has(s) ? 'checked' : ''} /> <span>${escapeHtml(workqueueStatusLabel(s))} (${Number(counts[s] || 0)})</span>`;
     const checkbox = label.querySelector('input');
     checkbox.addEventListener('change', () => {
       if (checkbox.checked) workqueueState.statusFilter.add(s);
@@ -3107,6 +3134,7 @@ async function fetchAndRenderWorkqueueItems() {
     const data = await res.json();
     const items = Array.isArray(data.items) ? data.items : [];
     workqueueState.items = items;
+    renderWorkqueueStatusFilters();
     renderWorkqueueItems();
   } catch (err) {
     addFeed('err', 'workqueue', `failed to load items: ${String(err)}`);
@@ -3577,6 +3605,9 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
       markPaneUnread(pane, 1, 'workqueue');
     }
     if (statusLine) statusLine.textContent = `${items.length} item(s)`;
+    if (typeof pane.workqueue?.renderStatusMultiSelect === 'function') {
+      pane.workqueue.renderStatusMultiSelect();
+    }
     renderWorkqueuePaneItems(pane);
   } catch (err) {
     if (statusLine) statusLine.textContent = `Failed to load: ${String(err)}`;
@@ -6012,6 +6043,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
     const renderStatusMultiSelect = () => {
       if (!statusRootEl || !statusSelectedEl || !statusOptionsEl) return;
+      const counts = countWorkqueueItemsByStatus(pane.workqueue?.items);
 
       statusSelectedEl.innerHTML = '';
       const selected = Array.from(statusSet);
@@ -6019,7 +6051,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         for (const s of selected) {
           const chip = document.createElement('span');
           chip.className = 'wq-pill';
-          chip.textContent = s;
+          chip.textContent = `${workqueueStatusLabel(s)} (${Number(counts[s] || 0)})`;
           statusSelectedEl.appendChild(chip);
         }
       } else {
@@ -6034,7 +6066,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         const id = `wq-pane-status-${pane.id}-${s}`;
         const label = document.createElement('label');
         label.className = 'wq-status-chip';
-        label.innerHTML = `<input type="checkbox" id="${id}" ${statusSet.has(s) ? 'checked' : ''} /> <span>${escapeHtml(s)}</span>`;
+        label.innerHTML = `<input type="checkbox" id="${id}" ${statusSet.has(s) ? 'checked' : ''} /> <span>${escapeHtml(workqueueStatusLabel(s))} (${Number(counts[s] || 0)})</span>`;
         const checkbox = label.querySelector('input');
         checkbox.addEventListener('change', () => {
           if (checkbox.checked) statusSet.add(s);
@@ -6044,6 +6076,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         statusOptionsEl.appendChild(label);
       }
     };
+    pane.workqueue.renderStatusMultiSelect = renderStatusMultiSelect;
 
     const applyQueueSearchFilter = () => {
       if (!queueSelectEl) return;
