@@ -9,6 +9,7 @@ const {
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
+  deriveInitialWorkqueueScope,
   normalizeAdminDestination,
   deriveAuthOverlayState,
   deriveGlobalConnectionState,
@@ -240,6 +241,14 @@ test('normalizePaneKind handles aliases safely', () => {
   assert.equal(normalizePaneKind('timeline'), 'timeline');
   assert.equal(normalizePaneKind('ti'), 'timeline');
   assert.equal(normalizePaneKind('x'), 'chat');
+});
+
+test('deriveInitialWorkqueueScope defaults targeted workqueue panes to assigned scope', () => {
+  assert.equal(deriveInitialWorkqueueScope({ kind: 'workqueue', role: 'admin', agentId: 'hop' }), 'assigned');
+  assert.equal(deriveInitialWorkqueueScope({ kind: 'workqueue', role: 'admin', agentId: 'main', defaultScope: 'unassigned' }), 'unassigned');
+  assert.equal(deriveInitialWorkqueueScope({ kind: 'workqueue', role: 'admin', agentId: '', defaultScope: 'unassigned' }), 'unassigned');
+  assert.equal(deriveInitialWorkqueueScope({ kind: 'workqueue', role: 'admin', agentId: 'hop', scopeFilter: 'all' }), 'all');
+  assert.equal(deriveInitialWorkqueueScope({ kind: 'chat', role: 'admin', agentId: 'hop', defaultScope: 'unassigned' }), 'all');
 });
 
 test('deriveAuthOverlayState captures auth/role transition flags', () => {

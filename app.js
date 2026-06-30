@@ -155,6 +155,17 @@ const normalizePaneKind = __appCore.normalizePaneKind || ((rawKind) => {
             ? 'timeline'
             : 'chat';
 });
+const deriveInitialWorkqueueScope = __appCore.deriveInitialWorkqueueScope || (({ kind = 'chat', role = null, agentId = '', scopeFilter = '', defaultScope = 'all' } = {}) => {
+  const explicit = String(scopeFilter || '').trim().toLowerCase();
+  if (explicit === 'assigned' || explicit === 'unassigned' || explicit === 'all') return explicit;
+  const paneKind = normalizePaneKind(kind);
+  if (paneKind !== 'workqueue') return 'all';
+  if (String(role || '').trim().toLowerCase() !== 'admin') return 'all';
+  const target = String(agentId || '').trim().toLowerCase();
+  if (target && target !== 'main') return 'assigned';
+  const fallback = String(defaultScope || '').trim().toLowerCase();
+  return fallback === 'assigned' || fallback === 'unassigned' ? fallback : 'all';
+});
 const normalizeAdminDestination = __appCore.normalizeAdminDestination || ((candidate, { origin = '', now = Date.now(), ttlMs = 10 * 60 * 1000 } = {}) => {
   const value = candidate && typeof candidate === 'object' ? candidate : {};
   const href = typeof value.href === 'string' ? value.href.trim() : '';
@@ -8472,6 +8483,8 @@ function renderAgentOptions(selectEl, agentId) {
 }
 
 function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, cronAgentId, nickname, pairedTargetLock = false, closable = true } = {}) {
+  const normalizedKind = normalizePaneKind(kind);
+  const normalizedAgentId = role === 'admin' ? normalizeAgentId(agentId || 'main') : null;
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   root.tabIndex = -1;
@@ -8518,16 +8531,18 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   const pane = {
     key,
     role,
-    kind: (() => {
-      const allowed = new Set(['chat', 'workqueue', 'cron', 'timeline']);
-      const k = String(kind || 'chat').trim().toLowerCase();
-      return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
-    })(),
-    agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
+    kind: normalizedKind,
+    agentId: normalizedAgentId,
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
-      scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScope()),
+      scopeFilter: deriveInitialWorkqueueScope({
+        kind: normalizedKind,
+        role,
+        agentId: normalizedAgentId,
+        scopeFilter,
+        defaultScope: getDefaultWorkqueueScope()
+      }),
       quickFilters: {
         sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
         repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : [],
@@ -10206,7 +10221,7 @@ const paneManager = {
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'];
-          const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
+          const scopeFilter = typeof item.scopeFilter === 'string' ? normalizeWorkqueueScope(item.scopeFilter) : undefined;
           const quickFilters = {
             sources: Array.isArray(item?.quickFilters?.sources) ? item.quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
             repos: Array.isArray(item?.quickFilters?.repos) ? item.quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : [],
