@@ -109,6 +109,7 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   return `${sec}s`;
 });
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
+const defaultWorkqueueSort = __appCore.defaultWorkqueueSort || { sortKey: 'priority', sortDir: 'desc' };
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
   const n = Number(count);
   if (!Number.isFinite(n) || n <= 1) return 1;
@@ -331,8 +332,8 @@ function buildDefaultAdminPanes(defaultAgent = 'main') {
       queue: 'dev-team',
       statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
       scopeFilter: getDefaultWorkqueueScope(),
-      sortKey: 'priority',
-      sortDir: 'desc'
+      sortKey: defaultWorkqueueSort.sortKey,
+      sortDir: defaultWorkqueueSort.sortDir
     }
   ];
 }
@@ -2946,8 +2947,8 @@ const workqueueState = {
   statusFilter: new Set(['ready', 'pending', 'claimed', 'in_progress']),
   items: [],
   selectedItemId: null,
-  sortKey: 'default',
-  sortDir: 'desc',
+  sortKey: defaultWorkqueueSort.sortKey,
+  sortDir: defaultWorkqueueSort.sortDir,
   leaseTicker: null,
   autoRefreshEnabled: true,
   autoRefreshIntervalMs: 15000,
@@ -5598,8 +5599,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       },
       items: [],
       selectedItemId: null,
-      sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
-      sortDir: sortDir === 'asc' ? 'asc' : 'desc'
+      sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : defaultWorkqueueSort.sortKey,
+      sortDir: sortDir === 'asc' ? 'asc' : defaultWorkqueueSort.sortDir
     },
     cronAgentId: typeof cronAgentId === 'string' ? cronAgentId.trim() : '',
     connected: false,
@@ -7047,8 +7048,8 @@ const paneManager = {
             sources: Array.isArray(item?.quickFilters?.sources) ? item.quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
             repos: Array.isArray(item?.quickFilters?.repos) ? item.quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
           };
-          const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
-          const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
+          const sortKey = typeof item.sortKey === 'string' ? item.sortKey : defaultWorkqueueSort.sortKey;
+          const sortDir = item.sortDir === 'asc' ? 'asc' : defaultWorkqueueSort.sortDir;
           return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir };
         }
         if (kind === 'cron' || kind === 'timeline') {
@@ -7095,8 +7096,8 @@ const paneManager = {
             sources: Array.isArray(pane.workqueue?.quickFilters?.sources) ? pane.workqueue.quickFilters.sources : [],
             repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos : []
           },
-          sortKey: pane.workqueue?.sortKey || 'priority',
-          sortDir: pane.workqueue?.sortDir || 'desc'
+          sortKey: pane.workqueue?.sortKey || defaultWorkqueueSort.sortKey,
+          sortDir: pane.workqueue?.sortDir || defaultWorkqueueSort.sortDir
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
