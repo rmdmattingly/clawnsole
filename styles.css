@@ -1846,8 +1846,20 @@ kbd {
 .wq-pane .wq-field,
 .wq-pane .wq-scope,
 .wq-pane .wq-sort,
+.wq-pane .wq-group-toggle,
 .wq-pane .wq-toolbar-row > button {
   flex: 0 0 auto;
+}
+
+.wq-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .wq-status-field {
@@ -2308,6 +2320,34 @@ kbd {
 
 .wq-row.selected {
   background: rgba(127, 209, 185, 0.12);
+}
+
+.wq-row-group {
+  background: rgba(127, 209, 185, 0.07);
+  border-left: 3px solid rgba(127, 209, 185, 0.55);
+  font-weight: 600;
+}
+
+.wq-row-group-child {
+  padding-left: 24px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.wq-group-caret {
+  display: inline-flex;
+  width: 16px;
+  color: var(--muted);
+}
+
+.wq-count-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(127, 209, 185, 0.16);
+  color: var(--text);
+  font-size: 11px;
 }
 
 .wq-col {
