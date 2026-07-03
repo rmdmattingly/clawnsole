@@ -527,6 +527,34 @@ function showToast(message, { kind = 'info', timeoutMs = 2600 } = {}) {
   });
 }
 
+async function copyTextToClipboard(value) {
+  const text = String(value || '');
+  if (!text) return false;
+
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {}
+
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'readonly');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand('copy');
+    textarea.remove();
+    return !!ok;
+  } catch {
+    return false;
+  }
+}
+
 let agentRefreshTimer = null;
 let agentRefreshInFlight = null;
 let agentAutoRefreshInterval = null;
@@ -2740,6 +2768,34 @@ function openAgentWorkqueueFromFleet(agentId) {
   paneManager.focusPanePrimary(pane);
 }
 
+function copyFleetAgentId(agentIdInput) {
+  const agentId = String(agentIdInput || '').trim();
+  if (!agentId) {
+    showToast('Fleet: select an agent first.', { kind: 'info', timeoutMs: 1800 });
+    return false;
+  }
+
+  void copyTextToClipboard(agentId).then((ok) => {
+    if (ok) showToast(`Copied agent id: ${agentId}`, { kind: 'info', timeoutMs: 1800 });
+    else showToast('Could not copy agent id.', { kind: 'error', timeoutMs: 2200 });
+  });
+  return true;
+}
+
+function copyFocusedFleetAgentId() {
+  if (!globalElements.agentsModal?.classList.contains('open')) return false;
+  const active = document.activeElement;
+  const activeRow = active?.closest?.('#agentsList .agents-row');
+  const row = activeRow || globalElements.agentsList?.querySelector?.('.agents-row');
+  const agentId = String(row?.dataset?.agentId || '').trim();
+  if (row && typeof row.focus === 'function') {
+    try {
+      row.focus();
+    } catch {}
+  }
+  return copyFleetAgentId(agentId);
+}
+
 function findActivePaneFromFocus() {
   const active = document.activeElement;
   if (!active) return null;
@@ -2869,6 +2925,8 @@ function renderAgentsModalList() {
       const id = String(agent?.id || '').trim();
       const row = document.createElement('div');
       row.className = 'agents-row';
+      row.dataset.agentId = id;
+      row.tabIndex = 0;
 
       const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
@@ -2889,6 +2947,7 @@ function renderAgentsModalList() {
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Chat</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Timeline</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Workqueue</button>
+          <button type="button" class="secondary agents-action-btn" data-agent-action="copy-agent-id" data-agent-id="${escapeHtml(id)}" title="Copy agent id (y)" aria-label="Copy agent id for ${escapeHtml(label)}">Copy ID</button>
         </div>
         <details class="agents-row-actions-overflow">
           <summary class="secondary" aria-label="More actions for ${escapeHtml(label)}" title="More actions">⋯</summary>
@@ -2896,6 +2955,7 @@ function renderAgentsModalList() {
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Open Chat</button>
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Open Timeline</button>
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Open Workqueue</button>
+            <button type="button" class="secondary agents-action-btn" data-agent-action="copy-agent-id" data-agent-id="${escapeHtml(id)}" title="Copy agent id (y)" aria-label="Copy agent id for ${escapeHtml(label)}">Copy agent id</button>
           </div>
         </details>
       `;
@@ -2919,6 +2979,12 @@ function renderAgentsModalList() {
           if (action === 'open-chat') openAgentChatFromFleet(id);
           else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
           else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(id);
+          else if (action === 'copy-agent-id') {
+            try {
+              row.focus();
+            } catch {}
+            copyFleetAgentId(id);
+          }
         });
       });
 
@@ -7983,6 +8049,14 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     openFleetPane();
     return;
+  }
+
+  // y copies the focused Fleet row's agent id while the Fleet modal is open.
+  if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && key.toLowerCase() === 'y') {
+    if (copyFocusedFleetAgentId()) {
+      event.preventDefault();
+      return;
+    }
   }
 
   // Cmd/Ctrl+R refreshes agent list (instead of page reload).
