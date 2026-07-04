@@ -34,6 +34,38 @@ function seedAgentsForWorkqueuePicker() {
   fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2));
 }
 
+function seedWorkqueueState({ queue, count }) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const base = Date.now() - count * 1000;
+  const items = Array.from({ length: count }, (_, i) => {
+    const isHighPriority = i === 0;
+    return {
+      id: `large-${i}`,
+      queue,
+      title: isHighPriority ? 'zz high priority hidden until sorted' : `large item ${String(i).padStart(3, '0')}`,
+      instructions: 'large list fixture',
+      priority: isHighPriority ? 999 : 1,
+      status: 'ready',
+      claimedBy: '',
+      claimedAt: '',
+      leaseUntil: 0,
+      attempts: 0,
+      lastError: '',
+      createdAt: new Date(base + i * 1000).toISOString(),
+      updatedAt: new Date(base + i * 1000).toISOString(),
+      meta: { repo: 'rmdmattingly/clawnsole', kind: 'issue' }
+    };
+  });
+  const state = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: new Date(base).toISOString() } },
+    items,
+    assignments: {}
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(state, null, 2));
+}
+
 test('workqueue pane: renders + has queue dropdown + does not show chat composer', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -271,4 +303,37 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
     return { overflowY: cs.overflowY };
   });
   expect(['auto', 'scroll']).toContain(listStyles.overflowY);
+});
+
+test('workqueue pane: caps large initial render but sorts the full fetched list', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `large-render-${Date.now()}`;
+  seedWorkqueueState({ queue, count: 520 });
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  const itemsResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await itemsResP;
+
+  const rows = wqPane.locator('[data-wq-list-body] .wq-row');
+  await expect(rows).toHaveCount(100);
+  await expect(wqPane.locator('[data-wq-render-summary]')).toHaveText('Showing 100 of 520 matching items');
+  await expect(wqPane.locator('[data-wq-render-more]')).toBeVisible();
+
+  await wqPane.locator('[data-wq-sort="createdAt"]').first().click();
+  await expect(rows.first().locator('.wq-col.title')).toHaveText('large item 519');
+
+  await wqPane.locator('[data-wq-sort="priority"]').first().click();
+  await expect(rows.first().locator('.wq-col.title')).toHaveText('zz high priority hidden until sorted');
+
+  await wqPane.locator('[data-wq-render-more]').click();
+  await expect(rows).toHaveCount(200);
 });

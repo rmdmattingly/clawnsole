@@ -3512,6 +3512,9 @@ async function renderWorkqueuePane(rootEl, { queue = '' } = {}) {
 window.__debug = window.__debug || {};
 window.__debug.renderWorkqueuePane = renderWorkqueuePane;
 
+const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
+const WORKQUEUE_PANE_RENDER_INCREMENT = 100;
+
 function getWorkqueueItemRepo(item) {
   const repo = String(item?.meta?.repo || '').trim();
   if (repo) return repo;
@@ -3544,6 +3547,11 @@ function applyWorkqueueQuickFilters(items, quickFilters) {
   });
 }
 
+function resetWorkqueuePaneRenderLimit(pane) {
+  if (!pane?.workqueue) return;
+  pane.workqueue.renderLimit = WORKQUEUE_PANE_INITIAL_RENDER_LIMIT;
+}
+
 async function fetchAndRenderWorkqueueItemsForPane(pane) {
   if (!pane || pane.kind !== 'workqueue') return;
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
@@ -3573,6 +3581,7 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
     ]));
     pane.workqueue.items = items;
     pane.workqueue.itemsSignature = nextSignature;
+    resetWorkqueuePaneRenderLimit(pane);
     if (previousSignature && previousSignature !== nextSignature) {
       markPaneUnread(pane, 1, 'workqueue');
     }
@@ -3586,6 +3595,8 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
 function renderWorkqueuePaneItems(pane) {
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
   const empty = pane.elements?.thread?.querySelector('[data-wq-empty]');
+  const renderSummary = pane.elements?.thread?.querySelector('[data-wq-render-summary]');
+  const loadMore = pane.elements?.thread?.querySelector('[data-wq-render-more]');
   if (!body) return;
   body.innerHTML = '';
 
@@ -3601,6 +3612,10 @@ function renderWorkqueuePaneItems(pane) {
   });
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
   const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const rawLimit = Number(pane.workqueue?.renderLimit);
+  const renderLimit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : WORKQUEUE_PANE_INITIAL_RENDER_LIMIT;
+  pane.workqueue.renderLimit = renderLimit;
+  const visibleItems = items.slice(0, renderLimit);
 
   if (empty) {
     const hasItems = items.length > 0;
@@ -3635,8 +3650,23 @@ function renderWorkqueuePaneItems(pane) {
     }
   }
 
+  if (renderSummary) {
+    renderSummary.textContent = items.length > visibleItems.length
+      ? `Showing ${visibleItems.length} of ${items.length} matching items`
+      : `${items.length} matching item(s)`;
+  }
+
+  if (loadMore) {
+    loadMore.hidden = visibleItems.length >= items.length;
+    loadMore.textContent = `Load ${Math.min(WORKQUEUE_PANE_RENDER_INCREMENT, Math.max(0, items.length - visibleItems.length))} more`;
+    loadMore.onclick = () => {
+      pane.workqueue.renderLimit = Math.min(items.length, visibleItems.length + WORKQUEUE_PANE_RENDER_INCREMENT);
+      renderWorkqueuePaneItems(pane);
+    };
+  }
+
   const now = Date.now();
-  for (const it of items) {
+  for (const it of visibleItems) {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'wq-row';
@@ -5882,6 +5912,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <div>lease</div>
           </div>
           <div class="wq-list-body" data-wq-list-body></div>
+          <div class="wq-render-controls">
+            <span class="hint" data-wq-render-summary></span>
+            <button type="button" class="secondary" data-wq-render-more hidden>Load more</button>
+          </div>
           <div data-wq-empty class="hint" style="padding: 10px 12px;" hidden>No items.</div>
         </section>
 
@@ -5965,6 +5999,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           btn.addEventListener('click', () => {
             if (repoSet.has(repo)) repoSet.delete(repo);
             else repoSet.add(repo);
+            resetWorkqueuePaneRenderLimit(pane);
             persistQuickFilters();
             updateQuickFilterUi();
             renderWorkqueuePaneItems(pane);
@@ -6189,6 +6224,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     };
     const setScope = (scope) => {
       pane.workqueue.scopeFilter = normalizeWorkqueueScope(scope);
+      resetWorkqueuePaneRenderLimit(pane);
       storage.set(WORKQUEUE_SCOPE_PREF_KEY, pane.workqueue.scopeFilter);
       updateScopeUi();
       renderWorkqueuePaneItems(pane);
@@ -6205,6 +6241,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         if (!key) return;
         if (sourceSet.has(key)) sourceSet.delete(key);
         else sourceSet.add(key);
+        resetWorkqueuePaneRenderLimit(pane);
         persistQuickFilters();
         updateQuickFilterUi();
         renderWorkqueuePaneItems(pane);
@@ -6215,6 +6252,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       sourceSet.clear();
       repoSet.clear();
       repoSet.add('rmdmattingly/clawnsole');
+      resetWorkqueuePaneRenderLimit(pane);
       persistQuickFilters();
       updateQuickFilterUi();
       renderWorkqueuePaneItems(pane);
@@ -6223,6 +6261,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     clearQuickBtn?.addEventListener('click', () => {
       sourceSet.clear();
       repoSet.clear();
+      resetWorkqueuePaneRenderLimit(pane);
       persistQuickFilters();
       updateQuickFilterUi();
       renderWorkqueuePaneItems(pane);
@@ -6250,6 +6289,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         pane.workqueue.sortKey = nextKey;
         pane.workqueue.sortDir = nextKey === 'claimedBy' || nextKey === 'title' || nextKey === 'status' ? 'asc' : 'desc';
       }
+      resetWorkqueuePaneRenderLimit(pane);
       updateSortUi();
       renderWorkqueuePaneItems(pane);
       paneManager.persistAdminPanes();
