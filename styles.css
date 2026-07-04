@@ -675,6 +675,50 @@ body::before {
   color: var(--muted);
 }
 
+.pane-close-guard-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.pane-close-guard-dialog {
+  width: min(420px, calc(100vw - 36px));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: rgba(11, 14, 18, 0.98);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.52);
+  padding: 18px;
+}
+
+.pane-close-guard-dialog h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.pane-close-guard-dialog p {
+  margin: 10px 0 0;
+  color: var(--muted);
+}
+
+.pane-close-guard-dialog ul {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.pane-close-guard-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
 .pane-header-right {
   display: inline-flex;
   align-items: center;

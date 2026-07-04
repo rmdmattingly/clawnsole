@@ -78,6 +78,58 @@ test('chat pane: stop button can cancel a running response', async ({ page }) =>
   await expect(pane.locator('.chat-bubble.assistant')).not.toContainText('mock-reply: please stream this', { timeout: 3000 });
 });
 
+test('chat pane: close guard covers empty, draft, and active run states', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
+
+  const panes = page.locator('[data-pane][data-pane-kind="chat"]');
+  await expect(panes).toHaveCount(2);
+
+  const emptyPane = panes.last();
+  await emptyPane.locator('[data-pane-close]').click();
+  await expect(page.getByTestId('pane-close-guard')).toHaveCount(0);
+  await expect(panes).toHaveCount(1);
+
+  await addPane(page, 'Chat pane');
+  const draftPane = panes.last();
+  await draftPane.locator('[data-pane-input]').fill('keep this draft');
+  await draftPane.locator('[data-pane-close]').click();
+
+  const draftGuard = page.getByTestId('pane-close-guard');
+  await expect(draftGuard).toBeVisible();
+  await expect(draftGuard).toContainText('unsent draft text');
+  await expect(draftGuard.getByRole('dialog', { name: 'Close this pane?' })).toBeVisible();
+  await expect(draftGuard.locator('[data-pane-close-cancel]')).toBeFocused();
+  await draftGuard.locator('[data-pane-close-cancel]').click();
+  await expect(draftGuard).toHaveCount(0);
+  await expect(panes).toHaveCount(2);
+
+  await draftPane.locator('[data-pane-close]').click();
+  await page.getByTestId('pane-close-guard').locator('[data-pane-close-confirm]').click();
+  await expect(panes).toHaveCount(1);
+
+  const activePane = panes.first();
+  await activePane.locator('[data-pane-input]').fill('please stream close guard');
+  await activePane.locator('[data-pane-send]').click();
+  await expect(activePane.locator('[data-pane-stop]')).toBeVisible();
+
+  await activePane.locator('[data-pane-close]').click();
+  const activeGuard = page.getByTestId('pane-close-guard');
+  await expect(activeGuard).toBeVisible();
+  await expect(activeGuard).toContainText('an active run in progress');
+  await page.keyboard.press('Escape');
+  await expect(activeGuard).toHaveCount(0);
+  await expect(panes).toHaveCount(1);
+
+  await activePane.locator('[data-pane-stop]').click();
+  await expect(activePane.locator('.chat-bubble.assistant').last()).toContainText('(canceled)', { ignoreCase: true, timeout: 5000 });
+});
+
 test('chat pane: unread badge appears on inactive pane and clears on focus', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
