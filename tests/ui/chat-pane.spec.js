@@ -106,6 +106,74 @@ test('chat pane: unread badge appears on inactive pane and clears on focus', asy
   await expect(firstBadge).toBeHidden();
 });
 
+test('chat pane: close with empty composer does not prompt', async ({ page }) => {
+  test.setTimeout(120000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  let sawDialog = false;
+  page.once('dialog', async (dialog) => {
+    sawDialog = true;
+    await dialog.dismiss();
+  });
+
+  await page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-close]').click();
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(0);
+  expect(sawDialog).toBe(false);
+});
+
+test('chat pane: close with unsent draft prompts before removing pane', async ({ page }) => {
+  test.setTimeout(120000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  await chatPane.locator('[data-pane-input]').fill('keep this draft');
+
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toMatch(/unsent draft/i);
+    await dialog.dismiss();
+  });
+  await chatPane.locator('[data-pane-close]').click();
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(chatPane.locator('[data-pane-input]')).toHaveValue('keep this draft');
+
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toMatch(/unsent draft/i);
+    await dialog.accept();
+  });
+  await chatPane.locator('[data-pane-close]').click();
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(0);
+});
+
+test('chat pane: close with active run prompts with explicit warning', async ({ page }) => {
+  test.setTimeout(120000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  await chatPane.locator('[data-pane-input]').fill('stream while closing');
+  await chatPane.locator('[data-pane-send]').click();
+  await expect(chatPane.locator('.chat-bubble.assistant', { hasText: 'mock-stream: stream while clo' })).toBeVisible();
+
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toMatch(/active run in progress/i);
+    await dialog.dismiss();
+  });
+  await chatPane.locator('[data-pane-close]').click();
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(chatPane.locator('[data-pane-stop]')).toBeVisible();
+});
+
 test('topbar workqueue action reuses paired pane for active chat target and falls back to modal', async ({ page }) => {
   test.setTimeout(120000);
   test.skip(!!env?.skipReason, env?.skipReason);
