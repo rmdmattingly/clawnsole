@@ -126,3 +126,53 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue(agentId || 'main');
 });
+
+test('fleet keyboard triage selects rows and opens selected agent panes', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'dev', name: 'dev', displayName: 'dev' },
+    { id: 'main', name: 'main', displayName: 'main' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const rows = page.locator('#agentsList .agents-row');
+  await expect(rows).toHaveCount(2);
+  const firstRow = rows.nth(0);
+  const secondRow = rows.nth(1);
+  await expect(firstRow).toHaveAttribute('aria-current', 'true');
+
+  await page.locator('#agentsSearch').focus();
+  await page.keyboard.press('j');
+  await expect(firstRow).toHaveAttribute('aria-current', 'true');
+  await page.locator('#agentsSearch').fill('');
+  await expect(rows).toHaveCount(2);
+
+  await firstRow.focus();
+  await page.keyboard.press('j');
+  await expect(secondRow).toHaveAttribute('aria-current', 'true');
+  await page.keyboard.press('k');
+  await expect(firstRow).toHaveAttribute('aria-current', 'true');
+  await page.keyboard.press('j');
+
+  const agentId = (await secondRow.getAttribute('data-agent-id')) || 'main';
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"] [data-pane-agent-select]').first()).toHaveValue(agentId);
+
+  await secondRow.focus();
+  await page.keyboard.press('Shift+Enter');
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue(agentId);
+
+  await secondRow.focus();
+  await page.keyboard.press('.');
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+});

@@ -1513,6 +1513,17 @@ button.agents-section-title:hover {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.agents-row.selected,
+.agents-row[aria-current="true"] {
+  border-color: rgba(77, 196, 255, 0.72);
+  background: rgba(77, 196, 255, 0.1);
+}
+
+.agents-row:focus-visible {
+  outline: 2px solid rgba(77, 196, 255, 0.9);
+  outline-offset: 2px;
+}
+
 .agents-pin {
   width: 36px;
   height: 36px;
