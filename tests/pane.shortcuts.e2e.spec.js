@@ -36,6 +36,9 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await expect(modal).toContainText('Pane focus/navigation');
   await expect(modal).toContainText('Pane actions');
   await expect(modal).toContainText('Workqueue actions');
+  await expect(modal).toContainText('Focus Workqueue queue search');
+  await expect(modal).toContainText('Focus Workqueue item search');
+  await expect(modal).toContainText('Focus Workqueue status filter');
   await expect(modal).toContainText('disabled while typing');
 
   await page.keyboard.press('Escape');

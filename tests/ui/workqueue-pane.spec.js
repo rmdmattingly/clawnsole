@@ -50,6 +50,7 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
   await expect(wqPane.locator('.wq-pane')).toHaveCount(1);
   await expect(wqPane.locator('[data-wq-queue-search]')).toBeVisible();
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
+  await expect(wqPane.locator('[data-wq-item-search]')).toBeVisible();
 
   // Header target should describe queue context (not agent).
   await expect(wqPane.locator('[data-pane-target-label]')).toHaveText('Queue');
@@ -229,6 +230,78 @@ test('workqueue pane: source chips + clawnsole preset filter items without reloa
   await pane.locator('[data-wq-preset-clawnsole]').click();
   await expect(pane.locator('.wq-row')).toHaveCount(1);
   await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
+});
+
+test('workqueue pane: item search and control focus shortcuts are guarded', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  const queue = `shortcut-focus-${Date.now()}`;
+
+  const enqueue = async (title) => {
+    await page.evaluate(async ({ queue, title }) => {
+      await fetch('/api/workqueue/enqueue', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queue, title, instructions: 'shortcut coverage', priority: 50 })
+      });
+    }, { queue, title });
+  };
+
+  await enqueue('shortcut alpha item');
+  await enqueue('shortcut beta item');
+
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-refresh]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(2);
+
+  const itemSearch = pane.locator('[data-wq-item-search]');
+  await itemSearch.fill('alpha');
+  await expect(pane.locator('.wq-row')).toHaveCount(1);
+  await expect(pane.locator('.wq-row .wq-col.title')).toContainText('shortcut alpha item');
+  await itemSearch.press('Escape');
+  await expect(pane.locator('.wq-row')).toHaveCount(2);
+
+  const trigger = pane.locator('[data-wq-refresh]');
+  await trigger.focus();
+  await expect(trigger).toBeFocused();
+
+  await page.keyboard.press('w');
+  await page.keyboard.press('q');
+  await expect(pane.locator('[data-wq-queue-search]')).toBeFocused();
+
+  await trigger.focus();
+  await page.keyboard.press('w');
+  await page.keyboard.press('i');
+  await expect(itemSearch).toBeFocused();
+
+  await trigger.focus();
+  await page.keyboard.press('w');
+  await page.keyboard.press('s');
+  await expect(pane.locator('[data-wq-status-details] summary')).toBeFocused();
+  await expect(pane.locator('[data-wq-status-details]')).toHaveAttribute('open', '');
+
+  await itemSearch.focus();
+  await page.keyboard.press('w');
+  await page.keyboard.press('q');
+  await expect(itemSearch).toBeFocused();
+
+  await trigger.focus();
+  await pane.locator('[data-wq-item-search]').evaluate((el) => {
+    el.setAttribute('hidden', '');
+  });
+  await page.keyboard.press('w');
+  await page.keyboard.press('i');
+  await expect(page.getByTestId('toast').filter({ hasText: 'hidden or disabled' })).toBeVisible();
 });
 
 test('workqueue pane: controls toolbar is sticky and list scrolls independently', async ({ page }) => {
