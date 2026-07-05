@@ -490,18 +490,33 @@ const uiState = {
 };
 
 let toastSeq = 0;
-function showToast(message, { kind = 'info', timeoutMs = 2600 } = {}) {
+function showToast(message, { kind = 'info', timeoutMs = 2600, actionLabel = '', onAction = null, testId = 'toast' } = {}) {
   if (!globalElements.toastHost) return;
   const text = typeof message === 'string' ? message.trim() : String(message || '').trim();
   if (!text) return;
 
   const el = document.createElement('div');
   el.className = `toast ${kind === 'error' ? 'toast-error' : 'toast-info'}`;
-  el.textContent = text;
   const id = ++toastSeq;
   el.dataset.toastId = String(id);
-  el.setAttribute('data-testid', 'toast');
+  el.setAttribute('data-testid', testId || 'toast');
   el.dataset.toastKind = kind;
+
+  const messageEl = document.createElement('span');
+  messageEl.className = 'toast-message';
+  messageEl.textContent = text;
+  el.appendChild(messageEl);
+
+  const hasAction = actionLabel && typeof onAction === 'function';
+  let actionBtn = null;
+  if (hasAction) {
+    actionBtn = document.createElement('button');
+    actionBtn.type = 'button';
+    actionBtn.className = 'toast-action';
+    actionBtn.textContent = String(actionLabel);
+    actionBtn.dataset.testid = 'toast-action';
+    el.appendChild(actionBtn);
+  }
 
   globalElements.toastHost.appendChild(el);
 
@@ -521,7 +536,18 @@ function showToast(message, { kind = 'info', timeoutMs = 2600 } = {}) {
   };
 
   const timer = setTimeout(remove, Math.max(800, Number(timeoutMs) || 2600));
+  actionBtn?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    clearTimeout(timer);
+    try {
+      onAction?.();
+    } catch {}
+    remove();
+  });
+
   el.addEventListener('click', () => {
+    if (hasAction) return;
     clearTimeout(timer);
     remove();
   });
@@ -4193,6 +4219,7 @@ renderPulse();
 
 const ADMIN_PANES_KEY = 'clawnsole.admin.panes.v1';
 // Layout is inferred from pane count; no manual layout toggle.
+const ADMIN_LAYOUT_MODE_KEY = 'clawnsole.admin.layoutMode';
 const ADMIN_DEFAULT_AGENT_KEY = 'clawnsole.admin.agentId';
 const WORKQUEUE_SCOPE_PREF_KEY = 'clawnsole.admin.workqueue.scope.v1';
 
@@ -7199,8 +7226,10 @@ const paneManager = {
         kind: 'workqueue',
         agentId: nextAgentId,
         queue: nextQueue,
-        statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
-        scopeFilter: getDefaultWorkqueueScope(),
+        statusFilter: Array.isArray(options?.statusFilter) && options.statusFilter.length
+          ? options.statusFilter
+          : ['ready', 'pending', 'claimed', 'in_progress'],
+        scopeFilter: normalizeWorkqueueScope(options?.scopeFilter ?? getDefaultWorkqueueScope()),
         closable: true
       });
       this.panes.push(pane);
@@ -7281,6 +7310,38 @@ const paneManager = {
         }
       } catch {}
     }, 0);
+  },
+  baselineGuardEnabled() {
+    if (roleState.role !== 'admin') return false;
+    return String(storage.get(ADMIN_LAYOUT_MODE_KEY, 'default') || 'default') !== 'custom';
+  },
+  maybeOfferBaselineRestore(removedPane) {
+    if (!this.baselineGuardEnabled()) return;
+    const kind = removedPane?.kind;
+    if (kind !== 'chat' && kind !== 'workqueue') return;
+    if (this.panes.some((pane) => pane?.kind === kind)) return;
+
+    const labelKind = kind === 'workqueue' ? 'Workqueue' : 'Chat';
+    const agentId = normalizeAgentId(removedPane.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main') || 'main');
+    const restoreOptions =
+      kind === 'workqueue'
+        ? {
+            forceNew: true,
+            agentId,
+            queue: removedPane.workqueue?.queue || 'dev-team',
+            statusFilter: Array.isArray(removedPane.workqueue?.statusFilter)
+              ? removedPane.workqueue.statusFilter.slice()
+              : undefined,
+            scopeFilter: removedPane.workqueue?.scopeFilter || getDefaultWorkqueueScope()
+          }
+        : { agentId };
+
+    showToast(`${labelKind} pane closed.`, {
+      timeoutMs: 10000,
+      actionLabel: `Restore ${labelKind} pane`,
+      testId: `restore-${kind}-toast`,
+      onAction: () => this.addPane(kind, restoreOptions)
+    });
   },
   openAddPaneMenu(anchorEl) {
     if (roleState.role !== 'admin') return;
@@ -7452,6 +7513,7 @@ const paneManager = {
     this.updateCloseButtons();
     this.applyInferredLayout();
     this.persistAdminPanes();
+    this.maybeOfferBaselineRestore(pane);
     updateGlobalStatus();
     updateConnectionControls();
   },
