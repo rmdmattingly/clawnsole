@@ -1407,7 +1407,7 @@ button.send-btn .btn-icon {
 
 .agents-toolbar {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(220px, 1fr) auto auto auto;
   gap: 12px;
   align-items: end;
   margin-bottom: 14px;
@@ -1438,6 +1438,12 @@ button.send-btn .btn-icon {
   gap: 8px;
 }
 
+.agents-density-toggle {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
 .agents-chip {
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.03);
@@ -1458,6 +1464,10 @@ button.send-btn .btn-icon {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.agents-list.compact {
+  gap: 6px;
 }
 
 .agents-section-title {
@@ -1498,6 +1508,10 @@ button.agents-section-title:hover {
   gap: 8px;
 }
 
+.agents-list.compact .agents-rows {
+  gap: 4px;
+}
+
 .agents-rows[hidden] {
   display: none;
 }
@@ -1513,6 +1527,13 @@ button.agents-section-title:hover {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.agents-list.compact .agents-row {
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 8px;
+  border-radius: 10px;
+  padding: 3px 8px;
+}
+
 .agents-pin {
   width: 36px;
   height: 36px;
@@ -1521,6 +1542,14 @@ button.agents-section-title:hover {
   background: rgba(9, 12, 16, 0.35);
   color: var(--text);
   cursor: pointer;
+}
+
+.agents-list.compact .agents-pin {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-radius: 9px;
 }
 
 .agents-pin[aria-pressed="true"] {
@@ -1534,10 +1563,24 @@ button.agents-section-title:hover {
   color: var(--text);
 }
 
+.agents-list.compact .agents-row-title {
+  font-size: 13px;
+  line-height: 1.05;
+}
+
 .agents-row-meta {
   margin-top: 2px;
   font-size: 12px;
   color: var(--muted);
+}
+
+.agents-list.compact .agents-row-meta {
+  margin-top: 0;
+  font-size: 11px;
+  line-height: 1.05;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .agents-age-chip {
@@ -1562,6 +1605,13 @@ button.agents-section-title:hover {
   padding: 5px 9px;
   font-size: 12px;
   border-radius: 10px;
+}
+
+.agents-list.compact .agents-action-btn {
+  padding: 2px 6px;
+  min-height: 24px;
+  line-height: 1;
+  border-radius: 8px;
 }
 
 .agents-row-actions-overflow {

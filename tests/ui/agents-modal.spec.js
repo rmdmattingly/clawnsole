@@ -126,3 +126,50 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue(agentId || 'main');
 });
+
+test('agents modal compact density tightens rows and persists', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = Array.from({ length: 5 }, (_, index) => {
+    const id = `density-agent-${index + 1}`;
+    return { id, name: id, displayName: id };
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.evaluate(() => {
+    const now = Date.now();
+    const lastSeen = {};
+    for (let index = 1; index <= 5; index += 1) {
+      lastSeen[`density-agent-${index}`] = now;
+    }
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify(lastSeen));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const rows = page.locator('#agentsList .agents-row:visible');
+  await expect(rows).toHaveCount(5);
+  const firstRow = rows.first();
+  const comfortableHeight = await firstRow.evaluate((el) => el.getBoundingClientRect().height);
+
+  await page.getByRole('button', { name: 'Compact' }).click();
+  await expect(page.locator('#agentsList')).toHaveClass(/compact/);
+  await expect(page.getByRole('button', { name: 'Compact' })).toHaveAttribute('aria-pressed', 'true');
+  const compactHeight = await firstRow.evaluate((el) => el.getBoundingClientRect().height);
+
+  expect(compactHeight).toBeLessThan(comfortableHeight * 0.7);
+  await expect(firstRow.locator('[data-agent-action="open-chat"]').first()).toBeVisible();
+  await expect(firstRow.locator('[data-agent-action="open-timeline"]').first()).toBeVisible();
+  await expect(firstRow.locator('[data-agent-action="open-workqueue"]').first()).toBeVisible();
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsList')).toHaveClass(/compact/);
+  await expect(page.getByRole('button', { name: 'Compact' })).toHaveAttribute('aria-pressed', 'true');
+});

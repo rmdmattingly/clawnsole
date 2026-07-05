@@ -30,6 +30,7 @@ const globalElements = {
   agentsCloseBtn: document.getElementById('agentsCloseBtn'),
   agentsSearch: document.getElementById('agentsSearch'),
   agentsFilterButtons: Array.from(document.querySelectorAll('[data-agents-filter]')),
+  agentsDensityButtons: Array.from(document.querySelectorAll('[data-agents-density]')),
   agentsSort: document.getElementById('agentsSort'),
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
@@ -241,6 +242,7 @@ const ADMIN_AGENT_LAST_SEEN_KEY = 'clawnsole.admin.agentLastSeenAtMs';
 const ADMIN_AGENT_FILTER_KEY = 'clawnsole.admin.agents.filter';
 const ADMIN_AGENT_SORT_KEY = 'clawnsole.admin.agents.sort';
 const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
+const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
 const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
@@ -450,6 +452,23 @@ function getFleetSort() {
   const raw = String(storage.get(ADMIN_AGENT_SORT_KEY, 'recent_desc') || 'recent_desc').trim();
   const allowed = new Set(['recent_desc', 'agent_id_asc']);
   return allowed.has(raw) ? raw : 'recent_desc';
+}
+
+function getFleetDensity() {
+  return String(storage.get(ADMIN_AGENT_DENSITY_KEY, 'comfortable') || 'comfortable') === 'compact' ? 'compact' : 'comfortable';
+}
+
+function syncFleetDensityControl() {
+  const density = getFleetDensity();
+  if (globalElements.agentsList) {
+    globalElements.agentsList.dataset.density = density;
+    globalElements.agentsList.classList.toggle('compact', density === 'compact');
+  }
+  globalElements.agentsDensityButtons.forEach((btn) => {
+    const active = String(btn.getAttribute('data-agents-density') || '') === density;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
 }
 
 function getAgentPaneStateMap() {
@@ -2637,6 +2656,7 @@ function openAgentsModal() {
     const minutes = Number(storage.get(ADMIN_AGENT_ACTIVE_MINUTES_KEY, '10')) || 10;
     globalElements.agentsActiveMinutes.value = String(Math.max(1, minutes));
   }
+  syncFleetDensityControl();
 
   renderAgentsModalList();
   renderAgentsLastRefreshed();
@@ -2791,6 +2811,7 @@ function renderAgentsModalList() {
   const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
   const filterMode = getFleetFilter();
   const sortMode = getFleetSort();
+  syncFleetDensityControl();
 
   const pins = getPinnedAgentIds();
   const lastSeenMap = getAgentLastSeenMap();
@@ -7646,6 +7667,14 @@ globalElements.agentsFilterButtons.forEach((btn) => {
       chip.setAttribute('aria-pressed', active ? 'true' : 'false');
     });
     renderAgentsModalList();
+  });
+});
+
+globalElements.agentsDensityButtons.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const density = String(btn.getAttribute('data-agents-density') || 'comfortable') === 'compact' ? 'compact' : 'comfortable';
+    storage.set(ADMIN_AGENT_DENSITY_KEY, density);
+    syncFleetDensityControl();
   });
 });
 
