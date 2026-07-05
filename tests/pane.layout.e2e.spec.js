@@ -64,3 +64,35 @@ test('layout: reset layout restores default (Chat + Workqueue)', async ({ page }
   await expect(panes).toHaveCount(2);
   await expect(panes.nth(1)).toHaveAttribute('data-pane-kind', 'workqueue');
 });
+
+test('layout: reset warns and preserves panes when a draft would be discarded', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByRole('button', { name: 'Add pane' }).click();
+  await page.getByRole('button', { name: 'Cron pane' }).click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  const chatPane = page.locator('[data-pane]').first();
+  await chatPane.getByTestId('pane-input').fill('draft before reset');
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  let sawDraftWarning = false;
+  page.once('dialog', async (dialog) => {
+    sawDraftWarning = /unsent draft text or attachments/i.test(dialog.message());
+    await dialog.dismiss();
+  });
+  await page.click('#resetLayoutBtn');
+
+  await expect.poll(() => sawDraftWarning).toBe(true);
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+  await expect(chatPane.getByTestId('pane-input')).toHaveValue('draft before reset');
+});

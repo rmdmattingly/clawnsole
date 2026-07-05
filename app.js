@@ -5529,6 +5529,10 @@ function paneHasDraftChanges(pane) {
   return Boolean(draftText || hasAttachments);
 }
 
+function anyPaneHasDraftChanges(panes) {
+  return (Array.isArray(panes) ? panes : []).some((pane) => pane?.kind === 'chat' && paneHasDraftChanges(pane));
+}
+
 function paneSetDestinationStrip(pane) {
   const strip = pane?.elements?.destinationStrip;
   const valueEl = pane?.elements?.destinationValue;
@@ -7193,7 +7197,11 @@ const paneManager = {
   resetAdminLayoutToDefault({ confirm = true } = {}) {
     if (roleState.role !== 'admin') return;
     if (confirm) {
-      const ok = window.confirm('Reset layout to default (Chat + Workqueue)?');
+      const hasDraft = anyPaneHasDraftChanges(this.panes);
+      const message = hasDraft
+        ? 'Reset to recommended layout (Chat + Workqueue)?\n\nYou have unsent draft text or attachments. Resetting will clear the current panes and discard those drafts.'
+        : 'Reset to recommended layout (Chat + Workqueue)?';
+      const ok = window.confirm(message);
       if (!ok) return;
     }
 
