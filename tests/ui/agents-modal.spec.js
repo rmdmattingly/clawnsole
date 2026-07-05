@@ -126,3 +126,40 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue(agentId || 'main');
 });
+
+test('fleet copy agent id action supports keyboard and button flows', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text) => {
+          window.__clawnsoleCopiedText = String(text || '');
+        },
+        readText: async () => window.__clawnsoleCopiedText || ''
+      }
+    });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const firstRow = page.locator('#agentsList .agents-row').first();
+  await expect(firstRow).toBeVisible();
+  const firstAgentId = (await firstRow.getAttribute('data-agent-id')) || 'main';
+
+  await expect(firstRow.locator('[data-agent-action="copy-agent-id"]').first()).toBeVisible();
+  await firstRow.focus();
+  await page.keyboard.press('y');
+  await expect(page.getByTestId('toast').last()).toContainText(`Copied agent id: ${firstAgentId}`);
+  await expect(firstRow).toBeFocused();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(firstAgentId);
+
+  await firstRow.locator('[data-agent-action="copy-agent-id"]').first().click();
+  await expect(page.getByTestId('toast').last()).toContainText(`Copied agent id: ${firstAgentId}`);
+  await expect(firstRow).toBeFocused();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(firstAgentId);
+});
