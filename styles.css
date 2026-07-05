@@ -3177,6 +3177,9 @@ kbd {
 
 .toast {
   pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 10px 12px;
   border-radius: 12px;
   font-size: 14px;
@@ -3187,6 +3190,26 @@ kbd {
   transform: translateY(10px);
   opacity: 0;
   transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.toast-message {
+  min-width: 0;
+}
+
+.toast-action {
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+}
+
+.toast-action:hover {
+  background: rgba(255, 255, 255, 0.16);
 }
 
 .toast.open {
