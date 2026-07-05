@@ -438,6 +438,13 @@
               <span class="agents-label">Active window (min)</span>
               <input id="agentsActiveMinutes" type="number" min="1" step="1" value="10" aria-label="Active within minutes" />
             </label>
+            <div class="agents-field agents-density">
+              <span class="agents-label">Density</span>
+              <div class="agents-density-toggle" role="group" aria-label="Fleet density">
+                <button type="button" class="agents-chip" data-agents-density="comfortable" aria-pressed="true">Comfortable</button>
+                <button type="button" class="agents-chip" data-agents-density="compact" aria-pressed="false">Compact</button>
+              </div>
+            </div>
           </div>
 
           <div id="agentsList" class="agents-list" aria-label="Agent list"></div>
