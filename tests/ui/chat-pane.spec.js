@@ -49,6 +49,42 @@ test('chat pane: send/receive + upload attachment', async ({ page }, testInfo) =
   await expect(pane.locator('[data-chat-role="user"]').last()).toContainText('with file');
 });
 
+test('chat pane: stop button stays idle-hidden, then appears while running, then returns hidden', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
+
+  const pane = page.locator('[data-pane][data-pane-kind="chat"]').last();
+  await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+
+  const input = pane.locator('[data-pane-input]');
+  const stopBtn = pane.locator('[data-pane-stop]');
+
+  // Idle state: no active run -> hidden and unavailable to keyboard focus.
+  await expect(stopBtn).toBeHidden();
+  await input.click();
+  await page.keyboard.press('Tab');
+  await expect(stopBtn).not.toBeFocused();
+
+  await input.fill('please stream this');
+  await pane.locator('[data-pane-send]').click();
+
+  // Running state: control appears immediately.
+  await expect(stopBtn).toBeVisible();
+  await expect(stopBtn).toHaveAttribute('aria-label', 'Stop generating');
+
+  // Finish stream naturally.
+  await expect(pane.locator('.chat-bubble.assistant').last()).toContainText('mock-reply: please stream this', { timeout: 10000 });
+
+  // Back to idle once run completes.
+  await expect(stopBtn).toBeHidden();
+});
+
+
 test('chat pane: stop button can cancel a running response', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
