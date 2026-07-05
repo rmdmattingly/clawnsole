@@ -7263,7 +7263,7 @@ const paneManager = {
       return pane;
     }
 
-    const agentId = normalizeAgentId(storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
+    const agentId = normalizeAgentId(options?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
     const pane = createPane({ key: `p${randomId().slice(0, 8)}`, role: 'admin', kind: 'chat', agentId, closable: true });
     this.panes.push(pane);
     globalElements.paneGrid.appendChild(pane.elements.root);
