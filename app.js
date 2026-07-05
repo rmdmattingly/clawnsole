@@ -2939,6 +2939,8 @@ function renderAgentsModalList() {
 // Workqueue (admin-only)
 
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
+const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
+const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
 
 const workqueueState = {
   queues: [],
@@ -3601,6 +3603,11 @@ function renderWorkqueuePaneItems(pane) {
   });
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
   const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const renderLimit = Math.max(
+    WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
+    Number(pane.workqueue?.renderLimit || WORKQUEUE_PANE_INITIAL_RENDER_LIMIT)
+  );
+  const visibleItems = items.slice(0, renderLimit);
 
   if (empty) {
     const hasItems = items.length > 0;
@@ -3636,7 +3643,7 @@ function renderWorkqueuePaneItems(pane) {
   }
 
   const now = Date.now();
-  for (const it of items) {
+  for (const it of visibleItems) {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'wq-row';
@@ -3662,6 +3669,22 @@ function renderWorkqueuePaneItems(pane) {
     });
 
     body.appendChild(row);
+  }
+
+  const list = body.closest('.wq-list');
+  let more = list?.querySelector('[data-wq-load-more]');
+  if (more) more.remove();
+  if (items.length > visibleItems.length && list) {
+    more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'secondary wq-load-more';
+    more.setAttribute('data-wq-load-more', '');
+    more.textContent = `Load more (${visibleItems.length}/${items.length})`;
+    more.addEventListener('click', () => {
+      pane.workqueue.renderLimit = visibleItems.length + WORKQUEUE_PANE_RENDER_CHUNK_SIZE;
+      renderWorkqueuePaneItems(pane);
+    });
+    list.insertBefore(more, empty || null);
   }
 
   // Keep inspect in sync if selection vanished.
@@ -5598,6 +5621,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       },
       items: [],
       selectedItemId: null,
+      renderLimit: WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
       sortDir: sortDir === 'asc' ? 'asc' : 'desc'
     },
@@ -5942,6 +5966,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       paneManager.persistAdminPanes();
     };
 
+    const resetRenderLimit = () => {
+      pane.workqueue.renderLimit = WORKQUEUE_PANE_INITIAL_RENDER_LIMIT;
+    };
+
     const updateQuickFilterUi = () => {
       sourceBtns.forEach((btn) => {
         const key = String(btn.getAttribute('data-wq-source') || '').trim();
@@ -5965,6 +5993,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           btn.addEventListener('click', () => {
             if (repoSet.has(repo)) repoSet.delete(repo);
             else repoSet.add(repo);
+            resetRenderLimit();
             persistQuickFilters();
             updateQuickFilterUi();
             renderWorkqueuePaneItems(pane);
@@ -5978,6 +6007,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       statusSet.clear();
       for (const s of next) statusSet.add(s);
       pane.workqueue.statusFilter = Array.from(statusSet);
+      resetRenderLimit();
       renderStatusMultiSelect();
       if (closeMenu) statusDetailsEl?.removeAttribute('open');
       await fetchAndRenderWorkqueueItemsForPane(pane);
@@ -5988,6 +6018,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const doRefresh = async () => {
       const q = getQueueValue() || 'dev-team';
       pane.workqueue.queue = q;
+      resetRenderLimit();
       rememberRecentWorkqueueTarget(q);
       paneSetHeaderTarget(pane, {
         label: 'Queue',
@@ -6189,6 +6220,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     };
     const setScope = (scope) => {
       pane.workqueue.scopeFilter = normalizeWorkqueueScope(scope);
+      resetRenderLimit();
       storage.set(WORKQUEUE_SCOPE_PREF_KEY, pane.workqueue.scopeFilter);
       updateScopeUi();
       renderWorkqueuePaneItems(pane);
@@ -6205,6 +6237,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         if (!key) return;
         if (sourceSet.has(key)) sourceSet.delete(key);
         else sourceSet.add(key);
+        resetRenderLimit();
         persistQuickFilters();
         updateQuickFilterUi();
         renderWorkqueuePaneItems(pane);
@@ -6215,6 +6248,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       sourceSet.clear();
       repoSet.clear();
       repoSet.add('rmdmattingly/clawnsole');
+      resetRenderLimit();
       persistQuickFilters();
       updateQuickFilterUi();
       renderWorkqueuePaneItems(pane);
@@ -6223,6 +6257,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     clearQuickBtn?.addEventListener('click', () => {
       sourceSet.clear();
       repoSet.clear();
+      resetRenderLimit();
       persistQuickFilters();
       updateQuickFilterUi();
       renderWorkqueuePaneItems(pane);
@@ -6250,6 +6285,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         pane.workqueue.sortKey = nextKey;
         pane.workqueue.sortDir = nextKey === 'claimedBy' || nextKey === 'title' || nextKey === 'status' ? 'asc' : 'desc';
       }
+      resetRenderLimit();
       updateSortUi();
       renderWorkqueuePaneItems(pane);
       paneManager.persistAdminPanes();
