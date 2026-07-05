@@ -72,6 +72,7 @@ const globalElements = {
   settingsBtn: document.getElementById('settingsBtn'),
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
+  showPaneSwitchHud: document.getElementById('showPaneSwitchHud'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
   loginPassword: document.getElementById('loginPassword'),
@@ -246,6 +247,7 @@ const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
 const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
+const PANE_SWITCH_HUD_PREF_KEY = 'clawnsole.admin.showPaneSwitchHud.v1';
 const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
 const WQ_RECENT_ENQUEUE_AGENTS_KEY = 'clawnsole.wq.recentEnqueueAgents';
@@ -1293,6 +1295,10 @@ function openSettings() {
   globalElements.settingsModal.classList.add('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'false');
 
+  if (globalElements.showPaneSwitchHud) {
+    globalElements.showPaneSwitchHud.checked = storage.get(PANE_SWITCH_HUD_PREF_KEY, true) !== false;
+  }
+
   // Guest mode removed.
 
   loadRecurringPromptAgents();
@@ -1302,6 +1308,45 @@ function openSettings() {
 function closeSettings() {
   globalElements.settingsModal.classList.remove('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'true');
+}
+
+let paneSwitchHudEl = null;
+let paneSwitchHudTimer = null;
+
+function paneSwitchHudEnabled() {
+  return storage.get(PANE_SWITCH_HUD_PREF_KEY, true) !== false;
+}
+
+function ensurePaneSwitchHud() {
+  if (paneSwitchHudEl) return paneSwitchHudEl;
+  const el = document.createElement('div');
+  el.className = 'pane-switch-hud';
+  el.dataset.testid = 'pane-switch-hud';
+  el.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(el);
+  paneSwitchHudEl = el;
+  return el;
+}
+
+function showPaneSwitchHud(pane, { source = '' } = {}) {
+  if (source !== 'keyboard') return;
+  if (!paneSwitchHudEnabled()) return;
+  if (!pane) return;
+
+  const el = ensurePaneSwitchHud();
+  const letter = paneHeaderLetter(pane);
+  const type = paneLabel(pane);
+  const target = paneTargetLabel(pane);
+  el.innerHTML = `
+    <div class="pane-switch-hud__identity">${escapeHtml(letter)} ${escapeHtml(type)} <span aria-hidden="true">·</span> ${escapeHtml(target)}</div>
+    <div class="pane-switch-hud__actions">${escapeHtml(pane.kind === 'chat' ? 'Type to send · Ctrl/Cmd+K commands' : 'Tab for controls · Ctrl/Cmd+K commands')}</div>
+  `;
+
+  window.clearTimeout(paneSwitchHudTimer);
+  el.classList.add('open');
+  paneSwitchHudTimer = window.setTimeout(() => {
+    el.classList.remove('open');
+  }, 900);
 }
 
 const recurringPromptState = {
@@ -1789,9 +1834,7 @@ function switchPaneByMru(direction = 1) {
   traversal.updatedAt = now;
   paneMruTraversal = traversal;
 
-  focusPaneIndex(paneIdx, { trackMru: false });
-  const pane = panes[paneIdx];
-  if (pane) showToast(`Switched to ${paneIdentityLabel(pane)}`, { kind: 'info', timeoutMs: 1400 });
+  focusPaneIndex(paneIdx, { trackMru: false, source: 'keyboard' });
   return true;
 }
 
@@ -7508,6 +7551,9 @@ globalElements.settingsCloseBtn?.addEventListener('click', () => closeSettings()
 globalElements.settingsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.settingsModal) closeSettings();
 });
+globalElements.showPaneSwitchHud?.addEventListener('change', () => {
+  storage.set(PANE_SWITCH_HUD_PREF_KEY, !!globalElements.showPaneSwitchHud.checked);
+});
 
 globalElements.shortcutsBtn?.addEventListener('click', () => openShortcuts());
 globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
@@ -7718,11 +7764,12 @@ function isTypingContext(target) {
   return false;
 }
 
-function focusPaneIndex(idx, { trackMru = true } = {}) {
+function focusPaneIndex(idx, { trackMru = true, source = '' } = {}) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
   clearPaneUnread(pane);
   if (trackMru) notePaneFocused(pane);
+  showPaneSwitchHud(pane, { source });
 
   try {
     pane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
@@ -7789,14 +7836,14 @@ function returnToLastActiveChatPane() {
     if (!key || key === activeKey) continue;
     const idx = panes.findIndex((pane) => pane.key === key && pane.kind === 'chat');
     if (idx >= 0) {
-      focusPaneIndex(idx);
+      focusPaneIndex(idx, { source: 'keyboard' });
       return true;
     }
   }
 
   const fallbackIdx = panes.findIndex((pane) => pane.kind === 'chat' && pane.key !== activeKey);
   if (fallbackIdx >= 0) {
-    focusPaneIndex(fallbackIdx);
+    focusPaneIndex(fallbackIdx, { source: 'keyboard' });
     return true;
   }
 
@@ -7811,7 +7858,7 @@ function cyclePaneFocus() {
   const active = document.activeElement;
   const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
   const next = idx >= 0 ? (idx + 1) % panes.length : 0;
-  focusPaneIndex(next);
+  focusPaneIndex(next, { source: 'keyboard' });
 }
 
 function cyclePaneFocusBackward() {
@@ -7821,7 +7868,7 @@ function cyclePaneFocusBackward() {
   const active = document.activeElement;
   const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
   const next = idx >= 0 ? (idx - 1 + panes.length) % panes.length : panes.length - 1;
-  focusPaneIndex(next);
+  focusPaneIndex(next, { source: 'keyboard' });
 }
 
 function cycleUnreadPaneFocus(direction = 1) {
@@ -7843,7 +7890,7 @@ function cycleUnreadPaneFocus(direction = 1) {
   const ordered = dir > 0 ? unreadIndexes : unreadIndexes.slice().reverse();
   const pick = ordered.find((idx) => dir > 0 ? idx > currentIdx : idx < currentIdx);
   const next = Number.isInteger(pick) ? pick : ordered[0];
-  focusPaneIndex(next);
+  focusPaneIndex(next, { source: 'keyboard' });
   return true;
 }
 
@@ -7930,7 +7977,7 @@ window.addEventListener('keydown', (event) => {
     const n = Number.parseInt(key, 10);
     if (Number.isFinite(n) && n >= 1 && n <= 9) {
       event.preventDefault();
-      focusPaneIndex(n - 1);
+      focusPaneIndex(n - 1, { source: 'keyboard' });
       return;
     }
   }
@@ -7940,7 +7987,7 @@ window.addEventListener('keydown', (event) => {
     const n = Number.parseInt(key, 10);
     if (Number.isFinite(n) && n >= 1 && n <= 9) {
       event.preventDefault();
-      focusPaneIndex(n - 1);
+      focusPaneIndex(n - 1, { source: 'keyboard' });
       return;
     }
   }
