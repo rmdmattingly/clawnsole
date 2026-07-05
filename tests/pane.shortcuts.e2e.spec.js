@@ -229,6 +229,66 @@ test('add-pane shortcuts do not fire while typing in chat input', async ({ page 
   await expect(panes).toHaveCount(2);
 });
 
+test('add-pane shortcuts are scoped away from overlays and menus', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  const shortcutsModal = page.locator('#shortcutsModal');
+  const workqueueModal = page.locator('#workqueueModal');
+  const addPaneMenu = page.getByTestId('pane-add-menu');
+
+  const fireAddChatShortcut = async () => {
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'C',
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+    });
+  };
+
+  await expect(panes).toHaveCount(2);
+  await page.click('#connectionStatus');
+
+  await fireAddChatShortcut();
+  await expect(panes).toHaveCount(3);
+  await page.click('#connectionStatus');
+
+  await page.keyboard.press('Shift+/');
+  await expect(shortcutsModal).toHaveAttribute('aria-hidden', 'false');
+  await fireAddChatShortcut();
+  await expect(panes).toHaveCount(3);
+  await page.keyboard.press('Escape');
+  await expect(shortcutsModal).toHaveAttribute('aria-hidden', 'true');
+
+  await page.evaluate(() => openWorkqueue());
+  await expect(workqueueModal).toHaveAttribute('aria-hidden', 'false');
+  await fireAddChatShortcut();
+  await expect(panes).toHaveCount(3);
+  await page.keyboard.press('Escape');
+  await expect(workqueueModal).toHaveAttribute('aria-hidden', 'true');
+
+  await page.getByTestId('add-pane-btn').click();
+  await expect(addPaneMenu).toBeVisible();
+  await fireAddChatShortcut();
+  await expect(panes).toHaveCount(3);
+  await page.keyboard.press('Escape');
+  await expect(addPaneMenu).toBeHidden();
+
+  await fireAddChatShortcut();
+  await expect(panes).toHaveCount(4);
+});
+
 test('fleet quick action button + keyboard shortcut focus existing timeline pane without duplicates', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);

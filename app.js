@@ -7637,6 +7637,7 @@ globalElements.shortcutsModal?.addEventListener('keydown', (event) => {
   if (!globalElements.shortcutsModal?.classList.contains('open')) return;
   if (event.key === 'Escape') {
     event.preventDefault();
+    event.stopPropagation();
     closeShortcuts();
     return;
   }
@@ -7670,6 +7671,7 @@ globalElements.commandPaletteInput?.addEventListener('keydown', (event) => {
   const key = String(event.key || '');
   if (key === 'Escape') {
     event.preventDefault();
+    event.stopPropagation();
     closeCommandPalette();
     return;
   }
@@ -7845,6 +7847,57 @@ function isTypingContext(target) {
   return false;
 }
 
+function isOverlayElementOpen(el) {
+  if (!el) return false;
+  if (el.classList?.contains('open')) return true;
+  return el.getAttribute?.('aria-hidden') === 'false';
+}
+
+function isAnyOverlayOpen() {
+  return !!(
+    isOverlayElementOpen(globalElements.commandPaletteModal) ||
+    isOverlayElementOpen(globalElements.paneManagerModal) ||
+    isOverlayElementOpen(globalElements.agentsModal) ||
+    isOverlayElementOpen(globalElements.shortcutsModal) ||
+    isOverlayElementOpen(globalElements.settingsModal) ||
+    isOverlayElementOpen(globalElements.workqueueModal) ||
+    isOverlayElementOpen(globalElements.loginOverlay) ||
+    paneManager?._addPaneMenuState?.open
+  );
+}
+
+function closeTopmostOverlay() {
+  if (paneManager?._addPaneMenuState?.open) {
+    paneManager.closeAddPaneMenu();
+    return true;
+  }
+  if (isCommandPaletteOpen()) {
+    closeCommandPalette();
+    return true;
+  }
+  if (isPaneManagerOpen()) {
+    closePaneManager();
+    return true;
+  }
+  if (isOverlayElementOpen(globalElements.agentsModal)) {
+    closeAgentsModal();
+    return true;
+  }
+  if (isOverlayElementOpen(globalElements.shortcutsModal)) {
+    closeShortcuts();
+    return true;
+  }
+  if (isOverlayElementOpen(globalElements.settingsModal)) {
+    closeSettings();
+    return true;
+  }
+  if (isOverlayElementOpen(globalElements.workqueueModal)) {
+    closeWorkqueue();
+    return true;
+  }
+  return false;
+}
+
 function focusPaneIndex(idx, { trackMru = true } = {}) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
@@ -7983,6 +8036,15 @@ window.addEventListener('keydown', (event) => {
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
   })();
 
+  if (event.key === 'Escape') {
+    const closedOverlay = closeTopmostOverlay();
+    if (closedOverlay || !isEditableTarget) {
+      event.preventDefault();
+    }
+    if (closedOverlay) event.stopPropagation();
+    return;
+  }
+
   // If Pane Manager is open, it gets first dibs on keys.
   if (paneManagerHandleKeydown(event)) return;
 
@@ -7992,12 +8054,12 @@ window.addEventListener('keydown', (event) => {
   // Ctrl/Cmd+Shift+R → focus matching cron target (Alt/Option adds anyway)
   // Ctrl/Cmd+Shift+T → focus matching timeline target (Alt/Option adds anyway)
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey;
-  if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target)) {
+  if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target) && !isAnyOverlayOpen()) {
     const key = String(event.key || '').toLowerCase();
     const map = { c: 'chat', w: 'workqueue', r: 'cron', t: 'timeline' };
     const kind = map[key];
     if (kind) {
-      // Don't hijack add-pane shortcuts while typing in inputs/editors.
+      // Don't hijack add-pane shortcuts while typing or while overlays are active.
       event.preventDefault();
       paneManager.closeAddPaneMenu();
       paneManager.addPane(kind, { forceNew: !!event.altKey });
@@ -8016,19 +8078,6 @@ window.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'k') {
     event.preventDefault();
     openCommandPalette();
-    return;
-  }
-
-  if (event.key === 'Escape') {
-    closeCommandPalette();
-    closePaneManager();
-    closeShortcuts();
-    closeSettings();
-    closeWorkqueue();
-    paneManager.closeAddPaneMenu();
-    if (!isEditableTarget) {
-      event.preventDefault();
-    }
     return;
   }
 
@@ -8099,7 +8148,7 @@ window.addEventListener('keydown', (event) => {
   }
 
   // Cmd/Ctrl+Shift+N opens Add pane menu.
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'n') {
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'n' && !isAnyOverlayOpen()) {
     event.preventDefault();
     paneManager.openAddPaneMenu(globalElements.addPaneBtn);
     return;
