@@ -3155,6 +3155,52 @@ kbd {
   color: rgba(255, 230, 230, 0.95);
 }
 
+.pane-switch-hud {
+  position: fixed;
+  z-index: 9998;
+  left: 50%;
+  bottom: 28px;
+  max-width: min(460px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(10, 15, 23, 0.92);
+  color: rgba(248, 250, 252, 0.96);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.48);
+  pointer-events: none;
+  transform: translate(-50%, 10px);
+  opacity: 0;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.pane-switch-hud.open {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.pane-switch-hud__identity {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-switch-hud__actions {
+  margin-top: 3px;
+  color: rgba(203, 213, 225, 0.78);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-switch-hud {
+    transition: none;
+    transform: translate(-50%, 0);
+  }
+}
+
 /* Cron + Timeline */
 .cron-list {
   display: flex;
