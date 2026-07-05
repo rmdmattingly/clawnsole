@@ -558,6 +558,45 @@
             <div>New Cron pane: <code>Ctrl/Cmd</code> + <code>Shift</code> + <code>R</code></div>
             <div>New Timeline pane: <code>Ctrl/Cmd</code> + <code>Shift</code> + <code>T</code></div>
           </div>
+
+          <section class="recurring-prompts" aria-label="Recurring agent prompts">
+            <div class="recurring-prompts-head">
+              <div>
+                <div class="recurring-prompts-title">Recurring Agent Prompts</div>
+                <div class="hint">Stored by Clawnsole; delivered by the external scheduler worker.</div>
+              </div>
+              <button id="recurringPromptRefreshBtn" class="secondary" type="button">Refresh</button>
+            </div>
+
+            <div class="recurring-prompt-form">
+              <label>
+                Title
+                <input id="recurringPromptTitle" type="text" placeholder="Daily checklist" />
+              </label>
+              <label>
+                Agent
+                <select id="recurringPromptAgent"></select>
+              </label>
+              <label>
+                Interval
+                <input id="recurringPromptInterval" type="number" value="1440" min="1" step="1" />
+              </label>
+              <label class="recurring-prompt-toggle">
+                <input id="recurringPromptEnabled" type="checkbox" checked />
+                <span>Enabled</span>
+              </label>
+              <label class="recurring-prompt-message">
+                Prompt
+                <textarea id="recurringPromptMessage" rows="4" placeholder="Admin prompt content"></textarea>
+              </label>
+              <div class="recurring-prompt-actions">
+                <button id="recurringPromptCreateBtn" class="primary" type="button">Create</button>
+              </div>
+            </div>
+
+            <div id="recurringPromptStatus" class="hint" role="status" aria-live="polite"></div>
+            <div id="recurringPromptList" class="recurring-prompt-list" aria-label="Recurring prompt list"></div>
+          </section>
         </div>
       </div>
     </div>

@@ -175,6 +175,9 @@ Clawnsole can store recurring prompts targeted at individual agents. Delivery is
 node scripts/recurring-prompts-scheduler.js --once
 # or loop
 node scripts/recurring-prompts-scheduler.js --loopSeconds 60
+# python worker wrapper (with retry/backoff)
+python3 scripts/recurring-prompts-worker.py --once
+python3 scripts/recurring-prompts-worker.py --loopSeconds 60
 ```
 
 Prompts are stored in `~/.openclaw/clawnsole-recurring-prompts*.json` (instance-aware).

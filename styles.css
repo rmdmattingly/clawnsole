@@ -1661,6 +1661,123 @@ kbd {
   }
 }
 
+/* Recurring prompts */
+
+.recurring-prompts {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.recurring-prompts-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.recurring-prompts-title {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.recurring-prompt-form {
+  display: grid;
+  grid-template-columns: 1fr 150px 110px auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.recurring-prompt-toggle {
+  flex-direction: row !important;
+  align-items: center;
+  min-height: 42px;
+}
+
+.recurring-prompt-message,
+.recurring-prompt-actions {
+  grid-column: 1 / -1;
+}
+
+.recurring-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.recurring-prompt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.recurring-prompt-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.recurring-prompt-card-main {
+  min-width: 0;
+}
+
+.recurring-prompt-card-title {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.recurring-prompt-card-meta,
+.recurring-prompt-card-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.recurring-prompt-error {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.recurring-prompt-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-content: flex-start;
+  gap: 8px;
+}
+
+.recurring-prompt-card-actions .danger {
+  border-color: rgba(255, 96, 96, 0.42);
+  color: #ff9a9a;
+}
+
+#recurringPromptStatus.error {
+  color: var(--danger);
+}
+
+@media (max-width: 760px) {
+  .recurring-prompt-form {
+    grid-template-columns: 1fr;
+  }
+
+  .recurring-prompt-card {
+    flex-direction: column;
+  }
+
+  .recurring-prompt-card-actions {
+    justify-content: flex-start;
+  }
+}
+
 /* Workqueue modal */
 
 .wq-toolbar {
