@@ -2379,8 +2379,8 @@ function buildCommandPaletteItems() {
     withShortcut(
       {
         id: 'cmd:reset-layout',
-        label: 'Layout: Reset panes',
-        detail: 'Reset admin layout to default',
+        label: 'Layout: Reset to recommended layout',
+        detail: 'Restore Chat + Workqueue panes',
         run: () => paneManager.resetAdminLayoutToDefault({ confirm: true })
       },
       ''
@@ -7246,10 +7246,16 @@ const paneManager = {
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
+  hasUnsentDrafts() {
+    return this.panes.some((pane) => {
+      if (pane.kind !== 'chat') return false;
+      return String(pane.elements?.input?.value || '').trim().length > 0;
+    });
+  },
   resetAdminLayoutToDefault({ confirm = true } = {}) {
     if (roleState.role !== 'admin') return;
-    if (confirm) {
-      const ok = window.confirm('Reset layout to default (Chat + Workqueue)?');
+    if (confirm && this.hasUnsentDrafts()) {
+      const ok = window.confirm('Reset to recommended layout? Unsent draft text will be discarded.');
       if (!ok) return;
     }
 
@@ -8215,6 +8221,10 @@ globalElements.disconnectBtn?.addEventListener('click', () => {
   });
   paneManager.connectAll();
 });
+
+if (globalElements.resetLayoutBtn) {
+  globalElements.resetLayoutBtn.textContent = 'Reset to recommended layout';
+}
 
 globalElements.resetLayoutBtn?.addEventListener('click', () => {
   paneManager.resetAdminLayoutToDefault({ confirm: true });
