@@ -2283,6 +2283,14 @@ function scoreFuzzy(hay, needle) {
   return Math.max(1, score);
 }
 
+function commandPalettePaneMeta({ type, target, mode }) {
+  return [
+    { label: type || 'Pane', tone: 'type' },
+    { label: target || 'default', tone: 'target' },
+    { label: mode || 'open', tone: mode === 'focus existing' ? 'reuse' : 'create' }
+  ];
+}
+
 function buildCommandPaletteItems() {
   const items = [];
   const withShortcut = (item, shortcut) => ({ ...item, shortcut: shortcut || '' });
@@ -2296,9 +2304,11 @@ function buildCommandPaletteItems() {
       withShortcut(
         {
           id: `cmd:focus-pane-${pane.key}`,
-          label: `Focus pane ${letter}`,
-          detail: `${type} · ${target}`,
-          run: () => focusPaneIndex(idx)
+          label: `Focus ${type}: ${target}`,
+          detail: `Pane ${letter} · focus existing`,
+          paneMeta: commandPalettePaneMeta({ type, target, mode: 'focus existing' }),
+          searchText: `open focus existing pane ${letter} ${type} ${target}`,
+          run: () => paneManager.focusPanePrimary(pane)
         },
         idx < 9 ? `⌘/Ctrl+${idx + 1}` : ''
       )
@@ -2308,39 +2318,93 @@ function buildCommandPaletteItems() {
   // Core open actions for all enabled pane types.
   items.push(
     withShortcut(
-      { id: 'cmd:add-chat', label: 'Open pane: Chat', detail: 'Create a new Chat pane', run: () => paneManager.addPane('chat') },
+      {
+        id: 'cmd:add-chat',
+        label: 'Open Chat: main',
+        detail: 'Create or focus the default Chat pane',
+        paneMeta: commandPalettePaneMeta({ type: 'Chat', target: 'main', mode: 'create or focus' }),
+        run: () => paneManager.addPane('chat')
+      },
       '⌘/Ctrl+Shift+C'
     ),
     withShortcut(
-      { id: 'cmd:add-workqueue', label: 'Open pane: Workqueue', detail: 'Focus matching Workqueue pane target (or create one)', run: () => paneManager.addPane('workqueue') },
+      {
+        id: 'cmd:add-workqueue',
+        label: 'Open Workqueue: dev-team',
+        detail: 'Focus matching queue target or create one',
+        paneMeta: commandPalettePaneMeta({ type: 'Workqueue', target: 'dev-team', mode: 'create or focus' }),
+        run: () => paneManager.addPane('workqueue')
+      },
       '⌘/Ctrl+Shift+W'
     ),
     withShortcut(
-      { id: 'cmd:add-workqueue-force', label: 'Open pane: Workqueue (open anyway)', detail: 'Create a new Workqueue pane even if matching target exists', run: () => paneManager.addPane('workqueue', { forceNew: true }) },
+      {
+        id: 'cmd:add-workqueue-force',
+        label: 'New Workqueue: dev-team',
+        detail: 'Create a new Workqueue pane even if matching target exists',
+        paneMeta: commandPalettePaneMeta({ type: 'Workqueue', target: 'dev-team', mode: 'create new' }),
+        run: () => paneManager.addPane('workqueue', { forceNew: true })
+      },
       ''
     ),
     withShortcut(
-      { id: 'cmd:add-cron', label: 'Open pane: Cron', detail: 'Focus matching Cron pane target (or create one)', run: () => paneManager.addPane('cron') },
+      {
+        id: 'cmd:add-cron',
+        label: 'Open Cron: gateway',
+        detail: 'Focus matching gateway pane or create one',
+        paneMeta: commandPalettePaneMeta({ type: 'Cron', target: 'gateway', mode: 'create or focus' }),
+        run: () => paneManager.addPane('cron')
+      },
       '⌘/Ctrl+Shift+R'
     ),
     withShortcut(
-      { id: 'cmd:add-cron-force', label: 'Open pane: Cron (open anyway)', detail: 'Create a new Cron pane even if matching target exists', run: () => paneManager.addPane('cron', { forceNew: true }) },
+      {
+        id: 'cmd:add-cron-force',
+        label: 'New Cron: gateway',
+        detail: 'Create a new Cron pane even if matching target exists',
+        paneMeta: commandPalettePaneMeta({ type: 'Cron', target: 'gateway', mode: 'create new' }),
+        run: () => paneManager.addPane('cron', { forceNew: true })
+      },
       ''
     ),
     withShortcut(
-      { id: 'cmd:add-timeline', label: 'Open pane: Timeline', detail: 'Focus matching Timeline pane target (or create one)', run: () => paneManager.addPane('timeline') },
+      {
+        id: 'cmd:add-timeline',
+        label: 'Open Timeline: gateway',
+        detail: 'Focus matching gateway pane or create one',
+        paneMeta: commandPalettePaneMeta({ type: 'Timeline', target: 'gateway', mode: 'create or focus' }),
+        run: () => paneManager.addPane('timeline')
+      },
       '⌘/Ctrl+Shift+T'
     ),
     withShortcut(
-      { id: 'cmd:add-timeline-force', label: 'Open pane: Timeline (open anyway)', detail: 'Create a new Timeline pane even if matching target exists', run: () => paneManager.addPane('timeline', { forceNew: true }) },
+      {
+        id: 'cmd:add-timeline-force',
+        label: 'New Timeline: gateway',
+        detail: 'Create a new Timeline pane even if matching target exists',
+        paneMeta: commandPalettePaneMeta({ type: 'Timeline', target: 'gateway', mode: 'create new' }),
+        run: () => paneManager.addPane('timeline', { forceNew: true })
+      },
       ''
     ),
     withShortcut(
-      { id: 'cmd:open-fleet', label: 'Open pane: Fleet', detail: 'Focus existing Fleet pane or open one', run: () => openFleetPane() },
+      {
+        id: 'cmd:open-fleet',
+        label: 'Open Fleet: all nodes',
+        detail: 'Focus existing Fleet pane or open one',
+        paneMeta: commandPalettePaneMeta({ type: 'Fleet', target: 'all nodes', mode: 'create or focus' }),
+        run: () => openFleetPane()
+      },
       '⌘/Ctrl+Shift+F'
     ),
     withShortcut(
-      { id: 'cmd:add-fleet', label: 'Open pane: Fleet (new)', detail: 'Create a new Fleet pane even if one exists', run: () => openFleetPane({ forceNew: true }) },
+      {
+        id: 'cmd:add-fleet',
+        label: 'New Fleet: all nodes',
+        detail: 'Create a new Fleet pane even if one exists',
+        paneMeta: commandPalettePaneMeta({ type: 'Fleet', target: 'all nodes', mode: 'create new' }),
+        run: () => openFleetPane({ forceNew: true })
+      },
       ''
     )
   );
@@ -2353,7 +2417,8 @@ function buildCommandPaletteItems() {
     items.push(withShortcut({
       id: `cmd:add-workqueue:${queue}`,
       label: `Open Workqueue: ${queue}`,
-      detail: 'Open a Workqueue pane already targeted to this queue',
+      detail: 'Focus matching queue target or create one',
+      paneMeta: commandPalettePaneMeta({ type: 'Workqueue', target: queue, mode: 'create or focus' }),
       run: () => paneManager.addPane('workqueue', { queue })
     }, 'targeted open'));
   });
@@ -2363,14 +2428,17 @@ function buildCommandPaletteItems() {
     id: 'cmd:add-timeline:all',
     label: 'Open Timeline: All agents',
     detail: 'Open Timeline with agent filter set to all',
+    paneMeta: commandPalettePaneMeta({ type: 'Timeline', target: 'all agents', mode: 'create or focus' }),
     run: () => paneManager.addPane('timeline', { cronAgentId: 'all' })
   }, 'targeted open'));
   for (const agent of agents) {
     const agentId = normalizeAgentId(agent?.id || 'main');
+    const agentLabel = formatAgentLabel(agent, { includeId: false });
     items.push(withShortcut({
       id: `cmd:add-timeline:${agentId}`,
-      label: `Open Timeline: ${formatAgentLabel(agent, { includeId: false })}`,
+      label: `Open Timeline: ${agentLabel}`,
       detail: `Open Timeline filtered to ${agentId}`,
+      paneMeta: commandPalettePaneMeta({ type: 'Timeline', target: agentLabel, mode: 'create or focus' }),
       run: () => paneManager.addPane('timeline', { cronAgentId: agentId })
     }, 'targeted open'));
   }
@@ -2470,7 +2538,7 @@ function buildCommandPaletteItems() {
 
     if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-return-last-chat' || id === 'cmd:pane-mru-next' || id === 'cmd:pane-mru-prev' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
       enriched.group = 'Panes';
-      enriched.priority = 110;
+      enriched.priority = id.startsWith('cmd:focus-pane-') ? 130 : 110;
       return enriched;
     }
     if (id.startsWith('cmd:add-')) {
@@ -2635,9 +2703,21 @@ function renderCommandPalette() {
     btn.setAttribute('role', 'option');
     btn.setAttribute('aria-selected', idx === selected ? 'true' : 'false');
     btn.dataset.commandPaletteId = item.id;
+    const paneMeta = Array.isArray(item.paneMeta) ? item.paneMeta : [];
+    const paneMetaMarkup = paneMeta.length
+      ? `<div class="command-palette-pane-meta">${paneMeta
+          .map((meta) => {
+            const tone = String(meta?.tone || 'target');
+            const label = String(meta?.label || '').trim();
+            if (!label) return '';
+            return `<span class="command-palette-pane-chip command-palette-pane-chip-${escapeHtml(tone)}">${escapeHtml(label)}</span>`;
+          })
+          .join('')}</div>`
+      : '';
     btn.innerHTML = `
       <div class="command-palette-item-main">
         <div class="command-palette-item-label">${escapeHtml(item.label)}</div>
+        ${paneMetaMarkup}
         <div class="command-palette-item-detail">${escapeHtml(item.detail || '')}</div>
       </div>
       <div class="command-palette-item-meta">${escapeHtml(item.shortcut || '')}${idx === selected ? (item.shortcut ? ' · ↵' : '↵') : ''}</div>
@@ -2671,7 +2751,8 @@ function filterCommandPalette(query) {
   const q = commandPaletteState.query.trim();
   const scored = commandPaletteState.items
     .map((item) => {
-      const hay = `${item.label || ''} ${item.detail || ''} ${item.id || ''} ${item.group || ''} ${item.subgroup || ''}`;
+      const meta = Array.isArray(item.paneMeta) ? item.paneMeta.map((x) => x?.label || '').join(' ') : '';
+      const hay = `${item.label || ''} ${item.detail || ''} ${item.searchText || ''} ${meta} ${item.id || ''} ${item.group || ''} ${item.subgroup || ''}`;
       const score = scoreFuzzy(hay, q);
       const rank = score + Number(item.priority || 0);
       return { item, score, rank };
