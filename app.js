@@ -5585,6 +5585,27 @@ function paneHasDraftChanges(pane) {
   return Boolean(draftText || hasAttachments);
 }
 
+function paneHasActiveRun(pane) {
+  if (!pane) return false;
+  return Boolean(pane.thinking?.active || (pane.chat?.runs && pane.chat.runs.size > 0) || (pane.abortState && pane.abortState.active));
+}
+
+function paneCloseGuardPrompt(pane) {
+  if (!pane || pane.kind !== 'chat') return true;
+
+  const hasDraft = paneHasDraftChanges(pane);
+  const hasActiveRun = paneHasActiveRun(pane);
+  if (!hasDraft && !hasActiveRun) return true;
+
+  const warnings = [];
+  if (hasDraft) warnings.push('- unsent draft text or attachments');
+  if (hasActiveRun) warnings.push('- active run in progress');
+
+  return window.confirm(
+    `Close this chat pane?\n\nThis pane has:\n${warnings.join('\n')}\n\nClosing it will discard this pane context.`
+  );
+}
+
 function paneSetDestinationStrip(pane) {
   const strip = pane?.elements?.destinationStrip;
   const valueEl = pane?.elements?.destinationValue;
@@ -7577,6 +7598,8 @@ const paneManager = {
     if (this.panes.length <= 1) return;
     const idx = this.panes.findIndex((pane) => pane.key === key);
     if (idx < 0) return;
+    const closingPane = this.panes[idx];
+    if (!paneCloseGuardPrompt(closingPane)) return;
     const [pane] = this.panes.splice(idx, 1);
     forgetFocusedPaneKey(pane?.key || key);
     try {
