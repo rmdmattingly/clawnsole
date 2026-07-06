@@ -61,18 +61,28 @@ test('chat pane: stop button can cancel a running response', async ({ page }) =>
   const pane = page.locator('[data-pane][data-pane-kind="chat"]').last();
   await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
 
+  const stopBtn = pane.locator('[data-pane-stop]');
+  await expect(stopBtn).toBeHidden();
+  await expect(stopBtn).toBeDisabled();
+
+  await pane.locator('[data-pane-input]').focus();
+  await page.keyboard.press('Tab');
+  await expect(pane.locator('[data-pane-send]')).toBeFocused();
+
   await pane.locator('[data-pane-input]').fill('please stream this');
   await pane.locator('[data-pane-send]').click();
 
   // Streaming begins immediately in mock gateway.
   await expect(pane.locator('.chat-bubble.assistant', { hasText: 'mock-stream: please stream' })).toBeVisible();
 
-  const stopBtn = pane.locator('[data-pane-stop]');
   await expect(stopBtn).toBeVisible();
+  await expect(stopBtn).toBeEnabled();
   await stopBtn.click();
 
   await expect(stopBtn).toHaveAttribute('aria-label', 'Canceling…');
   await expect(pane.locator('.chat-bubble.assistant').last()).toContainText('(canceled)', { ignoreCase: true, timeout: 5000 });
+  await expect(stopBtn).toBeHidden();
+  await expect(stopBtn).toBeDisabled();
 
   // Cancel should not still emit a completed reply after stream is stopped.
   await expect(pane.locator('.chat-bubble.assistant')).not.toContainText('mock-reply: please stream this', { timeout: 3000 });

@@ -65,7 +65,7 @@ test('layout: reset layout restores default (Chat + Workqueue)', async ({ page }
   await expect(panes.nth(1)).toHaveAttribute('data-pane-kind', 'workqueue');
 });
 
-test('layout: reset warns and preserves panes when a draft would be discarded', async ({ page }) => {
+test('layout: reset requires confirmation before discarding a chat draft', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
 
@@ -76,23 +76,32 @@ test('layout: reset warns and preserves panes when a draft would be discarded', 
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
+  const input = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
+  await input.fill('hold this thought');
+
   await page.getByRole('button', { name: 'Add pane' }).click();
   await page.getByRole('button', { name: 'Cron pane' }).click();
   await expect(page.locator('[data-pane]')).toHaveCount(3);
 
-  const chatPane = page.locator('[data-pane]').first();
-  await chatPane.getByTestId('pane-input').fill('draft before reset');
-
   await page.getByRole('button', { name: 'Open settings' }).click();
 
-  let sawDraftWarning = false;
   page.once('dialog', async (dialog) => {
-    sawDraftWarning = /unsent draft text or attachments/i.test(dialog.message());
+    expect(dialog.message()).toContain('Unsent draft text or attachments will be discarded');
     await dialog.dismiss();
   });
   await page.click('#resetLayoutBtn');
-
-  await expect.poll(() => sawDraftWarning).toBe(true);
   await expect(page.locator('[data-pane]')).toHaveCount(3);
-  await expect(chatPane.getByTestId('pane-input')).toHaveValue('draft before reset');
+  await expect(input).toHaveValue('hold this thought');
+
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('Unsent draft text or attachments will be discarded');
+    await dialog.accept();
+  });
+  await page.click('#resetLayoutBtn');
+
+  const panes = page.locator('[data-pane]');
+  await expect(panes).toHaveCount(2);
+  await expect(panes.first()).toHaveAttribute('data-pane-kind', 'chat');
+  await expect(panes.nth(1)).toHaveAttribute('data-pane-kind', 'workqueue');
+  await expect(panes.first().locator('[data-pane-input]')).toHaveValue('');
 });

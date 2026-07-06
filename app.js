@@ -73,6 +73,7 @@ const globalElements = {
   settingsBtn: document.getElementById('settingsBtn'),
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
+  paneSwitchHudEnabled: document.getElementById('paneSwitchHudEnabled'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
   loginPassword: document.getElementById('loginPassword'),
@@ -248,6 +249,7 @@ const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
 const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
+const PANE_SWITCH_HUD_ENABLED_KEY = 'clawnsole.admin.paneSwitchHud.enabled';
 const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
 const WQ_RECENT_ENQUEUE_AGENTS_KEY = 'clawnsole.wq.recentEnqueueAgents';
@@ -1335,6 +1337,9 @@ async function attemptLogin() {
 }
 
 function openSettings() {
+  if (globalElements.paneSwitchHudEnabled) {
+    globalElements.paneSwitchHudEnabled.checked = isPaneSwitchHudEnabled();
+  }
   globalElements.settingsModal.classList.add('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'false');
 
@@ -1738,6 +1743,57 @@ function paneSummaryLabel(pane) {
   return paneIdentityLabel(pane, { includeUnread: false });
 }
 
+function isPaneSwitchHudEnabled() {
+  return String(storage.get(PANE_SWITCH_HUD_ENABLED_KEY, '1') || '1') !== '0';
+}
+
+let paneSwitchHudHideTimer = null;
+
+function ensurePaneSwitchHud() {
+  let hud = document.getElementById('paneSwitchHud');
+  if (hud) return hud;
+  hud = document.createElement('div');
+  hud.id = 'paneSwitchHud';
+  hud.className = 'pane-switch-hud';
+  hud.setAttribute('role', 'status');
+  hud.setAttribute('aria-live', 'polite');
+  hud.setAttribute('aria-atomic', 'true');
+  hud.tabIndex = -1;
+  hud.hidden = true;
+  document.body.appendChild(hud);
+  return hud;
+}
+
+function paneSwitchHudActions(pane) {
+  const kind = String(pane?.kind || 'chat');
+  if (kind === 'workqueue') return ['Refresh', 'Claim'];
+  if (kind === 'cron') return ['Refresh', 'Open job'];
+  if (kind === 'timeline') return ['Refresh', 'Filter'];
+  return ['Send', 'Attach'];
+}
+
+function showPaneSwitchHud(pane) {
+  if (!pane || !isPaneSwitchHudEnabled()) return;
+  const hud = ensurePaneSwitchHud();
+  const actions = paneSwitchHudActions(pane);
+  hud.innerHTML = `
+    <div class="pane-switch-hud-title">${escapeHtml(paneIdentityLabel(pane))}</div>
+    <div class="pane-switch-hud-actions">${actions.map((action) => `<span>${escapeHtml(action)}</span>`).join('')}</div>
+  `;
+  hud.hidden = false;
+  hud.classList.remove('is-hiding');
+  hud.classList.add('is-visible');
+
+  if (paneSwitchHudHideTimer) clearTimeout(paneSwitchHudHideTimer);
+  paneSwitchHudHideTimer = setTimeout(() => {
+    hud.classList.add('is-hiding');
+    hud.classList.remove('is-visible');
+    paneSwitchHudHideTimer = setTimeout(() => {
+      hud.hidden = true;
+    }, 180);
+  }, 900);
+}
+
 function paneDuplicateKey(pane) {
   return `${String(pane?.kind || 'chat')}::${String(paneTargetLabel(pane) || '').trim().toLowerCase()}`;
 }
@@ -1834,7 +1890,7 @@ function switchPaneByMru(direction = 1) {
   traversal.updatedAt = now;
   paneMruTraversal = traversal;
 
-  focusPaneIndex(paneIdx, { trackMru: false });
+  focusPaneIndex(paneIdx, { trackMru: false, showHud: true });
   const pane = panes[paneIdx];
   if (pane) showToast(`Switched to ${paneIdentityLabel(pane)}`, { kind: 'info', timeoutMs: 1400 });
   return true;
@@ -2227,6 +2283,14 @@ function scoreFuzzy(hay, needle) {
   return Math.max(1, score);
 }
 
+function commandPalettePaneMeta({ type, target, mode }) {
+  return [
+    { label: type || 'Pane', tone: 'type' },
+    { label: target || 'default', tone: 'target' },
+    { label: mode || 'open', tone: mode === 'focus existing' ? 'reuse' : 'create' }
+  ];
+}
+
 function buildCommandPaletteItems() {
   const items = [];
   const withShortcut = (item, shortcut) => ({ ...item, shortcut: shortcut || '' });
@@ -2240,9 +2304,11 @@ function buildCommandPaletteItems() {
       withShortcut(
         {
           id: `cmd:focus-pane-${pane.key}`,
-          label: `Focus pane ${letter}`,
-          detail: `${type} · ${target}`,
-          run: () => focusPaneIndex(idx)
+          label: `Focus ${type}: ${target}`,
+          detail: `Pane ${letter} · focus existing`,
+          paneMeta: commandPalettePaneMeta({ type, target, mode: 'focus existing' }),
+          searchText: `open focus existing pane ${letter} ${type} ${target}`,
+          run: () => paneManager.focusPanePrimary(pane)
         },
         idx < 9 ? `⌘/Ctrl+${idx + 1}` : ''
       )
@@ -2252,39 +2318,93 @@ function buildCommandPaletteItems() {
   // Core open actions for all enabled pane types.
   items.push(
     withShortcut(
-      { id: 'cmd:add-chat', label: 'Open pane: Chat', detail: 'Create a new Chat pane', run: () => paneManager.addPane('chat') },
+      {
+        id: 'cmd:add-chat',
+        label: 'Open Chat: main',
+        detail: 'Create or focus the default Chat pane',
+        paneMeta: commandPalettePaneMeta({ type: 'Chat', target: 'main', mode: 'create or focus' }),
+        run: () => paneManager.addPane('chat')
+      },
       '⌘/Ctrl+Shift+C'
     ),
     withShortcut(
-      { id: 'cmd:add-workqueue', label: 'Open pane: Workqueue', detail: 'Focus matching Workqueue pane target (or create one)', run: () => paneManager.addPane('workqueue') },
+      {
+        id: 'cmd:add-workqueue',
+        label: 'Open Workqueue: dev-team',
+        detail: 'Focus matching queue target or create one',
+        paneMeta: commandPalettePaneMeta({ type: 'Workqueue', target: 'dev-team', mode: 'create or focus' }),
+        run: () => paneManager.addPane('workqueue')
+      },
       '⌘/Ctrl+Shift+W'
     ),
     withShortcut(
-      { id: 'cmd:add-workqueue-force', label: 'Open pane: Workqueue (open anyway)', detail: 'Create a new Workqueue pane even if matching target exists', run: () => paneManager.addPane('workqueue', { forceNew: true }) },
+      {
+        id: 'cmd:add-workqueue-force',
+        label: 'New Workqueue: dev-team',
+        detail: 'Create a new Workqueue pane even if matching target exists',
+        paneMeta: commandPalettePaneMeta({ type: 'Workqueue', target: 'dev-team', mode: 'create new' }),
+        run: () => paneManager.addPane('workqueue', { forceNew: true })
+      },
       ''
     ),
     withShortcut(
-      { id: 'cmd:add-cron', label: 'Open pane: Cron', detail: 'Focus matching Cron pane target (or create one)', run: () => paneManager.addPane('cron') },
+      {
+        id: 'cmd:add-cron',
+        label: 'Open Cron: gateway',
+        detail: 'Focus matching gateway pane or create one',
+        paneMeta: commandPalettePaneMeta({ type: 'Cron', target: 'gateway', mode: 'create or focus' }),
+        run: () => paneManager.addPane('cron')
+      },
       '⌘/Ctrl+Shift+R'
     ),
     withShortcut(
-      { id: 'cmd:add-cron-force', label: 'Open pane: Cron (open anyway)', detail: 'Create a new Cron pane even if matching target exists', run: () => paneManager.addPane('cron', { forceNew: true }) },
+      {
+        id: 'cmd:add-cron-force',
+        label: 'New Cron: gateway',
+        detail: 'Create a new Cron pane even if matching target exists',
+        paneMeta: commandPalettePaneMeta({ type: 'Cron', target: 'gateway', mode: 'create new' }),
+        run: () => paneManager.addPane('cron', { forceNew: true })
+      },
       ''
     ),
     withShortcut(
-      { id: 'cmd:add-timeline', label: 'Open pane: Timeline', detail: 'Focus matching Timeline pane target (or create one)', run: () => paneManager.addPane('timeline') },
+      {
+        id: 'cmd:add-timeline',
+        label: 'Open Timeline: gateway',
+        detail: 'Focus matching gateway pane or create one',
+        paneMeta: commandPalettePaneMeta({ type: 'Timeline', target: 'gateway', mode: 'create or focus' }),
+        run: () => paneManager.addPane('timeline')
+      },
       '⌘/Ctrl+Shift+T'
     ),
     withShortcut(
-      { id: 'cmd:add-timeline-force', label: 'Open pane: Timeline (open anyway)', detail: 'Create a new Timeline pane even if matching target exists', run: () => paneManager.addPane('timeline', { forceNew: true }) },
+      {
+        id: 'cmd:add-timeline-force',
+        label: 'New Timeline: gateway',
+        detail: 'Create a new Timeline pane even if matching target exists',
+        paneMeta: commandPalettePaneMeta({ type: 'Timeline', target: 'gateway', mode: 'create new' }),
+        run: () => paneManager.addPane('timeline', { forceNew: true })
+      },
       ''
     ),
     withShortcut(
-      { id: 'cmd:open-fleet', label: 'Open pane: Fleet', detail: 'Focus existing Fleet pane or open one', run: () => openFleetPane() },
+      {
+        id: 'cmd:open-fleet',
+        label: 'Open Fleet: all nodes',
+        detail: 'Focus existing Fleet pane or open one',
+        paneMeta: commandPalettePaneMeta({ type: 'Fleet', target: 'all nodes', mode: 'create or focus' }),
+        run: () => openFleetPane()
+      },
       '⌘/Ctrl+Shift+F'
     ),
     withShortcut(
-      { id: 'cmd:add-fleet', label: 'Open pane: Fleet (new)', detail: 'Create a new Fleet pane even if one exists', run: () => openFleetPane({ forceNew: true }) },
+      {
+        id: 'cmd:add-fleet',
+        label: 'New Fleet: all nodes',
+        detail: 'Create a new Fleet pane even if one exists',
+        paneMeta: commandPalettePaneMeta({ type: 'Fleet', target: 'all nodes', mode: 'create new' }),
+        run: () => openFleetPane({ forceNew: true })
+      },
       ''
     )
   );
@@ -2297,7 +2417,8 @@ function buildCommandPaletteItems() {
     items.push(withShortcut({
       id: `cmd:add-workqueue:${queue}`,
       label: `Open Workqueue: ${queue}`,
-      detail: 'Open a Workqueue pane already targeted to this queue',
+      detail: 'Focus matching queue target or create one',
+      paneMeta: commandPalettePaneMeta({ type: 'Workqueue', target: queue, mode: 'create or focus' }),
       run: () => paneManager.addPane('workqueue', { queue })
     }, 'targeted open'));
   });
@@ -2307,14 +2428,17 @@ function buildCommandPaletteItems() {
     id: 'cmd:add-timeline:all',
     label: 'Open Timeline: All agents',
     detail: 'Open Timeline with agent filter set to all',
+    paneMeta: commandPalettePaneMeta({ type: 'Timeline', target: 'all agents', mode: 'create or focus' }),
     run: () => paneManager.addPane('timeline', { cronAgentId: 'all' })
   }, 'targeted open'));
   for (const agent of agents) {
     const agentId = normalizeAgentId(agent?.id || 'main');
+    const agentLabel = formatAgentLabel(agent, { includeId: false });
     items.push(withShortcut({
       id: `cmd:add-timeline:${agentId}`,
-      label: `Open Timeline: ${formatAgentLabel(agent, { includeId: false })}`,
+      label: `Open Timeline: ${agentLabel}`,
       detail: `Open Timeline filtered to ${agentId}`,
+      paneMeta: commandPalettePaneMeta({ type: 'Timeline', target: agentLabel, mode: 'create or focus' }),
       run: () => paneManager.addPane('timeline', { cronAgentId: agentId })
     }, 'targeted open'));
   }
@@ -2323,8 +2447,8 @@ function buildCommandPaletteItems() {
     withShortcut(
       {
         id: 'cmd:reset-layout',
-        label: 'Layout: Reset panes',
-        detail: 'Reset admin layout to default',
+        label: 'Layout: Reset to recommended layout',
+        detail: 'Restore Chat + Workqueue panes',
         run: () => paneManager.resetAdminLayoutToDefault({ confirm: true })
       },
       ''
@@ -2414,7 +2538,7 @@ function buildCommandPaletteItems() {
 
     if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-return-last-chat' || id === 'cmd:pane-mru-next' || id === 'cmd:pane-mru-prev' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
       enriched.group = 'Panes';
-      enriched.priority = 110;
+      enriched.priority = id.startsWith('cmd:focus-pane-') ? 130 : 110;
       return enriched;
     }
     if (id.startsWith('cmd:add-')) {
@@ -2579,9 +2703,21 @@ function renderCommandPalette() {
     btn.setAttribute('role', 'option');
     btn.setAttribute('aria-selected', idx === selected ? 'true' : 'false');
     btn.dataset.commandPaletteId = item.id;
+    const paneMeta = Array.isArray(item.paneMeta) ? item.paneMeta : [];
+    const paneMetaMarkup = paneMeta.length
+      ? `<div class="command-palette-pane-meta">${paneMeta
+          .map((meta) => {
+            const tone = String(meta?.tone || 'target');
+            const label = String(meta?.label || '').trim();
+            if (!label) return '';
+            return `<span class="command-palette-pane-chip command-palette-pane-chip-${escapeHtml(tone)}">${escapeHtml(label)}</span>`;
+          })
+          .join('')}</div>`
+      : '';
     btn.innerHTML = `
       <div class="command-palette-item-main">
         <div class="command-palette-item-label">${escapeHtml(item.label)}</div>
+        ${paneMetaMarkup}
         <div class="command-palette-item-detail">${escapeHtml(item.detail || '')}</div>
       </div>
       <div class="command-palette-item-meta">${escapeHtml(item.shortcut || '')}${idx === selected ? (item.shortcut ? ' · ↵' : '↵') : ''}</div>
@@ -2615,7 +2751,8 @@ function filterCommandPalette(query) {
   const q = commandPaletteState.query.trim();
   const scored = commandPaletteState.items
     .map((item) => {
-      const hay = `${item.label || ''} ${item.detail || ''} ${item.id || ''} ${item.group || ''} ${item.subgroup || ''}`;
+      const meta = Array.isArray(item.paneMeta) ? item.paneMeta.map((x) => x?.label || '').join(' ') : '';
+      const hay = `${item.label || ''} ${item.detail || ''} ${item.searchText || ''} ${meta} ${item.id || ''} ${item.group || ''} ${item.subgroup || ''}`;
       const score = scoreFuzzy(hay, q);
       const rank = score + Number(item.priority || 0);
       return { item, score, rank };
@@ -4830,7 +4967,7 @@ function paneRenderStopControl(pane) {
   btn.hidden = !visible;
 
   const isCanceling = Boolean(pane.abortState && pane.abortState.active);
-  btn.disabled = !uiState.authed || !pane.connected || isCanceling;
+  btn.disabled = !visible || isCanceling;
   btn.setAttribute('aria-label', isCanceling ? 'Canceling…' : 'Stop generating');
 }
 
@@ -7194,14 +7331,13 @@ const paneManager = {
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
+  hasUnsentDrafts() {
+    return anyPaneHasDraftChanges(this.panes);
+  },
   resetAdminLayoutToDefault({ confirm = true } = {}) {
     if (roleState.role !== 'admin') return;
-    if (confirm) {
-      const hasDraft = anyPaneHasDraftChanges(this.panes);
-      const message = hasDraft
-        ? 'Reset to recommended layout (Chat + Workqueue)?\n\nYou have unsent draft text or attachments. Resetting will clear the current panes and discard those drafts.'
-        : 'Reset to recommended layout (Chat + Workqueue)?';
-      const ok = window.confirm(message);
+    if (confirm && this.hasUnsentDrafts()) {
+      const ok = window.confirm('Reset to recommended layout? Unsent draft text or attachments will be discarded.');
       if (!ok) return;
     }
 
@@ -7635,6 +7771,9 @@ globalElements.settingsCloseBtn?.addEventListener('click', () => closeSettings()
 globalElements.settingsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.settingsModal) closeSettings();
 });
+globalElements.paneSwitchHudEnabled?.addEventListener('change', () => {
+  storage.set(PANE_SWITCH_HUD_ENABLED_KEY, globalElements.paneSwitchHudEnabled.checked ? '1' : '0');
+});
 
 globalElements.shortcutsBtn?.addEventListener('click', () => openShortcuts());
 globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
@@ -7853,11 +7992,12 @@ function isTypingContext(target) {
   return false;
 }
 
-function focusPaneIndex(idx, { trackMru = true } = {}) {
+function focusPaneIndex(idx, { trackMru = true, showHud = false } = {}) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
   clearPaneUnread(pane);
   if (trackMru) notePaneFocused(pane);
+  if (showHud) showPaneSwitchHud(pane);
 
   try {
     pane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
@@ -7946,7 +8086,7 @@ function cyclePaneFocus() {
   const active = document.activeElement;
   const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
   const next = idx >= 0 ? (idx + 1) % panes.length : 0;
-  focusPaneIndex(next);
+  focusPaneIndex(next, { showHud: true });
 }
 
 function cyclePaneFocusBackward() {
@@ -7956,7 +8096,7 @@ function cyclePaneFocusBackward() {
   const active = document.activeElement;
   const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
   const next = idx >= 0 ? (idx - 1 + panes.length) % panes.length : panes.length - 1;
-  focusPaneIndex(next);
+  focusPaneIndex(next, { showHud: true });
 }
 
 function cycleUnreadPaneFocus(direction = 1) {
@@ -7978,8 +8118,21 @@ function cycleUnreadPaneFocus(direction = 1) {
   const ordered = dir > 0 ? unreadIndexes : unreadIndexes.slice().reverse();
   const pick = ordered.find((idx) => dir > 0 ? idx > currentIdx : idx < currentIdx);
   const next = Number.isInteger(pick) ? pick : ordered[0];
-  focusPaneIndex(next);
+  focusPaneIndex(next, { showHud: true });
   return true;
+}
+
+function isBlockingOverlayOpenForPaneShortcuts() {
+  const blockers = [
+    globalElements.loginOverlay,
+    globalElements.settingsModal,
+    globalElements.shortcutsModal,
+    globalElements.commandPaletteModal,
+    globalElements.paneManagerModal,
+    globalElements.workqueueModal,
+    globalElements.agentsModal
+  ];
+  return blockers.some((el) => !!el?.classList?.contains('open')) || !!paneManager?._addPaneMenuState?.open;
 }
 
 window.addEventListener('keydown', (event) => {
@@ -8006,6 +8159,7 @@ window.addEventListener('keydown', (event) => {
     const kind = map[key];
     if (kind) {
       // Don't hijack add-pane shortcuts while typing in inputs/editors.
+      if (isBlockingOverlayOpenForPaneShortcuts()) return;
       event.preventDefault();
       paneManager.closeAddPaneMenu();
       paneManager.addPane(kind, { forceNew: !!event.altKey });
@@ -8065,7 +8219,7 @@ window.addEventListener('keydown', (event) => {
     const n = Number.parseInt(key, 10);
     if (Number.isFinite(n) && n >= 1 && n <= 9) {
       event.preventDefault();
-      focusPaneIndex(n - 1);
+      focusPaneIndex(n - 1, { showHud: true });
       return;
     }
   }
@@ -8075,7 +8229,7 @@ window.addEventListener('keydown', (event) => {
     const n = Number.parseInt(key, 10);
     if (Number.isFinite(n) && n >= 1 && n <= 9) {
       event.preventDefault();
-      focusPaneIndex(n - 1);
+      focusPaneIndex(n - 1, { showHud: true });
       return;
     }
   }
@@ -8163,6 +8317,10 @@ globalElements.disconnectBtn?.addEventListener('click', () => {
   });
   paneManager.connectAll();
 });
+
+if (globalElements.resetLayoutBtn) {
+  globalElements.resetLayoutBtn.textContent = 'Reset to recommended layout';
+}
 
 globalElements.resetLayoutBtn?.addEventListener('click', () => {
   paneManager.resetAdminLayoutToDefault({ confirm: true });
