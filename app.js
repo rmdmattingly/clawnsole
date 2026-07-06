@@ -4886,7 +4886,7 @@ function paneRenderStopControl(pane) {
   btn.hidden = !visible;
 
   const isCanceling = Boolean(pane.abortState && pane.abortState.active);
-  btn.disabled = !uiState.authed || !pane.connected || isCanceling;
+  btn.disabled = !visible || isCanceling;
   btn.setAttribute('aria-label', isCanceling ? 'Canceling…' : 'Stop generating');
 }
 
