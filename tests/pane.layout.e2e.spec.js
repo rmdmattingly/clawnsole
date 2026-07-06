@@ -86,7 +86,7 @@ test('layout: reset requires confirmation before discarding a chat draft', async
   await page.getByRole('button', { name: 'Open settings' }).click();
 
   page.once('dialog', async (dialog) => {
-    expect(dialog.message()).toContain('Unsent draft text will be discarded');
+    expect(dialog.message()).toContain('Unsent draft text or attachments will be discarded');
     await dialog.dismiss();
   });
   await page.click('#resetLayoutBtn');
@@ -94,7 +94,7 @@ test('layout: reset requires confirmation before discarding a chat draft', async
   await expect(input).toHaveValue('hold this thought');
 
   page.once('dialog', async (dialog) => {
-    expect(dialog.message()).toContain('Unsent draft text will be discarded');
+    expect(dialog.message()).toContain('Unsent draft text or attachments will be discarded');
     await dialog.accept();
   });
   await page.click('#resetLayoutBtn');

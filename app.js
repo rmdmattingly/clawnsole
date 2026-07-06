@@ -5666,6 +5666,10 @@ function paneHasDraftChanges(pane) {
   return Boolean(draftText || hasAttachments);
 }
 
+function anyPaneHasDraftChanges(panes) {
+  return (Array.isArray(panes) ? panes : []).some((pane) => pane?.kind === 'chat' && paneHasDraftChanges(pane));
+}
+
 function paneSetDestinationStrip(pane) {
   const strip = pane?.elements?.destinationStrip;
   const valueEl = pane?.elements?.destinationValue;
@@ -7328,15 +7332,12 @@ const paneManager = {
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
   hasUnsentDrafts() {
-    return this.panes.some((pane) => {
-      if (pane.kind !== 'chat') return false;
-      return String(pane.elements?.input?.value || '').trim().length > 0;
-    });
+    return anyPaneHasDraftChanges(this.panes);
   },
   resetAdminLayoutToDefault({ confirm = true } = {}) {
     if (roleState.role !== 'admin') return;
     if (confirm && this.hasUnsentDrafts()) {
-      const ok = window.confirm('Reset to recommended layout? Unsent draft text will be discarded.');
+      const ok = window.confirm('Reset to recommended layout? Unsent draft text or attachments will be discarded.');
       if (!ok) return;
     }
 
