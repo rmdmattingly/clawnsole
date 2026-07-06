@@ -7619,6 +7619,7 @@ const paneManager = {
   },
   updatePaneLabels() {
     this.panes.forEach((pane) => renderPaneIdentity(pane));
+    renderPaneShortcutIndexBadges();
     this.updatePaneGridLabel();
   },
   updatePaneGridLabel() {
@@ -7727,6 +7728,10 @@ globalElements.commandPaletteInput?.addEventListener('input', () => {
 globalElements.commandPaletteInput?.addEventListener('keydown', (event) => {
   if (!isCommandPaletteOpen()) return;
   const key = String(event.key || '');
+
+  if (key === 'Alt' && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+    setPaneShortcutBadgesVisible(true);
+  }
   if (key === 'Escape') {
     event.preventDefault();
     closeCommandPalette();
@@ -7894,6 +7899,32 @@ globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFro
 globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFromUi());
 
 let shortcutState = { lastGAtMs: 0 };
+let paneShortcutBadgesVisible = false;
+
+function renderPaneShortcutIndexBadges() {
+  const panes = Array.from(document.querySelectorAll('[data-pane]'));
+  panes.forEach((paneEl, idx) => {
+    const badge = paneEl.querySelector('[data-pane-shortcut-index-badge]');
+    if (!badge) return;
+    const shortcutIndex = idx + 1;
+    if (paneShortcutBadgesVisible && shortcutIndex <= 9) {
+      badge.hidden = false;
+      badge.textContent = String(shortcutIndex);
+      badge.setAttribute('title', `Direct focus shortcut: Alt/Option+${shortcutIndex}`);
+      return;
+    }
+    badge.hidden = true;
+    badge.textContent = '';
+    badge.removeAttribute('title');
+  });
+}
+
+function setPaneShortcutBadgesVisible(visible) {
+  const next = !!visible;
+  if (paneShortcutBadgesVisible === next) return;
+  paneShortcutBadgesVisible = next;
+  renderPaneShortcutIndexBadges();
+}
 
 function isTypingContext(target) {
   const el = target || document.activeElement;
@@ -8200,6 +8231,14 @@ window.addEventListener('keydown', (event) => {
       return;
     }
   }
+});
+
+window.addEventListener('keyup', (event) => {
+  if (String(event.key || '') === 'Alt') setPaneShortcutBadgesVisible(false);
+});
+
+window.addEventListener('blur', () => {
+  setPaneShortcutBadgesVisible(false);
 });
 
 globalElements.disconnectBtn?.addEventListener('click', () => {
