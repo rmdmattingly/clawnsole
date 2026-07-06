@@ -148,6 +148,43 @@ test('alt+1..3 and cmd/ctrl+1..3 focus panes by visible order; shortcuts do not 
   await expect.poll(activePaneIndex).toBe(0);
 });
 
+test('pane-switch HUD appears for keyboard pane navigation and respects settings', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  const hud = page.locator('#paneSwitchHud');
+  await page.click('#connectionStatus');
+
+  await page.keyboard.press('Alt+2');
+  await expect(hud).toBeVisible();
+  await expect(hud).toContainText('B Workqueue');
+  await expect(hud).toContainText('dev-team');
+
+  await page.locator('[data-pane]').nth(2).click();
+  await expect.poll(() => page.locator('#paneSwitchHud').isVisible()).toBe(false);
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const toggle = page.locator('#paneSwitchHudEnabled');
+  await expect(toggle).toBeChecked();
+  await toggle.uncheck();
+  await expect(toggle).not.toBeChecked();
+  await page.keyboard.press('Escape');
+
+  await page.keyboard.press('Alt+1');
+  await expect.poll(() => page.locator('#paneSwitchHud').isVisible()).toBe(false);
+});
+
 test('ctrl+tab switches panes by MRU order and reverses with shift', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);

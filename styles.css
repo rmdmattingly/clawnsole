@@ -3568,3 +3568,68 @@ kbd {
   margin: 0;
   font-size: 0.9rem;
 }
+
+.pane-switch-hud {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%) translateY(8px);
+  z-index: 1600;
+  min-width: min(360px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.94);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.36);
+  color: #e5e7eb;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.pane-switch-hud.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.pane-switch-hud.is-hiding {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+}
+
+.pane-switch-hud-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-switch-hud-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 7px;
+  color: rgba(226, 232, 240, 0.76);
+  font-size: 0.76rem;
+}
+
+.pane-switch-hud-actions span {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-switch-hud {
+    transition: opacity 1ms linear;
+    transform: translateX(-50%);
+  }
+
+  .pane-switch-hud.is-visible,
+  .pane-switch-hud.is-hiding {
+    transform: translateX(-50%);
+  }
+}
