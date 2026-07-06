@@ -37,9 +37,69 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await expect(modal).toContainText('Pane actions');
   await expect(modal).toContainText('Workqueue actions');
   await expect(modal).toContainText('disabled while typing');
+  await expect(modal).toContainText('workspace only');
 
   await page.keyboard.press('Escape');
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
+});
+
+test('pane-add shortcuts are scoped to workspace and blocked by overlays', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  const paneCount = async () => panes.count();
+  const triggerChatPaneShortcut = async () => page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'C',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    }));
+  });
+
+  const initialCount = await paneCount();
+  await page.click('#connectionStatus');
+
+  await page.keyboard.press('Shift+/');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'false');
+  await triggerChatPaneShortcut();
+  await expect(panes).toHaveCount(initialCount);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'true');
+
+  await page.locator('#settingsBtn').click();
+  await expect(page.locator('#settingsModal')).toHaveClass(/open/);
+  await triggerChatPaneShortcut();
+  await expect(panes).toHaveCount(initialCount);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#settingsModal')).not.toHaveClass(/open/);
+
+  await page.evaluate(() => window.openWorkqueue?.());
+  await expect(page.locator('#workqueueModal')).toHaveClass(/open/);
+  await triggerChatPaneShortcut();
+  await expect(panes).toHaveCount(initialCount);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#workqueueModal')).not.toHaveClass(/open/);
+
+  await page.getByTestId('add-pane-btn').click();
+  await expect(page.getByTestId('pane-add-menu')).toBeVisible();
+  await triggerChatPaneShortcut();
+  await expect(panes).toHaveCount(initialCount);
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('pane-add-menu')).toBeHidden();
+
+  await page.click('#connectionStatus');
+  await triggerChatPaneShortcut();
+  await expect(panes).toHaveCount(initialCount + 1);
 });
 
 test('shortcuts modal restores prior focus on close', async ({ page }) => {

@@ -8040,6 +8040,19 @@ function cycleUnreadPaneFocus(direction = 1) {
   return true;
 }
 
+function isBlockingOverlayOpenForPaneShortcuts() {
+  const blockers = [
+    globalElements.loginOverlay,
+    globalElements.settingsModal,
+    globalElements.shortcutsModal,
+    globalElements.commandPaletteModal,
+    globalElements.paneManagerModal,
+    globalElements.workqueueModal,
+    globalElements.agentsModal
+  ];
+  return blockers.some((el) => !!el?.classList?.contains('open')) || !!paneManager?._addPaneMenuState?.open;
+}
+
 window.addEventListener('keydown', (event) => {
   const isEditableTarget = (() => {
     const el = event.target;
@@ -8064,6 +8077,7 @@ window.addEventListener('keydown', (event) => {
     const kind = map[key];
     if (kind) {
       // Don't hijack add-pane shortcuts while typing in inputs/editors.
+      if (isBlockingOverlayOpenForPaneShortcuts()) return;
       event.preventDefault();
       paneManager.closeAddPaneMenu();
       paneManager.addPane(kind, { forceNew: !!event.altKey });
