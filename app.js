@@ -1757,6 +1757,26 @@ function paneTargetLabel(pane) {
   return String(pane.agentId || 'main');
 }
 
+function paneBrowserTitle(pane) {
+  if (!pane) return 'Clawnsole';
+  const parts = ['Clawnsole', paneLabel(pane)];
+  if (pane.kind === 'chat' || pane.kind === 'workqueue') {
+    const target = paneTargetLabel(pane);
+    if (target) parts.push(target);
+  }
+  return parts.join(' · ');
+}
+
+function updateBrowserTitle(pane = null) {
+  const panes = paneManager?.panes || [];
+  const selectedPane =
+    pane ||
+    panes.find((entry) => String(entry?.key || '') === focusedPaneKey()) ||
+    panes.find((entry) => String(entry?.key || '') === paneMruOrder()[0]) ||
+    null;
+  document.title = paneBrowserTitle(selectedPane);
+}
+
 function paneIdentityLabel(pane, { includeUnread = false } = {}) {
   const letter = paneHeaderLetter(pane);
   const type = paneLabel(pane);
@@ -1853,9 +1873,12 @@ function notePaneFocused(pane) {
   if (paneMruSuppressFocusEvents) return;
   const key = String(pane?.key || '');
   if (!key) return;
+  const panes = paneManager?.panes || [];
+  if (!panes.some((entry) => String(entry?.key || '') === key)) return;
   paneMruTraversal = null;
   paneMruOrder();
   paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
+  updateBrowserTitle(pane);
 }
 
 function forgetFocusedPaneKey(paneKey) {
@@ -5612,6 +5635,8 @@ function paneHeaderLetter(pane) {
 function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
   pane.elements.name.textContent = paneIdentityLabel(pane, { includeUnread: true });
+  const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
+  if (activeKey && String(pane.key || '') === activeKey) updateBrowserTitle(pane);
 }
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
@@ -7379,6 +7404,7 @@ const paneManager = {
     this.updatePaneLabels();
     this.updateCloseButtons();
     this.applyInferredLayout();
+    updateBrowserTitle(this.panes[0] || null);
   },
   destroyAll() {
     this.panes.forEach((pane) => {
@@ -7826,6 +7852,9 @@ const paneManager = {
     this.applyInferredLayout();
     this.persistAdminPanes();
     this.maybeOfferBaselineRestore(pane);
+    const fallbackPane = this.panes[Math.min(idx, this.panes.length - 1)] || this.panes[0] || null;
+    if (fallbackPane) notePaneFocused(fallbackPane);
+    else updateBrowserTitle(null);
     updateGlobalStatus();
     updateConnectionControls();
   },
@@ -8216,6 +8245,7 @@ function focusPaneIndex(idx, { trackMru = true, showHud = false } = {}) {
   if (!pane) return;
   clearPaneUnread(pane);
   if (trackMru) notePaneFocused(pane);
+  else updateBrowserTitle(pane);
   if (showHud) showPaneSwitchHud(pane);
 
   try {
