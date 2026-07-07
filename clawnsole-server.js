@@ -867,14 +867,11 @@ function createClawnsoleServer(options = {}) {
           : [];
         const statusSet = statuses.length ? new Set(statuses) : null;
 
-        const { loadState } = require('./lib/workqueue');
+        const { loadState, listItems } = require('./lib/workqueue');
         const state = loadState(null);
-        const items = Array.isArray(state.items) ? state.items : [];
-        const filtered = items.filter((it) => {
-          if (!it) return false;
-          if (queue && it.queue !== queue) return false;
-          if (statusSet && !statusSet.has(String(it.status || 'ready'))) return false;
-          return true;
+        const filtered = listItems(state, {
+          queues: queue ? [queue] : null,
+          status: statusSet ? Array.from(statusSet) : null
         });
         // newest first for convenience
         filtered.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
