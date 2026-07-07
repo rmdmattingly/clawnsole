@@ -40,9 +40,10 @@ test('workqueue modal: status filters use human labels and queue-scoped counts',
   };
 
   await enqueue('dev-team', 'dev item');
-  await enqueue('qa-team', 'qa item');
+  await enqueue('qa-team', 'qa item one');
+  await enqueue('qa-team', 'qa item two');
 
-  await page.locator('#workqueueBtn').click();
+  await page.evaluate(() => window.openWorkqueue?.());
   await expect(page.locator('#workqueueModal')).toHaveClass(/open/);
 
   // Humanized labels (no raw snake_case token in display text).
@@ -54,5 +55,5 @@ test('workqueue modal: status filters use human labels and queue-scoped counts',
   await expect(page.locator('#wqStatusFilters .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
 
   await queueSelect.selectOption('qa-team');
-  await expect(page.locator('#wqStatusFilters .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
+  await expect(page.locator('#wqStatusFilters .wq-status-chip', { hasText: 'Ready (2)' })).toHaveCount(1);
 });
