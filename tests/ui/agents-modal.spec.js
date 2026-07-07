@@ -24,6 +24,44 @@ test('agents modal supports pinning agents and persists to localStorage', async 
   await expect(firstPinAfter).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('agents modal renders pinned agents in a dedicated top section after reload', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' },
+    { id: 'gamma', name: 'Gamma', displayName: 'Gamma' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({ alpha: now, gamma: now }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  await page.locator('#agentsList .agents-row').filter({ hasText: 'Beta (beta)' }).locator('.agents-pin').click();
+  await expect(page.locator('#agentsList .agents-section-title').nth(0)).toContainText('Pinned (1)');
+  await expect(page.locator('#agentsList .agents-section').nth(0).locator('.agents-row')).toContainText('Beta (beta)');
+  await expect(page.locator('#agentsList .agents-section-title').nth(1)).toContainText('Needs attention (0)');
+  await expect(page.locator('#agentsList .agents-section-title').nth(2)).toContainText('Healthy (2)');
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+
+  await expect(page.locator('#agentsList .agents-section-title').nth(0)).toContainText('Pinned (1)');
+  await expect(page.locator('#agentsList .agents-section').nth(0).locator('.agents-row')).toContainText('Beta (beta)');
+  await expect(page.locator('#agentsList .agents-section-title').nth(1)).toContainText('Needs attention (0)');
+  await expect(page.locator('#agentsList .agents-section-title').nth(2)).toContainText('Healthy (2)');
+});
+
 test('agents modal shows live refresh freshness indicators', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 

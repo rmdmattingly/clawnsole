@@ -3076,8 +3076,8 @@ function renderAgentsModalList() {
   const pinned = sortAgents(filtered.filter((a) => pins.has(String(a?.id || '').trim())));
   const rest = sortAgents(filtered.filter((a) => !pins.has(String(a?.id || '').trim())));
   const ordered = [...pinned, ...rest];
-  const needsAttention = ordered.filter((agent) => classify(agent?.id).bucket !== 'active');
-  const healthy = ordered.filter((agent) => classify(agent?.id).bucket === 'active');
+  const needsAttention = rest.filter((agent) => classify(agent?.id).bucket !== 'active');
+  const healthy = rest.filter((agent) => classify(agent?.id).bucket === 'active');
   const healthyCollapseDefault = baseAgents.length > ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD;
   const healthyCollapsed = String(storage.get(ADMIN_AGENT_HEALTHY_COLLAPSED_KEY, healthyCollapseDefault ? '1' : '0')) === '1';
 
@@ -3175,6 +3175,7 @@ function renderAgentsModalList() {
     root.appendChild(section);
   };
 
+  if (pinned.length > 0) renderSection('Pinned', pinned);
   renderSection('Needs attention', needsAttention);
   renderSection('Healthy', healthy, { collapsible: true, collapsed: healthyCollapsed });
 
