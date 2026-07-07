@@ -319,3 +319,57 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
   });
   expect(['auto', 'scroll']).toContain(listStyles.overflowY);
 });
+
+test('workqueue pane: large queues render an initial capped slice and load more incrementally', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `large-render-${Date.now()}`;
+  const stateDir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const now = new Date().toISOString();
+  const items = Array.from({ length: 505 }, (_, ix) => ({
+    id: `large-${ix}`,
+    queue,
+    title: ix === 504 ? 'needle large list item' : `large list item ${String(ix).padStart(3, '0')}`,
+    instructions: 'fixture item',
+    priority: ix,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: now,
+    updatedAt: now,
+    meta: { repo: ix === 504 ? 'rmdmattingly/clawnsole' : 'example/other' }
+  }));
+  fs.writeFileSync(
+    path.join(stateDir, 'work-queues.json'),
+    JSON.stringify({ version: 1, queues: { [queue]: { name: queue, createdAt: now } }, items, assignments: {} }, null, 2)
+  );
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption(queue);
+
+  const refreshResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
+  await pane.locator('[data-wq-refresh]').click();
+  await refreshResP;
+
+  await expect(pane.locator('.wq-row')).toHaveCount(100);
+  await expect(pane.locator('[data-wq-load-more]')).toHaveText('Load more (100/505)');
+
+  await pane.locator('[data-wq-load-more]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(200);
+  await expect(pane.locator('[data-wq-load-more]')).toHaveText('Load more (200/505)');
+
+  await pane.locator('[data-wq-preset-clawnsole]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(1);
+  await expect(pane.locator('.wq-row .wq-col.title')).toContainText('needle large list item');
+  await expect(pane.locator('[data-wq-load-more]')).toHaveCount(0);
+});
