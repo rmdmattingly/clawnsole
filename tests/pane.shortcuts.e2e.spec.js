@@ -326,6 +326,39 @@ test('add-pane shortcuts do not fire while typing in chat input', async ({ page 
   await expect(panes).toHaveCount(2);
 });
 
+test('admin launch shortcuts do not fire while typing in chat input', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const input = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+  const shortcutsModal = page.locator('#shortcutsModal');
+  const workqueueModal = page.locator('#workqueueModal');
+  const commandPaletteModal = page.getByTestId('command-palette-modal');
+  const paneManagerModal = page.getByTestId('pane-manager-modal');
+
+  await input.focus();
+  await input.fill('typing');
+  await expect(input).toBeFocused();
+
+  await page.keyboard.press('Shift+/');
+  await page.keyboard.press('g');
+  await page.keyboard.press('w');
+  await page.keyboard.press('ControlOrMeta+K');
+  await page.keyboard.press('ControlOrMeta+P');
+
+  await expect(shortcutsModal).toHaveAttribute('aria-hidden', 'true');
+  await expect(workqueueModal).toHaveAttribute('aria-hidden', 'true');
+  await expect(commandPaletteModal).toHaveAttribute('aria-hidden', 'true');
+  await expect(paneManagerModal).toHaveAttribute('aria-hidden', 'true');
+});
+
 test('fleet quick action button + keyboard shortcut focus existing timeline pane without duplicates', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
