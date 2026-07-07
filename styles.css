@@ -1191,6 +1191,41 @@ button.send-btn .btn-icon {
   font-weight: 600;
 }
 
+.command-palette-pane-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.command-palette-pane-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.command-palette-pane-chip-type {
+  color: var(--text);
+  background: rgba(110, 231, 183, 0.12);
+  border-color: rgba(110, 231, 183, 0.24);
+}
+
+.command-palette-pane-chip-reuse {
+  color: #bbf7d0;
+  border-color: rgba(34, 197, 94, 0.28);
+}
+
+.command-palette-pane-chip-create {
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
 .command-palette-item-detail {
   margin-top: 2px;
   font-size: 12px;
@@ -2844,6 +2879,10 @@ kbd {
   color: rgba(255, 120, 120, 0.95);
 }
 
+.chat-actions .stop-btn[hidden] {
+  display: none;
+}
+
 .chat-actions .stop-btn:hover {
   background: rgba(255, 70, 70, 0.12);
 }
@@ -3567,4 +3606,69 @@ kbd {
 .settings-rp-history-head h4 {
   margin: 0;
   font-size: 0.9rem;
+}
+
+.pane-switch-hud {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%) translateY(8px);
+  z-index: 1600;
+  min-width: min(360px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.94);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.36);
+  color: #e5e7eb;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.pane-switch-hud.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.pane-switch-hud.is-hiding {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+}
+
+.pane-switch-hud-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-switch-hud-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 7px;
+  color: rgba(226, 232, 240, 0.76);
+  font-size: 0.76rem;
+}
+
+.pane-switch-hud-actions span {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-switch-hud {
+    transition: opacity 1ms linear;
+    transform: translateX(-50%);
+  }
+
+  .pane-switch-hud.is-visible,
+  .pane-switch-hud.is-hiding {
+    transform: translateX(-50%);
+  }
 }

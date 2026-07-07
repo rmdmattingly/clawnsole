@@ -264,7 +264,8 @@
           <div class="shortcut-group">
             <h3 class="shortcut-group-title">Pane actions</h3>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Open command palette</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="shortcut-desc">Add pane; pane-add shortcuts are ignored while overlays are open</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="shortcut-desc">Add pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C/W/R/T</kbd></div><div class="shortcut-desc">Add Chat/Workqueue/Cron/Timeline pane (workspace only)</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></div><div class="shortcut-desc">Open/focus Fleet pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>R</kbd></div><div class="shortcut-desc">Refresh agent list</div></div>
           </div>
@@ -476,11 +477,19 @@
           </label>
           <div class="button-row">
             <button id="disconnectBtn">Disconnect</button>
-            <button id="resetLayoutBtn" type="button" class="secondary">Reset layout</button>
+            <button id="resetLayoutBtn" type="button" class="secondary">Reset to recommended layout</button>
           </div>
           <div class="hint">
             Auto-connecting with the gateway token from your local OpenClaw config.
           </div>
+
+          <section class="settings-section" aria-label="Pane navigation">
+            <h3>Pane navigation</h3>
+            <label class="inline-checkbox">
+              <input id="paneSwitchHudEnabled" type="checkbox" checked />
+              Show pane-switch HUD
+            </label>
+          </section>
 
           <section class="settings-section" aria-label="Recurring admin prompts">
             <h3>Recurring admin/system prompts</h3>

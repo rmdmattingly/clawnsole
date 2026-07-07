@@ -38,6 +38,10 @@ test('command palette: keyboard flow can reuse a targeted pane and focus by pane
   await input.click();
 
   await input.type('open workqueue: dev-team');
+  const firstHit = page.locator('#commandPaletteList [role="option"]').first();
+  await expect(firstHit).toHaveAttribute('data-command-palette-id', /^cmd:focus-pane-/);
+  await expect(firstHit.locator('.command-palette-item-label')).toHaveText('Focus Workqueue: dev-team');
+  await expect(firstHit.locator('.command-palette-pane-chip')).toContainText(['Workqueue', 'dev-team', 'focus existing']);
   await page.keyboard.press('Enter');
 
   const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
