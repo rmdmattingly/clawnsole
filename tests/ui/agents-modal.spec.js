@@ -99,6 +99,51 @@ test('fleet attention mode sections healthy agents and keeps filters while expan
   await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
 });
 
+test('agents modal heartbeat heatmap and stale-first sort are toggleable and resettable', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = ['fresh-agent', 'warning-agent', 'stale-agent', 'critical-agent']
+    .map((id) => ({ id, name: id, displayName: id }));
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      'fresh-agent': now,
+      'warning-agent': now - 15 * 60 * 1000,
+      'stale-agent': now - 70 * 60 * 1000
+    }));
+    localStorage.removeItem('clawnsole.admin.agents.heartbeatHeatmap');
+    localStorage.removeItem('clawnsole.admin.agents.sort');
+    localStorage.removeItem('clawnsole.admin.agents.preHeartbeatSort');
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+  await expect(page.locator('#agentsHeatmapToggle')).not.toBeChecked();
+  await expect(page.locator('#agentsList .agents-row-heatmap')).toHaveCount(0);
+
+  await page.locator('#agentsHeatmapToggle').check();
+  await expect(page.locator('#agentsList .agents-row-heatmap')).toHaveCount(4);
+  await expect(page.locator('#agentsList .agents-row[data-heartbeat-bucket="critical"]')).toContainText('critical-agent');
+  await expect(page.locator('#agentsList .agents-row[data-heartbeat-bucket="stale"]')).toContainText('stale-agent');
+  await expect(page.locator('#agentsList .agents-row[data-heartbeat-bucket="warning"]')).toContainText('warning-agent');
+  await expect(page.locator('#agentsList .agents-row[data-heartbeat-bucket="fresh"]')).toContainText('fresh-agent');
+
+  await page.getByRole('button', { name: 'Stale first' }).click();
+  await expect(page.locator('#agentsSort')).toHaveValue('heartbeat_age_desc');
+  await expect(page.locator('#agentsSortIndicator')).toContainText('Sorted by heartbeat age');
+  await expect(page.locator('#agentsList .agents-row:visible').first()).toContainText('critical-agent');
+
+  await page.getByRole('button', { name: 'Reset sort' }).click();
+  await expect(page.locator('#agentsSort')).toHaveValue('recent_desc');
+  await expect(page.locator('#agentsSortIndicator')).toHaveText('');
+});
+
 test('agents modal quick actions open/reuse chat, timeline, and workqueue context', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 

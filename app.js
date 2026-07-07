@@ -32,6 +32,10 @@ const globalElements = {
   agentsFilterButtons: Array.from(document.querySelectorAll('[data-agents-filter]')),
   agentsDensityButtons: Array.from(document.querySelectorAll('[data-agents-density]')),
   agentsSort: document.getElementById('agentsSort'),
+  agentsHeatmapToggle: document.getElementById('agentsHeatmapToggle'),
+  agentsHeartbeatSortBtn: document.getElementById('agentsHeartbeatSortBtn'),
+  agentsSortResetBtn: document.getElementById('agentsSortResetBtn'),
+  agentsSortIndicator: document.getElementById('agentsSortIndicator'),
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
   agentsList: document.getElementById('agentsList'),
@@ -242,6 +246,8 @@ const ADMIN_AGENT_PINS_KEY = 'clawnsole.admin.agentPins';
 const ADMIN_AGENT_LAST_SEEN_KEY = 'clawnsole.admin.agentLastSeenAtMs';
 const ADMIN_AGENT_FILTER_KEY = 'clawnsole.admin.agents.filter';
 const ADMIN_AGENT_SORT_KEY = 'clawnsole.admin.agents.sort';
+const ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY = 'clawnsole.admin.agents.preHeartbeatSort';
+const ADMIN_AGENT_HEATMAP_KEY = 'clawnsole.admin.agents.heartbeatHeatmap';
 const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
@@ -444,6 +450,22 @@ function sortAgentsByLastSeen(agents) {
   });
 }
 
+function heartbeatAgeBucket(ageMs, { activeWindowMs = 10 * 60_000, paneState = 'unknown' } = {}) {
+  if (paneState === 'error' || paneState === 'offline') return 'critical';
+  if (!Number.isFinite(ageMs)) return 'critical';
+  if (ageMs <= activeWindowMs) return 'fresh';
+  if (ageMs <= activeWindowMs * 3) return 'warning';
+  if (ageMs <= activeWindowMs * 10) return 'stale';
+  return 'critical';
+}
+
+function heartbeatAgeBucketLabel(bucket) {
+  if (bucket === 'fresh') return 'fresh';
+  if (bucket === 'warning') return 'warning';
+  if (bucket === 'stale') return 'stale';
+  return 'critical';
+}
+
 function getFleetFilter() {
   const raw = String(storage.get(ADMIN_AGENT_FILTER_KEY, 'all') || 'all').trim();
   const allowed = new Set(['all', 'active', 'stale', 'offline_error']);
@@ -452,8 +474,12 @@ function getFleetFilter() {
 
 function getFleetSort() {
   const raw = String(storage.get(ADMIN_AGENT_SORT_KEY, 'recent_desc') || 'recent_desc').trim();
-  const allowed = new Set(['recent_desc', 'agent_id_asc']);
+  const allowed = new Set(['recent_desc', 'heartbeat_age_desc', 'agent_id_asc']);
   return allowed.has(raw) ? raw : 'recent_desc';
+}
+
+function getFleetHeatmapEnabled() {
+  return String(storage.get(ADMIN_AGENT_HEATMAP_KEY, '0')) === '1';
 }
 
 function getFleetDensity() {
@@ -2808,6 +2834,7 @@ function openAgentsModal() {
   // Bootstrap persisted controls.
   const filter = getFleetFilter();
   const sort = getFleetSort();
+  const heatmapEnabled = getFleetHeatmapEnabled();
   globalElements.agentsFilterButtons.forEach((btn) => {
     const key = btn.getAttribute('data-agents-filter') || '';
     const active = key === filter;
@@ -2815,6 +2842,7 @@ function openAgentsModal() {
     btn.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
   if (globalElements.agentsSort) globalElements.agentsSort.value = sort;
+  if (globalElements.agentsHeatmapToggle) globalElements.agentsHeatmapToggle.checked = heatmapEnabled;
   if (globalElements.agentsActiveMinutes) {
     const minutes = Number(storage.get(ADMIN_AGENT_ACTIVE_MINUTES_KEY, '10')) || 10;
     globalElements.agentsActiveMinutes.value = String(Math.max(1, minutes));
@@ -2830,6 +2858,23 @@ function openAgentsModal() {
   try {
     globalElements.agentsSearch?.focus?.();
   } catch {}
+}
+
+function setFleetHeartbeatSort() {
+  const current = getFleetSort();
+  if (current !== 'heartbeat_age_desc') storage.set(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY, current);
+  storage.set(ADMIN_AGENT_SORT_KEY, 'heartbeat_age_desc');
+  if (globalElements.agentsSort) globalElements.agentsSort.value = 'heartbeat_age_desc';
+  renderAgentsModalList();
+}
+
+function resetFleetSort() {
+  const previous = String(storage.get(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY, '') || '').trim();
+  const next = previous && previous !== 'heartbeat_age_desc' ? previous : 'recent_desc';
+  storage.set(ADMIN_AGENT_SORT_KEY, next);
+  storage.remove(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY);
+  if (globalElements.agentsSort) globalElements.agentsSort.value = next;
+  renderAgentsModalList();
 }
 
 function closeAgentsModal() {
@@ -2972,8 +3017,10 @@ function renderAgentsModalList() {
 
   const search = String(globalElements.agentsSearch?.value || '').trim().toLowerCase();
   const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
+  const activeWindowMs = withinMinutes * 60_000;
   const filterMode = getFleetFilter();
   const sortMode = getFleetSort();
+  const heatmapEnabled = getFleetHeatmapEnabled();
   syncFleetDensityControl();
 
   const pins = getPinnedAgentIds();
@@ -2987,10 +3034,11 @@ function renderAgentsModalList() {
     const ts = Number(lastSeenMap[id]) || 0;
     const ageMs = ts > 0 ? Math.max(0, Date.now() - ts) : Number.POSITIVE_INFINITY;
     const paneState = paneStateMap[id] || 'unknown';
-    if (paneState === 'error' || paneState === 'offline') return { bucket: 'offline_error', ts, ageMs };
-    if (!Number.isFinite(ageMs)) return { bucket: 'offline_error', ts, ageMs };
-    if (ageMs <= withinMinutes * 60_000) return { bucket: 'active', ts, ageMs };
-    return { bucket: 'stale', ts, ageMs };
+    const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs, paneState });
+    if (paneState === 'error' || paneState === 'offline') return { bucket: 'offline_error', ageBucket, ts, ageMs };
+    if (!Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket, ts, ageMs };
+    if (ageMs <= activeWindowMs) return { bucket: 'active', ageBucket, ts, ageMs };
+    return { bucket: 'stale', ageBucket, ts, ageMs };
   };
 
   const matches = (agent) => {
@@ -3008,6 +3056,17 @@ function renderAgentsModalList() {
     const arr = (Array.isArray(list) ? list : []).slice();
     if (sortMode === 'agent_id_asc') {
       arr.sort((a, b) => String(a?.id || '').localeCompare(String(b?.id || '')));
+      return arr;
+    }
+    if (sortMode === 'heartbeat_age_desc') {
+      arr.sort((a, b) => {
+        const ca = classify(a?.id);
+        const cb = classify(b?.id);
+        const da = Number.isFinite(ca.ageMs) ? ca.ageMs : Number.MAX_SAFE_INTEGER;
+        const db = Number.isFinite(cb.ageMs) ? cb.ageMs : Number.MAX_SAFE_INTEGER;
+        if (db !== da) return db - da;
+        return formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true }));
+      });
       return arr;
     }
     return sortAgentsByLastSeen(arr);
@@ -3060,14 +3119,17 @@ function renderAgentsModalList() {
       const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
       const triage = classify(id);
       const bucketLabel = triage.bucket === 'offline_error' ? 'offline/error' : triage.bucket;
+      const heatBucketLabel = heartbeatAgeBucketLabel(triage.ageBucket);
       const statusSnippet = String(statusSnippetMap[id] || '').trim();
       const statusSnippetHtml = statusSnippet ? ` · <span class="agents-status-snippet">${escapeHtml(statusSnippet)}</span>` : '';
+      row.dataset.heartbeatBucket = triage.ageBucket;
+      row.classList.toggle('agents-row-heatmap', heatmapEnabled);
 
       row.innerHTML = `
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
         <div class="agents-row-main">
           <div class="agents-row-title">${escapeHtml(label)}</div>
-          <div class="agents-row-meta">${escapeHtml(id)} · ${escapeHtml(bucketLabel)} · <span class="agents-age-chip">${escapeHtml(heartbeatAge)}</span>${statusSnippetHtml}</div>
+          <div class="agents-row-meta">${escapeHtml(id)} · ${escapeHtml(bucketLabel)} · <span class="agents-age-chip" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}">${escapeHtml(heartbeatAge)} · ${escapeHtml(heatBucketLabel)}</span>${statusSnippetHtml}</div>
         </div>
         <div class="agents-row-actions agents-row-actions-inline" role="group" aria-label="Quick actions for ${escapeHtml(label)}">
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Chat</button>
@@ -3115,6 +3177,22 @@ function renderAgentsModalList() {
 
   renderSection('Needs attention', needsAttention);
   renderSection('Healthy', healthy, { collapsible: true, collapsed: healthyCollapsed });
+
+  if (globalElements.agentsHeatmapToggle) globalElements.agentsHeatmapToggle.checked = heatmapEnabled;
+  if (globalElements.agentsHeartbeatSortBtn) {
+    const active = sortMode === 'heartbeat_age_desc';
+    globalElements.agentsHeartbeatSortBtn.classList.toggle('active', active);
+    globalElements.agentsHeartbeatSortBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  }
+  if (globalElements.agentsSortResetBtn) {
+    globalElements.agentsSortResetBtn.disabled = sortMode === 'recent_desc';
+  }
+  if (globalElements.agentsSortIndicator) {
+    globalElements.agentsSortIndicator.textContent =
+      sortMode === 'heartbeat_age_desc'
+        ? 'Sorted by heartbeat age: stale first. Reset sort returns to the prior/default order.'
+        : '';
+  }
 
   const empty = ordered.length === 0;
   if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
@@ -7893,6 +7971,13 @@ globalElements.agentsCloseBtn?.addEventListener('click', () => closeAgentsModal(
 globalElements.agentsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.agentsModal) closeAgentsModal();
 });
+globalElements.agentsModal?.addEventListener('keydown', (event) => {
+  if (isTypingContext(event.target)) return;
+  if (String(event.key || '').toLowerCase() !== 'h' || event.metaKey || event.ctrlKey || event.altKey) return;
+  event.preventDefault();
+  if (event.shiftKey || getFleetSort() !== 'heartbeat_age_desc') setFleetHeartbeatSort();
+  else resetFleetSort();
+});
 
 globalElements.agentsSearch?.addEventListener('input', () => renderAgentsModalList());
 globalElements.agentsSearch?.addEventListener('keydown', (event) => {
@@ -7929,6 +8014,14 @@ globalElements.agentsSort?.addEventListener('change', () => {
   storage.set(ADMIN_AGENT_SORT_KEY, String(globalElements.agentsSort.value || 'recent_desc'));
   renderAgentsModalList();
 });
+
+globalElements.agentsHeatmapToggle?.addEventListener('change', () => {
+  storage.set(ADMIN_AGENT_HEATMAP_KEY, globalElements.agentsHeatmapToggle.checked ? '1' : '0');
+  renderAgentsModalList();
+});
+
+globalElements.agentsHeartbeatSortBtn?.addEventListener('click', () => setFleetHeartbeatSort());
+globalElements.agentsSortResetBtn?.addEventListener('click', () => resetFleetSort());
 
 globalElements.agentsActiveMinutes?.addEventListener('change', () => {
   const minutes = Math.max(1, Number(globalElements.agentsActiveMinutes.value) || 10);
@@ -8319,6 +8412,17 @@ window.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'f') {
     event.preventDefault();
     openFleetPane();
+    return;
+  }
+
+  // Cmd/Ctrl+Shift+H opens Agents and sorts by heartbeat age (stale first).
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'h') {
+    event.preventDefault();
+    if (roleState.role === 'admin') {
+      openAgentsModal();
+      setFleetHeartbeatSort();
+      toast('Sorted fleet by heartbeat age.', 'info');
+    }
     return;
   }
 
