@@ -87,6 +87,53 @@ test('workqueue pane: pane grid label switches from chat-only to generic panes',
   await expect(grid).toHaveAttribute('aria-label', 'Panes');
 });
 
+test('workqueue pane: status filter uses human labels and queue-scoped counts', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  const baseUrl = `http://127.0.0.1:${env.serverPort}`;
+  const enqueue = async (queue, title) => {
+    const res = await page.request.post(`${baseUrl}/api/workqueue/enqueue`, {
+      data: {
+        queue,
+        title,
+        instructions: `seed ${title}`,
+        priority: 1
+      }
+    });
+    expect(res.ok()).toBeTruthy();
+  };
+
+  await enqueue('pane-status-dev', 'pane dev item');
+  await enqueue('pane-status-qa', 'pane qa item');
+
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  const queueSelect = wqPane.locator('[data-wq-queue-select]');
+  const customQueue = wqPane.locator('[data-wq-queue-custom]');
+  await queueSelect.selectOption('__custom__');
+  await customQueue.fill('pane-status-dev');
+  await customQueue.press('Enter');
+
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('1 item');
+  await wqPane.locator('[data-wq-status-details] summary').click();
+
+  await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'In progress (' })).toHaveCount(1);
+  await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'in_progress' })).toHaveCount(0);
+  await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
+
+  await queueSelect.selectOption('__custom__');
+  await customQueue.fill('pane-status-qa');
+  await customQueue.press('Enter');
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('1 item');
+  await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
+});
+
 test('workqueue pane: queue target supports search + recent persistence', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);

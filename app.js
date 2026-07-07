@@ -3204,10 +3204,34 @@ const WORKQUEUE_STATUSES = ['ready', 'pending', 'claimed', 'in_progress', 'done'
 const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
 const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
 
+function formatWorkqueueStatusLabel(status) {
+  const s = String(status || '').trim().toLowerCase();
+  if (!s) return 'Unknown';
+  return s
+    .split('_')
+    .filter(Boolean)
+    .map((part, ix) => {
+      if (ix > 0) return part;
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(' ');
+}
+
+function buildWorkqueueStatusCounts(items) {
+  const counts = Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0]));
+  for (const it of Array.isArray(items) ? items : []) {
+    const status = String(it?.status || '').trim().toLowerCase();
+    if (!status || !Object.prototype.hasOwnProperty.call(counts, status)) continue;
+    counts[status] += 1;
+  }
+  return counts;
+}
+
 const workqueueState = {
   queues: [],
   selectedQueue: '',
   statusFilter: new Set(['ready', 'pending', 'claimed', 'in_progress']),
+  statusCounts: Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0])),
   items: [],
   selectedItemId: null,
   sortKey: 'default',
@@ -3243,7 +3267,9 @@ function renderWorkqueueStatusFilters() {
     const id = `wq-status-${s}`;
     const label = document.createElement('label');
     label.className = 'wq-status-chip';
-    label.innerHTML = `<input type="checkbox" id="${id}" ${workqueueState.statusFilter.has(s) ? 'checked' : ''} /> <span>${escapeHtml(s)}</span>`;
+    const count = Number(workqueueState.statusCounts?.[s] || 0);
+    const display = `${formatWorkqueueStatusLabel(s)} (${count})`;
+    label.innerHTML = `<input type="checkbox" id="${id}" ${workqueueState.statusFilter.has(s) ? 'checked' : ''} /> <span>${escapeHtml(display)}</span>`;
     const checkbox = label.querySelector('input');
     checkbox.addEventListener('change', () => {
       if (checkbox.checked) workqueueState.statusFilter.add(s);
@@ -3363,14 +3389,31 @@ async function fetchAndRenderWorkqueueItems() {
   const params = new URLSearchParams();
   if (queue) params.set('queue', queue);
   if (statuses.length) params.set('status', statuses.join(','));
-  const url = `/api/workqueue/items${params.toString() ? `?${params.toString()}` : ''}`;
+  const filteredUrl = `/api/workqueue/items${params.toString() ? `?${params.toString()}` : ''}`;
+
+  const countsParams = new URLSearchParams();
+  if (queue) countsParams.set('queue', queue);
+  const countsUrl = `/api/workqueue/items${countsParams.toString() ? `?${countsParams.toString()}` : ''}`;
 
   try {
-    const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
-    if (!res.ok) throw new Error(String(res.status));
-    const data = await res.json();
-    const items = Array.isArray(data.items) ? data.items : [];
+    const [filteredRes, countsRes] = await Promise.all([
+      fetch(filteredUrl, { credentials: 'include', cache: 'no-store' }),
+      fetch(countsUrl, { credentials: 'include', cache: 'no-store' })
+    ]);
+    if (!filteredRes.ok) throw new Error(String(filteredRes.status));
+
+    const filteredData = await filteredRes.json();
+    const items = Array.isArray(filteredData.items) ? filteredData.items : [];
+
+    let countItems = items;
+    if (countsRes.ok) {
+      const countsData = await countsRes.json().catch(() => ({}));
+      if (Array.isArray(countsData.items)) countItems = countsData.items;
+    }
+
     workqueueState.items = items;
+    workqueueState.statusCounts = buildWorkqueueStatusCounts(countItems);
+    renderWorkqueueStatusFilters();
     renderWorkqueueItems();
   } catch (err) {
     addFeed('err', 'workqueue', `failed to load items: ${String(err)}`);
@@ -3820,14 +3863,26 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
   if (statuses.length) params.set('status', statuses.join(','));
   const url = `/api/workqueue/items${params.toString() ? `?${params.toString()}` : ''}`;
 
+  const countsParams = new URLSearchParams();
+  if (queue) countsParams.set('queue', queue);
+  const countsUrl = `/api/workqueue/items${countsParams.toString() ? `?${countsParams.toString()}` : ''}`;
+
   const statusLine = pane.elements.thread.querySelector('[data-wq-statusline]');
   if (statusLine) statusLine.textContent = 'Loading...';
 
   try {
-    const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+    const [res, countsRes] = await Promise.all([
+      fetch(url, { credentials: 'include', cache: 'no-store' }),
+      fetch(countsUrl, { credentials: 'include', cache: 'no-store' })
+    ]);
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
     const items = Array.isArray(data.items) ? data.items : [];
+    let countItems = items;
+    if (countsRes.ok) {
+      const countsData = await countsRes.json().catch(() => ({}));
+      if (Array.isArray(countsData.items)) countItems = countsData.items;
+    }
     const previousSignature = pane.workqueue.itemsSignature || '';
     const nextSignature = JSON.stringify(items.map((it) => [
       it?.id || '',
@@ -3836,15 +3891,31 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
       it?.title || ''
     ]));
     pane.workqueue.items = items;
+    pane.workqueue.countItems = countItems;
+    pane.workqueue.statusCounts = buildWorkqueueStatusCounts(filterWorkqueuePaneItemsByScope(pane, countItems));
     pane.workqueue.itemsSignature = nextSignature;
     if (previousSignature && previousSignature !== nextSignature) {
       markPaneUnread(pane, 1, 'workqueue');
     }
     if (statusLine) statusLine.textContent = `${items.length} item(s)`;
+    if (typeof pane.workqueue.renderStatusMultiSelect === 'function') pane.workqueue.renderStatusMultiSelect();
     renderWorkqueuePaneItems(pane);
   } catch (err) {
     if (statusLine) statusLine.textContent = `Failed to load: ${String(err)}`;
   }
+}
+
+function filterWorkqueuePaneItemsByScope(pane, items) {
+  const itemsRaw = Array.isArray(items) ? items : [];
+  const scope = pane.workqueue?.scopeFilter || 'all';
+  const activeTarget = String(pane.agentId || '').trim();
+  const getOwner = (it) => String(it?.claimedBy || it?.assignee || it?.assignedTo || it?.agentId || '').trim();
+  return itemsRaw.filter((it) => {
+    const owner = getOwner(it);
+    if (scope === 'unassigned') return !owner;
+    if (scope === 'assigned') return !!activeTarget && owner === activeTarget;
+    return true;
+  });
 }
 
 function renderWorkqueuePaneItems(pane) {
@@ -3853,16 +3924,7 @@ function renderWorkqueuePaneItems(pane) {
   if (!body) return;
   body.innerHTML = '';
 
-  const itemsRaw = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
-  const scope = pane.workqueue?.scopeFilter || 'all';
-  const activeTarget = String(pane.agentId || '').trim();
-  const getOwner = (it) => String(it?.claimedBy || it?.assignee || it?.assignedTo || it?.agentId || '').trim();
-  const scopedItems = itemsRaw.filter((it) => {
-    const owner = getOwner(it);
-    if (scope === 'unassigned') return !owner;
-    if (scope === 'assigned') return !!activeTarget && owner === activeTarget;
-    return true;
-  });
+  const scopedItems = filterWorkqueuePaneItemsByScope(pane, pane.workqueue?.items);
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
   const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
   const renderLimit = Math.max(
@@ -5886,7 +5948,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
         repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
       },
+      statusCounts: Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0])),
       items: [],
+      countItems: [],
       selectedItemId: null,
       renderLimit: WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
@@ -6317,7 +6381,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         for (const s of selected) {
           const chip = document.createElement('span');
           chip.className = 'wq-pill';
-          chip.textContent = s;
+          chip.textContent = formatWorkqueueStatusLabel(s);
           statusSelectedEl.appendChild(chip);
         }
       } else {
@@ -6332,7 +6396,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         const id = `wq-pane-status-${pane.id}-${s}`;
         const label = document.createElement('label');
         label.className = 'wq-status-chip';
-        label.innerHTML = `<input type="checkbox" id="${id}" ${statusSet.has(s) ? 'checked' : ''} /> <span>${escapeHtml(s)}</span>`;
+        const count = Number(pane.workqueue?.statusCounts?.[s] || 0);
+        const display = `${formatWorkqueueStatusLabel(s)} (${count})`;
+        label.innerHTML = `<input type="checkbox" id="${id}" ${statusSet.has(s) ? 'checked' : ''} /> <span>${escapeHtml(display)}</span>`;
         const checkbox = label.querySelector('input');
         checkbox.addEventListener('change', () => {
           if (checkbox.checked) statusSet.add(s);
@@ -6342,6 +6408,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         statusOptionsEl.appendChild(label);
       }
     };
+    pane.workqueue.renderStatusMultiSelect = renderStatusMultiSelect;
 
     const applyQueueSearchFilter = () => {
       if (!queueSelectEl) return;
@@ -6489,6 +6556,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       pane.workqueue.scopeFilter = normalizeWorkqueueScope(scope);
       resetRenderLimit();
       storage.set(WORKQUEUE_SCOPE_PREF_KEY, pane.workqueue.scopeFilter);
+      pane.workqueue.statusCounts = buildWorkqueueStatusCounts(filterWorkqueuePaneItemsByScope(pane, pane.workqueue.countItems));
+      if (typeof pane.workqueue.renderStatusMultiSelect === 'function') pane.workqueue.renderStatusMultiSelect();
       updateScopeUi();
       renderWorkqueuePaneItems(pane);
       paneManager.persistAdminPanes();
@@ -8081,6 +8150,10 @@ let shortcutState = { lastGAtMs: 0 };
 function isTypingContext(target) {
   const el = target || document.activeElement;
   if (!el) return false;
+  try {
+    if (el.hidden || el.disabled) return false;
+    if (el.getClientRects && el.getClientRects().length === 0) return false;
+  } catch {}
   const tag = String(el.tagName || '').toUpperCase();
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
   if (el.isContentEditable) return true;
