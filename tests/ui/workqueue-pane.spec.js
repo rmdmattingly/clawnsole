@@ -1,4 +1,6 @@
 const { test, expect } = require('@playwright/test');
+const fs = require('fs');
+const path = require('path');
 
 const { startTestEnv, loginAdmin, attachConsoleErrorAsserts, addPane } = require('./_helpers');
 
@@ -17,6 +19,20 @@ test.afterEach(async ({ page }) => {
     page.__consoleAsserts.assertNoErrors();
   }
 });
+
+function seedAgentsForWorkqueuePicker() {
+  const configPath = path.join(env.tempHome, '.openclaw', 'openclaw.json');
+  const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  cfg.agents = {
+    ...(cfg.agents || {}),
+    list: [
+      { id: 'main', name: 'main' },
+      { id: 'dev', name: 'Dev' },
+      { id: 'dev-2', name: 'Dev-2' }
+    ]
+  };
+  fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+}
 
 test('workqueue pane: renders + has queue dropdown + does not show chat composer', async ({ page }) => {
   test.setTimeout(180000);
@@ -47,6 +63,30 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
   await expect(wqPane.locator('[data-pane-input]')).toBeHidden();
 });
 
+test('workqueue pane: pane grid label switches from chat-only to generic panes', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([{ key: 'ptestchat', kind: 'chat', agentId: 'main' }])
+    );
+  });
+
+  await loginAdmin(page, env.serverPort);
+
+  const grid = page.getByTestId('pane-grid');
+  await expect(grid).toHaveAttribute('aria-label', 'Chat panes');
+
+  await addPane(page, 'Workqueue pane');
+
+  await expect(page.locator('[data-pane-kind="workqueue"]').last()).toBeVisible();
+  await expect(grid).toHaveAttribute('aria-label', 'Panes');
+});
+
 test('workqueue pane: queue target supports search + recent persistence', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -73,6 +113,37 @@ test('workqueue pane: queue target supports search + recent persistence', async 
   const secondPane = page.locator('[data-pane]').last();
   const secondSelect = secondPane.locator('[data-wq-queue-select]');
   await expect(secondSelect.locator('option', { hasText: '★ qa-hotfix' })).toHaveCount(1);
+});
+
+test('workqueue pane: enqueue assignment target supports search, keyboard select, and recents', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  seedAgentsForWorkqueuePicker();
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const firstPane = page.locator('[data-pane]').last();
+  await firstPane.locator('details.wq-enqueue summary').click();
+
+  const pickerSearch = firstPane.locator('[data-wq-claim-agent-search]');
+  const pickerList = firstPane.locator('[data-wq-claim-agent-list]');
+  await pickerSearch.fill('dev-2');
+  await expect(pickerList.locator('.wq-agent-picker-option')).toHaveCount(1);
+  await expect(pickerList.locator('.wq-agent-picker-option')).toContainText('Dev-2');
+
+  await pickerSearch.press('Enter');
+  await expect(firstPane.locator('[data-wq-claim-agent]')).toHaveValue('dev-2');
+
+  await pickerSearch.click();
+
+  const recentHeading = firstPane.locator('[data-wq-claim-agent-list] .wq-agent-picker-heading', { hasText: 'Recent' });
+  await expect(recentHeading).toBeVisible();
+  const firstRecent = firstPane.locator('[data-wq-claim-agent-list] .wq-agent-picker-option').first();
+  await expect(firstRecent).toContainText('Dev-2');
+  await expect(firstRecent.locator('.wq-agent-picker-badge')).toHaveText('recent');
 });
 
 test('workqueue pane: scope filter toggles assigned/unassigned/all deterministically', async ({ page }) => {
@@ -200,4 +271,58 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
     return { overflowY: cs.overflowY };
   });
   expect(['auto', 'scroll']).toContain(listStyles.overflowY);
+});
+
+test('workqueue pane: large queues render an initial capped slice and load more incrementally', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `large-render-${Date.now()}`;
+  const stateDir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const now = new Date().toISOString();
+  const items = Array.from({ length: 505 }, (_, ix) => ({
+    id: `large-${ix}`,
+    queue,
+    title: ix === 504 ? 'needle large list item' : `large list item ${String(ix).padStart(3, '0')}`,
+    instructions: 'fixture item',
+    priority: ix,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: now,
+    updatedAt: now,
+    meta: { repo: ix === 504 ? 'rmdmattingly/clawnsole' : 'example/other' }
+  }));
+  fs.writeFileSync(
+    path.join(stateDir, 'work-queues.json'),
+    JSON.stringify({ version: 1, queues: { [queue]: { name: queue, createdAt: now } }, items, assignments: {} }, null, 2)
+  );
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption(queue);
+
+  const refreshResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
+  await pane.locator('[data-wq-refresh]').click();
+  await refreshResP;
+
+  await expect(pane.locator('.wq-row')).toHaveCount(100);
+  await expect(pane.locator('[data-wq-load-more]')).toHaveText('Load more (100/505)');
+
+  await pane.locator('[data-wq-load-more]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(200);
+  await expect(pane.locator('[data-wq-load-more]')).toHaveText('Load more (200/505)');
+
+  await pane.locator('[data-wq-preset-clawnsole]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(1);
+  await expect(pane.locator('.wq-row .wq-col.title')).toContainText('needle large list item');
+  await expect(pane.locator('[data-wq-load-more]')).toHaveCount(0);
 });

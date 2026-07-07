@@ -64,3 +64,44 @@ test('layout: reset layout restores default (Chat + Workqueue)', async ({ page }
   await expect(panes).toHaveCount(2);
   await expect(panes.nth(1)).toHaveAttribute('data-pane-kind', 'workqueue');
 });
+
+test('layout: reset requires confirmation before discarding a chat draft', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const input = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
+  await input.fill('hold this thought');
+
+  await page.getByRole('button', { name: 'Add pane' }).click();
+  await page.getByRole('button', { name: 'Cron pane' }).click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('Unsent draft text or attachments will be discarded');
+    await dialog.dismiss();
+  });
+  await page.click('#resetLayoutBtn');
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+  await expect(input).toHaveValue('hold this thought');
+
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('Unsent draft text or attachments will be discarded');
+    await dialog.accept();
+  });
+  await page.click('#resetLayoutBtn');
+
+  const panes = page.locator('[data-pane]');
+  await expect(panes).toHaveCount(2);
+  await expect(panes.first()).toHaveAttribute('data-pane-kind', 'chat');
+  await expect(panes.nth(1)).toHaveAttribute('data-pane-kind', 'workqueue');
+  await expect(panes.first().locator('[data-pane-input]')).toHaveValue('');
+});

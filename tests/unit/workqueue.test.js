@@ -311,14 +311,30 @@ test('workqueue: issue-backed enqueue canonicalizes producer dedupe variants', (
       meta: { dedupeKey: 'rmdmattingly/clawnsole:392', source: 'coverage' }
     },
     {
+      title: 'Open issue triage: RMDMATTINGLY / CLAWNSOLE #392',
+      instructions: 'Ship queued issue',
+      priority: 4
+    },
+    {
+      title: 'Split fields producer',
+      instructions: 'Repo: RMDMATTINGLY / CLAWNSOLE\nIssue: #392\nShip queued issue',
+      priority: 5
+    },
+    {
+      title: 'Meta URL producer',
+      instructions: 'Ship queued issue',
+      priority: 6,
+      meta: { url: 'https://github.com/rmdmattingly/clawnsole/issues/392', source: 'follow-up' }
+    },
+    {
       title: 'URL producer',
       instructions: 'Ship https://github.com/rmdmattingly/clawnsole/issues/392',
-      priority: 4
+      priority: 7
     },
     {
       title: 'Explicit issue producer',
       instructions: 'Ship queued issue',
-      priority: 5,
+      priority: 8,
       repo: 'rmdmattingly/clawnsole',
       issueNumber: 392
     }
@@ -331,12 +347,42 @@ test('workqueue: issue-backed enqueue canonicalizes producer dedupe variants', (
   assert.equal(latest._deduped, true);
   assert.equal(latest.dedupeKey, 'rmdmattingly/clawnsole#392');
   assert.equal(latest.title, 'Explicit issue producer');
-  assert.equal(latest.priority, 5);
+  assert.equal(latest.priority, 8);
 
   const state = loadState(root);
   assert.equal(state.items.length, 1);
   assert.equal(state.items[0].dedupeKey, 'rmdmattingly/clawnsole#392');
   assert.equal(state.items[0].title, 'Explicit issue producer');
+});
+
+test('workqueue: issue-backed canonical dedupe keeps distinct issues separate', () => {
+  const root = tempRoot();
+
+  enqueueItem(root, {
+    queue: 'dev-team',
+    title: 'Issue coverage',
+    instructions: 'Ship https://github.com/rmdmattingly/clawnsole/issues/392',
+    priority: 1
+  });
+  enqueueItem(root, {
+    queue: 'dev-team',
+    title: 'Issue coverage',
+    instructions: 'Ship https://github.com/rmdmattingly/clawnsole/issues/393',
+    priority: 1
+  });
+  enqueueItem(root, {
+    queue: 'dev-team',
+    title: 'Issue coverage',
+    instructions: 'Ship https://github.com/example/clawnsole/issues/392',
+    priority: 1
+  });
+
+  const state = loadState(root);
+  assert.equal(state.items.length, 3);
+  assert.deepEqual(
+    state.items.map((it) => it.dedupeKey).sort(),
+    ['example/clawnsole#392', 'rmdmattingly/clawnsole#392', 'rmdmattingly/clawnsole#393']
+  );
 });
 
 test('workqueue: issue-backed enqueue creates new row when only terminal matches exist', () => {
