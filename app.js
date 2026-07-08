@@ -2920,10 +2920,12 @@ function openAgentChatFromFleet(agentId) {
   const target = normalizeAgentId(agentId || 'main');
   const pane =
     findExistingPane('chat', (p) => normalizeAgentId(p.agentId || 'main') === target) ||
+    findExistingPane('chat') ||
     paneManager.addPane('chat');
-  if (!pane) return;
+  if (!pane) return null;
   paneSetAgent(pane, target);
   paneManager.focusPanePrimary(pane);
+  return pane;
 }
 
 function openAgentTimelineFromFleet(agentId) {
@@ -2976,7 +2978,7 @@ function openAgentWorkqueueFromFleet(agentId) {
     findExistingPane('workqueue', (p) => String(p.workqueue?.queue || '').trim() === preferredQueue) ||
     findExistingPane('workqueue') ||
     paneManager.addPane('workqueue', { queue: preferredQueue, agentId: target });
-  if (!pane) return;
+  if (!pane) return null;
 
   pane.agentId = target;
   try {
@@ -2989,6 +2991,15 @@ function openAgentWorkqueueFromFleet(agentId) {
   } catch {}
   paneManager.persistAdminPanes();
   paneManager.focusPanePrimary(pane);
+  return pane;
+}
+
+function openAgentTriageFromFleet(agentId) {
+  const target = normalizeAgentId(agentId || 'main');
+  const chatPane = openAgentChatFromFleet(target);
+  openAgentWorkqueueFromFleet(target);
+  closeAgentsModal();
+  if (chatPane) paneManager.focusPanePrimary(chatPane);
 }
 
 function findActivePaneFromFocus() {
@@ -3155,13 +3166,15 @@ function renderAgentsModalList() {
           <div class="agents-row-meta">${escapeHtml(id)} · ${escapeHtml(bucketLabel)} · <span class="agents-age-chip" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}">${escapeHtml(heartbeatAge)} · ${escapeHtml(heatBucketLabel)}</span>${statusSnippetHtml}</div>
         </div>
         <div class="agents-row-actions agents-row-actions-inline" role="group" aria-label="Quick actions for ${escapeHtml(label)}">
+          <button type="button" class="secondary agents-action-btn agents-action-primary" data-agent-action="triage" data-agent-id="${escapeHtml(id)}" title="Triage agent" aria-label="Triage ${escapeHtml(label)}">Triage</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Chat</button>
-          <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Timeline</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Workqueue</button>
+          <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Timeline</button>
         </div>
         <details class="agents-row-actions-overflow">
           <summary class="secondary" aria-label="More actions for ${escapeHtml(label)}" title="More actions">⋯</summary>
           <div class="agents-row-actions-menu" role="group" aria-label="Quick actions for ${escapeHtml(label)}">
+            <button type="button" class="secondary agents-action-btn agents-action-primary" data-agent-action="triage" data-agent-id="${escapeHtml(id)}" title="Triage agent" aria-label="Triage ${escapeHtml(label)}">Triage agent</button>
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Open Chat</button>
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Open Timeline</button>
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Open Workqueue</button>
@@ -3185,7 +3198,8 @@ function renderAgentsModalList() {
           e.preventDefault();
           e.stopPropagation();
           const action = String(btn.getAttribute('data-agent-action') || '').trim();
-          if (action === 'open-chat') openAgentChatFromFleet(id);
+          if (action === 'triage') openAgentTriageFromFleet(id);
+          else if (action === 'open-chat') openAgentChatFromFleet(id);
           else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
           else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(id);
         });

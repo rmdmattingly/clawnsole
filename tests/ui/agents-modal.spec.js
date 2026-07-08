@@ -191,6 +191,7 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await expect(page.locator('#agentsModal')).toHaveClass(/open/);
 
   const firstRow = page.locator('#agentsList .agents-row').first();
+  await expect(firstRow.locator('[data-agent-action="triage"]').first()).toBeVisible();
   await expect(firstRow.locator('[data-agent-action="open-chat"]').first()).toBeVisible();
   await expect(firstRow.locator('[data-agent-action="open-timeline"]').first()).toBeVisible();
   await expect(firstRow.locator('[data-agent-action="open-workqueue"]').first()).toBeVisible();
@@ -208,6 +209,64 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue(agentId || 'main');
+});
+
+test('agents modal triage action opens chat and workqueue from empty layout', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents: [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }] } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.layoutMode', 'custom'));
+
+  await page.evaluate(() => {
+    if (typeof paneManager !== 'undefined') {
+      paneManager.panes.splice(0);
+      paneManager.persistAdminPanes();
+      paneManager.updatePaneLabels();
+      paneManager.updateCloseButtons();
+      paneManager.applyInferredLayout();
+    }
+    document.querySelectorAll('[data-pane]').forEach((pane) => pane.remove());
+  });
+  await expect(page.locator('[data-pane]')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+
+  await page.locator('#agentsList .agents-row').filter({ hasText: 'Alpha (alpha)' }).locator('[data-agent-action="triage"]').first().click();
+
+  await expect(page.locator('#agentsModal')).not.toHaveClass(/open/);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue('alpha');
+  await expect(page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]')).toBeFocused();
+});
+
+test('agents modal triage action reuses existing matching panes', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents: [{ id: 'beta', name: 'Beta', displayName: 'Beta' }] } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  const workqueuePane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await expect(chatPane).toBeVisible();
+  await expect(workqueuePane).toBeVisible();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await page.locator('#agentsList .agents-row').filter({ hasText: 'Beta (beta)' }).locator('[data-agent-action="triage"]').first().click();
+
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(workqueuePane.locator('[data-wq-claim-agent]')).toHaveValue('beta');
+  await expect(chatPane.locator('[data-pane-input]')).toBeFocused();
 });
 
 test('agents modal compact density tightens rows and persists', async ({ page, clawnsole }) => {
