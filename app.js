@@ -114,6 +114,7 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   if (min > 0) return `${min}m ${sec % 60}s`;
   return `${sec}s`;
 });
+const normalizeWorkqueueTitle = __appCore.normalizeWorkqueueTitle || ((item) => String(item?.title || ''));
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
   const n = Number(count);
@@ -3576,7 +3577,7 @@ function renderWorkqueueItems() {
       const next = String(it.lastNote || '').trim();
 
       card.innerHTML = `
-        <div class="wq-card-title">${escapeHtml(String(it.title || ''))}</div>
+        <div class="wq-card-title">${escapeHtml(normalizeWorkqueueTitle(it))}</div>
         <div class="wq-card-meta">
           <span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span>
           ${age ? `<span class="wq-card-chip mono">age ${escapeHtml(age)}</span>` : ''}
@@ -3626,7 +3627,7 @@ function renderWorkqueueInspect(item) {
     </div>
     <div class="wq-inspect-block">
       <div class="wq-inspect-label">Title</div>
-      <div class="wq-inspect-pre">${escapeHtml(String(item.title || ''))}</div>
+      <div class="wq-inspect-pre">${escapeHtml(normalizeWorkqueueTitle(item))}</div>
     </div>
     <div class="wq-inspect-block">
       <div class="wq-inspect-label">Instructions</div>
@@ -3781,7 +3782,7 @@ function renderWorkqueueSimpleList(rootEl, items, { emptyText }) {
   for (const it of items) {
     const li = document.createElement('li');
     const lease = it.leaseUntil ? new Date(Number(it.leaseUntil)).toISOString() : '';
-    li.innerHTML = `<div><strong>${escapeHtml(String(it.title || ''))}</strong></div>
+    li.innerHTML = `<div><strong>${escapeHtml(normalizeWorkqueueTitle(it))}</strong></div>
 <div class="meta">${escapeHtml(String(it.status || ''))}${it.claimedBy ? ` • ${escapeHtml(String(it.claimedBy))}` : ''}${lease ? ` • lease ${escapeHtml(lease)}` : ''}</div>`;
     ul.appendChild(li);
   }
@@ -4178,7 +4179,7 @@ function renderWorkqueuePaneItems(pane) {
     const status = String(it.status || '');
 
     row.innerHTML = `
-      <div class="wq-col title">${escapeHtml(String(it.title || ''))}</div>
+      <div class="wq-col title">${escapeHtml(normalizeWorkqueueTitle(it))}</div>
       <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
       <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
       <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
@@ -4239,7 +4240,7 @@ function renderWorkqueuePaneInspect(pane, item) {
     </div>
     <div class="wq-inspect-block">
       <div class="wq-inspect-label">Title</div>
-      <div class="wq-inspect-pre">${escapeHtml(String(item.title || ''))}</div>
+      <div class="wq-inspect-pre">${escapeHtml(normalizeWorkqueueTitle(item))}</div>
     </div>
     <div class="wq-inspect-block">
       <div class="wq-inspect-label">Instructions</div>
