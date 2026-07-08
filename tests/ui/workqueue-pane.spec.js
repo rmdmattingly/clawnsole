@@ -75,6 +75,41 @@ function seedLegacyDuplicateWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedLegacyIssueTitleVariants(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, title, offsetMs) => ({
+    id,
+    queue,
+    title,
+    instructions: 'Repo: rmdmattingly/clawnsole\nIssue: #280',
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(offsetMs),
+    updatedAt: iso(offsetMs),
+    dedupeKey: `legacy-title-variant-${id}`
+  });
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-120000) } },
+    assignments: {},
+    items: [
+      mkItem('legacy-title-a', '[issue] rmdmattingly/clawnsole#280 Normalize row titles', -30000),
+      mkItem('legacy-title-b', 'Open issue: Normalize row titles', -20000),
+      mkItem('legacy-title-c', 'Issue coverage: Normalize row titles', -10000)
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 test('workqueue pane: renders + has queue dropdown + does not show chat composer', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -317,6 +352,30 @@ test('workqueue pane: source chips + clawnsole preset filter items without reloa
   await pane.locator('[data-wq-preset-clawnsole]').click();
   await expect(pane.locator('.wq-row')).toHaveCount(1);
   await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
+});
+
+test('workqueue pane: normalizes mixed legacy issue title prefixes', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `title-normalize-${Date.now()}`;
+  seedLegacyIssueTitleVariants(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await expect(pane.locator('.wq-row')).toHaveCount(3);
+  await expect(pane.locator('.wq-row .wq-col.title')).toHaveText([
+    '[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles',
+    '[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles',
+    '[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles'
+  ]);
 });
 
 test('workqueue pane: duplicate health summary cleans legacy issue duplicates', async ({ page }) => {
