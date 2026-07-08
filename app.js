@@ -537,7 +537,10 @@ const uiState = {
 };
 
 let toastSeq = 0;
-function showToast(message, { kind = 'info', timeoutMs = 2600, actionLabel = '', onAction = null, testId = 'toast' } = {}) {
+function showToast(
+  message,
+  { kind = 'info', timeoutMs = 2600, actionLabel = '', onAction = null, secondaryActionLabel = '', onSecondaryAction = null, testId = 'toast' } = {}
+) {
   if (!globalElements.toastHost) return;
   const text = typeof message === 'string' ? message.trim() : String(message || '').trim();
   if (!text) return;
@@ -563,6 +566,17 @@ function showToast(message, { kind = 'info', timeoutMs = 2600, actionLabel = '',
     actionBtn.textContent = String(actionLabel);
     actionBtn.dataset.testid = 'toast-action';
     el.appendChild(actionBtn);
+  }
+
+  const hasSecondaryAction = secondaryActionLabel && typeof onSecondaryAction === 'function';
+  let secondaryActionBtn = null;
+  if (hasSecondaryAction) {
+    secondaryActionBtn = document.createElement('button');
+    secondaryActionBtn.type = 'button';
+    secondaryActionBtn.className = 'toast-action toast-action-secondary';
+    secondaryActionBtn.textContent = String(secondaryActionLabel);
+    secondaryActionBtn.dataset.testid = 'toast-secondary-action';
+    el.appendChild(secondaryActionBtn);
   }
 
   globalElements.toastHost.appendChild(el);
@@ -592,9 +606,18 @@ function showToast(message, { kind = 'info', timeoutMs = 2600, actionLabel = '',
     } catch {}
     remove();
   });
+  secondaryActionBtn?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    clearTimeout(timer);
+    try {
+      onSecondaryAction?.();
+    } catch {}
+    remove();
+  });
 
   el.addEventListener('click', () => {
-    if (hasAction) return;
+    if (hasAction || hasSecondaryAction) return;
     clearTimeout(timer);
     remove();
   });
@@ -2015,6 +2038,27 @@ function paneGroupOrder(kind) {
   return Number.isInteger(order[kind]) ? order[kind] : 99;
 }
 
+function isAnchorPaneKind(kind) {
+  return kind === 'chat' || kind === 'workqueue';
+}
+
+function anchorPaneOptions(pane) {
+  const kind = String(pane?.kind || 'chat');
+  if (kind === 'workqueue') {
+    return {
+      forceNew: true,
+      agentId: normalizeAgentId(pane?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main') || 'main'),
+      queue: pane?.workqueue?.queue || 'dev-team',
+      statusFilter: Array.isArray(pane?.workqueue?.statusFilter) ? pane.workqueue.statusFilter.slice() : undefined,
+      scopeFilter: pane?.workqueue?.scopeFilter || getDefaultWorkqueueScope()
+    };
+  }
+  return {
+    forceNew: true,
+    agentId: normalizeAgentId(pane?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main') || 'main')
+  };
+}
+
 function movePaneWithinVisible(paneKey, direction, visibleKeys) {
   const keys = Array.isArray(visibleKeys) ? visibleKeys : [];
   const visibleIdx = keys.indexOf(paneKey);
@@ -2138,8 +2182,20 @@ function renderPaneManager() {
           </div>
         `;
 
-        row.addEventListener('mouseenter', () => {
+        row.querySelector('[data-action="close"]')?.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
           paneManagerUiState.selectedIndex = Number(row.dataset.visibleIndex || 0);
+          try {
+            paneManager.removePane(pane.key, { source: 'manager' });
+          } catch {}
+          renderPaneManager();
+        });
+
+        row.addEventListener('mouseenter', () => {
+          const nextIndex = Number(row.dataset.visibleIndex || 0);
+          if (paneManagerUiState.selectedIndex === nextIndex) return;
+          paneManagerUiState.selectedIndex = nextIndex;
           renderPaneManager();
         });
 
@@ -2150,7 +2206,7 @@ function renderPaneManager() {
           paneManagerUiState.selectedIndex = selectedVisible;
           if (action === 'close') {
             try {
-              paneManager.removePane(pane.key);
+              paneManager.removePane(pane.key, { source: 'manager' });
             } catch {}
             renderPaneManager();
             return;
@@ -2177,7 +2233,7 @@ function renderPaneManager() {
             const duplicates = (paneManager?.panes || []).filter((entry) => paneDuplicateKey(entry) === dupKey && entry.key !== keepKey);
             duplicates.forEach((entry) => {
               try {
-                paneManager.removePane(entry.key);
+                paneManager.removePane(entry.key, { source: 'manager' });
               } catch {}
             });
             renderPaneManager();
@@ -2270,6 +2326,18 @@ function paneManagerHandleKeydown(event) {
     if (paneIdx < 0) return true;
     closePaneManager();
     focusPaneIndex(paneIdx);
+    return true;
+  }
+  if (event.key === 'Delete' || event.key === 'Backspace') {
+    event.preventDefault();
+    const idx = Math.max(0, Math.min(visibleKeys.length - 1, paneManagerUiState.selectedIndex));
+    const key = visibleKeys[idx];
+    if (key) {
+      try {
+        paneManager.removePane(key, { source: 'manager-keyboard' });
+      } catch {}
+      renderPaneManager();
+    }
     return true;
   }
   return false;
@@ -7654,33 +7722,28 @@ const paneManager = {
     if (roleState.role !== 'admin') return false;
     return String(storage.get(ADMIN_LAYOUT_MODE_KEY, 'default') || 'default') !== 'custom';
   },
-  maybeOfferBaselineRestore(removedPane) {
-    if (!this.baselineGuardEnabled()) return;
-    const kind = removedPane?.kind;
-    if (kind !== 'chat' && kind !== 'workqueue') return;
-    if (this.panes.some((pane) => pane?.kind === kind)) return;
+  isLastAnchorPane(pane) {
+    if (!this.baselineGuardEnabled()) return false;
+    const kind = String(pane?.kind || '');
+    if (!isAnchorPaneKind(kind)) return false;
+    return this.panes.filter((entry) => String(entry?.kind || 'chat') === kind).length === 1;
+  },
+  maybeOfferAnchorReplace(pane) {
+    if (!this.isLastAnchorPane(pane)) return false;
 
+    const kind = String(pane?.kind || 'chat');
     const labelKind = kind === 'workqueue' ? 'Workqueue' : 'Chat';
-    const agentId = normalizeAgentId(removedPane.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main') || 'main');
-    const restoreOptions =
-      kind === 'workqueue'
-        ? {
-            forceNew: true,
-            agentId,
-            queue: removedPane.workqueue?.queue || 'dev-team',
-            statusFilter: Array.isArray(removedPane.workqueue?.statusFilter)
-              ? removedPane.workqueue.statusFilter.slice()
-              : undefined,
-            scopeFilter: removedPane.workqueue?.scopeFilter || getDefaultWorkqueueScope()
-          }
-        : { agentId };
 
-    showToast(`${labelKind} pane closed.`, {
+    showToast(`This is the last ${labelKind} pane.`, {
       timeoutMs: 10000,
-      actionLabel: `Restore ${labelKind} pane`,
-      testId: `restore-${kind}-toast`,
-      onAction: () => this.addPane(kind, restoreOptions)
+      actionLabel: `Replace ${labelKind} pane`,
+      secondaryActionLabel: 'Cancel',
+      testId: `close-guard-${kind}-toast`,
+      onAction: () => this.replacePane(pane.key, kind, anchorPaneOptions(pane)),
+      onSecondaryAction: () => {}
     });
+
+    return true;
   },
   openAddPaneMenu(anchorEl) {
     if (roleState.role !== 'admin') return;
@@ -7834,11 +7897,22 @@ const paneManager = {
       } catch {}
     }
   },
-  removePane(key) {
+  replacePane(key, kind = 'chat', options = {}) {
+    if (roleState.role !== 'admin') return null;
+    const idx = this.panes.findIndex((pane) => pane.key === key);
+    if (idx < 0) return null;
+    const targetKind = isAnchorPaneKind(kind) ? kind : 'chat';
+    const removed = this.removePane(key, { skipAnchorGuard: true, focusFallback: false });
+    if (!removed) return null;
+    return this.addPane(targetKind, { ...options, forceNew: true });
+  },
+  removePane(key, { skipAnchorGuard = false, focusFallback = true, source = 'unknown' } = {}) {
     if (roleState.role !== 'admin') return;
     if (this.panes.length <= 1) return;
     const idx = this.panes.findIndex((pane) => pane.key === key);
     if (idx < 0) return;
+    const candidate = this.panes[idx];
+    if (!skipAnchorGuard && this.maybeOfferAnchorReplace(candidate, { source })) return;
     const [pane] = this.panes.splice(idx, 1);
     forgetFocusedPaneKey(pane?.key || key);
     try {
@@ -7852,12 +7926,14 @@ const paneManager = {
     this.updateCloseButtons();
     this.applyInferredLayout();
     this.persistAdminPanes();
-    this.maybeOfferBaselineRestore(pane);
-    const fallbackPane = this.panes[Math.min(idx, this.panes.length - 1)] || this.panes[0] || null;
-    if (fallbackPane) notePaneFocused(fallbackPane);
-    else updateBrowserTitle(null);
+    if (focusFallback) {
+      const fallbackPane = this.panes[Math.min(idx, this.panes.length - 1)] || this.panes[0] || null;
+      if (fallbackPane) notePaneFocused(fallbackPane);
+      else updateBrowserTitle(null);
+    }
     updateGlobalStatus();
     updateConnectionControls();
+    return pane;
   },
   movePane(key, delta = 0) {
     if (roleState.role !== 'admin') return false;

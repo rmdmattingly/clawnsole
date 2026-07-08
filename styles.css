@@ -3326,6 +3326,16 @@ kbd {
   background: rgba(255, 255, 255, 0.16);
 }
 
+.toast-action-secondary {
+  background: transparent;
+  color: var(--muted);
+}
+
+.toast-action-secondary:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
 .toast.open {
   opacity: 1;
   transform: translateY(0);
