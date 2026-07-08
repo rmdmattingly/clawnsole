@@ -3864,6 +3864,113 @@ function getWorkqueueItemSource(item) {
   return 'other';
 }
 
+const WORKQUEUE_DUPLICATE_TERMINAL_STATUSES = new Set(['done', 'failed']);
+
+function normalizeWorkqueueIssueRepo(repo) {
+  return String(repo || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function normalizeWorkqueueIssueNumber(raw) {
+  const n = Number.parseInt(String(raw || '').trim(), 10);
+  return Number.isFinite(n) && n > 0 ? String(n) : '';
+}
+
+function parseWorkqueueIssueRef(text) {
+  const src = String(text || '').trim();
+  if (!src) return null;
+
+  const fromUrl = src.match(/github\.com\/([a-z0-9_.-]+\/[a-z0-9_.-]+)\/issues\/(\d+)/i);
+  if (fromUrl) {
+    const repo = normalizeWorkqueueIssueRepo(fromUrl[1]);
+    const issueNumber = normalizeWorkqueueIssueNumber(fromUrl[2]);
+    if (repo && issueNumber) return { repo, issueNumber };
+  }
+
+  const repoRefPattern = String.raw`([a-z0-9_.-]+)\s*\/\s*([a-z0-9_.-]+)`;
+  const fromFullRef = src.match(new RegExp(String.raw`(?:^|[\s[(])(?:issue:)?${repoRefPattern}\s*#\s*(\d+)\b`, 'i'));
+  if (fromFullRef) {
+    const repo = normalizeWorkqueueIssueRepo(`${fromFullRef[1]}/${fromFullRef[2]}`);
+    const issueNumber = normalizeWorkqueueIssueNumber(fromFullRef[3]);
+    if (repo && issueNumber) return { repo, issueNumber };
+  }
+
+  const fromColonRef = src.match(new RegExp(String.raw`(?:^|[\s[(])(?:issue:)?${repoRefPattern}\s*:\s*(\d+)\b`, 'i'));
+  if (fromColonRef) {
+    const repo = normalizeWorkqueueIssueRepo(`${fromColonRef[1]}/${fromColonRef[2]}`);
+    const issueNumber = normalizeWorkqueueIssueNumber(fromColonRef[3]);
+    if (repo && issueNumber) return { repo, issueNumber };
+  }
+
+  const repoLine = src.match(new RegExp(String.raw`\brepo\s*:\s*${repoRefPattern}\b`, 'i'));
+  const issueLine = src.match(/\b(?:issue|issueNumber)\s*:\s*#?\s*(\d+)\b/i);
+  if (repoLine && issueLine) {
+    const repo = normalizeWorkqueueIssueRepo(`${repoLine[1]}/${repoLine[2]}`);
+    const issueNumber = normalizeWorkqueueIssueNumber(issueLine[1]);
+    if (repo && issueNumber) return { repo, issueNumber };
+  }
+
+  return null;
+}
+
+function getWorkqueueIssueKey(item) {
+  const meta = item?.meta && typeof item.meta === 'object' ? item.meta : {};
+  const explicitRepo = normalizeWorkqueueIssueRepo(meta.repo || item?.repo);
+  const explicitIssue = normalizeWorkqueueIssueNumber(meta.issueNumber || meta.issue || item?.issueNumber || item?.issue);
+  if (explicitRepo && explicitIssue) return `${explicitRepo}#${explicitIssue}`;
+
+  const parsed =
+    parseWorkqueueIssueRef(item?.dedupeKey) ||
+    parseWorkqueueIssueRef(meta.dedupeKey) ||
+    parseWorkqueueIssueRef(meta.url) ||
+    parseWorkqueueIssueRef(item?.instructions) ||
+    parseWorkqueueIssueRef(item?.title);
+  return parsed ? `${parsed.repo}#${parsed.issueNumber}` : '';
+}
+
+function chooseWorkqueueDuplicateKeepItem(items) {
+  const statusRank = { in_progress: 5, claimed: 4, ready: 3, pending: 2, done: 1, failed: 0 };
+  return (Array.isArray(items) ? items : [])
+    .slice()
+    .sort((a, b) => {
+      const pr = Number(b?.priority || 0) - Number(a?.priority || 0);
+      if (pr !== 0) return pr;
+      const sr = (statusRank[String(b?.status || '')] ?? -1) - (statusRank[String(a?.status || '')] ?? -1);
+      if (sr !== 0) return sr;
+      const ua = Date.parse(String(a?.updatedAt || '')) || 0;
+      const ub = Date.parse(String(b?.updatedAt || '')) || 0;
+      if (ub !== ua) return ub - ua;
+      const ca = Date.parse(String(a?.createdAt || '')) || 0;
+      const cb = Date.parse(String(b?.createdAt || '')) || 0;
+      if (cb !== ca) return cb - ca;
+      return String(a?.id || '').localeCompare(String(b?.id || ''));
+    })[0] || null;
+}
+
+function groupWorkqueueDuplicateIssues(items) {
+  const grouped = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    if (!item || WORKQUEUE_DUPLICATE_TERMINAL_STATUSES.has(String(item.status || '').trim())) continue;
+    const key = getWorkqueueIssueKey(item);
+    if (!key) continue;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(item);
+  }
+
+  return Array.from(grouped.entries())
+    .filter(([, group]) => group.length > 1)
+    .map(([key, group]) => {
+      const keep = chooseWorkqueueDuplicateKeepItem(group);
+      return {
+        key,
+        items: group,
+        keep,
+        remove: group.filter((item) => item?.id && item.id !== keep?.id)
+      };
+    })
+    .filter((group) => group.remove.length > 0)
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+
 function applyWorkqueueQuickFilters(items, quickFilters) {
   const sourceSet = new Set(Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((x) => String(x || '').trim()).filter(Boolean) : []);
   const repoSet = new Set(Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((x) => String(x || '').trim()).filter(Boolean) : []);
@@ -3942,11 +4049,80 @@ function filterWorkqueuePaneItemsByScope(pane, items) {
   });
 }
 
+function renderWorkqueueDuplicateHealthForPane(pane) {
+  const root = pane?.elements?.thread?.querySelector?.('[data-wq-duplicate-health]');
+  if (!root) return;
+
+  const sourceItems = filterWorkqueuePaneItemsByScope(pane, pane.workqueue?.countItems || pane.workqueue?.items);
+  const groups = groupWorkqueueDuplicateIssues(sourceItems);
+  pane.workqueue.duplicateGroups = groups;
+
+  const duplicateRows = groups.reduce((sum, group) => sum + group.remove.length, 0);
+  if (!duplicateRows) {
+    root.hidden = true;
+    root.innerHTML = '';
+    return;
+  }
+
+  const sampleKeys = groups.slice(0, 3).map((group) => group.key).join(', ');
+  root.hidden = false;
+  root.innerHTML = `
+    <div class="wq-duplicate-summary">
+      <strong>Duplicates:</strong>
+      <span>${escapeHtml(String(duplicateRows))} row${duplicateRows === 1 ? '' : 's'} across ${escapeHtml(String(groups.length))} issue${groups.length === 1 ? '' : 's'}</span>
+      <span class="hint">${escapeHtml(sampleKeys)}</span>
+    </div>
+    <button type="button" class="secondary danger" data-wq-clean-duplicates>Clean duplicates</button>
+    <div class="hint" data-wq-duplicate-audit></div>
+  `;
+
+  root.querySelector('[data-wq-clean-duplicates]')?.addEventListener('click', () => cleanWorkqueueDuplicatesForPane(pane));
+}
+
+async function cleanWorkqueueDuplicatesForPane(pane) {
+  const root = pane?.elements?.thread?.querySelector?.('[data-wq-duplicate-health]');
+  const audit = root?.querySelector?.('[data-wq-duplicate-audit]');
+  const groups = Array.isArray(pane?.workqueue?.duplicateGroups) ? pane.workqueue.duplicateGroups : [];
+  const removeItems = groups.flatMap((group) => group.remove.map((item) => ({ item, key: group.key, keep: group.keep })));
+  if (!removeItems.length) return;
+
+  const sampleKeys = groups.slice(0, 5).map((group) => group.key);
+  const ok = confirm(
+    `Clean ${removeItems.length} duplicate workqueue row${removeItems.length === 1 ? '' : 's'} across ${groups.length} issue${groups.length === 1 ? '' : 's'}?\n\n` +
+      `Keep rule: highest priority, then active status, then newest updatedAt, then newest createdAt, then lexical id.\n\n` +
+      `Sample: ${sampleKeys.join(', ')}`
+  );
+  if (!ok) return;
+
+  if (audit) audit.textContent = 'Cleaning duplicates...';
+  const sampleText = sampleKeys.join(',');
+  let removed = 0;
+  for (const { item, key, keep } of removeItems) {
+    try {
+      await workqueueUpdateItem(item.id, {
+        status: 'failed',
+        lastError: `duplicate-cleanup:${key}`,
+        lastNote: `duplicate cleanup archived; kept ${keep?.id || 'unknown'}; sampleKeys=${sampleText}`
+      });
+      removed += 1;
+    } catch (err) {
+      if (audit) audit.textContent = `Cleanup failed after ${removed}/${removeItems.length}: ${String(err)}`;
+      return;
+    }
+  }
+
+  const message = `Cleaned ${removed} duplicate row${removed === 1 ? '' : 's'}; sample keys: ${sampleKeys.join(', ')}`;
+  if (audit) audit.textContent = message;
+  addFeed('ok', 'workqueue', message);
+  await fetchAndRenderWorkqueueItemsForPane(pane);
+}
+
 function renderWorkqueuePaneItems(pane) {
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
   const empty = pane.elements?.thread?.querySelector('[data-wq-empty]');
   if (!body) return;
   body.innerHTML = '';
+  renderWorkqueueDuplicateHealthForPane(pane);
 
   const scopedItems = filterWorkqueuePaneItemsByScope(pane, pane.workqueue?.items);
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
@@ -6250,6 +6426,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         </details>
 
         <div class="hint" data-wq-statusline></div>
+        <div class="wq-duplicate-health" data-wq-duplicate-health aria-live="polite" hidden></div>
       </div>
 
       <div class="wq-layout">
