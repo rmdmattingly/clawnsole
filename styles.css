@@ -2010,6 +2010,36 @@ kbd {
   flex: 0 0 auto;
 }
 
+.wq-duplicate-health {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 179, 71, 0.32);
+  border-radius: 8px;
+  background: rgba(255, 179, 71, 0.1);
+}
+
+.wq-duplicate-health[hidden] {
+  display: none;
+}
+
+.wq-duplicate-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.wq-duplicate-health [data-wq-duplicate-audit] {
+  flex-basis: 100%;
+}
+
 .wq-status-field {
   min-width: min(420px, 100%);
   flex: 1;
