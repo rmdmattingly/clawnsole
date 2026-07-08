@@ -324,6 +324,15 @@ test('add-pane shortcuts do not fire while typing in chat input', async ({ page 
   await page.keyboard.press('Control+Shift+W');
 
   await expect(panes).toHaveCount(2);
+  await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Shortcut paused while typing');
+
+  await page.evaluate(() => {
+    document.querySelectorAll('[data-testid="shortcut-blocked-toast"]').forEach((el) => el.remove());
+  });
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Control+Shift+W');
+  await expect(panes).toHaveCount(2);
+  await expect(page.getByTestId('shortcut-blocked-toast')).toHaveCount(0);
 });
 
 test('add-pane shortcuts are scoped away from overlays and menus', async ({ page }) => {
@@ -365,6 +374,7 @@ test('add-pane shortcuts are scoped away from overlays and menus', async ({ page
   await expect(shortcutsModal).toHaveAttribute('aria-hidden', 'false');
   await fireAddChatShortcut();
   await expect(panes).toHaveCount(3);
+  await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Close modal to use this shortcut');
   await page.keyboard.press('Escape');
   await expect(shortcutsModal).toHaveAttribute('aria-hidden', 'true');
 

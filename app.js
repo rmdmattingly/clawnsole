@@ -8352,7 +8352,25 @@ globalElements.wqRefreshBtn?.addEventListener('click', () => {
 globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFromUi());
 globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFromUi());
 
-let shortcutState = { lastGAtMs: 0 };
+let shortcutState = { lastGAtMs: 0, blockedReasonLastShownAt: new Map() };
+const SHORTCUT_BLOCK_RATE_LIMIT_MS = 5000;
+const SHORTCUT_BLOCK_MESSAGES = {
+  typing: 'Shortcut paused while typing',
+  modal: 'Close modal to use this shortcut',
+  layout: 'Use Cmd/Ctrl+1..9 on this keyboard layout'
+};
+
+function reportBlockedShortcut(reason) {
+  const key = String(reason || '').trim();
+  const message = SHORTCUT_BLOCK_MESSAGES[key];
+  if (!message) return false;
+  const now = Date.now();
+  const lastShownAt = shortcutState.blockedReasonLastShownAt.get(key) || 0;
+  if (now - lastShownAt < SHORTCUT_BLOCK_RATE_LIMIT_MS) return true;
+  shortcutState.blockedReasonLastShownAt.set(key, now);
+  showToast(message, { kind: 'info', timeoutMs: 2600, testId: 'shortcut-blocked-toast' });
+  return true;
+}
 
 function isTypingContext(target) {
   const el = target || document.activeElement;
@@ -8384,6 +8402,50 @@ function isAnyOverlayOpen() {
     isOverlayElementOpen(globalElements.loginOverlay) ||
     paneManager?._addPaneMenuState?.open
   );
+}
+
+function isPaneNumberShortcutIntent(event) {
+  if (!(event?.metaKey || event?.ctrlKey) || event.shiftKey || event.altKey) return false;
+  const n = Number.parseInt(String(event.key || ''), 10);
+  if (Number.isFinite(n) && n >= 1 && n <= 9) return true;
+  return /^Digit[1-9]$/.test(String(event.code || ''));
+}
+
+function hasPaneNumberLayoutMismatch(event) {
+  if (!isPaneNumberShortcutIntent(event)) return false;
+  const keyNumber = Number.parseInt(String(event.key || ''), 10);
+  return !(Number.isFinite(keyNumber) && keyNumber >= 1 && keyNumber <= 9);
+}
+
+function isTypingShortcutExempt(event) {
+  const key = String(event?.key || '').toLowerCase();
+  return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'p' || key === 'k');
+}
+
+function isNonTrivialGlobalShortcut(event) {
+  if (!event) return false;
+  const key = String(event.key || '');
+  const lower = key.toLowerCase();
+  const hasMetaCtrl = !!(event.metaKey || event.ctrlKey);
+  const isAccel = hasMetaCtrl && event.shiftKey;
+  if (isAccel && ['c', 'w', 'r', 't', 'k', 'j', 'n', 'f', 'h'].includes(lower)) return true;
+  if (isAccel && (key === ']' || key === '}' || key === '[' || key === '{')) return true;
+  if (hasMetaCtrl && !event.shiftKey && !event.altKey && ['p', 'k', 'r'].includes(lower)) return true;
+  if (event.ctrlKey && !event.metaKey && !event.altKey && key === 'Tab') return true;
+  if ((key === '?' || (key === '/' && event.shiftKey)) && !event.metaKey && !event.ctrlKey && !event.altKey) return true;
+  if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+    const n = Number.parseInt(key, 10);
+    if (Number.isFinite(n) && n >= 1 && n <= 9) return true;
+  }
+  return isPaneNumberShortcutIntent(event);
+}
+
+function blockedGlobalShortcutReason(event) {
+  if (!isNonTrivialGlobalShortcut(event)) return '';
+  if (isAnyOverlayOpen()) return 'modal';
+  if (isTypingContext(event.target) && !isTypingShortcutExempt(event)) return 'typing';
+  if (hasPaneNumberLayoutMismatch(event)) return 'layout';
+  return '';
 }
 
 function closeTopmostOverlay() {
@@ -8582,6 +8644,14 @@ window.addEventListener('keydown', (event) => {
 
   // If Pane Manager is open, it gets first dibs on keys.
   if (paneManagerHandleKeydown(event)) return;
+
+  const blockedReason = blockedGlobalShortcutReason(event);
+  if (blockedReason) {
+    event.preventDefault();
+    event.stopPropagation();
+    reportBlockedShortcut(blockedReason);
+    return;
+  }
 
   // Add-pane shortcuts (admin-only)
   // Ctrl/Cmd+Shift+C → new chat
