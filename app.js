@@ -2519,6 +2519,15 @@ function buildCommandPaletteItems() {
       'g w'
     ),
     withShortcut(
+      {
+        id: 'cmd:focus-chat-composer',
+        label: 'Chat: Focus composer',
+        detail: 'Focus the active or most recent Chat pane composer',
+        run: () => focusChatComposer()
+      },
+      '⌘/Ctrl+Shift+L'
+    ),
+    withShortcut(
       { id: 'cmd:refresh-agents', label: 'Agents: Refresh', detail: 'Refresh agent list', run: () => globalElements.refreshAgentsBtn?.click?.() },
       ''
     ),
@@ -2585,7 +2594,7 @@ function buildCommandPaletteItems() {
     const label = String(item.label || '');
     const enriched = { ...item, group: 'Advanced', subgroup: '', priority: 20, kind: 'action' };
 
-    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-return-last-chat' || id === 'cmd:pane-mru-next' || id === 'cmd:pane-mru-prev' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
+    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:focus-chat-composer' || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-return-last-chat' || id === 'cmd:pane-mru-next' || id === 'cmd:pane-mru-prev' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
       enriched.group = 'Panes';
       enriched.priority = id.startsWith('cmd:focus-pane-') ? 130 : 110;
       return enriched;
@@ -8177,6 +8186,10 @@ globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFro
 
 let shortcutState = { lastGAtMs: 0 };
 
+function isFocusChatComposerShortcut(event) {
+  return !!((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'l');
+}
+
 function isTypingContext(target) {
   const el = target || document.activeElement;
   if (!el) return false;
@@ -8329,6 +8342,33 @@ function returnToLastActiveChatPane() {
   return false;
 }
 
+function focusChatComposer() {
+  const panes = paneManager?.panes || [];
+  const activeKey = focusedPaneKey();
+  const activeChatIdx = panes.findIndex((pane) => pane.kind === 'chat' && pane.key === activeKey);
+  if (activeChatIdx >= 0) {
+    focusPaneIndex(activeChatIdx);
+    return true;
+  }
+
+  for (const key of paneMruOrder()) {
+    const idx = panes.findIndex((pane) => pane.kind === 'chat' && pane.key === key);
+    if (idx >= 0) {
+      focusPaneIndex(idx);
+      return true;
+    }
+  }
+
+  const fallbackIdx = panes.findIndex((pane) => pane.kind === 'chat');
+  if (fallbackIdx >= 0) {
+    focusPaneIndex(fallbackIdx);
+    return true;
+  }
+
+  const pane = paneManager.addPane('chat');
+  return !!pane;
+}
+
 function cyclePaneFocus() {
   const panes = paneManager.panes;
   if (!panes || panes.length === 0) return;
@@ -8439,10 +8479,24 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Never steal focus / override browser shortcuts while typing.
-  if (isTypingContext(event.target)) return;
+  const shouldFocusChatComposer = isFocusChatComposerShortcut(event);
+
+  // Never steal focus / override browser shortcuts while typing, except for the
+  // explicit composer-focus shortcut.
+  if (isTypingContext(event.target) && !shouldFocusChatComposer) return;
 
   const key = String(event.key || '');
+
+  if (shouldFocusChatComposer) {
+    event.preventDefault();
+    if (isBlockingOverlayOpenForPaneShortcuts()) {
+      showShortcutBlockedFeedback();
+      return;
+    }
+    paneManager.closeAddPaneMenu();
+    focusChatComposer();
+    return;
+  }
 
   // Ctrl+Tab walks panes in most-recently-used order; Shift reverses the traversal.
   if (event.ctrlKey && !event.metaKey && !event.altKey && key === 'Tab') {
