@@ -2151,9 +2151,8 @@ function renderPaneManager() {
           paneManagerUiState.selectedIndex = selectedVisible;
           if (action === 'close') {
             try {
-              paneManager.removePane(pane.key);
+              paneManager.removePane(pane.key).then(() => renderPaneManager());
             } catch {}
-            renderPaneManager();
             return;
           }
           if (action === 'move-up') {
@@ -5540,6 +5539,91 @@ function panePumpOutbox(pane) {
     });
 }
 
+function paneCloseGuardState(pane) {
+  if (!pane || pane.kind !== 'chat') return { needsConfirm: false, hasDraft: false, hasActiveRun: false };
+  const hasDraft = Boolean(String(pane.elements?.input?.value || '').trim());
+  const hasActiveRun = Boolean(pane.pendingSend || paneIsAbortable(pane));
+  return { needsConfirm: hasDraft || hasActiveRun, hasDraft, hasActiveRun };
+}
+
+function confirmPaneCloseGuard(pane) {
+  const state = paneCloseGuardState(pane);
+  if (!state.needsConfirm) return Promise.resolve(true);
+
+  return new Promise((resolve) => {
+    const priorFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const overlay = document.createElement('div');
+    overlay.className = 'pane-close-guard-backdrop';
+    overlay.setAttribute('role', 'presentation');
+    overlay.setAttribute('data-testid', 'pane-close-guard');
+
+    const dialog = document.createElement('div');
+    dialog.className = 'pane-close-guard-dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'paneCloseGuardTitle');
+    dialog.setAttribute('aria-describedby', 'paneCloseGuardDesc');
+
+    const warnings = [];
+    if (state.hasActiveRun) warnings.push('an active run in progress');
+    if (state.hasDraft) warnings.push('unsent draft text');
+
+    dialog.innerHTML = `
+      <h2 id="paneCloseGuardTitle">Close this pane?</h2>
+      <p id="paneCloseGuardDesc">${escapeHtml(state.hasActiveRun ? 'Closing now may interrupt work or discard context.' : 'This pane has unsent text.')}</p>
+      <ul>${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join('')}</ul>
+      <div class="pane-close-guard-actions">
+        <button class="secondary" type="button" data-pane-close-cancel>Cancel</button>
+        <button class="danger" type="button" data-pane-close-confirm>Close anyway</button>
+      </div>
+    `;
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    const cancelBtn = dialog.querySelector('[data-pane-close-cancel]');
+    const confirmBtn = dialog.querySelector('[data-pane-close-confirm]');
+    const focusable = () => Array.from(dialog.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+      .filter((el) => !el.disabled && el.offsetParent !== null);
+
+    const finish = (ok) => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      try {
+        overlay.remove();
+      } catch {}
+      try {
+        priorFocus?.focus?.();
+      } catch {}
+      resolve(Boolean(ok));
+    };
+
+    function onKeyDown(event) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const nodes = focusable();
+      if (nodes.length === 0) return;
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    cancelBtn?.addEventListener('click', () => finish(false));
+    confirmBtn?.addEventListener('click', () => finish(true));
+    document.addEventListener('keydown', onKeyDown, true);
+    cancelBtn?.focus?.();
+  });
+}
+
 
 async function paneSendChat(pane) {
   const raw = pane.elements.input.value.trim();
@@ -8035,11 +8119,13 @@ const paneManager = {
       } catch {}
     }
   },
-  removePane(key) {
-    if (roleState.role !== 'admin') return;
-    if (this.panes.length <= 1) return;
+  async removePane(key) {
+    if (roleState.role !== 'admin') return false;
+    if (this.panes.length <= 1) return false;
     const idx = this.panes.findIndex((pane) => pane.key === key);
-    if (idx < 0) return;
+    if (idx < 0) return false;
+    const targetPane = this.panes[idx];
+    if (!(await confirmPaneCloseGuard(targetPane))) return false;
     const [pane] = this.panes.splice(idx, 1);
     forgetFocusedPaneKey(pane?.key || key);
     try {
@@ -8059,6 +8145,7 @@ const paneManager = {
     else updateBrowserTitle(null);
     updateGlobalStatus();
     updateConnectionControls();
+    return true;
   },
   movePane(key, delta = 0) {
     if (roleState.role !== 'admin') return false;
