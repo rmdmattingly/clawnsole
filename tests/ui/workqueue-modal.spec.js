@@ -46,6 +46,20 @@ test('workqueue modal: status filters use human labels and queue-scoped counts',
   await page.evaluate(() => window.openWorkqueue?.());
   await expect(page.locator('#workqueueModal')).toHaveClass(/open/);
 
+  await expect(page.locator('[data-wq-modal-sort="title"]')).toHaveText('Task');
+  await expect(page.locator('[data-wq-modal-sort="priority"]')).toHaveText('Priority');
+  await expect(page.locator('[data-wq-modal-sort="attempts"]')).toHaveText('Attempts');
+  await expect(page.locator('[data-wq-modal-sort="claimedBy"]')).toHaveText('Claimed by');
+  await expect(page.locator('[data-wq-modal-sort="leaseUntil"]')).toHaveText('Lease expires');
+  await expect(page.locator('[data-wq-modal-sort="attempts"]')).toHaveAttribute(
+    'title',
+    /how many times this task has been claimed/
+  );
+  await expect(page.locator('[data-wq-modal-sort="leaseUntil"]')).toHaveAttribute(
+    'title',
+    /when the current claim expires/
+  );
+
   // Humanized labels (no raw snake_case token in display text).
   await expect(page.locator('#wqStatusFilters .wq-status-chip', { hasText: 'In progress (' })).toHaveCount(1);
   await expect(page.locator('#wqStatusFilters .wq-status-chip', { hasText: 'in_progress' })).toHaveCount(0);

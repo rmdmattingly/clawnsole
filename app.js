@@ -3227,6 +3227,14 @@ function renderAgentsModalList() {
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
 const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
 const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
+const WORKQUEUE_HEADER_META = {
+  title: { label: 'Task', tooltip: 'Sort by task title.' },
+  status: { label: 'Status', tooltip: 'Sort by queue status.' },
+  priority: { label: 'Priority', tooltip: 'Sort by priority. Higher values are handled first by default.' },
+  attempts: { label: 'Attempts', tooltip: 'Sort by how many times this task has been claimed.' },
+  claimedBy: { label: 'Claimed by', tooltip: 'Sort by the agent currently assigned to the task.' },
+  leaseUntil: { label: 'Lease expires', tooltip: 'Sort by when the current claim expires.' }
+};
 
 function formatWorkqueueStatusLabel(status) {
   const s = String(status || '').trim().toLowerCase();
@@ -3315,10 +3323,13 @@ function ensureWorkqueueModalSorting() {
   const updateUi = () => {
     btns.forEach((btn) => {
       const key = btn.getAttribute('data-wq-modal-sort') || '';
+      const meta = WORKQUEUE_HEADER_META[key];
       const active = key && key === workqueueState.sortKey;
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-      btn.title = active ? (workqueueState.sortDir === 'asc' ? 'Sorted ascending' : 'Sorted descending') : '';
+      if (meta) btn.textContent = meta.label;
+      const sortState = active ? ` Currently sorted ${workqueueState.sortDir === 'asc' ? 'ascending' : 'descending'}.` : '';
+      btn.title = `${meta?.tooltip || 'Sort workqueue items.'}${sortState}`;
     });
   };
 
@@ -6432,12 +6443,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       <div class="wq-layout">
         <section class="wq-list" aria-label="Workqueue items">
           <div class="wq-list-header">
-            <button type="button" class="wq-list-sort" data-wq-sort="title">title</button>
-            <button type="button" class="wq-list-sort" data-wq-sort="status">status</button>
-            <button type="button" class="wq-list-sort" data-wq-sort="priority">prio</button>
-            <button type="button" class="wq-list-sort" data-wq-sort="attempts">attempts</button>
-            <button type="button" class="wq-list-sort" data-wq-sort="claimedBy">claimedBy</button>
-            <div>lease</div>
+            <button type="button" class="wq-list-sort" data-wq-sort="title">Task</button>
+            <button type="button" class="wq-list-sort" data-wq-sort="status">Status</button>
+            <button type="button" class="wq-list-sort" data-wq-sort="priority">Priority</button>
+            <button type="button" class="wq-list-sort" data-wq-sort="attempts">Attempts</button>
+            <button type="button" class="wq-list-sort" data-wq-sort="claimedBy">Claimed by</button>
+            <button type="button" class="wq-list-sort" data-wq-sort="leaseUntil">Lease expires</button>
           </div>
           <div class="wq-list-body" data-wq-list-body></div>
           <div data-wq-empty class="hint" style="padding: 10px 12px;" hidden>No items.</div>
@@ -6809,10 +6820,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const updateSortUi = () => {
       sortBtns.forEach((btn) => {
         const key = btn.getAttribute('data-wq-sort') || '';
+        const meta = WORKQUEUE_HEADER_META[key];
         const active = key && key === pane.workqueue.sortKey;
         btn.classList.toggle('active', active);
         btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-        btn.title = active ? (pane.workqueue.sortDir === 'asc' ? 'Sorted ascending' : 'Sorted descending') : '';
+        if (meta) btn.textContent = meta.label;
+        const sortState = active ? ` Currently sorted ${pane.workqueue.sortDir === 'asc' ? 'ascending' : 'descending'}.` : '';
+        btn.title = `${meta?.tooltip || 'Sort workqueue items.'}${sortState}`;
       });
     };
 
