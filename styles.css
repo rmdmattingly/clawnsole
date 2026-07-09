@@ -2327,7 +2327,7 @@ kbd {
 .wq-list-header,
 .wq-row {
   display: grid;
-  grid-template-columns: 1.4fr 0.6fr 0.25fr 0.25fr 0.6fr 0.45fr;
+  grid-template-columns: minmax(32ch, 1fr) minmax(8ch, 12ch) 5ch 5ch minmax(9ch, 12ch) 8ch;
   gap: 10px;
   align-items: center;
 }

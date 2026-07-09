@@ -4189,9 +4189,12 @@ function renderWorkqueuePaneItems(pane) {
 
   const now = Date.now();
   for (const it of visibleItems) {
+    const displayTitle = formatWorkqueueIssueTitle(it);
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'wq-row';
+    row.title = displayTitle;
+    row.setAttribute('aria-label', `Open workqueue item: ${displayTitle}`);
     if (it.id && it.id === pane.workqueue.selectedItemId) row.classList.add('selected');
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
@@ -4199,7 +4202,7 @@ function renderWorkqueuePaneItems(pane) {
     const status = String(it.status || '');
 
     row.innerHTML = `
-      <div class="wq-col title">${escapeHtml(formatWorkqueueIssueTitle(it))}</div>
+      <div class="wq-col title" title="${escapeHtml(displayTitle)}" aria-label="${escapeHtml(displayTitle)}" data-wq-title>${escapeHtml(displayTitle)}</div>
       <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
       <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
       <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>

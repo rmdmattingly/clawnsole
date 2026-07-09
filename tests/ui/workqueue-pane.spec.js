@@ -110,6 +110,37 @@ function seedLegacyIssueTitleVariants(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedLongTitleWorkqueueItem(queue, title) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = now.toISOString();
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso } },
+    assignments: {},
+    items: [
+      {
+        id: 'long-title-affordance',
+        queue,
+        title,
+        instructions: 'Long title affordance coverage',
+        priority: 42,
+        status: 'ready',
+        claimedBy: '',
+        claimedAt: '',
+        leaseUntil: 0,
+        attempts: 0,
+        lastError: '',
+        createdAt: iso,
+        updatedAt: iso,
+        dedupeKey: 'long-title-affordance'
+      }
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 test('workqueue pane: renders + has queue dropdown + does not show chat composer', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -376,6 +407,40 @@ test('workqueue pane: normalizes mixed legacy issue title prefixes', async ({ pa
     '[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles',
     '[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles'
   ]);
+});
+
+test('workqueue pane: long table titles keep full-title hover and focus affordance', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `long-title-${Date.now()}`;
+  const longTitle = '[issue] rmdmattingly/clawnsole#297 UX: Workqueue table readability pass with a deliberately very long synthetic title that should truncate in the row while remaining fully discoverable';
+  const displayTitle = '[ISSUE] rmdmattingly/clawnsole#297 - UX: Workqueue table readability pass with a deliberately very long synthetic title that should truncate in the row while remaining fully discoverable';
+  seedLongTitleWorkqueueItem(queue, longTitle);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  const row = pane.locator('.wq-row').first();
+  const title = row.locator('[data-wq-title]');
+  await expect(row).toBeVisible();
+  await expect(title).toContainText('Workqueue table readability pass');
+  await expect(row).toHaveAttribute('title', displayTitle);
+  await expect(row).toHaveAttribute('aria-label', `Open workqueue item: ${displayTitle}`);
+  await expect(title).toHaveAttribute('title', displayTitle);
+  await expect(title).toHaveAttribute('aria-label', displayTitle);
+
+  await row.focus();
+  await expect(row).toBeFocused();
+  await expect(row).toHaveAttribute('aria-label', `Open workqueue item: ${displayTitle}`);
+  expect(await title.evaluate((el) => el.scrollWidth > el.clientWidth)).toBeTruthy();
 });
 
 test('workqueue pane: duplicate health summary cleans legacy issue duplicates', async ({ page }) => {
