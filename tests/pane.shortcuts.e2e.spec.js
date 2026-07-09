@@ -102,6 +102,57 @@ test('pane-add shortcuts are scoped to workspace and blocked by overlays', async
   await expect(panes).toHaveCount(initialCount + 1);
 });
 
+test('blocked global shortcuts explain typing and modal guards', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  const blockedToasts = page.getByTestId('shortcut-blocked-toast');
+  const fireAddChatShortcut = async () => {
+    await page.evaluate(() => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'C',
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true
+      });
+      (document.activeElement || window).dispatchEvent(event);
+    });
+  };
+
+  await expect(panes).toHaveCount(2);
+
+  const input = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+  await input.focus();
+  await expect(input).toBeFocused();
+  await fireAddChatShortcut();
+  await expect(panes).toHaveCount(2);
+  await expect(blockedToasts.last()).toContainText('Shortcut paused while typing');
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'false');
+  await fireAddChatShortcut();
+  await expect(panes).toHaveCount(2);
+  await expect(blockedToasts.last()).toContainText('Close modal to use this shortcut');
+
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'true');
+  const blockedCountBeforeUnblocked = await blockedToasts.count();
+
+  await fireAddChatShortcut();
+  await expect(panes).toHaveCount(3);
+  expect(await blockedToasts.count()).toBe(blockedCountBeforeUnblocked);
+});
+
 test('shortcuts modal restores prior focus on close', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);

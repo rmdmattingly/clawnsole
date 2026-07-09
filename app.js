@@ -8377,6 +8377,26 @@ globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFro
 globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFromUi());
 
 let shortcutState = { lastGAtMs: 0 };
+const shortcutDebug = {
+  cooldownMs: 5000,
+  lastShownAtByReason: new Map(),
+  messages: {
+    typing: 'Shortcut paused while typing',
+    overlay: 'Close modal to use this shortcut',
+    layout: 'Use Cmd/Ctrl+1..9 on this keyboard layout'
+  },
+  report(reason) {
+    const key = String(reason || '').trim();
+    const message = this.messages[key];
+    if (!message) return false;
+    const now = Date.now();
+    const lastShownAt = Number(this.lastShownAtByReason.get(key) || 0);
+    if (lastShownAt && now - lastShownAt < this.cooldownMs) return true;
+    this.lastShownAtByReason.set(key, now);
+    showToast(message, { kind: 'info', timeoutMs: 2200, testId: 'shortcut-blocked-toast' });
+    return true;
+  }
+};
 
 function isTypingContext(target) {
   const el = target || document.activeElement;
@@ -8408,6 +8428,62 @@ function isAnyOverlayOpen() {
     isOverlayElementOpen(globalElements.loginOverlay) ||
     paneManager?._addPaneMenuState?.open
   );
+}
+
+function isTypingShortcutExempt(event) {
+  const key = String(event?.key || '').toLowerCase();
+  if (key === 'escape') return true;
+  if ((event?.metaKey || event?.ctrlKey) && !event?.shiftKey && !event?.altKey && (key === 'k' || key === 'p')) return true;
+  return false;
+}
+
+function isPaneNumberShortcut(event) {
+  const key = String(event?.key || '');
+  if (event?.altKey && !event?.metaKey && !event?.ctrlKey && !event?.shiftKey) {
+    const n = Number.parseInt(key, 10);
+    return Number.isFinite(n) && n >= 1 && n <= 9;
+  }
+  if ((event?.metaKey || event?.ctrlKey) && !event?.shiftKey && !event?.altKey) {
+    const n = Number.parseInt(key, 10);
+    return Number.isFinite(n) && n >= 1 && n <= 9;
+  }
+  return false;
+}
+
+function isLayoutMismatchedPaneNumberShortcut(event) {
+  if (!(event?.metaKey || event?.ctrlKey) || event?.shiftKey || event?.altKey) return false;
+  const code = String(event?.code || '');
+  const digit = code.match(/^Digit([1-9])$/);
+  if (!digit) return false;
+  const key = String(event?.key || '');
+  return Number.parseInt(key, 10) !== Number(digit[1]);
+}
+
+function isAddPaneShortcut(event) {
+  if (!(event?.metaKey || event?.ctrlKey) || !event?.shiftKey) return false;
+  const key = String(event?.key || '').toLowerCase();
+  return key === 'c' || key === 'w' || key === 'r' || key === 't';
+}
+
+function isNonTrivialGlobalShortcut(event) {
+  const key = String(event?.key || '');
+  const lowerKey = key.toLowerCase();
+  if (isAddPaneShortcut(event) || isPaneNumberShortcut(event) || isLayoutMismatchedPaneNumberShortcut(event)) return true;
+  if ((event?.metaKey || event?.ctrlKey) && event?.shiftKey && !event?.altKey) {
+    return lowerKey === 'k' || lowerKey === 'j' || lowerKey === 'n' || lowerKey === 'f' || lowerKey === 'h' ||
+      key === ']' || key === '}' || key === '[' || key === '{';
+  }
+  if ((event?.metaKey || event?.ctrlKey) && !event?.shiftKey && !event?.altKey && lowerKey === 'r') return true;
+  if (event?.ctrlKey && !event?.metaKey && !event?.altKey && key === 'Tab') return true;
+  if (!event?.metaKey && !event?.ctrlKey && !event?.shiftKey && !event?.altKey) {
+    return lowerKey === 'g' || ((lowerKey === 'c' || lowerKey === 'w') && shortcutState.lastGAtMs && Date.now() - shortcutState.lastGAtMs < 1000);
+  }
+  return false;
+}
+
+function reportBlockedGlobalShortcut(event, reason) {
+  if (!isNonTrivialGlobalShortcut(event)) return false;
+  return shortcutDebug.report(reason);
 }
 
 function closeTopmostOverlay() {
@@ -8641,9 +8717,25 @@ window.addEventListener('keydown', (event) => {
   }
 
   // Never steal focus / override browser shortcuts while typing.
-  if (isTypingContext(event.target)) return;
+  if (isTypingContext(event.target)) {
+    if (!isTypingShortcutExempt(event)) reportBlockedGlobalShortcut(event, 'typing');
+    return;
+  }
 
   const key = String(event.key || '');
+
+  if (isLayoutMismatchedPaneNumberShortcut(event)) {
+    event.preventDefault();
+    reportBlockedGlobalShortcut(event, 'layout');
+    return;
+  }
+
+  if (isAnyOverlayOpen()) {
+    if (reportBlockedGlobalShortcut(event, 'overlay')) {
+      event.preventDefault();
+      return;
+    }
+  }
 
   // Ctrl+Tab walks panes in most-recently-used order; Shift reverses the traversal.
   if (event.ctrlKey && !event.metaKey && !event.altKey && key === 'Tab') {
