@@ -38,6 +38,7 @@ const globalElements = {
   agentsSortIndicator: document.getElementById('agentsSortIndicator'),
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
+  agentsHealthSummary: document.getElementById('agentsHealthSummary'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
   toastHost: document.getElementById('toastHost'),
@@ -492,6 +493,10 @@ function syncFleetDensityControl() {
   if (globalElements.agentsList) {
     globalElements.agentsList.dataset.density = density;
     globalElements.agentsList.classList.toggle('compact', density === 'compact');
+  }
+  if (globalElements.agentsHealthSummary) {
+    globalElements.agentsHealthSummary.dataset.density = density;
+    globalElements.agentsHealthSummary.classList.toggle('compact', density === 'compact');
   }
   globalElements.agentsDensityButtons.forEach((btn) => {
     const active = String(btn.getAttribute('data-agents-density') || '') === density;
@@ -3108,10 +3113,33 @@ function renderAgentsModalList() {
   const ordered = [...pinned, ...rest];
   const needsAttention = rest.filter((agent) => classify(agent?.id).bucket !== 'active');
   const healthy = rest.filter((agent) => classify(agent?.id).bucket === 'active');
+  const healthSummary = baseAgents.reduce((acc, agent) => {
+    const { bucket } = classify(agent?.id);
+    if (bucket === 'active') acc.healthy += 1;
+    else acc.needsTriage += 1;
+    if (bucket === 'offline_error') acc.disconnected += 1;
+    return acc;
+  }, { needsTriage: 0, healthy: 0, disconnected: 0 });
   const healthyCollapseDefault = baseAgents.length > ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD;
   const healthyCollapsed = String(storage.get(ADMIN_AGENT_HEALTHY_COLLAPSED_KEY, healthyCollapseDefault ? '1' : '0')) === '1';
 
   root.innerHTML = '';
+  if (globalElements.agentsHealthSummary) {
+    globalElements.agentsHealthSummary.innerHTML = `
+      <div class="agents-health-chip" title="Agents with stale, offline, error, or unknown heartbeat state">
+        <span class="agents-health-chip-label">Needs triage</span>
+        <strong>${healthSummary.needsTriage}</strong>
+      </div>
+      <div class="agents-health-chip" title="Agents active within the configured active window">
+        <span class="agents-health-chip-label">Healthy</span>
+        <strong>${healthSummary.healthy}</strong>
+      </div>
+      <div class="agents-health-chip" title="Agents currently offline, errored, or never seen">
+        <span class="agents-health-chip-label">Disconnected</span>
+        <strong>${healthSummary.disconnected}</strong>
+      </div>
+    `;
+  }
 
   const renderSection = (title, agents, { collapsible = false, collapsed = false } = {}) => {
     const section = document.createElement('div');

@@ -121,10 +121,21 @@ test('fleet attention mode sections healthy agents and keeps filters while expan
   await page.getByRole('button', { name: 'Open agents' }).click();
   await expect(page.locator('#agentsModal')).toHaveClass(/open/);
 
+  const summary = page.locator('#agentsHealthSummary');
+  await expect(summary.locator('.agents-health-chip').filter({ hasText: 'Needs triage' }).locator('strong')).toHaveText('1');
+  await expect(summary.locator('.agents-health-chip').filter({ hasText: 'Healthy' }).locator('strong')).toHaveText('11');
+  await expect(summary.locator('.agents-health-chip').filter({ hasText: 'Disconnected' }).locator('strong')).toHaveText('1');
+
   await expect(page.locator('#agentsList .agents-section-title').first()).toContainText('Needs attention (1)');
   const healthyToggle = page.getByRole('button', { name: /Healthy \(11\) Show/ });
   await expect(healthyToggle).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
+
+  await page.locator('#agentsSearch').fill('agent-12');
+  await expect(page.getByRole('button', { name: /Healthy \(1\) Show/ })).toBeVisible();
+  await expect(summary.locator('.agents-health-chip').filter({ hasText: 'Needs triage' }).locator('strong')).toHaveText('1');
+  await expect(summary.locator('.agents-health-chip').filter({ hasText: 'Healthy' }).locator('strong')).toHaveText('11');
+  await page.locator('#agentsSearch').fill('');
 
   await healthyToggle.click();
   await expect(page.getByRole('button', { name: /Healthy \(11\) Hide/ })).toHaveAttribute('aria-expanded', 'true');
@@ -307,6 +318,7 @@ test('agents modal compact density tightens rows and persists', async ({ page, c
 
   await page.getByRole('button', { name: 'Compact' }).click();
   await expect(page.locator('#agentsList')).toHaveClass(/compact/);
+  await expect(page.locator('#agentsHealthSummary')).toHaveClass(/compact/);
   await expect(page.getByRole('button', { name: 'Compact' })).toHaveAttribute('aria-pressed', 'true');
   const compactHeight = await firstRow.evaluate((el) => el.getBoundingClientRect().height);
 
@@ -319,5 +331,6 @@ test('agents modal compact density tightens rows and persists', async ({ page, c
   await clawnsole.waitForAdminUiReady(page);
   await page.getByRole('button', { name: 'Open agents' }).click();
   await expect(page.locator('#agentsList')).toHaveClass(/compact/);
+  await expect(page.locator('#agentsHealthSummary')).toHaveClass(/compact/);
   await expect(page.getByRole('button', { name: 'Compact' })).toHaveAttribute('aria-pressed', 'true');
 });

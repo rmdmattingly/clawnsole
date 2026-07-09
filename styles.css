@@ -1530,6 +1530,53 @@ button.send-btn .btn-icon {
   opacity: 0.48;
 }
 
+.agents-health-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.agents-health-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.agents-health-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.agents-health-chip strong {
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.agents-health-summary.compact {
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.agents-health-summary.compact .agents-health-chip {
+  padding: 6px 8px;
+}
+
+.agents-health-summary.compact .agents-health-chip strong {
+  font-size: 15px;
+}
+
 .agents-list {
   display: flex;
   flex-direction: column;
