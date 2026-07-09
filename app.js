@@ -4197,9 +4197,12 @@ function renderWorkqueuePaneItems(pane) {
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
     const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
     const status = String(it.status || '');
+    const title = formatWorkqueueIssueTitle(it);
+    row.title = title;
+    row.setAttribute('aria-label', `Workqueue item: ${title}`);
 
     row.innerHTML = `
-      <div class="wq-col title">${escapeHtml(formatWorkqueueIssueTitle(it))}</div>
+      <div class="wq-col title"><span class="wq-title-text" title="${escapeHtml(title)}">${escapeHtml(title)}</span></div>
       <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
       <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
       <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>

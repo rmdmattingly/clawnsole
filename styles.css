@@ -2327,7 +2327,7 @@ kbd {
 .wq-list-header,
 .wq-row {
   display: grid;
-  grid-template-columns: 1.4fr 0.6fr 0.25fr 0.25fr 0.6fr 0.45fr;
+  grid-template-columns: minmax(32ch, 1fr) minmax(7rem, max-content) 4ch 5ch minmax(7ch, 10ch) minmax(6ch, 8ch);
   gap: 10px;
   align-items: center;
 }
@@ -2506,6 +2506,18 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
+}
+
+.wq-col.title {
+  font-weight: 600;
+}
+
+.wq-title-text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wq-col.mono {

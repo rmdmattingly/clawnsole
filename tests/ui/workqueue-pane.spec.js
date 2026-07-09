@@ -378,6 +378,76 @@ test('workqueue pane: normalizes mixed legacy issue title prefixes', async ({ pa
   ]);
 });
 
+test('workqueue pane: long table titles stay discoverable on hover and focus', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `long-title-${Date.now()}`;
+  const title = '[ISSUE] rmdmattingly/clawnsole#297 - Workqueue title readability affordance with a very long synthetic title that should truncate visually while remaining fully available to pointer and keyboard users';
+  const stateDir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const now = new Date().toISOString();
+  fs.writeFileSync(
+    path.join(stateDir, 'work-queues.json'),
+    JSON.stringify({
+      version: 1,
+      queues: { [queue]: { name: queue, createdAt: now } },
+      assignments: {},
+      items: [{
+        id: 'long-title-item',
+        queue,
+        title,
+        instructions: 'fixture item',
+        priority: 100,
+        status: 'ready',
+        claimedBy: '',
+        claimedAt: '',
+        leaseUntil: 0,
+        attempts: 3,
+        lastError: '',
+        createdAt: now,
+        updatedAt: now,
+        meta: { repo: 'rmdmattingly/clawnsole' }
+      }]
+    }, null, 2)
+  );
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  const row = pane.locator('.wq-row').first();
+  const titleText = row.locator('.wq-title-text');
+  await expect(row).toBeVisible();
+  await expect(titleText).toHaveAttribute('title', title);
+  await expect(row).toHaveAttribute('title', title);
+  await expect(row).toHaveAttribute('aria-label', `Workqueue item: ${title}`);
+  await row.focus();
+  await expect(row).toBeFocused();
+
+  const titleLayout = await titleText.evaluate((el) => {
+    const cs = window.getComputedStyle(el);
+    return {
+      overflow: cs.overflow,
+      textOverflow: cs.textOverflow,
+      whiteSpace: cs.whiteSpace,
+      clipped: el.scrollWidth > el.clientWidth
+    };
+  });
+  expect(titleLayout).toMatchObject({
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    clipped: true
+  });
+});
+
 test('workqueue pane: duplicate health summary cleans legacy issue duplicates', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
