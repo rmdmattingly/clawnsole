@@ -3108,10 +3108,57 @@ function renderAgentsModalList() {
   const ordered = [...pinned, ...rest];
   const needsAttention = rest.filter((agent) => classify(agent?.id).bucket !== 'active');
   const healthy = rest.filter((agent) => classify(agent?.id).bucket === 'active');
+  const fleetSummary = baseAgents.reduce((acc, agent) => {
+    const { bucket } = classify(agent?.id);
+    if (bucket === 'active') acc.healthy += 1;
+    else acc.needsTriage += 1;
+    if (bucket === 'offline_error') acc.disconnected += 1;
+    return acc;
+  }, { needsTriage: 0, healthy: 0, disconnected: 0 });
   const healthyCollapseDefault = baseAgents.length > ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD;
   const healthyCollapsed = String(storage.get(ADMIN_AGENT_HEALTHY_COLLAPSED_KEY, healthyCollapseDefault ? '1' : '0')) === '1';
 
   root.innerHTML = '';
+
+  const renderSummary = () => {
+    const summary = document.createElement('div');
+    summary.className = 'agents-health-summary';
+    summary.setAttribute('aria-label', 'Fleet health summary');
+
+    const chips = [
+      {
+        label: 'Needs triage',
+        value: fleetSummary.needsTriage,
+        tone: 'attention',
+        title: 'Agents outside the active heartbeat window or reporting offline/error.'
+      },
+      {
+        label: 'Healthy',
+        value: fleetSummary.healthy,
+        tone: 'healthy',
+        title: 'Agents active within the selected window and not reporting offline/error.'
+      },
+      {
+        label: 'Disconnected',
+        value: fleetSummary.disconnected,
+        tone: 'disconnected',
+        title: 'Agents with no heartbeat data or a pane reporting offline/error.'
+      }
+    ];
+
+    for (const chip of chips) {
+      const node = document.createElement('div');
+      node.className = `agents-health-chip ${chip.tone}`;
+      node.title = chip.title;
+      node.innerHTML = `
+        <span class="agents-health-value">${escapeHtml(String(chip.value))}</span>
+        <span class="agents-health-label">${escapeHtml(chip.label)}</span>
+      `;
+      summary.appendChild(node);
+    }
+
+    root.appendChild(summary);
+  };
 
   const renderSection = (title, agents, { collapsible = false, collapsed = false } = {}) => {
     const section = document.createElement('div');
@@ -3208,6 +3255,7 @@ function renderAgentsModalList() {
     root.appendChild(section);
   };
 
+  renderSummary();
   if (pinned.length > 0) renderSection('Pinned', pinned);
   renderSection('Needs attention', needsAttention);
   renderSection('Healthy', healthy, { collapsible: true, collapsed: healthyCollapsed });

@@ -74,6 +74,48 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText(/\d+[smhd]/);
 });
 
+test('agents modal shows fleet health summary counts and refreshes them', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [
+    { id: 'healthy-agent', name: 'healthy-agent', displayName: 'healthy-agent' },
+    { id: 'stale-agent', name: 'stale-agent', displayName: 'stale-agent' },
+    { id: 'disconnected-agent', name: 'disconnected-agent', displayName: 'disconnected-agent' }
+  ];
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      'healthy-agent': Date.now(),
+      'stale-agent': Date.now() - 70 * 60 * 1000
+    }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const summary = page.locator('#agentsList .agents-health-summary');
+  await expect(summary).toBeVisible();
+  await expect(summary.getByText('Needs triage')).toBeVisible();
+  await expect(summary.locator('.agents-health-chip.attention')).toContainText('2');
+  await expect(summary.locator('.agents-health-chip.healthy')).toContainText('1');
+  await expect(summary.locator('.agents-health-chip.disconnected')).toContainText('1');
+
+  agents = [{ id: 'healthy-agent', name: 'healthy-agent', displayName: 'healthy-agent' }];
+  await page.getByRole('button', { name: 'Close agents' }).click();
+  await expect(page.locator('#agentsModal')).not.toHaveClass(/open/);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+
+  await expect(summary.locator('.agents-health-chip.attention')).toContainText('0');
+  await expect(summary.locator('.agents-health-chip.healthy')).toContainText('1');
+  await expect(summary.locator('.agents-health-chip.disconnected')).toContainText('0');
+});
+
 test('agents modal quick filter narrows list and Esc clears it', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
