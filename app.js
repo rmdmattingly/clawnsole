@@ -114,6 +114,7 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   if (min > 0) return `${min}m ${sec % 60}s`;
   return `${sec}s`;
 });
+const formatWorkqueueIssueTitle = __appCore.formatWorkqueueIssueTitle || ((item) => String(item?.title || ''));
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
   const n = Number(count);
@@ -3596,7 +3597,7 @@ function renderWorkqueueItems() {
       const next = String(it.lastNote || '').trim();
 
       card.innerHTML = `
-        <div class="wq-card-title">${escapeHtml(String(it.title || ''))}</div>
+        <div class="wq-card-title">${escapeHtml(formatWorkqueueIssueTitle(it))}</div>
         <div class="wq-card-meta">
           <span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span>
           ${age ? `<span class="wq-card-chip mono">age ${escapeHtml(age)}</span>` : ''}
@@ -3646,7 +3647,7 @@ function renderWorkqueueInspect(item) {
     </div>
     <div class="wq-inspect-block">
       <div class="wq-inspect-label">Title</div>
-      <div class="wq-inspect-pre">${escapeHtml(String(item.title || ''))}</div>
+      <div class="wq-inspect-pre">${escapeHtml(formatWorkqueueIssueTitle(item))}</div>
     </div>
     <div class="wq-inspect-block">
       <div class="wq-inspect-label">Instructions</div>
@@ -4198,7 +4199,7 @@ function renderWorkqueuePaneItems(pane) {
     const status = String(it.status || '');
 
     row.innerHTML = `
-      <div class="wq-col title">${escapeHtml(String(it.title || ''))}</div>
+      <div class="wq-col title">${escapeHtml(formatWorkqueueIssueTitle(it))}</div>
       <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
       <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
       <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
@@ -4259,7 +4260,7 @@ function renderWorkqueuePaneInspect(pane, item) {
     </div>
     <div class="wq-inspect-block">
       <div class="wq-inspect-label">Title</div>
-      <div class="wq-inspect-pre">${escapeHtml(String(item.title || ''))}</div>
+      <div class="wq-inspect-pre">${escapeHtml(formatWorkqueueIssueTitle(item))}</div>
     </div>
     <div class="wq-inspect-block">
       <div class="wq-inspect-label">Instructions</div>

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   escapeHtml,
   fmtRemaining,
+  formatWorkqueueIssueTitle,
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
@@ -84,6 +85,53 @@ test('sortWorkqueueItems supports explicit sort keys and stable ordering fallbac
   // For ties without timestamps, preserve input order.
   const byPrio = sortWorkqueueItems(items, { sortKey: 'priority', sortDir: 'desc' });
   assert.deepEqual(byPrio.map((it) => it.id), ['a', 'b', 'c']);
+});
+
+test('formatWorkqueueIssueTitle normalizes mixed legacy issue prefixes', () => {
+  const base = {
+    queue: 'dev-team',
+    instructions: 'Repo: rmdmattingly/clawnsole\nIssue: #280'
+  };
+
+  assert.equal(
+    formatWorkqueueIssueTitle({
+      ...base,
+      title: '[issue] rmdmattingly/clawnsole#280 UX: Normalize issue-backed Workqueue row titles'
+    }),
+    '[ISSUE] rmdmattingly/clawnsole#280 - UX: Normalize issue-backed Workqueue row titles'
+  );
+  assert.equal(
+    formatWorkqueueIssueTitle({
+      ...base,
+      title: 'Open issue: UX: Normalize issue-backed Workqueue row titles'
+    }),
+    '[ISSUE] rmdmattingly/clawnsole#280 - UX: Normalize issue-backed Workqueue row titles'
+  );
+  assert.equal(
+    formatWorkqueueIssueTitle({
+      ...base,
+      title: 'Issue coverage: UX: Normalize issue-backed Workqueue row titles'
+    }),
+    '[ISSUE] rmdmattingly/clawnsole#280 - UX: Normalize issue-backed Workqueue row titles'
+  );
+});
+
+test('sortWorkqueueItems title sort uses normalized issue display titles', () => {
+  const items = [
+    {
+      id: 'b',
+      title: 'Open issue: Beta',
+      instructions: 'Repo: rmdmattingly/clawnsole\nIssue: #281'
+    },
+    {
+      id: 'a',
+      title: '[issue] rmdmattingly/clawnsole#280 Alpha',
+      instructions: 'Repo: rmdmattingly/clawnsole\nIssue: #280'
+    }
+  ];
+
+  const sorted = sortWorkqueueItems(items, { sortKey: 'title', sortDir: 'asc' });
+  assert.deepEqual(sorted.map((it) => it.id), ['a', 'b']);
 });
 
 test('sortWorkqueueItems priority sort uses updatedAt desc tie-breaker', () => {
