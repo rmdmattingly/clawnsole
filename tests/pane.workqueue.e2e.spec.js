@@ -46,6 +46,21 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   await expect(wqPane.locator('[data-wq-refresh]')).toBeVisible();
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
   await expect(wqPane.locator('[data-wq-status]')).toBeVisible();
+  const listHeader = wqPane.locator('.wq-list-header');
+  await expect(listHeader.locator('[data-wq-sort="title"]')).toHaveText('Task');
+  await expect(listHeader.locator('[data-wq-sort="status"]')).toHaveText('Status');
+  await expect(listHeader.locator('[data-wq-sort="priority"]')).toHaveText('Priority');
+  await expect(listHeader.locator('[data-wq-sort="attempts"]')).toHaveText('Attempts');
+  await expect(listHeader.locator('[data-wq-sort="claimedBy"]')).toHaveText('Claimed by');
+  await expect(listHeader.locator('[data-wq-sort="leaseUntil"]')).toHaveText('Lease expires');
+  await expect(listHeader.locator('[data-wq-sort="attempts"]')).toHaveAttribute(
+    'title',
+    /how many times this task has been claimed/
+  );
+  await expect(listHeader.locator('[data-wq-sort="leaseUntil"]')).toHaveAttribute(
+    'title',
+    /when the current claim expires/
+  );
 
   // Layout regression: toolbar + list should consume full thread height (no dead space below).
   const thread = wqPane.locator('[data-pane-thread]');

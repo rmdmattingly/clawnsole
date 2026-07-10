@@ -63,6 +63,82 @@ function seedAgentsForWorkqueuePicker() {
   fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2));
 }
 
+function seedLegacyDuplicateWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, patch = {}) => ({
+    id,
+    queue,
+    title: '[issue] rmdmattingly/clawnsole#290 duplicate health',
+    instructions: 'Repo: rmdmattingly/clawnsole\nIssue: https://github.com/rmdmattingly/clawnsole/issues/290',
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-60000),
+    updatedAt: iso(-60000),
+    dedupeKey: 'legacy-freeform-key-' + id,
+    ...patch
+  });
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-120000) } },
+    assignments: {},
+    items: [
+      mkItem('legacy-dup-low', { priority: 5, updatedAt: iso(-30000) }),
+      mkItem('legacy-dup-keep', { priority: 50, updatedAt: iso(-20000) }),
+      mkItem('legacy-dup-pending', { priority: 1, status: 'pending', updatedAt: iso(-10000) }),
+      mkItem('legacy-other-issue', {
+        title: '[issue] rmdmattingly/clawnsole#291 unrelated',
+        instructions: 'https://github.com/rmdmattingly/clawnsole/issues/291',
+        dedupeKey: 'legacy-other-issue'
+      })
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
+function seedLegacyIssueTitleVariants(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, title, offsetMs) => ({
+    id,
+    queue,
+    title,
+    instructions: 'Repo: rmdmattingly/clawnsole\nIssue: #280',
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(offsetMs),
+    updatedAt: iso(offsetMs),
+    dedupeKey: `legacy-title-variant-${id}`
+  });
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-120000) } },
+    assignments: {},
+    items: [
+      mkItem('legacy-title-a', '[issue] rmdmattingly/clawnsole#280 Normalize row titles', -30000),
+      mkItem('legacy-title-b', 'Open issue: Normalize row titles', -20000),
+      mkItem('legacy-title-c', 'Issue coverage: Normalize row titles', -10000)
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 test('workqueue pane: renders + has queue dropdown + does not show chat composer', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -114,6 +190,53 @@ test('workqueue pane: pane grid label switches from chat-only to generic panes',
 
   await expect(page.locator('[data-pane-kind="workqueue"]').last()).toBeVisible();
   await expect(grid).toHaveAttribute('aria-label', 'Panes');
+});
+
+test('workqueue pane: status filter uses human labels and queue-scoped counts', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  const baseUrl = `http://127.0.0.1:${env.serverPort}`;
+  const enqueue = async (queue, title) => {
+    const res = await page.request.post(`${baseUrl}/api/workqueue/enqueue`, {
+      data: {
+        queue,
+        title,
+        instructions: `seed ${title}`,
+        priority: 1
+      }
+    });
+    expect(res.ok()).toBeTruthy();
+  };
+
+  await enqueue('pane-status-dev', 'pane dev item');
+  await enqueue('pane-status-qa', 'pane qa item');
+
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  const queueSelect = wqPane.locator('[data-wq-queue-select]');
+  const customQueue = wqPane.locator('[data-wq-queue-custom]');
+  await queueSelect.selectOption('__custom__');
+  await customQueue.fill('pane-status-dev');
+  await customQueue.press('Enter');
+
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('1 item');
+  await wqPane.locator('[data-wq-status-details] summary').click();
+
+  await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'In progress (' })).toHaveCount(1);
+  await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'in_progress' })).toHaveCount(0);
+  await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
+
+  await queueSelect.selectOption('__custom__');
+  await customQueue.fill('pane-status-qa');
+  await customQueue.press('Enter');
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('1 item');
+  await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
 });
 
 test('workqueue pane: queue target supports search + recent persistence', async ({ page }) => {
@@ -260,6 +383,135 @@ test('workqueue pane: source chips + clawnsole preset filter items without reloa
   await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
 });
 
+test('workqueue pane: normalizes mixed legacy issue title prefixes', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `title-normalize-${Date.now()}`;
+  seedLegacyIssueTitleVariants(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await expect(pane.locator('.wq-row')).toHaveCount(3);
+  await expect(pane.locator('.wq-row .wq-col.title')).toHaveText([
+    '[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles',
+    '[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles',
+    '[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles'
+  ]);
+});
+
+test('workqueue pane: long table titles stay discoverable on hover and focus', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `long-title-${Date.now()}`;
+  const title = '[ISSUE] rmdmattingly/clawnsole#297 - Workqueue title readability affordance with a very long synthetic title that should truncate visually while remaining fully available to pointer and keyboard users';
+  const stateDir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const now = new Date().toISOString();
+  fs.writeFileSync(
+    path.join(stateDir, 'work-queues.json'),
+    JSON.stringify({
+      version: 1,
+      queues: { [queue]: { name: queue, createdAt: now } },
+      assignments: {},
+      items: [{
+        id: 'long-title-item',
+        queue,
+        title,
+        instructions: 'fixture item',
+        priority: 100,
+        status: 'ready',
+        claimedBy: '',
+        claimedAt: '',
+        leaseUntil: 0,
+        attempts: 3,
+        lastError: '',
+        createdAt: now,
+        updatedAt: now,
+        meta: { repo: 'rmdmattingly/clawnsole' }
+      }]
+    }, null, 2)
+  );
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  const row = pane.locator('.wq-row').first();
+  const titleText = row.locator('.wq-title-text');
+  await expect(row).toBeVisible();
+  await expect(titleText).toHaveAttribute('title', title);
+  await expect(row).toHaveAttribute('title', title);
+  await expect(row).toHaveAttribute('aria-label', `Workqueue item: ${title}`);
+  await row.focus();
+  await expect(row).toBeFocused();
+
+  const titleLayout = await titleText.evaluate((el) => {
+    const cs = window.getComputedStyle(el);
+    return {
+      overflow: cs.overflow,
+      textOverflow: cs.textOverflow,
+      whiteSpace: cs.whiteSpace,
+      clipped: el.scrollWidth > el.clientWidth
+    };
+  });
+  expect(titleLayout).toMatchObject({
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    clipped: true
+  });
+});
+
+test('workqueue pane: duplicate health summary cleans legacy issue duplicates', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `dup-health-${Date.now()}`;
+  seedLegacyDuplicateWorkqueueItems(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await expect(pane.locator('[data-wq-statusline]')).toContainText('4 item');
+
+  const duplicateHealth = pane.locator('[data-wq-duplicate-health]');
+  await expect(duplicateHealth).toBeVisible();
+  await expect(duplicateHealth).toContainText('Duplicates:');
+  await expect(duplicateHealth).toContainText('2 rows across 1 issue');
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await duplicateHealth.locator('[data-wq-clean-duplicates]').click();
+  await expect(duplicateHealth).toBeHidden();
+
+  const res = await page.request.get(`http://127.0.0.1:${env.serverPort}/api/workqueue/items?queue=${encodeURIComponent(queue)}`);
+  expect(res.ok()).toBeTruthy();
+  const data = await res.json();
+  const issue290 = data.items.filter((it) => String(it.instructions || '').includes('/issues/290'));
+  expect(issue290.filter((it) => it.status !== 'failed')).toHaveLength(1);
+  expect(issue290.find((it) => it.id === 'legacy-dup-keep')?.status).toBe('ready');
+  expect(issue290.filter((it) => it.status === 'failed').every((it) => String(it.lastError || '').includes('duplicate-cleanup:rmdmattingly/clawnsole#290'))).toBeTruthy();
+});
+
 test('workqueue pane: controls toolbar is sticky and list scrolls independently', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -378,4 +630,58 @@ test('workqueue pane: all-scope guardrail stays hidden below threshold', async (
   await wqPane.locator('[data-wq-scope="all"]').click();
   await expect(wqPane.locator('[data-wq-all-scope-guardrail]')).toBeHidden();
   await expect(wqPane.locator('[data-wq-list-body] .wq-row')).toHaveCount(3);
+});
+
+test('workqueue pane: large queues render an initial capped slice and load more incrementally', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `large-render-${Date.now()}`;
+  const stateDir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const now = new Date().toISOString();
+  const items = Array.from({ length: 505 }, (_, ix) => ({
+    id: `large-${ix}`,
+    queue,
+    title: ix === 504 ? 'needle large list item' : `large list item ${String(ix).padStart(3, '0')}`,
+    instructions: 'fixture item',
+    priority: ix,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: now,
+    updatedAt: now,
+    meta: { repo: ix === 504 ? 'rmdmattingly/clawnsole' : 'example/other' }
+  }));
+  fs.writeFileSync(
+    path.join(stateDir, 'work-queues.json'),
+    JSON.stringify({ version: 1, queues: { [queue]: { name: queue, createdAt: now } }, items, assignments: {} }, null, 2)
+  );
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption(queue);
+
+  const refreshResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
+  await pane.locator('[data-wq-refresh]').click();
+  await refreshResP;
+
+  await expect(pane.locator('.wq-row')).toHaveCount(100);
+  await expect(pane.locator('[data-wq-load-more]')).toHaveText('Load more (100/505)');
+
+  await pane.locator('[data-wq-load-more]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(200);
+  await expect(pane.locator('[data-wq-load-more]')).toHaveText('Load more (200/505)');
+
+  await pane.locator('[data-wq-preset-clawnsole]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(1);
+  await expect(pane.locator('.wq-row .wq-col.title')).toContainText('needle large list item');
+  await expect(pane.locator('[data-wq-load-more]')).toHaveCount(0);
 });

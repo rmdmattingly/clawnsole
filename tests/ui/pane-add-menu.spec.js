@@ -83,6 +83,7 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T reuses timeline pane; Alt adds anyway
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
   await loginAdmin(page, env.serverPort);
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.layoutMode', 'custom'));
   await expect(page.locator('#addPaneBtn')).toBeVisible();
 
   while (await page.locator('[data-pane]').count() > 1) {
@@ -91,6 +92,7 @@ test('pane add shortcuts: Ctrl/Cmd+Shift+T reuses timeline pane; Alt adds anyway
 
   const countBefore = await page.locator('[data-pane]').count();
   await page.evaluate(() => document.activeElement?.blur?.());
+  await page.locator('body').click({ position: { x: 4, y: 4 } });
 
   const fireTimelineShortcut = async (forceNew = false) => {
     await page.evaluate(({ force }) => {
