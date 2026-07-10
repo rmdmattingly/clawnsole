@@ -67,7 +67,7 @@ async function loginAdminWithBaselinePanes(page, serverPort, { chatAgentId = 'ma
   await waitForAdminUiReady(page);
 }
 
-test('baseline restore: close and restore final chat and workqueue panes', async ({ page }) => {
+test('pane close guard: replace final chat and workqueue panes', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
 
@@ -82,26 +82,30 @@ test('baseline restore: close and restore final chat and workqueue panes', async
   await expect(workqueuePanes).toHaveCount(1);
   await chatPanes.first().getByTestId('pane-close').click();
 
-  const restoreChatToast = page.getByTestId('restore-chat-toast');
-  await expect(restoreChatToast).toBeVisible();
-  await expect(restoreChatToast.getByTestId('toast-action')).toHaveText('Restore Chat pane');
-  await restoreChatToast.getByTestId('toast-action').click();
+  const chatGuardToast = page.getByTestId('close-guard-chat-toast');
+  await expect(chatGuardToast).toBeVisible();
+  await expect(chatGuardToast.getByTestId('toast-secondary-action')).toHaveText('Cancel');
+  await expect(chatGuardToast.getByTestId('toast-action')).toHaveText('Replace Chat pane');
+  await expect(chatPanes).toHaveCount(1);
+  await chatGuardToast.getByTestId('toast-action').click();
 
   await expect(chatPanes).toHaveCount(1);
   await expect(chatPanes.first().locator('[data-pane-input]')).toBeFocused();
 
   await workqueuePanes.first().getByTestId('pane-close').click();
 
-  const restoreWorkqueueToast = page.getByTestId('restore-workqueue-toast');
-  await expect(restoreWorkqueueToast).toBeVisible();
-  await expect(restoreWorkqueueToast.getByTestId('toast-action')).toHaveText('Restore Workqueue pane');
-  await restoreWorkqueueToast.getByTestId('toast-action').click();
+  const workqueueGuardToast = page.getByTestId('close-guard-workqueue-toast');
+  await expect(workqueueGuardToast).toBeVisible();
+  await expect(workqueueGuardToast.getByTestId('toast-secondary-action')).toHaveText('Cancel');
+  await expect(workqueueGuardToast.getByTestId('toast-action')).toHaveText('Replace Workqueue pane');
+  await expect(workqueuePanes).toHaveCount(1);
+  await workqueueGuardToast.getByTestId('toast-action').click();
 
   await expect(workqueuePanes).toHaveCount(1);
   await expect(workqueuePanes.first().locator('[data-wq-queue-select]')).toBeFocused();
 });
 
-test('baseline restore: restored chat keeps original agent', async ({ page }) => {
+test('pane close guard: replacement chat keeps original agent', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
 
@@ -130,9 +134,9 @@ test('baseline restore: restored chat keeps original agent', async ({ page }) =>
     .toBe('dev');
   await chatPanes.first().getByTestId('pane-close').click();
 
-  const restoreChatToast = page.getByTestId('restore-chat-toast');
-  await expect(restoreChatToast).toBeVisible();
-  await restoreChatToast.getByTestId('toast-action').click();
+  const guardToast = page.getByTestId('close-guard-chat-toast');
+  await expect(guardToast).toBeVisible();
+  await guardToast.getByTestId('toast-action').click();
 
   await expect(chatPanes).toHaveCount(1);
   await expect
@@ -145,7 +149,52 @@ test('baseline restore: restored chat keeps original agent', async ({ page }) =>
     .toBe('dev');
 });
 
-test('baseline restore: custom layout mode disables restore affordance', async ({ page }) => {
+test('pane close guard: non-last panes close normally', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdminWithBaselinePanes(page, env.serverPort);
+  await page.locator('#addPaneBtn').click();
+  await page.getByTestId('pane-add-menu-chat').click();
+
+  const chatPanes = page.locator('[data-pane][data-pane-kind="chat"]');
+  await expect(chatPanes).toHaveCount(2);
+
+  await chatPanes.first().getByTestId('pane-close').click();
+
+  await expect(page.getByTestId('close-guard-chat-toast')).toHaveCount(0);
+  await expect(chatPanes).toHaveCount(1);
+});
+
+test('pane close guard: pane manager click and keyboard close use the guard', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdminWithBaselinePanes(page, env.serverPort);
+
+  await page.locator('#paneManagerBtn').click();
+  const manager = page.getByTestId('pane-manager-modal');
+  await expect(manager).toHaveClass(/open/);
+
+  const chatRow = manager.locator('.pane-manager-row[data-pane-kind="chat"]').first();
+  await chatRow.locator('[data-action="close"]').click();
+  const clickGuard = page.getByTestId('close-guard-chat-toast').last();
+  await expect(clickGuard).toBeVisible();
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await clickGuard.getByTestId('toast-secondary-action').click();
+
+  await page.getByTestId('pane-manager-search').fill('chat');
+  await page.keyboard.press('Delete');
+  const keyboardGuard = page.getByTestId('close-guard-chat-toast').last();
+  await expect(keyboardGuard).toBeVisible();
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+});
+
+test('pane close guard: custom layout mode disables guard affordance', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
 
@@ -156,6 +205,6 @@ test('baseline restore: custom layout mode disables restore affordance', async (
 
   await page.locator('[data-pane][data-pane-kind="chat"]').first().getByTestId('pane-close').click();
 
-  await expect(page.getByTestId('restore-chat-toast')).toHaveCount(0);
+  await expect(page.getByTestId('close-guard-chat-toast')).toHaveCount(0);
   await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(0);
 });

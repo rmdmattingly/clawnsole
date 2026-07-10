@@ -134,6 +134,7 @@ test('topbar workqueue action reuses paired pane for active chat target and fall
   await expect(page.locator('#workqueueModal')).not.toHaveClass(/open/);
 
   // Without an active or remembered chat target, preserve modal fallback behavior.
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.layoutMode', 'custom'));
   await chatPane.locator('[data-pane-close]').click();
   await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(0);
 
