@@ -1540,6 +1540,67 @@ button.send-btn .btn-icon {
   gap: 6px;
 }
 
+.agents-health-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.agents-health-chip {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.agents-health-chip.attention {
+  border-color: rgba(255, 203, 107, 0.34);
+}
+
+.agents-health-chip.healthy {
+  border-color: rgba(83, 211, 150, 0.34);
+}
+
+.agents-health-chip.disconnected {
+  border-color: rgba(255, 107, 107, 0.34);
+}
+
+.agents-health-value {
+  flex: 0 0 auto;
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.agents-health-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.agents-list.compact .agents-health-summary {
+  gap: 6px;
+}
+
+.agents-list.compact .agents-health-chip {
+  padding: 5px 8px;
+}
+
+.agents-list.compact .agents-health-value {
+  font-size: 15px;
+}
+
 .agents-section-title {
   width: 100%;
   display: flex;
