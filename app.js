@@ -2545,6 +2545,10 @@ function buildCommandPaletteItems() {
       'g c'
     ),
     withShortcut(
+      { id: 'cmd:focus-chat-composer', label: 'Chat: Focus composer', detail: 'Jump to the active or most recent Chat composer', run: () => focusChatComposer() },
+      '⌘/Ctrl+L'
+    ),
+    withShortcut(
       { id: 'cmd:pane-mru-next', label: 'Panes: Switch to previous MRU pane', detail: 'Move through panes by most-recent focus order', run: () => switchPaneByMru(1) },
       'Ctrl+Tab'
     ),
@@ -6236,6 +6240,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             lines: ['Shows queued work items, grouped by status.', 'Drag cards between columns to change status.', 'Use Refresh when another worker updates the queue.'],
             shortcuts: [
               ['g w', 'open Workqueue modal'],
+              ['Cmd/Ctrl+L', 'focus Chat composer'],
               ['Cmd/Ctrl+K', 'cycle focus between panes']
             ]
           };
@@ -6246,6 +6251,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             lines: ['Shows scheduled jobs in the Gateway cron scheduler.', 'Use filters to find failing/disabled jobs.', 'Use Run/Edit/Disable for quick ops.'],
             shortcuts: [
               ['?', 'keyboard shortcuts overlay'],
+              ['Cmd/Ctrl+L', 'focus Chat composer'],
               ['Cmd/Ctrl+K', 'cycle focus between panes']
             ]
           };
@@ -6256,6 +6262,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             lines: ['Shows recent cron run history (best-effort).', 'Adjust range/status/search to find events.', 'Click View to inspect the underlying job.'],
             shortcuts: [
               ['?', 'keyboard shortcuts overlay'],
+              ['Cmd/Ctrl+L', 'focus Chat composer'],
               ['Cmd/Ctrl+K', 'cycle focus between panes']
             ]
           };
@@ -6266,6 +6273,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           shortcuts: [
             ['Alt/Option+1..9', 'focus panes 1-9 by visible order'],
             ['Cmd/Ctrl+1..9', 'focus panes 1-9 by visible order'],
+            ['Cmd/Ctrl+L', 'focus Chat composer'],
             ['Cmd/Ctrl+Shift+K', 'focus next pane'],
             ['Cmd/Ctrl+Shift+J', 'focus previous pane']
           ]
@@ -8443,7 +8451,7 @@ function hasPaneNumberLayoutMismatch(event) {
 
 function isTypingShortcutExempt(event) {
   const key = String(event?.key || '').toLowerCase();
-  return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'p' || key === 'k');
+  return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'p' || key === 'k' || key === 'l');
 }
 
 function isNonTrivialGlobalShortcut(event) {
@@ -8455,6 +8463,7 @@ function isNonTrivialGlobalShortcut(event) {
   if (isAccel && ['c', 'w', 'r', 't', 'k', 'j', 'n', 'f', 'h'].includes(lower)) return true;
   if (isAccel && (key === ']' || key === '}' || key === '[' || key === '{')) return true;
   if (hasMetaCtrl && !event.shiftKey && !event.altKey && ['p', 'k', 'r'].includes(lower)) return true;
+  if (hasMetaCtrl && !event.shiftKey && !event.altKey && lower === 'l') return true;
   if (event.ctrlKey && !event.metaKey && !event.altKey && key === 'Tab') return true;
   if ((key === '?' || (key === '/' && event.shiftKey)) && !event.metaKey && !event.ctrlKey && !event.altKey) return true;
   if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
@@ -8592,6 +8601,40 @@ function returnToLastActiveChatPane() {
   return false;
 }
 
+function focusChatComposer() {
+  const panes = paneManager?.panes || [];
+  if (!panes.length) {
+    paneManager?.addPane?.('chat');
+    return true;
+  }
+
+  const activeKey = focusedPaneKey();
+  const activeIdx = panes.findIndex((pane) => pane.key === activeKey && pane.kind === 'chat');
+  if (activeIdx >= 0) {
+    focusPaneIndex(activeIdx);
+    return true;
+  }
+
+  for (const key of paneMruOrder()) {
+    const idx = panes.findIndex((pane) => pane.key === key && pane.kind === 'chat');
+    if (idx >= 0) {
+      focusPaneIndex(idx);
+      return true;
+    }
+  }
+
+  const fallbackIdx = panes.findIndex((pane) => pane.kind === 'chat');
+  if (fallbackIdx >= 0) {
+    focusPaneIndex(fallbackIdx);
+    return true;
+  }
+
+  const pane = paneManager.addPane('chat');
+  const idx = panes.indexOf(pane);
+  if (idx >= 0) focusPaneIndex(idx);
+  return true;
+}
+
 function cyclePaneFocus() {
   const panes = paneManager.panes;
   if (!panes || panes.length === 0) return;
@@ -8707,6 +8750,13 @@ window.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'k') {
     event.preventDefault();
     openCommandPalette();
+    return;
+  }
+
+  // Cmd/Ctrl+L focuses the active/most recent Chat composer (even while typing).
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'l') {
+    event.preventDefault();
+    focusChatComposer();
     return;
   }
 
