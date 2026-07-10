@@ -126,6 +126,35 @@ test('shortcuts modal restores prior focus on close', async ({ page }) => {
   await expect(openBtn).toBeFocused();
 });
 
+test('cmd/ctrl+shift+l focuses chat composer from non-chat pane', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
+  const workqueuePane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  const queueSelect = workqueuePane.locator('[data-wq-queue-select]');
+
+  await expect(chatInput).toBeVisible();
+  await expect(queueSelect).toBeVisible();
+
+  await queueSelect.focus();
+  await expect(queueSelect).toBeFocused();
+
+  await page.keyboard.press('Control+Shift+L');
+  await expect(chatInput).toBeFocused();
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  await expect(page.locator('#shortcutsModal')).toContainText('Focus active Chat composer');
+});
+
 test('cmd/ctrl+shift+j focuses previous pane with wraparound from unfocused state', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
