@@ -4267,6 +4267,11 @@ function renderWorkqueuePaneItems(pane) {
 
   const scopedItems = filterWorkqueuePaneItemsByScope(pane, pane.workqueue?.items);
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
+  renderWorkqueueAllScopeGuardrail(pane, {
+    visibleCount: filteredItems.length,
+    scope: pane.workqueue?.scopeFilter || 'all',
+    activeTarget: String(pane.agentId || '').trim()
+  });
   const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
   const renderLimit = Math.max(
     WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
@@ -4360,6 +4365,40 @@ function renderWorkqueuePaneItems(pane) {
     pane.workqueue.selectedItemId = null;
     renderWorkqueuePaneInspect(pane, null);
   }
+}
+
+function renderWorkqueueAllScopeGuardrail(pane, { visibleCount, scope, activeTarget }) {
+  const root = pane.elements?.thread?.querySelector('[data-wq-all-scope-guardrail]');
+  if (!root) return;
+
+  const threshold = getWorkqueueAllScopeGuardrailThreshold();
+  const shouldShow = scope === 'all' && visibleCount > threshold && !pane.workqueue?.allScopeGuardrailDismissed;
+  root.hidden = !shouldShow;
+  root.innerHTML = '';
+  if (!shouldShow) return;
+
+  root.innerHTML = `
+    <div class="wq-all-scope-guardrail-copy">
+      <strong>Viewing all items (${escapeHtml(String(visibleCount))}).</strong>
+      <span>Narrow scope?</span>
+    </div>
+    <div class="wq-all-scope-guardrail-actions">
+      <button type="button" class="secondary" data-wq-all-scope-action="assigned" ${activeTarget ? '' : 'disabled'}>Assigned to active target</button>
+      <button type="button" class="secondary" data-wq-all-scope-action="unassigned">Unassigned</button>
+      <button type="button" class="secondary" data-wq-all-scope-action="dismiss" aria-label="Dismiss all scope warning">Dismiss</button>
+    </div>
+  `;
+
+  root.querySelector('[data-wq-all-scope-action="assigned"]')?.addEventListener('click', () => {
+    pane.elements?.thread?.querySelector?.('[data-wq-scope="assigned"]')?.click();
+  });
+  root.querySelector('[data-wq-all-scope-action="unassigned"]')?.addEventListener('click', () => {
+    pane.elements?.thread?.querySelector?.('[data-wq-scope="unassigned"]')?.click();
+  });
+  root.querySelector('[data-wq-all-scope-action="dismiss"]')?.addEventListener('click', () => {
+    pane.workqueue.allScopeGuardrailDismissed = true;
+    renderWorkqueuePaneItems(pane);
+  });
 }
 
 function renderWorkqueuePaneInspect(pane, item) {
@@ -4864,9 +4903,16 @@ const ADMIN_PANES_KEY = 'clawnsole.admin.panes.v1';
 const ADMIN_LAYOUT_MODE_KEY = 'clawnsole.admin.layoutMode';
 const ADMIN_DEFAULT_AGENT_KEY = 'clawnsole.admin.agentId';
 const WORKQUEUE_SCOPE_PREF_KEY = 'clawnsole.admin.workqueue.scope.v1';
+const WORKQUEUE_ALL_SCOPE_GUARDRAIL_THRESHOLD_KEY = 'clawnsole.admin.workqueue.allScopeGuardrailThreshold';
+const WORKQUEUE_ALL_SCOPE_GUARDRAIL_DEFAULT_THRESHOLD = 200;
 
 function normalizeWorkqueueScope(scope) {
   return scope === 'assigned' || scope === 'unassigned' ? scope : 'all';
+}
+
+function getWorkqueueAllScopeGuardrailThreshold() {
+  const raw = Number(storage.get(WORKQUEUE_ALL_SCOPE_GUARDRAIL_THRESHOLD_KEY, WORKQUEUE_ALL_SCOPE_GUARDRAIL_DEFAULT_THRESHOLD));
+  return Number.isFinite(raw) && raw > 0 ? raw : WORKQUEUE_ALL_SCOPE_GUARDRAIL_DEFAULT_THRESHOLD;
 }
 
 function getDefaultWorkqueueScope() {
@@ -6500,6 +6546,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <button type="button" class="wq-scope-btn" data-wq-scope="unassigned">Unassigned</button>
             <button type="button" class="wq-scope-btn" data-wq-scope="all">All</button>
           </div>
+
+          <div class="wq-all-scope-guardrail" data-wq-all-scope-guardrail data-testid="wq-all-scope-guardrail" hidden></div>
 
           <div class="wq-field" data-wq-source-group role="group" aria-label="Filter by source">
             <span class="wq-label">Source</span>
