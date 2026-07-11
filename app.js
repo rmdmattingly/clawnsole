@@ -630,6 +630,9 @@ let agentAutoRefreshInterval = null;
 let agentsModalAutoRefreshInterval = null;
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
+let agentsModalSelectedAgentId = '';
+let agentsModalLastVisibleAgentIds = [];
+let agentsModalSelectionNotice = '';
 
 function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
@@ -2947,6 +2950,7 @@ function openAgentsModal() {
 
   renderAgentsModalList();
   renderAgentsLastRefreshed();
+  if (agentsModalSelectedAgentId) setAgentsModalSelectedAgent(agentsModalSelectedAgentId, { reveal: true });
   startAgentsModalAutoRefresh();
   startAgentsModalFreshnessTicker();
 
@@ -3113,9 +3117,52 @@ function openTopbarWorkqueueAction() {
   openWorkqueue();
 }
 
+function getAgentsModalScrollContainer() {
+  return globalElements.agentsList?.closest?.('.modal-body') || globalElements.agentsList || null;
+}
+
+function getVisibleAgentRows() {
+  return Array.from(globalElements.agentsList?.querySelectorAll?.('.agents-row[data-agent-id]') || [])
+    .filter((row) => row.offsetParent !== null);
+}
+
+function setAgentsModalSelectedAgent(agentId, { focus = false, reveal = false } = {}) {
+  const id = String(agentId || '').trim();
+  if (!id) return;
+  agentsModalSelectedAgentId = id;
+  const rows = getVisibleAgentRows();
+  rows.forEach((row) => {
+    const selected = row.dataset.agentId === id;
+    row.classList.toggle('selected', selected);
+    row.setAttribute('aria-selected', selected ? 'true' : 'false');
+    row.tabIndex = selected ? 0 : -1;
+    if (selected && (focus || reveal)) {
+      if (focus) row.focus({ preventScroll: true });
+      row.scrollIntoView({ block: 'nearest' });
+    }
+  });
+}
+
+function moveAgentsModalSelection(delta) {
+  const rows = getVisibleAgentRows();
+  if (!rows.length) return;
+  const currentIndex = Math.max(0, rows.findIndex((row) => row.dataset.agentId === agentsModalSelectedAgentId));
+  const nextIndex = Math.min(rows.length - 1, Math.max(0, currentIndex + delta));
+  setAgentsModalSelectedAgent(rows[nextIndex].dataset.agentId, { focus: true, reveal: true });
+}
+
+function runAgentsModalSelectedAction(action) {
+  const id = String(agentsModalSelectedAgentId || '').trim();
+  if (!id) return;
+  if (action === 'workqueue') openAgentWorkqueueFromFleet(id);
+  else openAgentChatFromFleet(id);
+}
+
 function renderAgentsModalList() {
   const root = globalElements.agentsList;
   if (!root) return;
+  const scrollContainer = getAgentsModalScrollContainer();
+  const priorScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
 
   const search = String(globalElements.agentsSearch?.value || '').trim().toLowerCase();
   const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
@@ -3178,6 +3225,22 @@ function renderAgentsModalList() {
   const pinned = sortAgents(filtered.filter((a) => pins.has(String(a?.id || '').trim())));
   const rest = sortAgents(filtered.filter((a) => !pins.has(String(a?.id || '').trim())));
   const ordered = [...pinned, ...rest];
+  const orderedIds = ordered.map((a) => String(a?.id || '').trim()).filter(Boolean);
+  const priorSelectedId = String(agentsModalSelectedAgentId || '').trim();
+  let selectedId = priorSelectedId;
+  if (!selectedId && orderedIds.length > 0) {
+    selectedId = orderedIds[0];
+  } else if (selectedId && !orderedIds.includes(selectedId)) {
+    const priorIndex = Math.max(0, agentsModalLastVisibleAgentIds.indexOf(selectedId));
+    selectedId = orderedIds[Math.min(priorIndex, orderedIds.length - 1)] || '';
+    agentsModalSelectionNotice = selectedId
+      ? `Selected agent ${priorSelectedId} is no longer in the current fleet view.`
+      : '';
+  } else if (selectedId) {
+    agentsModalSelectionNotice = '';
+  }
+  agentsModalSelectedAgentId = selectedId;
+  agentsModalLastVisibleAgentIds = orderedIds;
   const needsAttention = rest.filter((agent) => classify(agent?.id).bucket !== 'active');
   const healthy = rest.filter((agent) => classify(agent?.id).bucket === 'active');
   const fleetSummary = baseAgents.reduce((acc, agent) => {
@@ -3191,6 +3254,14 @@ function renderAgentsModalList() {
   const healthyCollapsed = String(storage.get(ADMIN_AGENT_HEALTHY_COLLAPSED_KEY, healthyCollapseDefault ? '1' : '0')) === '1';
 
   root.innerHTML = '';
+
+  if (agentsModalSelectionNotice) {
+    const notice = document.createElement('div');
+    notice.className = 'agents-selection-note';
+    notice.setAttribute('role', 'status');
+    notice.textContent = agentsModalSelectionNotice;
+    root.appendChild(notice);
+  }
 
   const renderSummary = () => {
     const summary = document.createElement('div');
@@ -3261,6 +3332,11 @@ function renderAgentsModalList() {
       const id = String(agent?.id || '').trim();
       const row = document.createElement('div');
       row.className = 'agents-row';
+      row.dataset.agentId = id;
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', id === agentsModalSelectedAgentId ? 'true' : 'false');
+      row.tabIndex = id === agentsModalSelectedAgentId ? 0 : -1;
+      row.classList.toggle('selected', id === agentsModalSelectedAgentId);
 
       const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
@@ -3319,6 +3395,7 @@ function renderAgentsModalList() {
           else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(id);
         });
       });
+      row.addEventListener('click', () => setAgentsModalSelectedAgent(id));
 
       list.appendChild(row);
     }
@@ -3350,6 +3427,7 @@ function renderAgentsModalList() {
 
   const empty = ordered.length === 0;
   if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
+  if (scrollContainer) scrollContainer.scrollTop = priorScrollTop;
 }
 
 // Workqueue (admin-only)
@@ -8408,7 +8486,24 @@ globalElements.agentsModal?.addEventListener('click', (event) => {
 });
 globalElements.agentsModal?.addEventListener('keydown', (event) => {
   if (isTypingContext(event.target)) return;
-  if (String(event.key || '').toLowerCase() !== 'h' || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const key = String(event.key || '').toLowerCase();
+  if (key === 'j' || event.key === 'ArrowDown') {
+    event.preventDefault();
+    moveAgentsModalSelection(1);
+    return;
+  }
+  if (key === 'k' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    moveAgentsModalSelection(-1);
+    return;
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    runAgentsModalSelectedAction(event.shiftKey ? 'workqueue' : 'chat');
+    return;
+  }
+  if (key !== 'h') return;
   event.preventDefault();
   if (event.shiftKey || getFleetSort() !== 'heartbeat_age_desc') setFleetHeartbeatSort();
   else resetFleetSort();

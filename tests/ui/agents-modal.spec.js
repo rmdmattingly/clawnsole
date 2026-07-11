@@ -224,6 +224,51 @@ test('agents modal heartbeat heatmap and stale-first sort are toggleable and res
   await expect(page.locator('#agentsSortIndicator')).toHaveText('');
 });
 
+test('agents modal preserves selected row and scroll context across refresh', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = Array.from({ length: 40 }, (_, index) => {
+    const id = `fleet-agent-${String(index + 1).padStart(2, '0')}`;
+    return { id, name: id, displayName: id };
+  });
+
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const modalBody = page.locator('#agentsModal .modal-body');
+  const selectedRow = page.locator('#agentsList .agents-row[data-agent-id="fleet-agent-25"]');
+  await selectedRow.scrollIntoViewIfNeeded();
+  await selectedRow.click();
+  await expect(selectedRow).toHaveAttribute('aria-selected', 'true');
+  await modalBody.evaluate((el) => { el.scrollTop = 420; });
+  const beforeScrollTop = await modalBody.evaluate((el) => el.scrollTop);
+
+  agents = agents.map((agent) => (
+    agent.id === 'fleet-agent-25'
+      ? { ...agent, displayName: 'Fleet Agent 25 refreshed' }
+      : agent
+  ));
+  await page.locator('#refreshAgentsBtn').dispatchEvent('click');
+
+  await expect(page.locator('#agentsList .agents-row[data-agent-id="fleet-agent-25"]')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#agentsList .agents-row[data-agent-id="fleet-agent-25"]')).toContainText('Fleet Agent 25 refreshed');
+  const afterScrollTop = await modalBody.evaluate((el) => el.scrollTop);
+  expect(Math.abs(afterScrollTop - beforeScrollTop)).toBeLessThan(8);
+
+  agents = agents.filter((agent) => agent.id !== 'fleet-agent-25');
+  await page.locator('#refreshAgentsBtn').dispatchEvent('click');
+
+  await expect(page.locator('#agentsList .agents-selection-note')).toContainText('fleet-agent-25');
+  await expect(page.locator('#agentsList .agents-row[data-agent-id="fleet-agent-25"]')).toHaveCount(0);
+  await expect(page.locator('#agentsList .agents-row[aria-selected="true"]')).toHaveCount(1);
+});
+
 test('agents modal quick actions open/reuse chat, timeline, and workqueue context', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
