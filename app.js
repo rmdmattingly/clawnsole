@@ -175,22 +175,33 @@ const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => (
   logoutOpacity: !!state?.authed ? '1' : '0.5'
 }));
 const deriveGlobalConnectionState = __appCore.deriveGlobalConnectionState || ((state) => {
-  if (!state?.authed) return { state: 'disconnected', meta: 'sign in required' };
+  if (!state?.authed) return { state: 'disconnected', meta: 'sign in required', ariaLabel: 'Pane status: sign in required' };
   const panes = Array.isArray(state?.panes) ? state.panes : [];
-  if (panes.length === 0) return { state: 'disconnected', meta: '' };
+  if (panes.length === 0) return { state: 'disconnected', meta: '', ariaLabel: 'Pane status: no panes' };
   const connectedCount = panes.filter((pane) => !!pane?.connected).length;
   const total = panes.length;
+  const disconnectedCount = Math.max(0, total - connectedCount);
+  const attentionCount = panes.filter((pane) => {
+    const status = String(pane?.statusState || '').toLowerCase();
+    const unread = Math.max(0, Number(pane?.unreadCount || 0));
+    return !pane?.connected || unread > 0 || status === 'error' || status === 'offline' || status === 'disconnected';
+  }).length;
   const anyConnecting = panes.some((pane) => pane?.statusState === 'connecting' || pane?.statusState === 'reconnecting');
   const anyError = panes.some((pane) => pane?.statusState === 'error');
-  const firstError = panes.find((pane) => pane?.statusState === 'error' && pane?.statusMeta);
   let nextState = 'disconnected';
   if (connectedCount === total) nextState = 'connected';
   else if (connectedCount > 0 || anyConnecting) nextState = 'reconnecting';
   else if (anyError) nextState = 'error';
-  const meta = connectedCount === 0 && anyError && firstError
-    ? String(firstError.statusMeta || '')
-    : `panes: ${connectedCount}/${total} connected`;
-  return { state: nextState, meta };
+  const meta = `panes: ${connectedCount} connected, ${disconnectedCount} disconnected, ${attentionCount} attention`;
+  return {
+    state: nextState,
+    meta,
+    connectedCount,
+    disconnectedCount,
+    attentionCount,
+    total,
+    ariaLabel: `Pane status: ${connectedCount} connected, ${disconnectedCount} disconnected, ${attentionCount} need attention`
+  };
 });
 const deriveDisconnectButtonState = __appCore.deriveDisconnectButtonState || ((state) => {
   if (!state?.authed) return { disabled: true, text: 'Reconnect' };
@@ -1230,7 +1241,11 @@ function setStatusPill(el, state, meta = '') {
 function updateGlobalStatus() {
   const status = deriveGlobalConnectionState({ authed: uiState.authed, panes: paneManager.panes });
   setStatusPill(globalElements.status, status.state, status.meta);
-  if (globalElements.paneManagerBtn) globalElements.paneManagerBtn.textContent = status.meta;
+  if (globalElements.paneManagerBtn) {
+    globalElements.paneManagerBtn.textContent = status.meta;
+    globalElements.paneManagerBtn.setAttribute('aria-label', status.ariaLabel || `Open pane manager. ${status.meta || 'No pane status'}`);
+    globalElements.paneManagerBtn.title = status.attentionCount > 0 ? 'Open attention panes' : 'Open pane manager';
+  }
 }
 
 function updateConnectionControls() {
@@ -1734,6 +1749,7 @@ const paneManagerUiState = {
   selectedIndex: 0,
   query: '',
   unreadOnly: false,
+  attentionOnly: false,
   visiblePaneKeys: [],
   collapsedKinds: {
     chat: false,
@@ -1973,6 +1989,12 @@ function paneUnreadCount(pane) {
   return Math.max(0, Number(pane?.unreadCount || 0));
 }
 
+function paneNeedsAttention(pane) {
+  if (!pane) return false;
+  const state = String(pane.statusState || '').toLowerCase();
+  return !pane.connected || paneUnreadCount(pane) > 0 || state === 'error' || state === 'offline' || state === 'disconnected';
+}
+
 function clearPaneUnread(pane) {
   if (!pane) return;
   if (!pane.unreadCount) return;
@@ -1980,6 +2002,7 @@ function clearPaneUnread(pane) {
   pane.unreadKind = '';
   renderPaneIdentity(pane);
   renderPaneActivityBadge(pane);
+  updateGlobalStatus();
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -2020,6 +2043,7 @@ function markPaneUnread(pane, increment = 1, kind = 'chat') {
   pane.unreadKind = String(kind || 'activity');
   renderPaneIdentity(pane);
   renderPaneActivityBadge(pane);
+  updateGlobalStatus();
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -2091,6 +2115,7 @@ function renderPaneManager() {
 
   const query = String(paneManagerUiState.query || '').trim().toLowerCase();
   const filtered = panes.filter((pane) => {
+    if (paneManagerUiState.attentionOnly && !paneNeedsAttention(pane)) return false;
     if (paneManagerUiState.unreadOnly && paneUnreadCount(pane) <= 0) return false;
     return !query || paneSearchText(pane).includes(query);
   });
@@ -2253,7 +2278,7 @@ function renderPaneManager() {
   });
 }
 
-function openPaneManager() {
+function openPaneManager({ attentionOnly = false } = {}) {
   if (roleState.role !== 'admin') return;
   if (!uiState.authed) {
     showLogin('Please sign in to continue.');
@@ -2263,8 +2288,13 @@ function openPaneManager() {
 
   paneManagerUiState.open = true;
   paneManagerUiState.selectedIndex = 0;
-  paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
-  paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
+  paneManagerUiState.attentionOnly = !!attentionOnly;
+  paneManagerUiState.query = attentionOnly ? '' : String(globalElements.paneManagerSearch?.value || '').trim();
+  paneManagerUiState.unreadOnly = attentionOnly ? false : !!globalElements.paneManagerUnreadOnly?.checked;
+  if (attentionOnly) {
+    if (globalElements.paneManagerSearch) globalElements.paneManagerSearch.value = '';
+    if (globalElements.paneManagerUnreadOnly) globalElements.paneManagerUnreadOnly.checked = false;
+  }
 
   globalElements.paneManagerModal.classList.add('open');
   globalElements.paneManagerModal.setAttribute('aria-hidden', 'false');
@@ -9032,18 +9062,20 @@ globalElements.resetLayoutBtn?.addEventListener('click', () => {
 
 globalElements.paneManagerBtn?.addEventListener('click', (event) => {
   event?.preventDefault?.();
-  openPaneManager();
+  openPaneManager({ attentionOnly: true });
 });
 
 globalElements.paneManagerCloseBtn?.addEventListener('click', () => closePaneManager());
 
 globalElements.paneManagerSearch?.addEventListener('input', () => {
+  paneManagerUiState.attentionOnly = false;
   paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
   paneManagerUiState.selectedIndex = 0;
   renderPaneManager();
 });
 
 globalElements.paneManagerUnreadOnly?.addEventListener('change', () => {
+  paneManagerUiState.attentionOnly = false;
   paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
   paneManagerUiState.selectedIndex = 0;
   renderPaneManager();
