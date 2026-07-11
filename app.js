@@ -2026,12 +2026,23 @@ function markPaneUnread(pane, increment = 1, kind = 'chat') {
 function paneSearchText(pane) {
   return [
     paneSummaryLabel(pane),
+    paneHeaderLetter(pane),
     paneLabel(pane),
     paneTargetLabel(pane),
+    pane?.workqueue?.queue || '',
     pane?.kind || ''
   ]
     .join(' ')
     .toLowerCase();
+}
+
+function paneManagerHighlight(text, query) {
+  const value = String(text || '');
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return escapeHtml(value);
+  const at = value.toLowerCase().indexOf(needle);
+  if (at < 0) return escapeHtml(value);
+  return `${escapeHtml(value.slice(0, at))}<mark class="pane-manager-match">${escapeHtml(value.slice(at, at + needle.length))}</mark>${escapeHtml(value.slice(at + needle.length))}`;
 }
 
 function paneGroupOrder(kind) {
@@ -2117,6 +2128,9 @@ function renderPaneManager() {
 
   list.innerHTML = '';
   empty.hidden = filtered.length > 0;
+  empty.textContent = panes.length === 0
+    ? 'No panes.'
+    : (query ? `No panes match "${String(paneManagerUiState.query || '').trim()}"` : 'No panes match this filter.');
   if (!filtered.length) return;
 
   const maxIndex = Math.max(0, visibleKeys.length - 1);
@@ -2167,7 +2181,7 @@ function renderPaneManager() {
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
               ${paneTypeBadgeMarkup(pane, { extraClass: 'pane-manager-type-badge', testId: 'pane-manager-type-badge' })}
-              <span class="pane-manager-kind-label">${escapeHtml(paneIdentity)}</span>
+              <span class="pane-manager-kind-label">${paneManagerHighlight(paneIdentity, query)}</span>
               <span class="pane-manager-pane-id" title="Internal pane id">${escapeHtml(String(pane?.key || ''))}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
               ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
@@ -2293,13 +2307,28 @@ function closePaneManager({ restoreFocus = true } = {}) {
 function paneManagerHandleKeydown(event) {
   if (!isPaneManagerOpen()) return false;
   const panes = paneManager?.panes || [];
+  const activeEl = document.activeElement;
+  const searchFocused = activeEl === globalElements.paneManagerSearch;
+  if ((event.key === '/' && !searchFocused) || ((event.metaKey || event.ctrlKey) && String(event.key || '').toLowerCase() === 'f')) {
+    event.preventDefault();
+    globalElements.paneManagerSearch?.focus?.();
+    globalElements.paneManagerSearch?.select?.();
+    return true;
+  }
   if (event.key === 'Escape') {
     event.preventDefault();
+    if (String(paneManagerUiState.query || '').trim()) {
+      paneManagerUiState.query = '';
+      if (globalElements.paneManagerSearch) globalElements.paneManagerSearch.value = '';
+      paneManagerUiState.selectedIndex = 0;
+      renderPaneManager();
+      globalElements.paneManagerSearch?.focus?.();
+      return true;
+    }
     closePaneManager();
     return true;
   }
 
-  const activeEl = document.activeElement;
   if (activeEl === globalElements.paneManagerSearch && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
     return false;
   }
@@ -8827,6 +8856,9 @@ window.addEventListener('keydown', (event) => {
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
   })();
 
+  // If Pane Manager is open, it gets first dibs on keys, including Esc clear-before-close.
+  if (paneManagerHandleKeydown(event)) return;
+
   if (event.key === 'Escape') {
     const closedOverlay = closeTopmostOverlay();
     if (closedOverlay || !isEditableTarget) {
@@ -8835,9 +8867,6 @@ window.addEventListener('keydown', (event) => {
     if (closedOverlay) event.stopPropagation();
     return;
   }
-
-  // If Pane Manager is open, it gets first dibs on keys.
-  if (paneManagerHandleKeydown(event)) return;
 
   const blockedReason = blockedGlobalShortcutReason(event);
   if (blockedReason) {

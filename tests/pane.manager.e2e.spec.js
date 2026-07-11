@@ -109,13 +109,44 @@ test('pane manager: quick-find filters and groups by kind', async ({ page }) => 
   await expect(page.locator('.pane-manager-group-header').nth(2)).toContainText('Cron (1)');
 
   const search = page.getByTestId('pane-manager-search');
+  await expect(search).toHaveAttribute('placeholder', 'Find pane (A, Workqueue, dev-agent...)');
   await search.fill('cron');
   await expect(page.locator('.pane-manager-row')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row').first()).toContainText('Cron');
+  await expect(page.locator('.pane-manager-row').first().locator('.pane-manager-match')).toContainText(/cron/i);
+
+  await page.keyboard.press('Enter');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+  await expect
+    .poll(async () => page.evaluate(() => {
+      const cronPane = document.querySelector('[data-pane][data-pane-kind="cron"]');
+      return !!(cronPane && document.activeElement && (cronPane === document.activeElement || cronPane.contains(document.activeElement)));
+    }))
+    .toBe(true);
+
+  await page.keyboard.press('Control+P');
+  if ((await modal.getAttribute('aria-hidden')) !== 'false') {
+    await page.click('#paneManagerBtn');
+  }
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await page.keyboard.press('Slash');
+  await expect(search).toBeFocused();
 
   await search.fill('B');
   await expect(page.locator('.pane-manager-row')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row').first()).toContainText('Workqueue');
+
+  await search.fill('zzz-no-pane');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(0);
+  await expect(page.locator('#paneManagerEmpty')).toHaveText('No panes match "zzz-no-pane"');
+
+  await page.keyboard.press('Escape');
+  await expect(search).toHaveValue('');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(3);
+
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
 });
 
 test('pane manager: shows summary + duplicate badge and supports close others', async ({ page }) => {

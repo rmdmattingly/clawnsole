@@ -1280,6 +1280,13 @@ button.send-btn .btn-icon {
   width: 100%;
 }
 
+.pane-manager-match {
+  border-radius: 4px;
+  background: rgba(255, 179, 71, 0.28);
+  color: var(--text);
+  padding: 0 2px;
+}
+
 .pane-manager-unread-only {
   display: inline-flex;
   align-items: center;
