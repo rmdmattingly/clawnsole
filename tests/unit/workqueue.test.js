@@ -4,7 +4,15 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { enqueueItem, claimNext, loadState, saveState, transitionItem } = require('../../lib/workqueue');
+const {
+  enqueueItem,
+  claimNext,
+  loadState,
+  saveState,
+  transitionItem,
+  collapseCanonicalIssueDuplicates,
+  canonicalizeIssueDedupeKey
+} = require('../../lib/workqueue');
 
 function withFakeNow(ms, fn) {
   const realNow = Date.now;
@@ -414,4 +422,99 @@ test('workqueue: issue-backed enqueue creates new row when only terminal matches
   assert.equal(second._enqueueAction, 'created');
   assert.equal(second.dedupeKey, 'rmdmattingly/clawnsole#392');
   assert.equal(loadState(root).items.length, 2);
+});
+
+test('workqueue: canonical issue key extracts from meta, URLs, dedupe keys, and titles', () => {
+  assert.equal(
+    canonicalizeIssueDedupeKey({ meta: { repo: 'RmdMattingly/Clawnsole', issueNumber: '298' } }),
+    'rmdmattingly/clawnsole#298'
+  );
+  assert.equal(
+    canonicalizeIssueDedupeKey({ instructions: 'Work https://github.com/rmdmattingly/clawnsole/issues/298 now' }),
+    'rmdmattingly/clawnsole#298'
+  );
+  assert.equal(
+    canonicalizeIssueDedupeKey({ dedupeKey: 'issue:rmdmattingly/clawnsole#298' }),
+    'rmdmattingly/clawnsole#298'
+  );
+  assert.equal(
+    canonicalizeIssueDedupeKey({ title: '[coverage] Open issue rmdmattingly / clawnsole #298 please' }),
+    'rmdmattingly/clawnsole#298'
+  );
+});
+
+test('workqueue: canonical issue dedupe tracks seen count and provenance', () => {
+  const root = tempRoot();
+
+  const first = enqueueItem(root, {
+    queue: 'dev-team',
+    title: '[coverage] Open issue rmdmattingly/clawnsole#298',
+    instructions: 'first source',
+    priority: 10,
+    meta: { source: 'coverage' }
+  });
+
+  const second = enqueueItem(root, {
+    queue: 'dev-team',
+    title: '[Issue] Workqueue dedupe v2',
+    instructions: 'https://github.com/rmdmattingly/clawnsole/issues/298',
+    priority: 50,
+    dedupeKey: 'routine:clawnsole:298',
+    meta: { source: 'routine', repo: 'rmdmattingly/clawnsole', issueNumber: 298 }
+  });
+
+  assert.equal(second.id, first.id);
+  assert.equal(second._deduped, true);
+  assert.equal(second.dedupeKey, 'rmdmattingly/clawnsole#298');
+  assert.equal(second.seenCount, 2);
+
+  const state = loadState(root);
+  assert.equal(state.items.length, 1);
+  assert.equal(state.items[0].meta.source, 'routine');
+  assert.equal(state.items[0].meta.seenCount, 2);
+  assert.equal(state.items[0].meta.provenance.length, 1);
+});
+
+test('workqueue: canonical issue dedupe does not collapse non-issue tasks', () => {
+  const root = tempRoot();
+
+  enqueueItem(root, { queue: 'dev-team', title: 'Routine review', instructions: 'review', priority: 1 });
+  enqueueItem(root, { queue: 'dev-team', title: 'Routine review', instructions: 'review', priority: 1 });
+
+  const state = loadState(root);
+  assert.equal(state.items.length, 2);
+});
+
+test('workqueue: collapseCanonicalIssueDuplicates safely backfills existing duplicate rows', () => {
+  const root = tempRoot();
+  const first = enqueueItem(root, {
+    queue: 'dev-team',
+    title: '[coverage] rmdmattingly/clawnsole#298',
+    instructions: 'first',
+    priority: 1
+  });
+
+  const state = loadState(root);
+  state.items.push({
+    ...first,
+    id: 'duplicate-existing-row',
+    title: 'Open issue',
+    instructions: 'https://github.com/rmdmattingly/clawnsole/issues/298',
+    dedupeKey: 'issue:rmdmattingly/clawnsole#298',
+    createdAt: '2026-01-01T00:00:01.000Z',
+    updatedAt: '2026-01-01T00:00:01.000Z'
+  });
+  saveState(root, state);
+
+  const dryRun = collapseCanonicalIssueDuplicates(root, { queue: 'dev-team', dryRun: true });
+  assert.equal(dryRun.removedCount, 1);
+  assert.equal(loadState(root).items.length, 2);
+
+  const result = collapseCanonicalIssueDuplicates(root, { queue: 'dev-team' });
+  assert.equal(result.removedCount, 1);
+  const finalState = loadState(root);
+  assert.equal(finalState.items.length, 1);
+  assert.equal(finalState.items[0].id, first.id);
+  assert.equal(finalState.items[0].dedupeKey, 'rmdmattingly/clawnsole#298');
+  assert.equal(finalState.items[0].seenCount, 2);
 });
