@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { enqueueItem, claimNext, loadState, saveState, transitionItem } = require('../../lib/workqueue');
+const { enqueueItem, claimNext, loadState, saveState, transitionItem, collapseIssueDuplicates } = require('../../lib/workqueue');
 
 function withFakeNow(ms, fn) {
   const realNow = Date.now;
@@ -414,4 +414,76 @@ test('workqueue: issue-backed enqueue creates new row when only terminal matches
   assert.equal(second._enqueueAction, 'created');
   assert.equal(second.dedupeKey, 'rmdmattingly/clawnsole#392');
   assert.equal(loadState(root).items.length, 2);
+});
+
+test('workqueue: collapse issue duplicates dry-run reports ready/pending rows without mutation', () => {
+  const root = tempRoot();
+
+  const first = enqueueItem(root, {
+    queue: 'dev-team',
+    title: 'Issue coverage',
+    instructions: 'Ship https://github.com/rmdmattingly/clawnsole/issues/392',
+    priority: 1
+  });
+  const state = loadState(root);
+  state.items[0].updatedAt = '2026-01-01T00:00:00.000Z';
+  state.items.push({
+    ...state.items[0],
+    id: 'legacy-duplicate',
+    title: '[Issue] rmdmattingly/clawnsole#392 legacy duplicate',
+    dedupeKey: 'legacy-freeform',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-02T00:00:00.000Z'
+  });
+  saveState(root, state);
+
+  const result = collapseIssueDuplicates(root, { queue: 'dev-team', dryRun: true });
+
+  assert.equal(result.dryRun, true);
+  assert.equal(result.removed, 1);
+  assert.equal(result.groups[0].key, 'rmdmattingly/clawnsole#392');
+  assert.equal(result.groups[0].keepId, 'legacy-duplicate');
+  assert.deepEqual(result.groups[0].removeIds, [first.id]);
+  assert.equal(loadState(root).items.filter((it) => it.status === 'failed').length, 0);
+});
+
+test('workqueue: collapse issue duplicates archives duplicate ready rows and ignores active items', () => {
+  const root = tempRoot();
+
+  const keep = enqueueItem(root, {
+    queue: 'dev-team',
+    title: 'Open issue rmdmattingly/clawnsole#392',
+    instructions: 'Ship queued issue',
+    priority: 1
+  });
+  const state = loadState(root);
+  state.items.push({
+    ...state.items[0],
+    id: 'legacy-ready-duplicate',
+    title: '[coverage] rmdmattingly/clawnsole#392',
+    dedupeKey: 'coverage:rmdmattingly/clawnsole:392',
+    updatedAt: '2026-01-01T00:00:00.000Z'
+  });
+  state.items.push({
+    ...state.items[0],
+    id: 'active-duplicate',
+    title: '[coverage] rmdmattingly/clawnsole#392',
+    dedupeKey: 'active:rmdmattingly/clawnsole:392',
+    status: 'in_progress',
+    claimedBy: 'dev',
+    updatedAt: '2026-01-03T00:00:00.000Z'
+  });
+  saveState(root, state);
+
+  const result = collapseIssueDuplicates(root, { queue: 'dev-team', dryRun: false });
+
+  assert.equal(result.dryRun, false);
+  assert.equal(result.removed, 1);
+  const next = loadState(root);
+  assert.equal(next.items.find((it) => it.id === keep.id).status, 'ready');
+  assert.equal(next.items.find((it) => it.id === 'active-duplicate').status, 'in_progress');
+  const archived = next.items.find((it) => it.id === 'legacy-ready-duplicate');
+  assert.equal(archived.status, 'failed');
+  assert.equal(archived.lastError, 'duplicate-cleanup:rmdmattingly/clawnsole#392');
+  assert.match(archived.lastNote, new RegExp(keep.id));
 });

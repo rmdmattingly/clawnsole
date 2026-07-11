@@ -10,7 +10,8 @@ const {
   statePaths,
   listAssignments,
   setAssignments,
-  resolveClaimQueues
+  resolveClaimQueues,
+  collapseIssueDuplicates
 } = require('../lib/workqueue');
 
 function parseArgs(argv) {
@@ -60,6 +61,7 @@ Workqueue commands:
   progress           <itemId> --agent <id> --note <text> [--leaseMs <ms>]
   inspect            <itemId>
   list               [--queue <name>] [--status <s1,s2>]
+  collapse-duplicates [--queue <name>] [--apply]
   assignments list
   assignments set    --agent <id> --queues <q1,q2>
 
@@ -207,6 +209,14 @@ async function main() {
       })
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
     printJson({ ok: true, items });
+    return;
+  }
+
+  if (cmd === 'collapse-duplicates') {
+    const queue = args.queue;
+    const dryRun = !args.apply;
+    const result = collapseIssueDuplicates(null, { queue, dryRun });
+    printJson({ ok: true, ...result });
     return;
   }
 
