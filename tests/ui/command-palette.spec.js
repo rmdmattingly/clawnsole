@@ -101,6 +101,7 @@ test('pane navigation: returns to the last active chat pane from shortcut and co
   const chatInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
   const workqueuePane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
   const queueSelect = workqueuePane.locator('[data-wq-queue-select]');
+  const fleetBtn = page.locator('#fleetBtn');
 
   await expect(chatInput).toBeVisible();
   await chatInput.click();
@@ -109,6 +110,11 @@ test('pane navigation: returns to the last active chat pane from shortcut and co
   await expect(queueSelect).toBeVisible();
   await queueSelect.focus();
   await expect(queueSelect).toBeFocused();
+
+  await fleetBtn.click();
+  const fleetPane = page.locator('[data-pane][data-pane-kind="timeline"]').first();
+  await expect(fleetPane).toBeVisible();
+  await expect.poll(async () => page.evaluate(() => document.activeElement?.closest?.('[data-pane]')?.dataset?.paneKind || '')).toBe('timeline');
 
   await page.evaluate(() => document.activeElement?.blur?.());
   await page.keyboard.press('g');
@@ -125,4 +131,23 @@ test('pane navigation: returns to the last active chat pane from shortcut and co
   await page.keyboard.press('Enter');
 
   await expect(chatInput).toBeFocused();
+});
+
+test('pane navigation: return to last active chat safely no-ops when no chat pane exists', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await loginAdmin(page, env.serverPort);
+
+  await page.locator('[data-pane][data-pane-kind="chat"] [data-pane-close]').first().click();
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(0);
+
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.press('g');
+  await page.keyboard.press('c');
+
+  await expect(page.getByTestId('toast').last()).toContainText('No previous chat pane.');
+  await expect(page.locator('[data-pane]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
 });

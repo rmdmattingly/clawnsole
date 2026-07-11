@@ -8724,7 +8724,7 @@ function returnToLastActiveChatPane() {
     return true;
   }
 
-  toast('No previous chat pane.', 'info');
+  showToast('No previous chat pane.', { kind: 'info' });
   return false;
 }
 
