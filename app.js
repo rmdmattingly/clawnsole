@@ -343,7 +343,8 @@ function buildDefaultAdminPanes(defaultAgent = 'main') {
       statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
       scopeFilter: getDefaultWorkqueueScope(),
       sortKey: 'priority',
-      sortDir: 'desc'
+      sortDir: 'desc',
+      groupMode: 'rows'
     }
   ];
 }
@@ -4123,6 +4124,104 @@ function applyWorkqueueQuickFilters(items, quickFilters) {
   });
 }
 
+function formatWorkqueueStatusSummary(items) {
+  const counts = buildWorkqueueStatusCounts(items);
+  return WORKQUEUE_STATUSES
+    .filter((status) => Number(counts[status] || 0) > 0)
+    .map((status) => `${formatWorkqueueStatusLabel(status)} ${counts[status]}`)
+    .join(' · ');
+}
+
+function newestWorkqueueUpdatedAt(items) {
+  let best = '';
+  let bestMs = 0;
+  for (const item of Array.isArray(items) ? items : []) {
+    const raw = item?.updatedAt || item?.createdAt || '';
+    const ms = Date.parse(String(raw));
+    if (Number.isFinite(ms) && ms >= bestMs) {
+      bestMs = ms;
+      best = String(raw);
+    }
+  }
+  return best;
+}
+
+function summarizeWorkqueueIssueGroups(items) {
+  const map = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    const key = getWorkqueueIssueKey(item);
+    if (!key) continue;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(item);
+  }
+
+  const groupedKeys = new Set();
+  const groups = [];
+  for (const [key, groupItems] of map.entries()) {
+    if (groupItems.length <= 1) continue;
+    groupedKeys.add(key);
+    const sorted = sortWorkqueueItems(groupItems, { sortKey: 'priority', sortDir: 'desc' });
+    const representative = sorted[0] || groupItems[0];
+    groups.push({
+      kind: 'group',
+      key,
+      items: groupItems,
+      representative,
+      title: formatWorkqueueIssueTitle(representative),
+      priority: Math.max(...groupItems.map((item) => Number(item?.priority || 0))),
+      statusSummary: formatWorkqueueStatusSummary(groupItems),
+      newestUpdatedAt: newestWorkqueueUpdatedAt(groupItems)
+    });
+  }
+
+  const out = [];
+  const emittedGroups = new Set();
+  for (const item of Array.isArray(items) ? items : []) {
+    const key = getWorkqueueIssueKey(item);
+    if (key && groupedKeys.has(key)) {
+      if (emittedGroups.has(key)) continue;
+      const group = groups.find((entry) => entry.key === key);
+      if (group) out.push(group);
+      emittedGroups.add(key);
+      continue;
+    }
+    out.push({ kind: 'item', item });
+  }
+  return out;
+}
+
+function appendWorkqueuePaneItemRow(pane, body, item, { child = false } = {}) {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = child ? 'wq-row wq-row-child' : 'wq-row';
+  if (item.id && item.id === pane.workqueue.selectedItemId) row.classList.add('selected');
+
+  const leaseMs = item.leaseUntil ? Number(item.leaseUntil) - Date.now() : NaN;
+  const leaseLabel = item.leaseUntil ? fmtRemaining(leaseMs) : '';
+  const status = String(item.status || '');
+  const title = formatWorkqueueIssueTitle(item);
+  row.title = title;
+  row.setAttribute('aria-label', `Workqueue item: ${title}`);
+
+  row.innerHTML = `
+    <div class="wq-col title"><span class="wq-title-text" title="${escapeHtml(title)}">${escapeHtml(title)}</span></div>
+    <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
+    <div class="wq-col prio mono">${escapeHtml(String(item.priority ?? ''))}</div>
+    <div class="wq-col attempts mono">${escapeHtml(String(item.attempts ?? ''))}</div>
+    <div class="wq-col claimedBy">${escapeHtml(String(item.claimedBy || ''))}</div>
+    <div class="wq-col lease mono" data-lease-until="${escapeHtml(String(item.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
+  `;
+
+  row.addEventListener('click', () => {
+    pane.workqueue.selectedItemId = item.id || null;
+    renderWorkqueuePaneItems(pane);
+    renderWorkqueuePaneInspect(pane, item);
+  });
+
+  body.appendChild(row);
+  return row;
+}
+
 async function fetchAndRenderWorkqueueItemsForPane(pane) {
   if (!pane || pane.kind !== 'workqueue') return;
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
@@ -4268,11 +4367,13 @@ function renderWorkqueuePaneItems(pane) {
   const scopedItems = filterWorkqueuePaneItemsByScope(pane, pane.workqueue?.items);
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
   const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const groupMode = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
+  const rows = groupMode === 'grouped' ? summarizeWorkqueueIssueGroups(items) : items.map((item) => ({ kind: 'item', item }));
   const renderLimit = Math.max(
     WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
     Number(pane.workqueue?.renderLimit || WORKQUEUE_PANE_INITIAL_RENDER_LIMIT)
   );
-  const visibleItems = items.slice(0, renderLimit);
+  const visibleRows = rows.slice(0, renderLimit);
 
   if (empty) {
     const hasItems = items.length > 0;
@@ -4307,49 +4408,55 @@ function renderWorkqueuePaneItems(pane) {
     }
   }
 
-  const now = Date.now();
-  for (const it of visibleItems) {
+  for (const entry of visibleRows) {
+    if (entry.kind === 'item') {
+      appendWorkqueuePaneItemRow(pane, body, entry.item);
+      continue;
+    }
+
+    const expanded = pane.workqueue.expandedGroupKeys?.has(entry.key);
     const row = document.createElement('button');
     row.type = 'button';
-    row.className = 'wq-row';
-    if (it.id && it.id === pane.workqueue.selectedItemId) row.classList.add('selected');
-
-    const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
-    const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
-    const status = String(it.status || '');
-    const title = formatWorkqueueIssueTitle(it);
-    row.title = title;
-    row.setAttribute('aria-label', `Workqueue item: ${title}`);
-
+    row.className = 'wq-row wq-group-row';
+    row.setAttribute('data-wq-group-row', entry.key);
+    row.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    row.title = entry.title;
     row.innerHTML = `
-      <div class="wq-col title"><span class="wq-title-text" title="${escapeHtml(title)}">${escapeHtml(title)}</span></div>
-      <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
-      <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
-      <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
-      <div class="wq-col claimedBy">${escapeHtml(String(it.claimedBy || ''))}</div>
-      <div class="wq-col lease mono" data-lease-until="${escapeHtml(String(it.leaseUntil || ''))}">${escapeHtml(leaseLabel)}</div>
+      <div class="wq-col title">
+        <span class="wq-group-caret">${expanded ? '-' : '+'}</span>
+        <span class="wq-title-text" title="${escapeHtml(entry.title)}">${escapeHtml(entry.title)}</span>
+        <span class="wq-group-count">${escapeHtml(String(entry.items.length))} rows</span>
+      </div>
+      <div class="wq-col status">${escapeHtml(entry.statusSummary || '')}</div>
+      <div class="wq-col prio mono">${escapeHtml(String(entry.priority ?? ''))}</div>
+      <div class="wq-col attempts mono">${escapeHtml(String(entry.items.length))}</div>
+      <div class="wq-col claimedBy">grouped</div>
+      <div class="wq-col lease mono">${escapeHtml(entry.newestUpdatedAt || '')}</div>
     `;
-
     row.addEventListener('click', () => {
-      pane.workqueue.selectedItemId = it.id || null;
+      if (!pane.workqueue.expandedGroupKeys) pane.workqueue.expandedGroupKeys = new Set();
+      if (pane.workqueue.expandedGroupKeys.has(entry.key)) pane.workqueue.expandedGroupKeys.delete(entry.key);
+      else pane.workqueue.expandedGroupKeys.add(entry.key);
       renderWorkqueuePaneItems(pane);
-      renderWorkqueuePaneInspect(pane, it);
     });
-
     body.appendChild(row);
+
+    if (expanded) {
+      for (const item of entry.items) appendWorkqueuePaneItemRow(pane, body, item, { child: true });
+    }
   }
 
   const list = body.closest('.wq-list');
   let more = list?.querySelector('[data-wq-load-more]');
   if (more) more.remove();
-  if (items.length > visibleItems.length && list) {
+  if (rows.length > visibleRows.length && list) {
     more = document.createElement('button');
     more.type = 'button';
     more.className = 'secondary wq-load-more';
     more.setAttribute('data-wq-load-more', '');
-    more.textContent = `Load more (${visibleItems.length}/${items.length})`;
+    more.textContent = `Load more (${visibleRows.length}/${rows.length})`;
     more.addEventListener('click', () => {
-      pane.workqueue.renderLimit = visibleItems.length + WORKQUEUE_PANE_RENDER_CHUNK_SIZE;
+      pane.workqueue.renderLimit = visibleRows.length + WORKQUEUE_PANE_RENDER_CHUNK_SIZE;
       renderWorkqueuePaneItems(pane);
     });
     list.insertBefore(more, empty || null);
@@ -6241,7 +6348,11 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function normalizeWorkqueueGroupMode(value) {
+  return String(value || '').trim().toLowerCase() === 'grouped' ? 'grouped' : 'rows';
+}
+
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, cronAgentId, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -6298,6 +6409,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       items: [],
       countItems: [],
       selectedItemId: null,
+      expandedGroupKeys: new Set(),
+      groupMode: normalizeWorkqueueGroupMode(groupMode),
       renderLimit: WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
       sortDir: sortDir === 'asc' ? 'asc' : 'desc'
@@ -6526,6 +6639,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <button type="button" class="wq-sort-btn" data-wq-sort="priority">Priority</button>
             <button type="button" class="wq-sort-btn" data-wq-sort="updatedAt">Updated</button>
             <button type="button" class="wq-sort-btn" data-wq-sort="createdAt">Created</button>
+          </div>
+
+          <div class="wq-sort" role="group" aria-label="Workqueue row grouping">
+            <span class="wq-sort-label">View</span>
+            <button type="button" class="wq-sort-btn" data-wq-group-mode="rows">Rows</button>
+            <button type="button" class="wq-sort-btn" data-wq-group-mode="grouped">Grouped</button>
           </div>
         </div>
 
@@ -6985,6 +7104,27 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       btn.addEventListener('click', () => setSort(btn.getAttribute('data-wq-sort')));
     });
     updateSortUi();
+
+    const groupModeBtns = Array.from(elements.thread.querySelectorAll('[data-wq-group-mode]'));
+    const updateGroupModeUi = () => {
+      const current = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
+      groupModeBtns.forEach((btn) => {
+        const key = normalizeWorkqueueGroupMode(btn.getAttribute('data-wq-group-mode'));
+        const active = key === current;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+    };
+    groupModeBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        pane.workqueue.groupMode = normalizeWorkqueueGroupMode(btn.getAttribute('data-wq-group-mode'));
+        pane.workqueue.renderLimit = WORKQUEUE_PANE_INITIAL_RENDER_LIMIT;
+        updateGroupModeUi();
+        renderWorkqueuePaneItems(pane);
+        paneManager.persistAdminPanes();
+      });
+    });
+    updateGroupModeUi();
 
     // Enqueue assignment target picker (searchable + recent targets).
     const claimAgentPicker = elements.thread.querySelector('[data-wq-claim-agent-picker]');
@@ -7774,9 +7914,10 @@ const paneManager = {
             sources: Array.isArray(item?.quickFilters?.sources) ? item.quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
             repos: Array.isArray(item?.quickFilters?.repos) ? item.quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
           };
+          const groupMode = normalizeWorkqueueGroupMode(item.groupMode);
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir };
+          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
@@ -7822,6 +7963,7 @@ const paneManager = {
             sources: Array.isArray(pane.workqueue?.quickFilters?.sources) ? pane.workqueue.quickFilters.sources : [],
             repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos : []
           },
+          groupMode: normalizeWorkqueueGroupMode(pane.workqueue?.groupMode),
           sortKey: pane.workqueue?.sortKey || 'priority',
           sortDir: pane.workqueue?.sortDir || 'desc'
         };
@@ -7897,6 +8039,7 @@ const paneManager = {
           ? options.statusFilter
           : ['ready', 'pending', 'claimed', 'in_progress'],
         scopeFilter: normalizeWorkqueueScope(options?.scopeFilter ?? getDefaultWorkqueueScope()),
+        groupMode: normalizeWorkqueueGroupMode(options?.groupMode),
         closable: true
       });
       this.panes.push(pane);

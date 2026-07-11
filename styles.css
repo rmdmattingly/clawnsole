@@ -2561,6 +2561,35 @@ kbd {
   background: rgba(127, 209, 185, 0.12);
 }
 
+.wq-group-row {
+  background: rgba(255, 255, 255, 0.035);
+  font-weight: 600;
+}
+
+.wq-row-child {
+  padding-left: 28px;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.wq-group-caret {
+  display: inline-flex;
+  justify-content: center;
+  width: 1.2em;
+  margin-right: 4px;
+  color: var(--muted);
+}
+
+.wq-group-count {
+  display: inline-flex;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .wq-col {
   min-width: 0;
   overflow: hidden;

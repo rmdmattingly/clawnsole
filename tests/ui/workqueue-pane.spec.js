@@ -483,6 +483,37 @@ test('workqueue pane: duplicate health summary cleans legacy issue duplicates', 
   expect(issue290.filter((it) => it.status === 'failed').every((it) => String(it.lastError || '').includes('duplicate-cleanup:rmdmattingly/clawnsole#290'))).toBeTruthy();
 });
 
+test('workqueue pane: grouped mode collapses duplicate issue rows and expands child actions', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `group-mode-${Date.now()}`;
+  seedLegacyDuplicateWorkqueueItems(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await expect(pane.locator('.wq-row')).toHaveCount(4);
+  await pane.locator('[data-wq-group-mode="grouped"]').click();
+  await expect(pane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]')).toBeVisible();
+  await expect(pane.locator('.wq-row')).toHaveCount(2);
+  await expect(pane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]')).toContainText('3 rows');
+  await expect(pane.locator('.wq-row', { hasText: 'unrelated' })).toHaveCount(1);
+
+  await pane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(5);
+
+  const child = pane.locator('.wq-row-child', { hasText: 'duplicate health' }).first();
+  await child.click();
+  await expect(pane.locator('[data-wq-inspect]')).toContainText('legacy-dup');
+});
+
 test('workqueue pane: controls toolbar is sticky and list scrolls independently', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
