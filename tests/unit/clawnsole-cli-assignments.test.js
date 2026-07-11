@@ -44,3 +44,38 @@ test('clawnsole workqueue assignments set requires non-empty queues', () => {
     /assignments set requires --queues/
   );
 });
+
+test('clawnsole workqueue collapse-duplicates defaults to dry-run', () => {
+  const home = tempHome();
+  const env = { OPENCLAW_HOME: path.join(home, '.openclaw') };
+
+  run([
+    'workqueue',
+    'enqueue',
+    '--queue',
+    'dev-team',
+    '--title',
+    'Issue coverage',
+    '--instructions',
+    'Ship https://github.com/rmdmattingly/clawnsole/issues/392'
+  ], env);
+
+  const statePath = path.join(home, '.openclaw', 'clawnsole', 'work-queues.json');
+  const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  state.items.push({
+    ...state.items[0],
+    id: 'legacy-duplicate',
+    title: '[issue] rmdmattingly/clawnsole#392 legacy',
+    dedupeKey: 'legacy-freeform'
+  });
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + '\n');
+
+  const out = run(['workqueue', 'collapse-duplicates', '--queue', 'dev-team'], env);
+  const json = JSON.parse(out);
+  assert.equal(json.ok, true);
+  assert.equal(json.dryRun, true);
+  assert.equal(json.removed, 1);
+
+  const after = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  assert.equal(after.items.filter((it) => it.status === 'failed').length, 0);
+});
