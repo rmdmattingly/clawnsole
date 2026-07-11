@@ -74,6 +74,48 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText(/\d+[smhd]/);
 });
 
+test('agents modal pauses auto-refresh while a row action menu is open', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' }
+  ];
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+  await expect(page.locator('#agentsList')).toContainText('Alpha (alpha)');
+
+  const overflow = page.locator('#agentsList .agents-row-actions-overflow').first();
+  await overflow.evaluate((el) => {
+    el.setAttribute('open', '');
+    el.dispatchEvent(new ToggleEvent('toggle', { bubbles: true }));
+  });
+  await expect(overflow).toHaveAttribute('open', '');
+
+  agents = [
+    { id: 'beta', name: 'Beta', displayName: 'Beta' }
+  ];
+
+  await page.evaluate(() => window.refreshAgents({ reason: 'fleet_auto_refresh' }));
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Refresh paused');
+  await expect(page.locator('#agentsList')).toContainText('Alpha (alpha)');
+  await expect(page.locator('#agentsList')).not.toContainText('Beta (beta)');
+
+  await overflow.evaluate((el) => {
+    el.removeAttribute('open');
+    el.dispatchEvent(new ToggleEvent('toggle', { bubbles: true }));
+  });
+  await expect(overflow).not.toHaveAttribute('open', '');
+  await expect(page.locator('#agentsList')).toContainText('Beta (beta)');
+  await expect(page.locator('#agentsList')).not.toContainText('Alpha (alpha)');
+});
+
 test('agents modal shows fleet health summary counts and refreshes them', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 

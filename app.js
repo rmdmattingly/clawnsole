@@ -630,6 +630,59 @@ let agentAutoRefreshInterval = null;
 let agentsModalAutoRefreshInterval = null;
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
+let agentsModalInteractionLockedAtMs = 0;
+let agentsModalDeferredRefreshPending = false;
+let agentsModalCatchupTimer = null;
+
+function isAgentsModalInteractionLocked() {
+  const modal = globalElements.agentsModal;
+  const list = globalElements.agentsList;
+  if (!modal?.classList?.contains('open') || !list) return false;
+  if (list.querySelector('.agents-row-actions-overflow[open]')) return true;
+  const active = document.activeElement;
+  if (active && list.contains(active)) return true;
+  try {
+    return Boolean(list.querySelector('.agents-row:hover'));
+  } catch {
+    return false;
+  }
+}
+
+function updateAgentsModalRefreshLock() {
+  const locked = isAgentsModalInteractionLocked();
+  if (locked && !agentsModalInteractionLockedAtMs) {
+    agentsModalInteractionLockedAtMs = Date.now();
+  } else if (!locked && agentsModalInteractionLockedAtMs) {
+    agentsModalInteractionLockedAtMs = 0;
+    if (agentsModalDeferredRefreshPending) {
+      agentsModalDeferredRefreshPending = false;
+      if (agentsModalCatchupTimer) clearTimeout(agentsModalCatchupTimer);
+      agentsModalCatchupTimer = setTimeout(() => {
+        agentsModalCatchupTimer = null;
+        refreshAgents({ reason: 'fleet_auto_catchup' }).catch(() => {});
+      }, 200);
+    }
+  }
+  renderAgentsLastRefreshed();
+}
+
+function clearAgentsModalRefreshLock() {
+  agentsModalInteractionLockedAtMs = 0;
+  agentsModalDeferredRefreshPending = false;
+  if (agentsModalCatchupTimer) clearTimeout(agentsModalCatchupTimer);
+  agentsModalCatchupTimer = null;
+  renderAgentsLastRefreshed();
+}
+
+function requestAgentsModalRefresh() {
+  updateAgentsModalRefreshLock();
+  if (agentsModalInteractionLockedAtMs) {
+    agentsModalDeferredRefreshPending = true;
+    renderAgentsLastRefreshed();
+    return;
+  }
+  refreshAgents({ reason: 'fleet_auto_refresh' }).catch(() => {});
+}
 
 function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
@@ -657,11 +710,16 @@ function formatRelativeAge(msAgo) {
 
 function renderAgentsLastRefreshed() {
   if (!globalElements.agentsLastRefreshed) return;
+  const paused = agentsModalInteractionLockedAtMs
+    ? ` · Refresh paused ${formatRelativeAge(Date.now() - agentsModalInteractionLockedAtMs)}`
+    : agentsModalDeferredRefreshPending
+      ? ' · Refresh pending'
+      : '';
   if (!agentsLastRefreshedAtMs) {
-    globalElements.agentsLastRefreshed.textContent = 'Last refreshed: never';
+    globalElements.agentsLastRefreshed.textContent = `Last refreshed: never${paused}`;
     return;
   }
-  globalElements.agentsLastRefreshed.textContent = `Last refreshed: ${formatRelativeAge(Date.now() - agentsLastRefreshedAtMs)}`;
+  globalElements.agentsLastRefreshed.textContent = `Last refreshed: ${formatRelativeAge(Date.now() - agentsLastRefreshedAtMs)}${paused}`;
 }
 
 function startAgentsModalAutoRefresh() {
@@ -669,7 +727,7 @@ function startAgentsModalAutoRefresh() {
   agentsModalAutoRefreshInterval = setInterval(() => {
     if (!globalElements.agentsModal?.classList?.contains('open')) return;
     if (document.hidden) return;
-    refreshAgents({ reason: 'fleet_auto_refresh' }).catch(() => {});
+    requestAgentsModalRefresh();
   }, 10_000);
 }
 
@@ -683,8 +741,9 @@ function startAgentsModalFreshnessTicker() {
   if (agentsModalFreshnessTicker) return;
   agentsModalFreshnessTicker = setInterval(() => {
     if (!globalElements.agentsModal?.classList?.contains('open')) return;
+    updateAgentsModalRefreshLock();
     renderAgentsLastRefreshed();
-    renderAgentsModalList();
+    if (!agentsModalInteractionLockedAtMs) renderAgentsModalList();
   }, 1000);
 }
 
@@ -697,6 +756,17 @@ function stopAgentsModalFreshnessTicker() {
 async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {}) {
   if (roleState.role !== 'admin') return uiState.agents;
   if (!uiState.authed) return uiState.agents;
+  const isManualRefresh = reason === 'manual' || showSuccessToast;
+
+  if (isManualRefresh) {
+    clearAgentsModalRefreshLock();
+  } else if (globalElements.agentsModal?.classList?.contains('open')) {
+    updateAgentsModalRefreshLock();
+    if (agentsModalInteractionLockedAtMs) {
+      agentsModalDeferredRefreshPending = true;
+      return uiState.agents;
+    }
+  }
 
   if (agentRefreshInFlight) return agentRefreshInFlight;
 
@@ -2926,6 +2996,7 @@ function openAgentsModal() {
   if (roleState.role !== 'admin') return;
   globalElements.agentsModal?.classList.add('open');
   globalElements.agentsModal?.setAttribute('aria-hidden', 'false');
+  clearAgentsModalRefreshLock();
 
   // Bootstrap persisted controls.
   const filter = getFleetFilter();
@@ -2949,6 +3020,7 @@ function openAgentsModal() {
   renderAgentsLastRefreshed();
   startAgentsModalAutoRefresh();
   startAgentsModalFreshnessTicker();
+  ensureAgentsModalRefreshLockHandlers();
 
   // Focus search by default for fast filtering.
   try {
@@ -2978,6 +3050,20 @@ function closeAgentsModal() {
   globalElements.agentsModal?.setAttribute('aria-hidden', 'true');
   stopAgentsModalAutoRefresh();
   stopAgentsModalFreshnessTicker();
+  clearAgentsModalRefreshLock();
+}
+
+function ensureAgentsModalRefreshLockHandlers() {
+  const list = globalElements.agentsList;
+  if (!list || list.dataset.refreshLockHandlers === '1') return;
+  list.dataset.refreshLockHandlers = '1';
+
+  const queueCheck = () => setTimeout(updateAgentsModalRefreshLock, 0);
+  list.addEventListener('mouseover', queueCheck);
+  list.addEventListener('mouseout', queueCheck);
+  list.addEventListener('focusin', updateAgentsModalRefreshLock);
+  list.addEventListener('focusout', queueCheck);
+  list.addEventListener('toggle', updateAgentsModalRefreshLock, true);
 }
 
 function findExistingPane(kind, predicate = null) {
