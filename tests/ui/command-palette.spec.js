@@ -18,6 +18,21 @@ test.afterEach(async ({ page }) => {
   }
 });
 
+async function loginAdminWithChatOnlyPane(page, serverPort, { agentId = 'main' } = {}) {
+  await page.addInitScript((nextAgentId) => {
+    localStorage.setItem('clawnsole.admin.layoutMode', 'custom');
+    localStorage.setItem('clawnsole.admin.agentId', nextAgentId);
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([{ key: 'ptestchat', kind: 'chat', agentId: nextAgentId }])
+    );
+  }, agentId);
+  await page.goto(`http://127.0.0.1:${serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+}
+
 test('command palette: keyboard flow can reuse a targeted pane and focus by pane letter', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -132,7 +147,7 @@ test('command palette: opens or focuses Workqueue for active chat agent', async 
   test.skip(!!env?.skipReason, env?.skipReason);
 
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
-  await loginAdmin(page, env.serverPort);
+  await loginAdminWithChatOnlyPane(page, env.serverPort);
 
   const runCommand = async (query) => {
     await page.keyboard.press('ControlOrMeta+K');
@@ -144,7 +159,6 @@ test('command palette: opens or focuses Workqueue for active chat agent', async 
 
   const chatInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
   await expect(chatInput).toBeVisible();
-  await page.locator('[data-pane][data-pane-kind="workqueue"] [data-pane-close]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(0);
 
   await chatInput.focus();

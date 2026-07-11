@@ -3038,12 +3038,15 @@ function openWorkqueueForActiveChatAgent() {
   } catch {
     renderWorkqueuePaneItems(pane);
   }
-  setTimeout(() => {
+
+  const focusWorkqueuePane = () => {
     try {
       const queueSelect = pane.elements?.thread?.querySelector?.('[data-wq-queue-select]');
       (queueSelect || pane.elements?.thread)?.focus?.();
     } catch {}
-  }, 0);
+  };
+  setTimeout(focusWorkqueuePane, 0);
+  setTimeout(focusWorkqueuePane, 30);
   showToast(`Workqueue scoped to ${agentId}`, { kind: 'info', timeoutMs: 1600 });
   return pane;
 }

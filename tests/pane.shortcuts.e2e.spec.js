@@ -12,6 +12,21 @@ test.afterAll(() => {
   app?.stop?.();
 });
 
+async function seedChatOnlyPaneLayout(page, serverPort, { agentId = 'main' } = {}) {
+  await page.addInitScript((nextAgentId) => {
+    localStorage.setItem('clawnsole.admin.layoutMode', 'custom');
+    localStorage.setItem('clawnsole.admin.agentId', nextAgentId);
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([{ key: 'ptestchat', kind: 'chat', agentId: nextAgentId }])
+    );
+  }, agentId);
+  await page.goto(`http://127.0.0.1:${serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+}
+
 test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
@@ -402,13 +417,9 @@ test('ctrl/cmd+shift+g opens or focuses workqueue for active chat agent', async 
 
   installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
 
-  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
-  await page.fill('#loginPassword', 'admin');
-  await page.click('#loginBtn');
-  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await seedChatOnlyPaneLayout(page, app.serverPort);
 
   const chatInput = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
-  await page.locator('[data-pane][data-pane-kind="workqueue"] [data-pane-close]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(0);
 
   await chatInput.focus();
