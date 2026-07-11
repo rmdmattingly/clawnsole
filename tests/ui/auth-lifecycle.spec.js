@@ -10,6 +10,40 @@ test('visiting /admin without auth shows login overlay', async ({ page, clawnsol
   await expect(page.getByTestId('role-pill')).toContainText('signed out');
 });
 
+test('unlock form autofocuses, submits on Enter, and prevents duplicate in-flight submits', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let loginRequests = 0;
+  let releaseLogin;
+  const loginReleased = new Promise((resolve) => {
+    releaseLogin = resolve;
+  });
+
+  await page.route('**/auth/login', async (route) => {
+    loginRequests += 1;
+    await loginReleased;
+    await route.continue();
+  });
+
+  await page.goto(clawnsole.serverUrl);
+  await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
+  await expect(page.getByTestId('login-password')).toBeFocused();
+
+  await page.getByTestId('login-password').fill('admin');
+  await page.getByTestId('login-password').press('Enter');
+
+  await expect(page.getByTestId('login-button')).toBeDisabled();
+  await expect(page.getByTestId('login-button')).toHaveText('Unlocking...');
+  await expect(page.getByTestId('login-password')).toBeDisabled();
+
+  await page.getByTestId('login-button').click({ force: true });
+  await page.keyboard.press('Enter');
+  await expect.poll(() => loginRequests).toBe(1);
+
+  releaseLogin();
+  await clawnsole.waitForAdminUiReady(page);
+});
+
 test('admin login restores the intended in-app destination', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
