@@ -74,6 +74,37 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText(/\d+[smhd]/);
 });
 
+test('fleet refresh mode persists and manual mode requires explicit refresh', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [{ id: 'manual-agent', name: 'manual-agent', displayName: 'manual-agent' }];
+  let agentsRequests = 0;
+
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    agentsRequests += 1;
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+  await page.getByLabel('Fleet refresh mode').selectOption('manual');
+  await expect(page.getByLabel('Fleet refresh mode')).toHaveValue('manual');
+
+  agentsRequests = 0;
+  await page.waitForTimeout(11_000);
+  expect(agentsRequests).toBe(0);
+
+  await page.locator('#agentsManualRefreshBtn').click();
+  await expect.poll(() => agentsRequests).toBeGreaterThan(0);
+
+  await page.getByLabel('Fleet refresh mode').selectOption('slow');
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.getByLabel('Fleet refresh mode')).toHaveValue('slow');
+});
+
 test('agents modal shows fleet health summary counts and refreshes them', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 

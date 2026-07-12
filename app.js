@@ -31,6 +31,8 @@ const globalElements = {
   agentsSearch: document.getElementById('agentsSearch'),
   agentsFilterButtons: Array.from(document.querySelectorAll('[data-agents-filter]')),
   agentsDensityButtons: Array.from(document.querySelectorAll('[data-agents-density]')),
+  agentsRefreshMode: document.getElementById('agentsRefreshMode'),
+  agentsManualRefreshBtn: document.getElementById('agentsManualRefreshBtn'),
   agentsSort: document.getElementById('agentsSort'),
   agentsHeatmapToggle: document.getElementById('agentsHeatmapToggle'),
   agentsHeartbeatSortBtn: document.getElementById('agentsHeartbeatSortBtn'),
@@ -251,8 +253,17 @@ const ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY = 'clawnsole.admin.agents.preHeartbeatS
 const ADMIN_AGENT_HEATMAP_KEY = 'clawnsole.admin.agents.heartbeatHeatmap';
 const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
+const ADMIN_AGENT_REFRESH_MODE_KEY = 'clawnsole.admin.agents.refreshMode';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
+const ADMIN_AGENT_REFRESH_INTERVALS_MS = {
+  auto: 10_000,
+  slow: 60_000
+};
+const ADMIN_AGENT_BACKGROUND_REFRESH_INTERVALS_MS = {
+  auto: 30_000,
+  slow: 120_000
+};
 const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
@@ -487,6 +498,11 @@ function getFleetDensity() {
   return String(storage.get(ADMIN_AGENT_DENSITY_KEY, 'comfortable') || 'comfortable') === 'compact' ? 'compact' : 'comfortable';
 }
 
+function getFleetRefreshMode() {
+  const raw = String(storage.get(ADMIN_AGENT_REFRESH_MODE_KEY, 'auto') || 'auto').trim();
+  return raw === 'slow' || raw === 'manual' ? raw : 'auto';
+}
+
 function syncFleetDensityControl() {
   const density = getFleetDensity();
   if (globalElements.agentsList) {
@@ -627,25 +643,36 @@ function showToast(
 let agentRefreshTimer = null;
 let agentRefreshInFlight = null;
 let agentAutoRefreshInterval = null;
+let agentAutoRefreshMode = '';
 let agentsModalAutoRefreshInterval = null;
+let agentsModalAutoRefreshMode = '';
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
 
 function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
   if (!uiState.authed) return;
-  if (agentAutoRefreshInterval) return;
+  const mode = getFleetRefreshMode();
+  if (mode === 'manual') {
+    stopAgentAutoRefresh();
+    return;
+  }
+  if (agentAutoRefreshInterval && agentAutoRefreshMode === mode) return;
+  stopAgentAutoRefresh();
+  agentAutoRefreshMode = mode;
   // Low-frequency poll so new agents appear even if connectivity never fully drops.
   agentAutoRefreshInterval = setInterval(() => {
     if (document.hidden) return;
+    if (getFleetRefreshMode() === 'manual') return;
     scheduleAgentRefresh('poll');
-  }, 30_000);
+  }, ADMIN_AGENT_BACKGROUND_REFRESH_INTERVALS_MS[mode] || ADMIN_AGENT_BACKGROUND_REFRESH_INTERVALS_MS.auto);
 }
 
 function stopAgentAutoRefresh() {
   if (!agentAutoRefreshInterval) return;
   clearInterval(agentAutoRefreshInterval);
   agentAutoRefreshInterval = null;
+  agentAutoRefreshMode = '';
 }
 
 function formatRelativeAge(msAgo) {
@@ -665,18 +692,27 @@ function renderAgentsLastRefreshed() {
 }
 
 function startAgentsModalAutoRefresh() {
-  if (agentsModalAutoRefreshInterval) return;
+  const mode = getFleetRefreshMode();
+  if (mode === 'manual') {
+    stopAgentsModalAutoRefresh();
+    return;
+  }
+  if (agentsModalAutoRefreshInterval && agentsModalAutoRefreshMode === mode) return;
+  stopAgentsModalAutoRefresh();
+  agentsModalAutoRefreshMode = mode;
   agentsModalAutoRefreshInterval = setInterval(() => {
     if (!globalElements.agentsModal?.classList?.contains('open')) return;
     if (document.hidden) return;
+    if (getFleetRefreshMode() === 'manual') return;
     refreshAgents({ reason: 'fleet_auto_refresh' }).catch(() => {});
-  }, 10_000);
+  }, ADMIN_AGENT_REFRESH_INTERVALS_MS[mode] || ADMIN_AGENT_REFRESH_INTERVALS_MS.auto);
 }
 
 function stopAgentsModalAutoRefresh() {
   if (!agentsModalAutoRefreshInterval) return;
   clearInterval(agentsModalAutoRefreshInterval);
   agentsModalAutoRefreshInterval = null;
+  agentsModalAutoRefreshMode = '';
 }
 
 function startAgentsModalFreshnessTicker() {
@@ -781,9 +817,11 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
 function scheduleAgentRefresh(reason = 'ws_connected') {
   if (roleState.role !== 'admin') return;
   if (!uiState.authed) return;
+  if (getFleetRefreshMode() === 'manual') return;
   if (agentRefreshTimer) return;
   agentRefreshTimer = setTimeout(() => {
     agentRefreshTimer = null;
+    if (getFleetRefreshMode() === 'manual') return;
     refreshAgents({ reason }).catch(() => {});
   }, 450);
 }
@@ -2948,6 +2986,7 @@ function openAgentsModal() {
   const filter = getFleetFilter();
   const sort = getFleetSort();
   const heatmapEnabled = getFleetHeatmapEnabled();
+  const refreshMode = getFleetRefreshMode();
   globalElements.agentsFilterButtons.forEach((btn) => {
     const key = btn.getAttribute('data-agents-filter') || '';
     const active = key === filter;
@@ -2955,6 +2994,7 @@ function openAgentsModal() {
     btn.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
   if (globalElements.agentsSort) globalElements.agentsSort.value = sort;
+  if (globalElements.agentsRefreshMode) globalElements.agentsRefreshMode.value = refreshMode;
   if (globalElements.agentsHeatmapToggle) globalElements.agentsHeatmapToggle.checked = heatmapEnabled;
   if (globalElements.agentsActiveMinutes) {
     const minutes = Number(storage.get(ADMIN_AGENT_ACTIVE_MINUTES_KEY, '10')) || 10;
@@ -8516,6 +8556,21 @@ globalElements.agentsDensityButtons.forEach((btn) => {
   });
 });
 
+globalElements.agentsRefreshMode?.addEventListener('change', () => {
+  const mode = String(globalElements.agentsRefreshMode.value || 'auto').trim();
+  const next = mode === 'slow' || mode === 'manual' ? mode : 'auto';
+  storage.set(ADMIN_AGENT_REFRESH_MODE_KEY, next);
+  if (globalElements.agentsRefreshMode.value !== next) globalElements.agentsRefreshMode.value = next;
+  startAgentAutoRefresh();
+  if (globalElements.agentsModal?.classList?.contains('open')) startAgentsModalAutoRefresh();
+});
+
+globalElements.agentsManualRefreshBtn?.addEventListener('click', () => {
+  refreshAgents({ reason: 'fleet_manual_refresh', showSuccessToast: true }).catch(() => {
+    showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
+  });
+});
+
 globalElements.agentsSort?.addEventListener('change', () => {
   storage.set(ADMIN_AGENT_SORT_KEY, String(globalElements.agentsSort.value || 'recent_desc'));
   renderAgentsModalList();
@@ -8539,12 +8594,14 @@ globalElements.agentsActiveMinutes?.addEventListener('change', () => {
 document.addEventListener('visibilitychange', () => {
   if (!globalElements.agentsModal?.classList?.contains('open')) return;
   if (document.hidden) return;
+  if (getFleetRefreshMode() === 'manual') return;
   refreshAgents({ reason: 'fleet_visibility_resume' }).catch(() => {});
 });
 
 window.addEventListener('focus', () => {
   if (!globalElements.agentsModal?.classList?.contains('open')) return;
   if (document.hidden) return;
+  if (getFleetRefreshMode() === 'manual') return;
   refreshAgents({ reason: 'fleet_focus_resume' }).catch(() => {});
 });
 

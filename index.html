@@ -418,6 +418,17 @@
         <div class="modal-body">
           <div class="agents-toolbar">
             <div id="agentsLastRefreshed" class="agents-last-refreshed" aria-live="polite">Last refreshed: never</div>
+            <div class="agents-field">
+              <span class="agents-label">Refresh</span>
+              <div class="agents-refresh-controls">
+                <select id="agentsRefreshMode" aria-label="Fleet refresh mode">
+                  <option value="auto">Auto</option>
+                  <option value="slow">Slow</option>
+                  <option value="manual">Manual</option>
+                </select>
+                <button id="agentsManualRefreshBtn" type="button" class="agents-chip" title="Refresh now (Cmd/Ctrl+R)">Refresh</button>
+              </div>
+            </div>
             <label class="agents-field">
               <span class="agents-label">Search</span>
               <input id="agentsSearch" type="text" placeholder="Filter agents…" />

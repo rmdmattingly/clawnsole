@@ -1473,6 +1473,13 @@ button.send-btn .btn-icon {
   gap: 8px;
 }
 
+.agents-refresh-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
 .agents-heatmap-controls {
   min-width: 280px;
 }
