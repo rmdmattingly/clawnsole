@@ -37,6 +37,8 @@ const globalElements = {
   agentsSortResetBtn: document.getElementById('agentsSortResetBtn'),
   agentsSortIndicator: document.getElementById('agentsSortIndicator'),
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
+  agentsRefreshMode: document.getElementById('agentsRefreshMode'),
+  agentsRefreshNowBtn: document.getElementById('agentsRefreshNowBtn'),
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
@@ -252,6 +254,7 @@ const ADMIN_AGENT_HEATMAP_KEY = 'clawnsole.admin.agents.heartbeatHeatmap';
 const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
+const ADMIN_AGENT_REFRESH_MODE_KEY = 'clawnsole.admin.agents.refreshMode';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
 const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
@@ -487,6 +490,11 @@ function getFleetDensity() {
   return String(storage.get(ADMIN_AGENT_DENSITY_KEY, 'comfortable') || 'comfortable') === 'compact' ? 'compact' : 'comfortable';
 }
 
+function getFleetRefreshMode() {
+  const raw = String(storage.get(ADMIN_AGENT_REFRESH_MODE_KEY, 'auto') || 'auto').trim().toLowerCase();
+  return ['auto', 'slow', 'manual'].includes(raw) ? raw : 'auto';
+}
+
 function syncFleetDensityControl() {
   const density = getFleetDensity();
   if (globalElements.agentsList) {
@@ -635,11 +643,15 @@ function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
   if (!uiState.authed) return;
   if (agentAutoRefreshInterval) return;
+  const mode = getFleetRefreshMode();
+  if (mode === 'manual') return;
+  const intervalMs = mode === 'slow' ? 120_000 : 30_000;
   // Low-frequency poll so new agents appear even if connectivity never fully drops.
   agentAutoRefreshInterval = setInterval(() => {
     if (document.hidden) return;
+    if (getFleetRefreshMode() === 'manual') return;
     scheduleAgentRefresh('poll');
-  }, 30_000);
+  }, intervalMs);
 }
 
 function stopAgentAutoRefresh() {
@@ -666,11 +678,15 @@ function renderAgentsLastRefreshed() {
 
 function startAgentsModalAutoRefresh() {
   if (agentsModalAutoRefreshInterval) return;
+  const mode = getFleetRefreshMode();
+  if (mode === 'manual') return;
+  const intervalMs = mode === 'slow' ? 60_000 : 10_000;
   agentsModalAutoRefreshInterval = setInterval(() => {
     if (!globalElements.agentsModal?.classList?.contains('open')) return;
     if (document.hidden) return;
+    if (getFleetRefreshMode() === 'manual') return;
     refreshAgents({ reason: 'fleet_auto_refresh' }).catch(() => {});
-  }, 10_000);
+  }, intervalMs);
 }
 
 function stopAgentsModalAutoRefresh() {
@@ -692,6 +708,19 @@ function stopAgentsModalFreshnessTicker() {
   if (!agentsModalFreshnessTicker) return;
   clearInterval(agentsModalFreshnessTicker);
   agentsModalFreshnessTicker = null;
+}
+
+function restartFleetRefreshTimers() {
+  stopAgentAutoRefresh();
+  stopAgentsModalAutoRefresh();
+  startAgentAutoRefresh();
+  if (globalElements.agentsModal?.classList?.contains('open')) startAgentsModalAutoRefresh();
+}
+
+function refreshFleetNow({ showSuccessToast = false } = {}) {
+  return refreshAgents({ reason: 'manual', showSuccessToast }).catch(() => {
+    showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
+  });
 }
 
 async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {}) {
@@ -2948,6 +2977,7 @@ function openAgentsModal() {
   const filter = getFleetFilter();
   const sort = getFleetSort();
   const heatmapEnabled = getFleetHeatmapEnabled();
+  const refreshMode = getFleetRefreshMode();
   globalElements.agentsFilterButtons.forEach((btn) => {
     const key = btn.getAttribute('data-agents-filter') || '';
     const active = key === filter;
@@ -2956,6 +2986,7 @@ function openAgentsModal() {
   });
   if (globalElements.agentsSort) globalElements.agentsSort.value = sort;
   if (globalElements.agentsHeatmapToggle) globalElements.agentsHeatmapToggle.checked = heatmapEnabled;
+  if (globalElements.agentsRefreshMode) globalElements.agentsRefreshMode.value = refreshMode;
   if (globalElements.agentsActiveMinutes) {
     const minutes = Number(storage.get(ADMIN_AGENT_ACTIVE_MINUTES_KEY, '10')) || 10;
     globalElements.agentsActiveMinutes.value = String(Math.max(1, minutes));
@@ -8467,9 +8498,7 @@ globalElements.recurringPromptRows?.addEventListener('click', (event) => {
 });
 
 globalElements.refreshAgentsBtn?.addEventListener('click', () => {
-  refreshAgents({ reason: 'manual', showSuccessToast: true }).catch(() => {
-    showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
-  });
+  refreshFleetNow({ showSuccessToast: true });
 });
 
 globalElements.agentsBtn?.addEventListener('click', () => openAgentsModal());
@@ -8479,6 +8508,11 @@ globalElements.agentsModal?.addEventListener('click', (event) => {
 });
 globalElements.agentsModal?.addEventListener('keydown', (event) => {
   if (isTypingContext(event.target)) return;
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'r') {
+    event.preventDefault();
+    refreshFleetNow({ showSuccessToast: true });
+    return;
+  }
   if (String(event.key || '').toLowerCase() !== 'h' || event.metaKey || event.ctrlKey || event.altKey) return;
   event.preventDefault();
   if (event.shiftKey || getFleetSort() !== 'heartbeat_age_desc') setFleetHeartbeatSort();
@@ -8529,6 +8563,17 @@ globalElements.agentsHeatmapToggle?.addEventListener('change', () => {
 globalElements.agentsHeartbeatSortBtn?.addEventListener('click', () => setFleetHeartbeatSort());
 globalElements.agentsSortResetBtn?.addEventListener('click', () => resetFleetSort());
 
+globalElements.agentsRefreshMode?.addEventListener('change', () => {
+  const mode = ['auto', 'slow', 'manual'].includes(String(globalElements.agentsRefreshMode.value || '')) ? globalElements.agentsRefreshMode.value : 'auto';
+  storage.set(ADMIN_AGENT_REFRESH_MODE_KEY, mode);
+  globalElements.agentsRefreshMode.value = mode;
+  restartFleetRefreshTimers();
+});
+
+globalElements.agentsRefreshNowBtn?.addEventListener('click', () => {
+  refreshFleetNow({ showSuccessToast: true });
+});
+
 globalElements.agentsActiveMinutes?.addEventListener('change', () => {
   const minutes = Math.max(1, Number(globalElements.agentsActiveMinutes.value) || 10);
   globalElements.agentsActiveMinutes.value = String(minutes);
@@ -8539,12 +8584,14 @@ globalElements.agentsActiveMinutes?.addEventListener('change', () => {
 document.addEventListener('visibilitychange', () => {
   if (!globalElements.agentsModal?.classList?.contains('open')) return;
   if (document.hidden) return;
+  if (getFleetRefreshMode() === 'manual') return;
   refreshAgents({ reason: 'fleet_visibility_resume' }).catch(() => {});
 });
 
 window.addEventListener('focus', () => {
   if (!globalElements.agentsModal?.classList?.contains('open')) return;
   if (document.hidden) return;
+  if (getFleetRefreshMode() === 'manual') return;
   refreshAgents({ reason: 'fleet_focus_resume' }).catch(() => {});
 });
 

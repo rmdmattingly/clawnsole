@@ -419,6 +419,15 @@
           <div class="agents-toolbar">
             <div id="agentsLastRefreshed" class="agents-last-refreshed" aria-live="polite">Last refreshed: never</div>
             <label class="agents-field">
+              <span class="agents-label">Refresh</span>
+              <select id="agentsRefreshMode" aria-label="Fleet refresh mode">
+                <option value="auto">Auto</option>
+                <option value="slow">Slow</option>
+                <option value="manual">Manual</option>
+              </select>
+            </label>
+            <button id="agentsRefreshNowBtn" type="button" class="secondary agents-refresh-now" title="Refresh Fleet now (Cmd/Ctrl+R)">Refresh now</button>
+            <label class="agents-field">
               <span class="agents-label">Search</span>
               <input id="agentsSearch" type="text" placeholder="Filter agents…" />
             </label>

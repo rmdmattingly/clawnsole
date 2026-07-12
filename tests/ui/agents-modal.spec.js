@@ -74,6 +74,40 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText(/\d+[smhd]/);
 });
 
+test('agents modal refresh mode persists and manual refresh works on demand', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  await page.locator('#agentsRefreshMode').selectOption('manual');
+  await expect(page.locator('#agentsRefreshMode')).toHaveValue('manual');
+  await expect(page.locator('#agentsList .agents-row')).toContainText('Alpha (alpha)');
+  await expect(page).toHaveURL(/\/admin\/?$/);
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsRefreshMode')).toHaveValue('manual');
+
+  agents = [{ id: 'beta', name: 'Beta', displayName: 'Beta' }];
+  await page.getByRole('button', { name: 'Refresh now' }).click();
+  await expect(page.locator('#agentsList .agents-row')).toContainText('Beta (beta)');
+  await expect(page.locator('#agentsLastRefreshed')).toContainText(/Last refreshed: \d+s ago/);
+
+  agents = [{ id: 'gamma', name: 'Gamma', displayName: 'Gamma' }];
+  await page.getByRole('button', { name: 'Refresh now' }).focus();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+R' : 'Control+R');
+  await expect(page).toHaveURL(/\/admin\/?$/);
+  await expect(page.locator('#agentsList .agents-row')).toContainText('Gamma (gamma)');
+});
+
 test('agents modal shows fleet health summary counts and refreshes them', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 

@@ -1442,7 +1442,7 @@ button.send-btn .btn-icon {
 
 .agents-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto auto auto;
+  grid-template-columns: minmax(180px, 1fr) repeat(5, auto);
   gap: 12px;
   align-items: end;
   margin-bottom: 14px;
@@ -1458,6 +1458,11 @@ button.send-btn .btn-icon {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.agents-refresh-now {
+  min-height: 33px;
+  white-space: nowrap;
 }
 
 .agents-label {
