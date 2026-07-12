@@ -2618,6 +2618,14 @@ function buildCommandPaletteItems() {
       '⌘/Ctrl+Shift+J'
     ),
     withShortcut(
+      { id: 'cmd:chat-cycle-next', label: 'Chat: Focus next Chat pane', detail: 'Move to the next Chat pane by focus history, skipping non-chat panes', run: () => cycleChatPaneFocus(1) },
+      '⌘/Ctrl+Alt+K'
+    ),
+    withShortcut(
+      { id: 'cmd:chat-cycle-previous', label: 'Chat: Focus previous Chat pane', detail: 'Move to the previous Chat pane by focus history, skipping non-chat panes', run: () => cycleChatPaneFocus(-1) },
+      '⌘/Ctrl+Alt+J'
+    ),
+    withShortcut(
       { id: 'cmd:pane-return-last-chat', label: 'Panes: Return to last active Chat pane', detail: 'Jump back to the most recent chat pane in focus history', run: () => returnToLastActiveChatPane() },
       'g c'
     ),
@@ -8651,6 +8659,7 @@ function isNonTrivialGlobalShortcut(event) {
   const hasMetaCtrl = !!(event.metaKey || event.ctrlKey);
   const isAccel = hasMetaCtrl && event.shiftKey;
   if (isAccel && ['c', 'w', 'r', 't', 'k', 'j', 'n', 'f', 'h'].includes(lower)) return true;
+  if (hasMetaCtrl && event.altKey && !event.shiftKey && ['k', 'j'].includes(lower)) return true;
   if (isAccel && (key === ']' || key === '}' || key === '[' || key === '{')) return true;
   if (hasMetaCtrl && !event.shiftKey && !event.altKey && ['p', 'k', 'r'].includes(lower)) return true;
   if (hasMetaCtrl && !event.shiftKey && !event.altKey && lower === 'l') return true;
@@ -8845,6 +8854,34 @@ function cyclePaneFocusBackward() {
   focusPaneIndex(next, { showHud: true });
 }
 
+function cycleChatPaneFocus(direction = 1) {
+  const panes = paneManager?.panes || [];
+  const chatPanes = panes.filter((pane) => pane?.kind === 'chat');
+  if (chatPanes.length < 2) {
+    showToast('Only one Chat pane is open.', { kind: 'info', timeoutMs: 1600 });
+    return false;
+  }
+
+  const activeKey = focusedPaneKey();
+  const orderedKeys = [
+    activeKey,
+    ...paneMruOrder().filter((key) => key !== activeKey)
+  ].filter((key) => chatPanes.some((pane) => pane.key === key));
+
+  chatPanes.forEach((pane) => {
+    if (pane?.key && !orderedKeys.includes(pane.key)) orderedKeys.push(pane.key);
+  });
+
+  const currentIndex = Math.max(0, orderedKeys.indexOf(activeKey));
+  const step = direction >= 0 ? 1 : -1;
+  const nextKey = orderedKeys[(currentIndex + step + orderedKeys.length) % orderedKeys.length];
+  const nextIndex = panes.findIndex((pane) => pane?.key === nextKey);
+  if (nextIndex < 0) return false;
+
+  focusPaneIndex(nextIndex, { showHud: true });
+  return true;
+}
+
 function cycleUnreadPaneFocus(direction = 1) {
   const panes = paneManager?.panes || [];
   if (!panes.length) return false;
@@ -9008,6 +9045,18 @@ window.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'j') {
     event.preventDefault();
     cyclePaneFocusBackward();
+    return;
+  }
+
+  // Cmd/Ctrl+Alt+K/J cycles only Chat panes, skipping Workqueue/Cron/Timeline/Fleet panes.
+  if ((event.metaKey || event.ctrlKey) && event.altKey && !event.shiftKey && key.toLowerCase() === 'k') {
+    event.preventDefault();
+    cycleChatPaneFocus(1);
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.altKey && !event.shiftKey && key.toLowerCase() === 'j') {
+    event.preventDefault();
+    cycleChatPaneFocus(-1);
     return;
   }
 
