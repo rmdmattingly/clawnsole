@@ -164,6 +164,71 @@ test('cmd/ctrl+shift+j focuses previous pane with wraparound from unfocused stat
   await expect.poll(activePaneIndex).toBe(2);
 });
 
+test('cmd/ctrl+alt+j/k cycles chat panes only and keeps typing guard', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  await expect(panes).toHaveCount(2);
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  const triggerChatCycle = async (key, { targetInput = false } = {}) => {
+    await page.evaluate(({ key, targetInput }) => {
+      const event = new KeyboardEvent('keydown', {
+        key,
+        ctrlKey: true,
+        altKey: true,
+        bubbles: true,
+        cancelable: true
+      });
+      const target = targetInput
+        ? document.querySelector('[data-pane][data-pane-kind="chat"] [data-pane-input]')
+        : window;
+      target.dispatchEvent(event);
+    }, { key, targetInput });
+  };
+
+  await page.click('#connectionStatus');
+  await page.evaluate(() => focusPaneIndex(0));
+  await expect.poll(activePaneIndex).toBe(0);
+  await triggerChatCycle('K');
+  await expect.poll(activePaneIndex).toBe(0);
+  await expect(page.getByTestId('toast').last()).toContainText('Only one Chat pane is open.');
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-chat').click();
+  await expect(panes).toHaveCount(3);
+  await expect(panes.nth(1)).toHaveAttribute('data-pane-kind', 'workqueue');
+  await expect(panes.nth(2)).toHaveAttribute('data-pane-kind', 'chat');
+
+  await page.evaluate(() => focusPaneIndex(0));
+  await expect.poll(activePaneIndex).toBe(0);
+  await triggerChatCycle('K');
+  await expect.poll(activePaneIndex).toBe(2);
+  await triggerChatCycle('J');
+  await expect.poll(activePaneIndex).toBe(0);
+
+  const firstPaneInput = panes.first().locator('[data-pane-input]');
+  await firstPaneInput.focus();
+  await expect(firstPaneInput).toBeFocused();
+  await triggerChatCycle('K', { targetInput: true });
+  await expect.poll(activePaneIndex).toBe(0);
+  await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Shortcut paused while typing');
+});
+
 test('alt+1..3 and cmd/ctrl+1..3 focus panes by visible order; shortcuts do not fire while typing', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
