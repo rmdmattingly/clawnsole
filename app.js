@@ -2588,6 +2588,15 @@ function buildCommandPaletteItems() {
       'g w'
     ),
     withShortcut(
+      {
+        id: 'cmd:open-workqueue-active-agent',
+        label: 'Workqueue for active chat agent',
+        detail: 'Open/focus a Workqueue pane scoped to the active chat agent',
+        run: () => openWorkqueueForActiveChatAgent()
+      },
+      '⌘/Ctrl+Shift+G'
+    ),
+    withShortcut(
       { id: 'cmd:refresh-agents', label: 'Agents: Refresh', detail: 'Refresh agent list', run: () => globalElements.refreshAgentsBtn?.click?.() },
       ''
     ),
@@ -2683,9 +2692,9 @@ function buildCommandPaletteItems() {
       enriched.priority = 85;
       return enriched;
     }
-    if (id === 'cmd:open-workqueue') {
+    if (id === 'cmd:open-workqueue' || id === 'cmd:open-workqueue-active-agent') {
       enriched.group = 'Workqueue';
-      enriched.priority = 92;
+      enriched.priority = id === 'cmd:open-workqueue-active-agent' ? 96 : 92;
       return enriched;
     }
     if (id === 'cmd:refresh-agents') {
@@ -2987,6 +2996,59 @@ function findExistingPane(kind, predicate = null) {
     if (!predicate || predicate(pane)) return pane;
   }
   return null;
+}
+
+function getActiveChatAgentPane() {
+  const focusedKey = focusedPaneKey();
+  const fallbackKey = paneMruOrder()[0] || '';
+  const activeKey = focusedKey || fallbackKey;
+  return (paneManager?.panes || []).find((pane) => String(pane?.key || '') === activeKey && pane.kind === 'chat') || null;
+}
+
+function openWorkqueueForActiveChatAgent() {
+  if (roleState.role !== 'admin') return null;
+  const chatPane = getActiveChatAgentPane();
+  const agentId = normalizeAgentId(chatPane?.agentId || '');
+  if (!chatPane || !agentId) {
+    showToast('No active chat agent selected', { kind: 'error', timeoutMs: 2600 });
+    return null;
+  }
+
+  const queue = 'dev-team';
+  const existing = findExistingPane('workqueue', (pane) =>
+    normalizeAgentId(pane.agentId || 'main') === agentId &&
+    String(pane.workqueue?.queue || '').trim() === queue
+  );
+
+  const pane = existing || paneManager.addPane('workqueue', {
+    forceNew: true,
+    agentId,
+    queue,
+    scopeFilter: 'assigned'
+  });
+  if (!pane) return null;
+
+  pane.agentId = agentId;
+  pane.workqueue.scopeFilter = 'assigned';
+  paneManager.persistAdminPanes();
+  paneManager.focusPanePrimary(pane);
+  try {
+    const scopeBtn = pane.elements?.thread?.querySelector?.('[data-wq-scope="assigned"]');
+    scopeBtn?.click?.();
+  } catch {
+    renderWorkqueuePaneItems(pane);
+  }
+
+  const focusWorkqueuePane = () => {
+    try {
+      const queueSelect = pane.elements?.thread?.querySelector?.('[data-wq-queue-select]');
+      (queueSelect || pane.elements?.thread)?.focus?.();
+    } catch {}
+  };
+  setTimeout(focusWorkqueuePane, 0);
+  setTimeout(focusWorkqueuePane, 30);
+  showToast(`Workqueue scoped to ${agentId}`, { kind: 'info', timeoutMs: 1600 });
+  return pane;
 }
 
 function openAgentChatFromFleet(agentId) {
@@ -7864,6 +7926,7 @@ const paneManager = {
     const nextQueue = String(options?.queue || 'dev-team').trim() || 'dev-team';
     const nextAgentId = normalizeAgentId(options?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
     const nextCronAgentId = String(options?.cronAgentId || '').trim();
+    const nextScopeFilter = normalizeWorkqueueScope(options?.scopeFilter ?? getDefaultWorkqueueScope());
     const forceNew = Boolean(options?.forceNew);
 
     const findMatchingPane = () => {
@@ -7896,7 +7959,7 @@ const paneManager = {
         statusFilter: Array.isArray(options?.statusFilter) && options.statusFilter.length
           ? options.statusFilter
           : ['ready', 'pending', 'claimed', 'in_progress'],
-        scopeFilter: normalizeWorkqueueScope(options?.scopeFilter ?? getDefaultWorkqueueScope()),
+        scopeFilter: nextScopeFilter,
         closable: true
       });
       this.panes.push(pane);
@@ -8884,6 +8947,13 @@ window.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'l') {
     event.preventDefault();
     focusChatComposer();
+    return;
+  }
+
+  // Cmd/Ctrl+Shift+G targets the focused chat pane, so allow it from the chat input.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'g' && roleState.role === 'admin') {
+    event.preventDefault();
+    openWorkqueueForActiveChatAgent();
     return;
   }
 

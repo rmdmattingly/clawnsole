@@ -12,6 +12,21 @@ test.afterAll(() => {
   app?.stop?.();
 });
 
+async function seedChatOnlyPaneLayout(page, serverPort, { agentId = 'main' } = {}) {
+  await page.addInitScript((nextAgentId) => {
+    localStorage.setItem('clawnsole.admin.layoutMode', 'custom');
+    localStorage.setItem('clawnsole.admin.agentId', nextAgentId);
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([{ key: 'ptestchat', kind: 'chat', agentId: nextAgentId }])
+    );
+  }, agentId);
+  await page.goto(`http://127.0.0.1:${serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+}
+
 test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
@@ -394,6 +409,31 @@ test('add-pane shortcuts are scoped away from overlays and menus', async ({ page
 
   await fireAddChatShortcut();
   await expect(panes).toHaveCount(4);
+});
+
+test('ctrl/cmd+shift+g opens or focuses workqueue for active chat agent', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await seedChatOnlyPaneLayout(page, app.serverPort);
+
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(0);
+
+  await chatInput.focus();
+  await page.keyboard.press('ControlOrMeta+Shift+G');
+
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]');
+  await expect(wqPane).toHaveCount(1);
+  await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
+  await expect(wqPane.locator('[data-wq-scope="assigned"]')).toHaveClass(/active/);
+
+  await chatInput.focus();
+  await page.keyboard.press('ControlOrMeta+Shift+G');
+  await expect(wqPane).toHaveCount(1);
+  await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
 });
 
 test('fleet quick action button + keyboard shortcut focus existing timeline pane without duplicates', async ({ page }) => {
