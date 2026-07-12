@@ -109,13 +109,78 @@ test('pane manager: quick-find filters and groups by kind', async ({ page }) => 
   await expect(page.locator('.pane-manager-group-header').nth(2)).toContainText('Cron (1)');
 
   const search = page.getByTestId('pane-manager-search');
+  await expect(search).toHaveAttribute('placeholder', 'Find pane (A, Workqueue, dev-agent...)');
+
   await search.fill('cron');
   await expect(page.locator('.pane-manager-row')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row').first()).toContainText('Cron');
+  await expect(page.locator('.pane-manager-row mark.pane-manager-match').first()).toContainText(/cron/i);
 
   await search.fill('B');
   await expect(page.locator('.pane-manager-row')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row').first()).toContainText('Workqueue');
+
+  await search.fill('workqueue dev-team');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(1);
+  await expect(page.locator('.pane-manager-row').first()).toContainText('Workqueue');
+
+  await search.fill('not-a-pane');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(0);
+  await expect(page.locator('#paneManagerEmpty')).toHaveText('No panes match "not-a-pane"');
+});
+
+test('pane manager: search keyboard flow clears then closes and enter focuses result', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.locator('#paneManagerBtn').click();
+  const modal = page.locator('#paneManagerModal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await page.waitForTimeout(120);
+
+  const search = page.getByTestId('pane-manager-search');
+  await page.evaluate(() => {
+    document.body.tabIndex = -1;
+    document.body.focus();
+  });
+  await expect(search).not.toBeFocused();
+  await page.keyboard.press('Slash');
+  await expect(search).toBeFocused();
+
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+
+  await page.locator('#paneManagerBtn').click();
+  await search.fill('chat');
+  await page.keyboard.press('Escape');
+  await expect(search).toHaveValue('');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+
+  await page.locator('#paneManagerBtn').click();
+  await page.keyboard.press('Slash');
+  await expect(search).toBeFocused();
+  await search.fill('workqueue');
+  await page.keyboard.press('Control+F');
+  await expect(search).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+
+  const focusedPaneKind = await page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    const pane = panes.find((entry) => entry === active || (active && entry.contains(active)));
+    return pane?.getAttribute('data-pane-kind') || '';
+  });
+  expect(focusedPaneKind).toBe('workqueue');
 });
 
 test('pane manager: shows summary + duplicate badge and supports close others', async ({ page }) => {
