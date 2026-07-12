@@ -88,6 +88,45 @@ test('chat pane: stop button can cancel a running response', async ({ page }) =>
   await expect(pane.locator('.chat-bubble.assistant')).not.toContainText('mock-reply: please stream this', { timeout: 3000 });
 });
 
+test('chat pane: immediate Enter after pane switch is guarded once', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
+
+  const panes = page.locator('[data-pane][data-pane-kind="chat"]');
+  const firstPane = panes.first();
+  const secondPane = panes.last();
+  const firstInput = firstPane.locator('[data-pane-input]');
+  const secondInput = secondPane.locator('[data-pane-input]');
+
+  await expect(secondPane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+  await secondInput.fill('guarded send');
+
+  await firstInput.click();
+  await secondInput.click();
+  await page.keyboard.press('Enter');
+
+  await expect(secondPane.locator('[data-chat-role="user"]')).toHaveCount(0);
+  await expect(secondPane.locator('[data-pane-command-hints]')).toContainText('Pane changed: press Enter again to send');
+
+  await page.keyboard.press('Enter');
+
+  await expect(secondPane.locator('[data-chat-role="user"]').last()).toContainText('guarded send');
+  await expect(secondPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: guarded send');
+
+  await secondInput.fill('override send');
+  await firstInput.click();
+  await secondInput.click();
+  await page.keyboard.press('ControlOrMeta+Enter');
+
+  await expect(secondPane.locator('[data-chat-role="user"]').last()).toContainText('override send');
+  await expect(secondPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: override send');
+});
+
 test('chat pane: unread badge appears on inactive pane and clears on focus', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);

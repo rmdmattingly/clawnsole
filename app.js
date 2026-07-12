@@ -1881,6 +1881,37 @@ function focusedPaneKey() {
 let paneFocusMruKeys = [];
 let paneMruTraversal = null;
 let paneMruSuppressFocusEvents = false;
+const PANE_SWITCH_SEND_GUARD_MS = 750;
+
+function paneArmSwitchSendGuard(pane, previousKey) {
+  if (!pane || pane.kind !== 'chat') return;
+  const key = String(pane.key || '');
+  const prior = String(previousKey || '');
+  if (!key || !prior || prior === key) return;
+  pane.switchSendGuard = {
+    until: Date.now() + PANE_SWITCH_SEND_GUARD_MS
+  };
+}
+
+function paneShowSwitchSendGuardHint(pane) {
+  const text = 'Pane changed: press Enter again to send';
+  const hints = pane?.elements?.commandHints;
+  if (hints) {
+    hints.innerHTML = `<div class="command-hint">${escapeHtml(text)}</div>`;
+    hints.classList.add('visible');
+  }
+  showToast(text, { kind: 'info', timeoutMs: 1600 });
+}
+
+function paneShouldBlockSwitchSend(pane, event) {
+  if (!pane || pane.kind !== 'chat') return false;
+  if (event?.metaKey || event?.ctrlKey) return false;
+  const guard = pane.switchSendGuard;
+  pane.switchSendGuard = null;
+  if (!guard || Date.now() > Number(guard.until || 0)) return false;
+  paneShowSwitchSendGuardHint(pane);
+  return true;
+}
 
 function paneMruOrder() {
   const panes = paneManager?.panes || [];
@@ -1899,6 +1930,8 @@ function notePaneFocused(pane) {
   if (!key) return;
   const panes = paneManager?.panes || [];
   if (!panes.some((entry) => String(entry?.key || '') === key)) return;
+  const previousKey = paneFocusMruKeys[0] || focusedPaneKey();
+  paneArmSwitchSendGuard(pane, previousKey);
   paneMruTraversal = null;
   paneMruOrder();
   paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
@@ -7724,6 +7757,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       if (elements.sendBtn.disabled) return;
+      if (paneShouldBlockSwitchSend(pane, event)) return;
       paneSendChat(pane);
     }
   });
@@ -8715,7 +8749,9 @@ function closeTopmostOverlay() {
 function focusPaneIndex(idx, { trackMru = true, showHud = false } = {}) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
+  const previousKey = focusedPaneKey() || paneFocusMruKeys[0];
   clearPaneUnread(pane);
+  paneArmSwitchSendGuard(pane, previousKey);
   if (trackMru) notePaneFocused(pane);
   else updateBrowserTitle(pane);
   if (showHud) showPaneSwitchHud(pane);
