@@ -3081,6 +3081,7 @@ const SHORTCUT_STATUS_LABELS = {
   available: 'Available',
   'typing-focus': 'Blocked: typing-focus',
   'modal-open': 'Blocked: modal-open',
+  'insufficient-pane-count': 'Blocked: insufficient-pane-count',
   'layout-state': 'Blocked: layout-state'
 };
 
@@ -3130,11 +3131,11 @@ function getShortcutRowBlockReason(row) {
   const paneCount = panes.length;
   const chatPaneCount = panes.filter((pane) => pane.kind === 'chat').length;
   const hasUnreadPane = panes.some((pane) => paneUnreadCount(pane) > 0);
-  if (rule === 'multi-pane' && paneCount < 2) return 'layout-state';
-  if (rule === 'multi-chat-pane' && chatPaneCount < 2) return 'layout-state';
+  if (rule === 'multi-pane' && paneCount < 2) return 'insufficient-pane-count';
+  if (rule === 'multi-chat-pane' && chatPaneCount < 2) return 'insufficient-pane-count';
   if (rule === 'unread-pane' && !hasUnreadPane) return 'layout-state';
 
-  if (shortcutsModalIsOpen() && rule !== 'always') return 'modal-open';
+  if (shortcutsModalIsOpen() && rule !== 'always' && rule !== 'modal-only') return 'modal-open';
 
   return '';
 }
@@ -3149,6 +3150,8 @@ function updateShortcutsStatus() {
     const state = reason || 'available';
     chip.textContent = SHORTCUT_STATUS_LABELS[state] || SHORTCUT_STATUS_LABELS.available;
     chip.dataset.state = state;
+    row.dataset.shortcutAvailability = reason ? 'blocked' : 'available';
+    row.dataset.shortcutBlockReason = reason;
   });
 }
 
@@ -13386,12 +13389,12 @@ function isOverlayElementOpen(el) {
   return el.getAttribute?.('aria-hidden') === 'false';
 }
 
-function isAnyOverlayOpen() {
+function isAnyOverlayOpen({ ignoreShortcuts = false } = {}) {
   return !!(
     isOverlayElementOpen(globalElements.commandPaletteModal) ||
     isOverlayElementOpen(globalElements.paneManagerModal) ||
     isOverlayElementOpen(globalElements.agentsModal) ||
-    isOverlayElementOpen(globalElements.shortcutsModal) ||
+    (!ignoreShortcuts && isOverlayElementOpen(globalElements.shortcutsModal)) ||
     isOverlayElementOpen(globalElements.settingsModal) ||
     isOverlayElementOpen(globalElements.workqueueModal) ||
     isOverlayElementOpen(globalElements.loginOverlay) ||

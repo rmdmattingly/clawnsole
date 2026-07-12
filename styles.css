@@ -2741,6 +2741,7 @@ button.agents-section-title:hover {
 
 .shortcut-status[data-state^="typing"],
 .shortcut-status[data-state^="modal"],
+.shortcut-status[data-state^="insufficient"],
 .shortcut-status[data-state^="layout"] {
   border-color: rgba(255, 189, 89, 0.28);
   background: rgba(255, 189, 89, 0.11);

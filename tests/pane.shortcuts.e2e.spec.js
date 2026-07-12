@@ -195,6 +195,23 @@ test('shortcuts overlay stays in sync with registered shortcut catalog', async (
   await expect(modal).toContainText('Open Timeline for selected Fleet agent');
 });
 
+test('shortcuts overlay shows live availability and blocked reason tokens', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await seedChatOnlyPaneLayout(page, app.serverPort);
+
+  const modal = page.locator('#shortcutsModal');
+  await page.locator('#shortcutsBtn').click();
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  await expect(modal.locator('[data-shortcut-id="pane.manager"] .shortcut-status')).toHaveText('Available');
+  await expect(modal.locator('[data-shortcut-id="chat.next"]')).toHaveAttribute('data-shortcut-availability', 'blocked');
+  await expect(modal.locator('[data-shortcut-id="chat.next"] .shortcut-status')).toContainText('insufficient-pane-count');
+});
+
 test('pane-add shortcuts are scoped to workspace and blocked by overlays', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
