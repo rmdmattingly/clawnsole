@@ -53,6 +53,34 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await expect(modal).toContainText('Workqueue actions');
   await expect(modal).toContainText('disabled while typing');
   await expect(modal).toContainText('workspace only');
+  await expect(modal.locator('[data-shortcut-status]').first()).toBeVisible();
+  await expect(modal).toContainText('Available');
+  await expect(modal).toContainText('Blocked: modal-open');
+  await expect(modal).toContainText('Blocked: layout-state');
+
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+});
+
+test('shortcuts overlay: status panel shows typing-focus block reason', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const input = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+  const modal = page.locator('#shortcutsModal');
+  await input.focus();
+  await input.fill('typing');
+
+  await page.evaluate(() => window.openShortcuts?.());
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await expect(modal).toContainText('Blocked: typing-focus');
 
   await page.keyboard.press('Escape');
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
