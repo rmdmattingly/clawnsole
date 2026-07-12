@@ -192,6 +192,40 @@ const deriveGlobalConnectionState = __appCore.deriveGlobalConnectionState || ((s
     : `panes: ${connectedCount}/${total} connected`;
   return { state: nextState, meta };
 });
+const derivePaneAttentionSummary = __appCore.derivePaneAttentionSummary || ((state) => {
+  const panes = Array.isArray(state?.panes) ? state.panes : [];
+  if (!state?.authed || panes.length === 0) {
+    const total = state?.authed ? panes.length : 0;
+    return {
+      connectedCount: 0,
+      disconnectedCount: 0,
+      unreadCount: 0,
+      attentionCount: 0,
+      total,
+      text: panes.length === 0 ? '' : '0 connected · 0 disconnected · 0 attention',
+      ariaLabel: panes.length === 0
+        ? 'Pane summary: no panes'
+        : 'Pane summary: 0 of 0 panes connected, 0 disconnected, 0 need attention, 0 with unread activity'
+    };
+  }
+  const connectedCount = panes.filter((pane) => !!pane?.connected).length;
+  const disconnectedCount = panes.filter((pane) => !pane?.connected).length;
+  const unreadCount = panes.filter((pane) => Math.max(0, Number(pane?.unreadCount || 0)) > 0).length;
+  const attentionCount = panes.filter((pane) => {
+    const stateText = String(pane?.statusState || (pane?.connected ? 'connected' : 'disconnected')).toLowerCase();
+    return Math.max(0, Number(pane?.unreadCount || 0)) > 0 || !pane?.connected || stateText === 'error' || stateText === 'offline';
+  }).length;
+  const total = panes.length;
+  return {
+    connectedCount,
+    disconnectedCount,
+    unreadCount,
+    attentionCount,
+    total,
+    text: `${connectedCount} connected · ${disconnectedCount} disconnected · ${attentionCount} attention`,
+    ariaLabel: `Pane summary: ${connectedCount} of ${total} panes connected, ${disconnectedCount} disconnected, ${attentionCount} need attention, ${unreadCount} with unread activity`
+  };
+});
 const deriveDisconnectButtonState = __appCore.deriveDisconnectButtonState || ((state) => {
   if (!state?.authed) return { disabled: true, text: 'Reconnect' };
   const panes = Array.isArray(state?.panes) ? state.panes : [];
@@ -1229,8 +1263,13 @@ function setStatusPill(el, state, meta = '') {
 
 function updateGlobalStatus() {
   const status = deriveGlobalConnectionState({ authed: uiState.authed, panes: paneManager.panes });
+  const paneSummary = derivePaneAttentionSummary({ authed: uiState.authed, panes: paneManager.panes });
   setStatusPill(globalElements.status, status.state, status.meta);
-  if (globalElements.paneManagerBtn) globalElements.paneManagerBtn.textContent = status.meta;
+  if (globalElements.paneManagerBtn) {
+    globalElements.paneManagerBtn.textContent = paneSummary.text || status.meta;
+    globalElements.paneManagerBtn.title = paneSummary.ariaLabel || status.meta || 'Open pane manager';
+    globalElements.paneManagerBtn.setAttribute('aria-label', `${paneSummary.ariaLabel || status.meta || 'Pane summary'}. Open Pane Manager filtered to panes needing attention.`);
+  }
 }
 
 function updateConnectionControls() {
@@ -1733,6 +1772,7 @@ const paneManagerUiState = {
   open: false,
   selectedIndex: 0,
   query: '',
+  attentionOnly: false,
   unreadOnly: false,
   visiblePaneKeys: [],
   collapsedKinds: {
@@ -1980,6 +2020,7 @@ function clearPaneUnread(pane) {
   pane.unreadKind = '';
   renderPaneIdentity(pane);
   renderPaneActivityBadge(pane);
+  updateGlobalStatus();
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -2020,7 +2061,13 @@ function markPaneUnread(pane, increment = 1, kind = 'chat') {
   pane.unreadKind = String(kind || 'activity');
   renderPaneIdentity(pane);
   renderPaneActivityBadge(pane);
+  updateGlobalStatus();
   if (isPaneManagerOpen()) renderPaneManager();
+}
+
+function paneNeedsAttention(pane) {
+  const state = String(pane?.statusState || (pane?.connected ? 'connected' : 'disconnected')).toLowerCase();
+  return paneUnreadCount(pane) > 0 || !pane?.connected || state === 'error' || state === 'offline';
 }
 
 function paneSearchText(pane) {
@@ -2091,6 +2138,7 @@ function renderPaneManager() {
 
   const query = String(paneManagerUiState.query || '').trim().toLowerCase();
   const filtered = panes.filter((pane) => {
+    if (paneManagerUiState.attentionOnly && !paneNeedsAttention(pane)) return false;
     if (paneManagerUiState.unreadOnly && paneUnreadCount(pane) <= 0) return false;
     return !query || paneSearchText(pane).includes(query);
   });
@@ -2253,7 +2301,7 @@ function renderPaneManager() {
   });
 }
 
-function openPaneManager() {
+function openPaneManager(options = {}) {
   if (roleState.role !== 'admin') return;
   if (!uiState.authed) {
     showLogin('Please sign in to continue.');
@@ -2263,8 +2311,16 @@ function openPaneManager() {
 
   paneManagerUiState.open = true;
   paneManagerUiState.selectedIndex = 0;
-  paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
-  paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
+  paneManagerUiState.attentionOnly = !!options.attentionOnly;
+  if (paneManagerUiState.attentionOnly) {
+    paneManagerUiState.query = '';
+    paneManagerUiState.unreadOnly = false;
+    if (globalElements.paneManagerSearch) globalElements.paneManagerSearch.value = '';
+    if (globalElements.paneManagerUnreadOnly) globalElements.paneManagerUnreadOnly.checked = false;
+  } else {
+    paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
+    paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
+  }
 
   globalElements.paneManagerModal.classList.add('open');
   globalElements.paneManagerModal.setAttribute('aria-hidden', 'false');
@@ -9151,18 +9207,20 @@ globalElements.resetLayoutBtn?.addEventListener('click', () => {
 
 globalElements.paneManagerBtn?.addEventListener('click', (event) => {
   event?.preventDefault?.();
-  openPaneManager();
+  openPaneManager({ attentionOnly: true });
 });
 
 globalElements.paneManagerCloseBtn?.addEventListener('click', () => closePaneManager());
 
 globalElements.paneManagerSearch?.addEventListener('input', () => {
+  paneManagerUiState.attentionOnly = false;
   paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
   paneManagerUiState.selectedIndex = 0;
   renderPaneManager();
 });
 
 globalElements.paneManagerUnreadOnly?.addEventListener('change', () => {
+  paneManagerUiState.attentionOnly = false;
   paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
   paneManagerUiState.selectedIndex = 0;
   renderPaneManager();
