@@ -90,6 +90,8 @@ const globalElements = {
   addQueuePaneBtn: document.getElementById('addQueuePaneBtn'),
   layoutSelect: document.getElementById('layoutSelect'),
   paneGrid: document.getElementById('paneGrid'),
+  signedOutAdminState: document.getElementById('signedOutAdminState'),
+  signedOutUnlockBtn: document.getElementById('signedOutUnlockBtn'),
   paneTemplate: document.getElementById('paneTemplate')
 };
 
@@ -168,9 +170,9 @@ const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => (
   isAdmin: String(state?.role || '') === 'admin',
   startAgentAutoRefresh: String(state?.role || '') === 'admin' && !!state?.authed,
   stopAgentAutoRefresh: String(state?.role || '') !== 'admin' || !state?.authed,
-  rolePillText: String(state?.role || '') === 'admin' ? 'signed in' : (state?.role || 'signed out'),
-  rolePillAdmin: String(state?.role || '') === 'admin',
-  showAdminControls: String(state?.role || '') === 'admin',
+  rolePillText: String(state?.role || '') === 'admin' && !!state?.authed ? 'signed in' : (String(state?.role || '') && String(state?.role || '') !== 'admin' ? String(state?.role || '') : 'signed out'),
+  rolePillAdmin: String(state?.role || '') === 'admin' && !!state?.authed,
+  showAdminControls: String(state?.role || '') === 'admin' && !!state?.authed,
   logoutEnabled: !!state?.authed,
   logoutOpacity: !!state?.authed ? '1' : '0.5'
 }));
@@ -1240,12 +1242,28 @@ function updateConnectionControls() {
   globalElements.disconnectBtn.textContent = control.text;
 }
 
+function syncSignedOutAdminShell() {
+  const isAdminRoute = routeRole === 'admin';
+  const showSignedOut = isAdminRoute && !uiState.authed;
+  if (globalElements.signedOutAdminState) {
+    globalElements.signedOutAdminState.hidden = !showSignedOut;
+  }
+  if (globalElements.paneGrid) {
+    globalElements.paneGrid.hidden = showSignedOut;
+  }
+  if (globalElements.paneManagerBtn) {
+    globalElements.paneManagerBtn.hidden = showSignedOut;
+    globalElements.paneManagerBtn.disabled = showSignedOut;
+  }
+}
+
 function setAuthState(authed) {
   uiState.authed = authed;
   const authUi = deriveAuthOverlayState({ authed, role: roleState.role });
   updateGlobalStatus();
   updateConnectionControls();
   paneManager.refreshChatEnabled();
+  syncSignedOutAdminShell();
 
   if (authUi.startAgentAutoRefresh) {
     startAgentAutoRefresh();
@@ -1254,6 +1272,7 @@ function setAuthState(authed) {
   }
 
   if (globalElements.logoutBtn) {
+    globalElements.logoutBtn.hidden = !authUi.logoutEnabled;
     globalElements.logoutBtn.disabled = !authUi.logoutEnabled;
     globalElements.logoutBtn.style.opacity = authUi.logoutOpacity;
   }
@@ -1268,11 +1287,12 @@ function setRole(role) {
   }
 
   const isAdmin = authUi.isAdmin;
+  const showAdminControls = authUi.showAdminControls;
   const visibleOpacity = isAdmin ? '1' : '0.5';
 
   if (globalElements.refreshAgentsBtn) {
-    globalElements.refreshAgentsBtn.hidden = !isAdmin;
-    globalElements.refreshAgentsBtn.disabled = !isAdmin || !uiState.authed;
+    globalElements.refreshAgentsBtn.hidden = !showAdminControls;
+    globalElements.refreshAgentsBtn.disabled = !showAdminControls;
     globalElements.refreshAgentsBtn.style.opacity = visibleOpacity;
   }
 
@@ -1283,37 +1303,39 @@ function setRole(role) {
   }
 
   if (globalElements.settingsBtn) {
-    if (isAdmin) globalElements.settingsBtn.removeAttribute('disabled');
+    if (showAdminControls) globalElements.settingsBtn.removeAttribute('disabled');
     else globalElements.settingsBtn.setAttribute('disabled', 'disabled');
     globalElements.settingsBtn.style.opacity = visibleOpacity;
   }
 
   if (globalElements.paneControls) {
-    globalElements.paneControls.hidden = !isAdmin;
+    globalElements.paneControls.hidden = !showAdminControls;
   }
   if (globalElements.agentsBtn) {
-    globalElements.agentsBtn.hidden = !isAdmin;
-    globalElements.agentsBtn.disabled = !isAdmin;
+    globalElements.agentsBtn.hidden = !showAdminControls;
+    globalElements.agentsBtn.disabled = !showAdminControls;
     globalElements.agentsBtn.style.opacity = visibleOpacity;
   }
 
   if (globalElements.workqueueBtn) {
-    globalElements.workqueueBtn.hidden = !isAdmin;
-    globalElements.workqueueBtn.disabled = !isAdmin;
+    globalElements.workqueueBtn.hidden = !showAdminControls;
+    globalElements.workqueueBtn.disabled = !showAdminControls;
     globalElements.workqueueBtn.style.opacity = visibleOpacity;
   }
 
   if (globalElements.fleetBtn) {
-    globalElements.fleetBtn.hidden = !isAdmin;
-    globalElements.fleetBtn.disabled = !isAdmin;
+    globalElements.fleetBtn.hidden = !showAdminControls;
+    globalElements.fleetBtn.disabled = !showAdminControls;
     globalElements.fleetBtn.style.opacity = visibleOpacity;
   }
 
   if (globalElements.shortcutsBtn) {
-    globalElements.shortcutsBtn.hidden = !isAdmin;
-    globalElements.shortcutsBtn.disabled = !isAdmin;
+    globalElements.shortcutsBtn.hidden = !showAdminControls;
+    globalElements.shortcutsBtn.disabled = !showAdminControls;
     globalElements.shortcutsBtn.style.opacity = visibleOpacity;
   }
+
+  syncSignedOutAdminShell();
 }
 
 function showLogin(message = '') {
@@ -9183,6 +9205,7 @@ globalElements.status?.addEventListener('click', () => {
   paneManager.connectIfNeeded();
 });
 
+globalElements.signedOutUnlockBtn?.addEventListener('click', () => showLogin());
 globalElements.loginBtn?.addEventListener('click', () => attemptLogin());
 globalElements.loginPassword?.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {

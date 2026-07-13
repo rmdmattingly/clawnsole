@@ -30,6 +30,10 @@ html {
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 *:focus-visible {
   outline: 2px solid rgba(127, 209, 185, 0.85);
   outline-offset: 2px;
@@ -393,6 +397,55 @@ body::before {
   grid-template-columns: repeat(var(--pane-cols, 1), minmax(0, 1fr));
   gap: 12px;
   min-height: 0;
+}
+
+.pane-grid[hidden],
+.signed-out-admin-state[hidden] {
+  display: none;
+}
+
+.signed-out-admin-state {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 24px;
+}
+
+.signed-out-admin-panel {
+  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.signed-out-kicker {
+  color: var(--warning);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.signed-out-admin-panel h2 {
+  margin: 0;
+  font-size: clamp(28px, 5vw, 46px);
+  line-height: 1;
+}
+
+.signed-out-admin-panel p {
+  margin: 0;
+  max-width: 42rem;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.signed-out-unlock {
+  margin-top: 6px;
 }
 
 .chat-panel {

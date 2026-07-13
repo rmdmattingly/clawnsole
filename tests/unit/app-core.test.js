@@ -178,7 +178,16 @@ test('deriveAuthOverlayState captures auth/role transition flags', () => {
     logoutOpacity: '1'
   });
 
-  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).startAgentAutoRefresh, false);
+  assert.deepEqual(deriveAuthOverlayState({ authed: false, role: 'admin' }), {
+    isAdmin: true,
+    startAgentAutoRefresh: false,
+    stopAgentAutoRefresh: true,
+    rolePillText: 'signed out',
+    rolePillAdmin: false,
+    showAdminControls: false,
+    logoutEnabled: false,
+    logoutOpacity: '0.5'
+  });
   assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest' }).rolePillText, 'guest');
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '0.5');
 });

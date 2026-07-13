@@ -85,6 +85,14 @@
 
       <main class="chat-page">
         <canvas id="pulseCanvas" class="flux-canvas"></canvas>
+        <section id="signedOutAdminState" class="signed-out-admin-state" data-testid="signed-out-admin-state" hidden>
+          <div class="signed-out-admin-panel">
+            <div class="signed-out-kicker">Admin locked</div>
+            <h2>Unlock to access Chat + Workqueue + Fleet</h2>
+            <p>Sign in to load panes, agent controls, queue tools, and fleet status.</p>
+            <button id="signedOutUnlockBtn" class="primary signed-out-unlock" type="button" data-testid="signed-out-unlock">Unlock</button>
+          </div>
+        </section>
         <div id="paneGrid" class="pane-grid" aria-label="Chat panes" data-testid="pane-grid"></div>
 
         <template id="paneTemplate">
