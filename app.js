@@ -81,6 +81,7 @@ const globalElements = {
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
   loginPassword: document.getElementById('loginPassword'),
+  loginCapsHint: document.getElementById('loginCapsHint'),
   loginBtn: document.getElementById('loginBtn'),
   loginError: document.getElementById('loginError'),
   logoutBtn: document.getElementById('logoutBtn'),
@@ -1322,6 +1323,7 @@ function showLogin(message = '') {
   globalElements.loginOverlay.setAttribute('aria-hidden', 'false');
   globalElements.loginError.textContent = message;
   globalElements.loginPassword.value = '';
+  updateLoginCapsHint(false);
 
   // Guest role selection removed.
 
@@ -1347,7 +1349,22 @@ function hideLogin() {
   globalElements.loginOverlay.classList.remove('open');
   globalElements.loginOverlay.setAttribute('aria-hidden', 'true');
   globalElements.loginError.textContent = '';
+  updateLoginCapsHint(false);
   setAuthState(true);
+}
+
+function updateLoginCapsHint(visible) {
+  if (!globalElements.loginCapsHint) return;
+  globalElements.loginCapsHint.hidden = !visible;
+}
+
+function handleLoginPasswordCapsState(event) {
+  if (document.activeElement !== globalElements.loginPassword) {
+    updateLoginCapsHint(false);
+    return;
+  }
+  const getModifierState = event && typeof event.getModifierState === 'function' ? event.getModifierState.bind(event) : null;
+  updateLoginCapsHint(Boolean(getModifierState && getModifierState('CapsLock')));
 }
 
 async function attemptLogin() {
@@ -9185,11 +9202,14 @@ globalElements.status?.addEventListener('click', () => {
 
 globalElements.loginBtn?.addEventListener('click', () => attemptLogin());
 globalElements.loginPassword?.addEventListener('keydown', (event) => {
+  handleLoginPasswordCapsState(event);
   if (event.key === 'Enter') {
     event.preventDefault();
     attemptLogin();
   }
 });
+globalElements.loginPassword?.addEventListener('keyup', handleLoginPasswordCapsState);
+globalElements.loginPassword?.addEventListener('blur', () => updateLoginCapsHint(false));
 
 globalElements.logoutBtn?.addEventListener('click', async () => {
   try {
