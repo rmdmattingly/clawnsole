@@ -2853,13 +2853,14 @@ function updateBrowserTitle(pane = null) {
   document.title = paneBrowserTitle(selectedPane);
 }
 
-function paneIdentityLabel(pane, { includeUnread = false } = {}) {
+function paneIdentityLabel(pane, { includeUnread = false, includeDraft = true } = {}) {
   const letter = paneHeaderLetter(pane);
   const type = paneLabel(pane);
   const target = paneDisplayTargetLabel(pane);
   const nickname = paneNickname(pane);
   const unread = paneUnreadCount(pane);
-  return `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
+  const draft = includeDraft && paneHasDraftChanges(pane);
+  return `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}${draft ? ' • unsent draft' : ''}`;
 }
 
 function paneSummaryLabel(pane) {
@@ -3107,6 +3108,32 @@ function renderPaneActivityBadge(pane) {
   badge.textContent = count > 99 ? '99+' : String(count);
   badge.setAttribute('aria-label', countLabel);
   badge.title = countLabel;
+}
+
+function renderPaneDraftBadge(pane) {
+  const badge = pane?.elements?.draftBadge;
+  if (!badge) return;
+
+  const hasDraft = paneHasDraftChanges(pane);
+  if (!hasDraft) {
+    badge.hidden = true;
+    badge.textContent = 'Draft';
+    badge.setAttribute('aria-label', 'No unsent draft');
+    badge.title = 'No unsent draft';
+    return;
+  }
+
+  const label = `Unsent draft in this ${paneLabel(pane).toLowerCase()} pane`;
+  badge.hidden = false;
+  badge.textContent = 'Draft';
+  badge.setAttribute('aria-label', label);
+  badge.title = label;
+}
+
+function refreshPaneDraftState(pane) {
+  renderPaneIdentity(pane);
+  renderPaneDraftBadge(pane);
+  if (isPaneManagerOpen()) renderPaneManager();
 }
 
 function markPaneUnread(pane, increment = 1, kind = 'chat') {
@@ -3544,9 +3571,12 @@ function renderPaneManager() {
         const duplicateCount = duplicateCounts.get(paneDuplicateKey(pane)) || 0;
         const isDuplicate = duplicateCount > 1;
         const unreadCount = paneUnreadCount(pane);
+        const hasDraft = paneHasDraftChanges(pane);
         const paneIdentity = paneSummaryLabel(pane);
         const nickname = paneNickname(pane);
         const pairedAction = getPaneManagerPairedAction(pane);
+        const rowLabel = `${paneIdentity}${nickname ? `, nickname ${nickname}` : ''}${unreadCount > 0 ? `, ${unreadCount} unread` : ''}${hasDraft ? ', unsent draft' : ''}`;
+        row.setAttribute('aria-label', rowLabel);
 
         const lockDisabled = paneManager.isLayoutLocked();
 
@@ -3560,6 +3590,7 @@ function renderPaneManager() {
               <span class="pane-manager-pane-id" title="Internal pane id">${paneManagerHighlightHtml(String(pane?.key || ''), query)}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
               ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
+              ${hasDraft ? '<span class="pane-manager-draft-badge" data-testid="pane-manager-draft-badge" title="Unsent draft">Draft</span>' : ''}
             </div>
             <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
           </div>
@@ -7745,6 +7776,7 @@ function paneRenderAttachments(pane) {
     remove.addEventListener('click', () => {
       pane.attachments.files.splice(index, 1);
       paneRenderAttachments(pane);
+      refreshPaneDraftState(pane);
     });
     pill.append(name, remove);
     list.appendChild(pill);
@@ -7793,6 +7825,7 @@ async function paneHandleFileSelection(pane, event) {
   }
   event.target.value = '';
   paneRenderAttachments(pane);
+  refreshPaneDraftState(pane);
 }
 
 async function paneUploadAttachments(pane) {
@@ -7812,6 +7845,7 @@ async function paneUploadAttachments(pane) {
   const data = await res.json();
   pane.attachments.files = [];
   paneRenderAttachments(pane);
+  refreshPaneDraftState(pane);
   pane.elements.attachmentStatus.textContent = '';
   return Array.isArray(data.files) ? data.files : [];
 }
@@ -8116,6 +8150,7 @@ async function paneSendChat(pane) {
     paneClearChatHistory(pane, { wipeStorage: true });
     pane.elements.input.value = '';
     paneUpdateCommandHints(pane);
+    refreshPaneDraftState(pane);
     addFeed('event', 'chat', `cleared local history (${pane.sessionKey()})`);
     return;
   }
@@ -8124,6 +8159,7 @@ async function paneSendChat(pane) {
     paneClearChatHistory(pane, { wipeStorage: true });
     pane.elements.input.value = '';
     paneUpdateCommandHints(pane);
+    refreshPaneDraftState(pane);
     pane.client.request('sessions.reset', { key });
     addFeed('event', 'chat', `reset session (${key})`);
     return;
@@ -8205,6 +8241,7 @@ async function paneSendChat(pane) {
 
   pane.elements.input.value = '';
   paneUpdateCommandHints(pane);
+  refreshPaneDraftState(pane);
 }
 
 function handleGatewayFrame(pane, data) {
@@ -8415,12 +8452,13 @@ function renderPaneIdentity(pane) {
   const target = paneDisplayTargetLabel(pane);
   const nickname = paneNickname(pane);
   const unread = paneUnreadCount(pane);
-  const identity = `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}`;
+  const draft = paneHasDraftChanges(pane);
+  const identity = `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}${draft ? ' • unsent draft' : ''}`;
   pane.elements.name.title = paneIdentityLabel(pane, { includeUnread: false });
   pane.elements.name.setAttribute('aria-label', identity);
   if (pane.elements.nameToken && pane.elements.nameTarget) {
     pane.elements.nameToken.textContent = `${letter} ${type}`;
-    pane.elements.nameTarget.textContent = ` · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}`;
+    pane.elements.nameTarget.textContent = ` · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}${draft ? ' • unsent draft' : ''}`;
   } else {
     pane.elements.name.textContent = identity;
   }
@@ -8756,6 +8794,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     agentWarning: root.querySelector('[data-pane-agent-warning]'),
     agentPill: root.querySelector('[data-pane-agent-pill]'),
     status: root.querySelector('[data-pane-status]'),
+    draftBadge: root.querySelector('[data-pane-draft-badge]'),
     activityBadge: root.querySelector('[data-pane-activity-badge]'),
     helpDetails: root.querySelector('[data-pane-help]'),
     helpPopover: root.querySelector('[data-pane-help-popover]'),
@@ -10287,6 +10326,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     pane.client = buildClientForPane(pane);
     setStatusPill(elements.status, 'disconnected', '');
     renderPaneIdentity(pane);
+    renderPaneDraftBadge(pane);
     return pane;
   }
 
@@ -10328,6 +10368,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
   elements.input.addEventListener('input', () => {
     paneUpdateCommandHints(pane);
+    refreshPaneDraftState(pane);
   });
 
   elements.attachBtn.addEventListener('click', () => {
@@ -10361,6 +10402,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   pane.client = buildClientForPane(pane);
   setStatusPill(elements.status, 'disconnected', '');
   renderPaneIdentity(pane);
+  renderPaneDraftBadge(pane);
   return pane;
 }
 
