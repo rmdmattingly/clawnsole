@@ -169,18 +169,25 @@ test('normalizePaneKind handles aliases safely', () => {
 test('deriveAuthOverlayState captures auth/role transition flags', () => {
   assert.deepEqual(deriveAuthOverlayState({ authed: true, role: 'admin' }), {
     isAdmin: true,
+    isLocked: false,
     startAgentAutoRefresh: true,
     stopAgentAutoRefresh: false,
     rolePillText: 'signed in',
     rolePillAdmin: true,
+    rolePillLocked: false,
     showAdminControls: true,
+    authActionText: 'Logout',
+    authActionLabel: 'Log out',
     logoutEnabled: true,
     logoutOpacity: '1'
   });
 
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).startAgentAutoRefresh, false);
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).rolePillText, 'Locked');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).showAdminControls, false);
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).authActionText, 'Unlock');
   assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest' }).rolePillText, 'guest');
-  assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '0.5');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '1');
 });
 
 test('extractChatText converts attachment/file payloads to markdown links', () => {

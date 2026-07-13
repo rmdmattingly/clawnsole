@@ -228,6 +228,12 @@ body::before {
   color: var(--accent-2);
 }
 
+.role-pill.locked {
+  background: rgba(255, 179, 71, 0.18);
+  border-color: rgba(255, 179, 71, 0.55);
+  color: var(--accent);
+}
+
 .channel-switch select {
   background: rgba(9, 12, 16, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -358,6 +364,12 @@ body::before {
   background: rgba(255, 107, 107, 0.25);
   border-color: rgba(255, 107, 107, 0.8);
   color: var(--warning);
+}
+
+.status-pill.locked {
+  background: rgba(255, 179, 71, 0.12);
+  border-color: rgba(255, 179, 71, 0.45);
+  color: var(--accent);
 }
 
 @keyframes status-sweep {
