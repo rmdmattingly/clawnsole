@@ -77,6 +77,7 @@ const globalElements = {
   settingsBtn: document.getElementById('settingsBtn'),
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
+  labeledHeaderControls: document.getElementById('labeledHeaderControls'),
   paneSwitchHudEnabled: document.getElementById('paneSwitchHudEnabled'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
@@ -256,6 +257,7 @@ const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
 const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
+const LABELED_HEADER_CONTROLS_KEY = 'clawnsole.admin.labeledHeaderControls';
 const PANE_SWITCH_HUD_ENABLED_KEY = 'clawnsole.admin.paneSwitchHud.enabled';
 const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
@@ -1387,6 +1389,9 @@ async function attemptLogin() {
 }
 
 function openSettings() {
+  if (globalElements.labeledHeaderControls) {
+    globalElements.labeledHeaderControls.checked = isLabeledHeaderControlsEnabled();
+  }
   if (globalElements.paneSwitchHudEnabled) {
     globalElements.paneSwitchHudEnabled.checked = isPaneSwitchHudEnabled();
   }
@@ -1815,6 +1820,14 @@ function paneSummaryLabel(pane) {
 
 function isPaneSwitchHudEnabled() {
   return String(storage.get(PANE_SWITCH_HUD_ENABLED_KEY, '1') || '1') !== '0';
+}
+
+function isLabeledHeaderControlsEnabled() {
+  return String(storage.get(LABELED_HEADER_CONTROLS_KEY, '0') || '0') === '1';
+}
+
+function applyLabeledHeaderControls() {
+  document.documentElement.classList.toggle('labeled-header-controls', isLabeledHeaderControlsEnabled());
 }
 
 let paneSwitchHudHideTimer = null;
@@ -8355,9 +8368,14 @@ globalElements.settingsCloseBtn?.addEventListener('click', () => closeSettings()
 globalElements.settingsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.settingsModal) closeSettings();
 });
+globalElements.labeledHeaderControls?.addEventListener('change', () => {
+  storage.set(LABELED_HEADER_CONTROLS_KEY, globalElements.labeledHeaderControls.checked ? '1' : '0');
+  applyLabeledHeaderControls();
+});
 globalElements.paneSwitchHudEnabled?.addEventListener('change', () => {
   storage.set(PANE_SWITCH_HUD_ENABLED_KEY, globalElements.paneSwitchHudEnabled.checked ? '1' : '0');
 });
+applyLabeledHeaderControls();
 
 globalElements.shortcutsBtn?.addEventListener('click', () => openShortcuts());
 globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());

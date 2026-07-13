@@ -282,13 +282,14 @@ body::before {
 }
 
 .action-btn {
-  width: auto;
+  width: 40px;
   min-width: 40px;
   height: 40px;
-  gap: 8px;
-  padding: 0 12px;
+  gap: 0;
+  padding: 0;
   font-size: 13px;
   font-weight: 600;
+  max-width: 40px;
 }
 
 .action-btn .btn-icon {
@@ -297,18 +298,36 @@ body::before {
 }
 
 .action-btn .btn-label {
+  display: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-@media (max-width: 920px) {
-  .action-btn {
+.labeled-header-controls .action-btn {
+  width: auto;
+  max-width: 132px;
+  padding: 0 12px;
+  gap: 8px;
+}
+
+.labeled-header-controls .action-btn .btn-label {
+  display: inline;
+}
+
+@media (max-width: 1040px) {
+  .action-btn,
+  .labeled-header-controls .action-btn {
     width: 36px;
     min-width: 36px;
+    max-width: 36px;
     padding: 0;
     gap: 0;
   }
 
-  .action-btn .btn-label {
+  .action-btn .btn-label,
+  .labeled-header-controls .action-btn .btn-label {
     display: none;
   }
 }
