@@ -350,6 +350,17 @@ body::before {
   white-space: nowrap;
 }
 
+body.header-labels-off .action-btn {
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+  gap: 0;
+}
+
+body.header-labels-off .action-btn .btn-label {
+  display: none;
+}
+
 @media (max-width: 920px) {
   .action-btn {
     width: 36px;

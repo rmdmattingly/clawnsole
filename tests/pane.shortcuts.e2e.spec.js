@@ -193,6 +193,46 @@ test('shortcuts modal restores prior focus on close', async ({ page }) => {
   await expect(openBtn).toBeFocused();
 });
 
+test('labeled header controls setting persists and respects narrow viewport fallback', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+  await page.setViewportSize({ width: 1280, height: 800 });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const settingsLabel = page.locator('#settingsBtn .btn-label');
+  const shortcutsLabel = page.locator('#shortcutsBtn .btn-label');
+  await expect(settingsLabel).toBeVisible();
+  await expect(shortcutsLabel).toBeVisible();
+  await expect(page.locator('#settingsBtn')).toHaveAttribute('aria-label', 'Open settings');
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.locator('#headerLabeledControlsEnabled').uncheck();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('body')).toHaveClass(/header-labels-off/);
+  await expect(settingsLabel).toBeHidden();
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await expect(page.locator('body')).toHaveClass(/header-labels-off/);
+  await expect(settingsLabel).toBeHidden();
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.locator('#headerLabeledControlsEnabled').check();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('body')).not.toHaveClass(/header-labels-off/);
+  await expect(settingsLabel).toBeVisible();
+
+  await page.setViewportSize({ width: 760, height: 800 });
+  await expect(settingsLabel).toBeHidden();
+  await expect(page.locator('#settingsBtn')).toHaveAttribute('aria-label', 'Open settings');
+});
+
 test('keyboard settings flags risky shortcuts and updates cheatsheet after applying replacement', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);

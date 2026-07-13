@@ -82,6 +82,7 @@ const globalElements = {
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   paneSwitchHudEnabled: document.getElementById('paneSwitchHudEnabled'),
+  headerLabeledControlsEnabled: document.getElementById('headerLabeledControlsEnabled'),
   keybindConflictList: document.getElementById('keybindConflictList'),
   shortcutOverridesList: document.getElementById('shortcutOverridesList'),
   shortcutOverridesSave: document.getElementById('shortcutOverridesSave'),
@@ -301,6 +302,7 @@ const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
 const PANE_SWITCH_HUD_ENABLED_KEY = 'clawnsole.admin.paneSwitchHud.enabled';
+const HEADER_LABELED_CONTROLS_ENABLED_KEY = 'clawnsole.header.labeledControls';
 const KEYBIND_OVERRIDES_KEY = 'clawnsole.admin.keybindOverrides.v1';
 const SHORTCUT_OVERRIDES_KEY = 'clawnsole.admin.shortcutOverrides.v1';
 const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
@@ -1887,6 +1889,9 @@ function openSettings() {
   if (globalElements.paneSwitchHudEnabled) {
     globalElements.paneSwitchHudEnabled.checked = isPaneSwitchHudEnabled();
   }
+  if (globalElements.headerLabeledControlsEnabled) {
+    globalElements.headerLabeledControlsEnabled.checked = areHeaderLabeledControlsEnabled();
+  }
   renderKeyboardSettings();
   shortcutOverridesDraft = readShortcutOverrides();
   renderShortcutOverrideSettings();
@@ -2744,6 +2749,16 @@ function paneSummaryLabel(pane) {
 function isPaneSwitchHudEnabled() {
   return String(storage.get(PANE_SWITCH_HUD_ENABLED_KEY, '1') || '1') !== '0';
 }
+
+function areHeaderLabeledControlsEnabled() {
+  return String(storage.get(HEADER_LABELED_CONTROLS_ENABLED_KEY, '1') || '1') !== '0';
+}
+
+function applyHeaderLabeledControlsSetting() {
+  document.body.classList.toggle('header-labels-off', !areHeaderLabeledControlsEnabled());
+}
+
+applyHeaderLabeledControlsSetting();
 
 let paneSwitchHudHideTimer = null;
 
@@ -10864,6 +10879,10 @@ globalElements.settingsModal?.addEventListener('click', (event) => {
 });
 globalElements.paneSwitchHudEnabled?.addEventListener('change', () => {
   storage.set(PANE_SWITCH_HUD_ENABLED_KEY, globalElements.paneSwitchHudEnabled.checked ? '1' : '0');
+});
+globalElements.headerLabeledControlsEnabled?.addEventListener('change', () => {
+  storage.set(HEADER_LABELED_CONTROLS_ENABLED_KEY, globalElements.headerLabeledControlsEnabled.checked ? '1' : '0');
+  applyHeaderLabeledControlsSetting();
 });
 function handleShortcutOverrideInputKeydown(event) {
   const input = event.target?.closest?.('[data-shortcut-action]');

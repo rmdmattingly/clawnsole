@@ -91,8 +91,9 @@
             <span class="btn-icon" aria-hidden="true">WQ</span>
             <span class="btn-label">Workqueue</span>
           </button>
-          <button id="shortcutsBtn" class="icon-btn" type="button" aria-label="Open keyboard shortcuts" title="Keyboard shortcuts (?)" hidden data-testid="shortcuts-btn">
-            ?
+          <button id="shortcutsBtn" class="icon-btn action-btn" type="button" aria-label="Open keyboard shortcuts" title="Keyboard shortcuts (?)" hidden data-testid="shortcuts-btn">
+            <span class="btn-icon" aria-hidden="true">?</span>
+            <span class="btn-label">Shortcuts</span>
           </button>
           <button id="settingsBtn" class="icon-btn action-btn" type="button" aria-label="Open settings" title="Settings">
             <span class="btn-icon" aria-hidden="true">⚙︎</span>
@@ -508,6 +509,14 @@
             <label class="inline-checkbox">
               <input id="paneSwitchHudEnabled" type="checkbox" checked />
               Show pane-switch HUD
+            </label>
+          </section>
+
+          <section class="settings-section" aria-label="Header controls">
+            <h3>Header controls</h3>
+            <label class="inline-checkbox">
+              <input id="headerLabeledControlsEnabled" type="checkbox" checked />
+              Labeled header controls
             </label>
           </section>
 
