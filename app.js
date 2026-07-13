@@ -54,6 +54,13 @@ const globalElements = {
   shortcutsDialog: document.getElementById('shortcutsDialog'),
   shortcutsContent: document.getElementById('shortcutsContent'),
   shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
+  shortcutsUnlockedCopy: document.querySelector('[data-shortcuts-unlocked-copy]'),
+  shortcutsLockedCopy: document.querySelector('[data-shortcuts-locked-copy]'),
+  shortcutsGlobalUnlockedTitle: document.querySelector('[data-shortcuts-global-unlocked]'),
+  shortcutsGlobalLockedTitle: document.querySelector('[data-shortcuts-global-locked]'),
+  shortcutsLockedRow: document.querySelector('[data-shortcuts-locked-row]'),
+  shortcutsLockedLabels: Array.from(document.querySelectorAll('[data-shortcuts-locked-label]')),
+  shortcutsAdminGroups: Array.from(document.querySelectorAll('[data-shortcuts-admin-group]')),
   paneManagerModal: document.getElementById('paneManagerModal'),
   paneManagerCloseBtn: document.getElementById('paneManagerCloseBtn'),
   paneManagerSearch: document.getElementById('paneManagerSearch'),
@@ -466,6 +473,7 @@ function shortcutStatusRule(entry) {
 function renderShortcutsContent() {
   const root = globalElements.shortcutsContent;
   if (!root) return;
+  const locked = isAdminLocked();
   const groups = [];
   for (const entry of KEYBIND_CATALOG) {
     let group = groups.find((g) => g.name === entry.group);
@@ -475,20 +483,25 @@ function renderShortcutsContent() {
     }
     group.entries.push(entry);
   }
-  const hint = `
+  const hint = locked ? `
+    <div class="hint" style="margin-bottom: 10px;">
+      Admin is locked. These shortcuts are limited to sign-in and help until you unlock.
+    </div>
+  ` : `
     <div class="hint" style="margin-bottom: 10px;">
       Most shortcuts are disabled while typing in inputs, textareas, selects, or contenteditable fields. Global keys like <kbd>Esc</kbd>, <kbd>${escapeHtml(shortcutDisplay('pane.manager'))}</kbd>, and <kbd>${escapeHtml(shortcutDisplay('command.palette'))}</kbd> still work.
     </div>
   `;
   const html = groups.map((group) => `
-    <div class="shortcut-group">
-      <h3 class="shortcut-group-title">${escapeHtml(group.name)}</h3>
+    <div class="shortcut-group${locked && group.name !== 'Global' ? ' shortcut-group-locked' : ''}">
+      <h3 class="shortcut-group-title">${locked && group.name === 'Global' ? 'Available now' : escapeHtml(group.name)}${locked && group.name !== 'Global' ? ' <span class="shortcut-locked-label">Available after unlock</span>' : ''}</h3>
       ${group.entries.map((entry) => `
-        <div class="shortcut-row" data-shortcut-id="${escapeHtml(entry.id)}" data-shortcut-rule="${escapeHtml(shortcutStatusRule(entry))}">
+        <div class="shortcut-row${locked && group.name !== 'Global' ? ' shortcut-row-locked' : ''}" data-shortcut-id="${escapeHtml(entry.id)}" data-shortcut-rule="${escapeHtml(shortcutStatusRule(entry))}">
           <div class="shortcut-keys"${keybindIdToShortcutActionId(entry.id) ? ` data-shortcut-help="${escapeHtml(keybindIdToShortcutActionId(entry.id))}"` : ''}>${renderShortcutKeys(shortcutDisplay(entry.id))}</div>
           <div class="shortcut-desc">${escapeHtml(entry.label)}${isKeybindCustomized(entry.id) ? ' <span class="shortcut-custom">custom</span>' : ''}</div>
         </div>
       `).join('')}
+      ${locked && group.name === 'Global' ? '<div class="shortcut-row"><div class="shortcut-keys"><kbd>Enter</kbd></div><div class="shortcut-desc">Unlock after entering the admin password</div></div>' : ''}
     </div>
   `).join('');
   root.innerHTML = hint + html;
@@ -1855,8 +1868,11 @@ function showLogin(message = '') {
   closeAuthSessionPopover();
   globalElements.settingsBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
-  globalElements.shortcutsBtn?.setAttribute('disabled', 'disabled');
-  if (globalElements.shortcutsBtn) globalElements.shortcutsBtn.style.opacity = '0.5';
+  if (globalElements.shortcutsBtn && roleState.role === 'admin') {
+    globalElements.shortcutsBtn.hidden = false;
+    globalElements.shortcutsBtn.removeAttribute('disabled');
+    globalElements.shortcutsBtn.style.opacity = '1';
+  }
   globalElements.fleetBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.fleetBtn) globalElements.fleetBtn.style.opacity = '0.5';
 
@@ -2633,6 +2649,19 @@ const SHORTCUT_STATUS_LABELS = {
   'layout-state': 'Blocked: layout-state'
 };
 
+function isAdminLocked() {
+  return !uiState.authed && (
+    roleState.role === 'admin' ||
+    globalElements.loginOverlay?.classList?.contains('open') ||
+    globalElements.loginOverlay?.getAttribute?.('aria-hidden') === 'false'
+  );
+}
+
+function syncShortcutsLockedState() {
+  const locked = isAdminLocked();
+  globalElements.shortcutsModal?.classList.toggle('locked-state', locked);
+}
+
 function getModalFocusableElements(modalEl) {
   if (!modalEl || !modalEl.querySelectorAll) return [];
   return Array.from(modalEl.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
@@ -2704,11 +2733,13 @@ function openShortcuts() {
   if (!modal) return;
   if (modal.classList.contains('open')) {
     renderShortcutsContent();
+    syncShortcutsLockedState();
     updatePaneShortcutBadges();
     updateShortcutsStatus();
     return;
   }
   renderShortcutsContent();
+  syncShortcutsLockedState();
   shortcutsLastFocusedEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   modal.classList.add('open');
   modal.setAttribute('aria-hidden', 'false');
@@ -11573,6 +11604,9 @@ function isNonTrivialGlobalShortcut(event) {
 
 function blockedGlobalShortcutReason(event) {
   if (!isNonTrivialGlobalShortcut(event)) return '';
+  const key = String(event.key || '');
+  const isQuestion = (key === '?' || (key === '/' && event.shiftKey)) && !event.metaKey && !event.ctrlKey && !event.altKey;
+  if (isQuestion && isAdminLocked()) return '';
   if (isAnyOverlayOpen()) return 'modal';
   if (isTypingContext(event.target) && !isTypingShortcutExempt(event)) return 'typing';
   if (hasPaneNumberLayoutMismatch(event)) return 'layout';
@@ -11976,11 +12010,18 @@ window.addEventListener('keydown', (event) => {
     }
   }
 
+  const key = String(event.key || '');
+
+  const isQuestion = key === '?' || (key === '/' && event.shiftKey);
+  if (isAdminLocked() && isQuestion && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault();
+    openShortcuts();
+    return;
+  }
+
   // Never steal focus / override browser shortcuts while typing.
   if (isTypingContext(event.target)) return;
   if (isAnyOverlayOpen()) return;
-
-  const key = String(event.key || '');
 
   // Ctrl+Tab walks panes in most-recently-used order; Shift reverses the traversal.
   if (matchesKeybind(event, 'pane.mruNext') || matchesKeybind(event, 'pane.mruPrev')) {
@@ -11990,7 +12031,6 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  const isQuestion = key === '?' || (key === '/' && event.shiftKey);
   if (isQuestion && !event.metaKey && !event.ctrlKey && !event.altKey) {
     event.preventDefault();
     openShortcuts();

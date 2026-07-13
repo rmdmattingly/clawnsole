@@ -1191,7 +1191,7 @@ button.send-btn .btn-icon {
 .login-overlay.open {
   opacity: 1;
   visibility: visible;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .login-card {
@@ -1205,6 +1205,7 @@ button.send-btn .btn-icon {
   flex-direction: column;
   gap: 12px;
   opacity: 0;
+  pointer-events: auto;
   transform: translateY(10px) scale(0.985);
   transition: transform 0.22s ease, opacity 0.22s ease;
 }
@@ -2374,6 +2375,19 @@ button.agents-section-title:hover {
   opacity: 0.95;
 }
 
+.shortcut-locked-label {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .shortcut-row {
   display: grid;
   grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) max-content;
@@ -2434,6 +2448,10 @@ button.agents-section-title:hover {
   color: #bae6fd;
   font-size: 0.72rem;
   vertical-align: middle;
+}
+
+.shortcut-row-locked kbd {
+  opacity: 0.55;
 }
 
 kbd {
