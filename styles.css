@@ -2227,6 +2227,13 @@ button.agents-section-title:hover {
   outline-offset: 2px;
 }
 
+.agents-row[aria-selected="true"],
+.agents-row:focus-visible {
+  border-color: rgba(109, 201, 255, 0.72);
+  box-shadow: 0 0 0 2px rgba(109, 201, 255, 0.18);
+  outline: none;
+}
+
 .agents-row-heatmap {
   border-left-width: 4px;
 }

@@ -490,7 +490,7 @@ const KEYBIND_CATALOG = [
   { id: 'workqueue.focusQueueSearch', group: 'Workqueue actions', label: 'Focus Workqueue queue search', binding: { alt: true, key: 'q', display: 'Alt/Option+Q' } },
   { id: 'workqueue.focusItemSearch', group: 'Workqueue actions', label: 'Focus Workqueue item search', binding: { alt: true, key: 'f', display: 'Alt/Option+F' } },
   { id: 'workqueue.focusStatusFilter', group: 'Workqueue actions', label: 'Focus Workqueue status filter', binding: { alt: true, key: 's', display: 'Alt/Option+S' } },
-  { id: 'fleet.open', group: 'Fleet actions', label: 'Open/focus Fleet pane', binding: { accel: true, shift: true, key: 'f', display: 'Cmd/Ctrl+Shift+F' } },
+  { id: 'fleet.open', group: 'Fleet actions', label: 'Focus Fleet: first needs attention', binding: { accel: true, shift: true, key: 'f', display: 'Cmd/Ctrl+Shift+F' } },
   { id: 'fleet.sortHeartbeatGlobal', group: 'Fleet actions', label: 'Open Fleet sorted by heartbeat age', binding: { accel: true, shift: true, key: 'h', display: 'Cmd/Ctrl+Shift+H' } },
   { id: 'fleet.next', group: 'Fleet actions', label: 'Move Fleet selection down', binding: { key: 'j', display: 'J / Down' } },
   { id: 'fleet.prev', group: 'Fleet actions', label: 'Move Fleet selection up', binding: { key: 'k', display: 'K / Up' } },
@@ -2400,9 +2400,9 @@ const SHORTCUT_OVERRIDE_ACTIONS = [
   },
   {
     id: 'fleet-open',
-    label: 'Open fleet/agents',
+    label: 'Focus Fleet: first needs attention',
     defaultCombo: { accel: true, shift: true, alt: false, key: 'f' },
-    run: () => openFleetPane()
+    run: () => focusFleetFirstNeedsAttention()
   }
 ];
 const SHORTCUT_OVERRIDE_ACTION_BY_ID = new Map(SHORTCUT_OVERRIDE_ACTIONS.map((action) => [action.id, action]));
@@ -4555,10 +4555,10 @@ function buildCommandPaletteItems() {
     withShortcut(
       {
         id: 'cmd:open-fleet',
-        label: 'Open Fleet: all nodes',
-        detail: 'Focus existing Fleet pane or open one',
+        label: 'Focus Fleet: first needs attention',
+        detail: 'Focus Fleet and select the first agent needing attention',
         paneMeta: commandPalettePaneMeta({ type: 'Fleet', target: 'all nodes', mode: 'create or focus' }),
-        run: () => openFleetPane()
+        run: () => focusFleetFirstNeedsAttention()
       },
       '⌘/Ctrl+Shift+F'
     ),
@@ -5243,6 +5243,41 @@ function openFleetPane({ forceNew = false } = {}) {
   return pane;
 }
 
+function focusFleetFirstNeedsAttention() {
+  if (roleState.role !== 'admin') return false;
+
+  openFleetPane();
+  storage.set(ADMIN_AGENT_FILTER_KEY, 'all');
+  storage.set(ADMIN_AGENT_SORT_KEY, 'heartbeat_age_desc');
+  if (globalElements.agentsSearch) globalElements.agentsSearch.value = '';
+  if (globalElements.agentsSort) globalElements.agentsSort.value = 'heartbeat_age_desc';
+
+  if (!globalElements.agentsModal?.classList?.contains('open')) openAgentsModal();
+  else renderAgentsModalList();
+
+  const rows = getFleetSelectableRows();
+  const attentionRow = rows.find((row) => String(row.dataset.needsAttention || '') === 'true') || null;
+  const targetRow = attentionRow || rows[0] || null;
+  if (!targetRow) return false;
+
+  const targetId = String(targetRow.dataset.agentId || '');
+  const selectTarget = () => {
+    if (!selectFleetAgent(targetId, { focusRow: true })) return;
+    try {
+      targetRow.scrollIntoView({ block: 'nearest' });
+    } catch {}
+  };
+  selectTarget();
+  setTimeout(selectTarget, 0);
+  if (!attentionRow) {
+    fleetSelectionState.notice = 'No attention-needed agents right now.';
+    renderFleetSelectionBar();
+    if (globalElements.agentsSortIndicator) globalElements.agentsSortIndicator.textContent = fleetSelectionState.notice;
+    showToast('No attention-needed agents right now.', { kind: 'info', timeoutMs: 1800 });
+  }
+  return true;
+}
+
 function openAgentWorkqueueFromFleet(agentId) {
   const target = normalizeAgentId(agentId || 'main');
   captureTriageReturnAnchor(target, { action: 'open-workqueue' });
@@ -5691,6 +5726,7 @@ function renderAgentsModalList() {
         : '';
       row.dataset.heartbeatBucket = triage.ageBucket;
       row.dataset.healthState = triage.bucket;
+      row.dataset.needsAttention = triage.bucket === 'active' ? 'false' : 'true';
       row.classList.toggle('is-stale', triage.bucket === 'stale' || heartbeatAgeMs > FLEET_DEFAULT_STALE_THRESHOLD_MINUTES * 60_000);
       if (snoozed) row.dataset.snoozed = 'true';
       row.classList.toggle('agents-row-heatmap', heatmapEnabled);
@@ -5902,6 +5938,55 @@ function runFleetSelectedAgent(mode = 'chat') {
   else if (mode === 'timeline') openAgentTimelineFromFleet(id);
   else openAgentChatFromFleet(id);
   return true;
+}
+
+function handleFleetModalShortcutKeydown(event) {
+  if (event.defaultPrevented || roleState.role !== 'admin' || !isAgentsModalOpen()) return false;
+  const targetInsideModal = !!(event.target instanceof Node && globalElements.agentsModal?.contains(event.target));
+  if (targetInsideModal && isTypingContext(event.target)) return false;
+  if (targetInsideModal && event.target instanceof Element && event.target.closest('button, a, input, select, textarea, summary')) return false;
+
+  const key = String(event.key || '');
+  const lower = key.toLowerCase();
+  if (matchesKeybind(event, 'triage.return')) {
+    event.preventDefault();
+    returnToTriageSource();
+    return true;
+  }
+  if (!event.metaKey && !event.ctrlKey && !event.altKey) {
+    if (key === 'ArrowDown' || lower === 'j') {
+      event.preventDefault();
+      moveFleetSelection(1);
+      return true;
+    }
+    if (key === 'ArrowUp' || lower === 'k') {
+      event.preventDefault();
+      moveFleetSelection(-1);
+      return true;
+    }
+    if (lower === 'y') {
+      event.preventDefault();
+      copyFleetAgentId();
+      return true;
+    }
+    if (key === 'Enter') {
+      event.preventDefault();
+      runFleetSelectedAgent(event.shiftKey ? 'workqueue' : 'chat');
+      return true;
+    }
+    if (key === '.') {
+      event.preventDefault();
+      runFleetSelectedAgent('timeline');
+      return true;
+    }
+  }
+  if (lower === 'h' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault();
+    if (event.shiftKey || getFleetSort() !== 'heartbeat_age_desc') setFleetHeartbeatSort();
+    else resetFleetSort();
+    return true;
+  }
+  return false;
 }
 
 // Workqueue (admin-only)
@@ -13146,6 +13231,7 @@ window.addEventListener('keydown', (event) => {
   // If Pane Manager is open, it gets first dibs on keys.
   if (paneManagerHandleKeydown(event)) return;
   if (event.defaultPrevented) return;
+  if (handleFleetModalShortcutKeydown(event)) return;
 
   if (matchesKeybind(event, 'triage.return') && roleState.role === 'admin' && isAgentsModalOpen()) {
     event.preventDefault();
@@ -13367,10 +13453,10 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Cmd/Ctrl+Shift+F opens/focuses Fleet pane.
+  // Cmd/Ctrl+Shift+F opens/focuses Fleet and jumps to the first attention row.
   if (matchesKeybind(event, 'fleet.open')) {
     event.preventDefault();
-    openFleetPane();
+    focusFleetFirstNeedsAttention();
     return;
   }
 
