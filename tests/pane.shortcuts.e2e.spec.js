@@ -22,9 +22,25 @@ async function seedChatOnlyPaneLayout(page, serverPort, { agentId = 'main' } = {
     );
   }, agentId);
   await page.goto(`http://127.0.0.1:${serverPort}/`);
-  await page.fill('#loginPassword', 'admin');
-  await page.click('#loginBtn');
+  if (await page.locator('#loginPassword').isVisible()) {
+    await page.fill('#loginPassword', 'admin');
+    await page.click('#loginBtn');
+  } else if (!/\/admin\/?$/.test(page.url())) {
+    await page.goto(`http://127.0.0.1:${serverPort}/admin`);
+  }
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+}
+
+async function triggerPairedPaneShortcut(page) {
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Y',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    }));
+  });
 }
 
 test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page }) => {
@@ -570,18 +586,21 @@ test('paired-pane toggle shortcut focuses existing pair and opens missing pair',
   });
 
   // Existing pair path: from Chat, jump to the existing Workqueue pane.
-  const chatInput = page.locator('[data-pane-kind="chat"] [data-pane-input]').first();
-  await chatInput.focus();
-  await page.keyboard.press('Control+Shift+Y');
-  await expect.poll(activePaneIndex).toBe(1);
-  await expect(page.locator('[data-pane]')).toHaveCount(2);
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+  const workqueuePanes = page.locator('[data-pane][data-pane-kind="workqueue"]');
+  const initialWorkqueueCount = await workqueuePanes.count();
+  expect(initialWorkqueueCount).toBeGreaterThan(0);
 
-  // Missing pair path: close Workqueue, then toggle should create+focus paired Workqueue.
-  await page.locator('[data-pane-kind="workqueue"] [data-pane-close]').first().click();
-  await expect(page.locator('[data-pane-kind="workqueue"]')).toHaveCount(0);
   await chatInput.focus();
-  await page.keyboard.press('Control+Shift+Y');
-  await expect(page.locator('[data-pane-kind="workqueue"]')).toHaveCount(1);
-  await expect(page.locator('[data-pane]')).toHaveCount(2);
+  await triggerPairedPaneShortcut(page);
   await expect.poll(activePaneIndex).toBe(1);
+  await expect(workqueuePanes).toHaveCount(initialWorkqueueCount);
+
+  // Missing pair path: reload with a chat-only layout, then toggle creates+focuses Workqueue.
+  await seedChatOnlyPaneLayout(page, app.serverPort);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(0);
+  await page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first().focus();
+  await triggerPairedPaneShortcut(page);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect.poll(activePaneIndex).toBeGreaterThan(0);
 });

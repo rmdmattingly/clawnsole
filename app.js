@@ -624,6 +624,10 @@ function showToast(
   });
 }
 
+function toast(message, kind = 'info') {
+  showToast(message, { kind, timeoutMs: 2600 });
+}
+
 let agentRefreshTimer = null;
 let agentRefreshInFlight = null;
 let agentAutoRefreshInterval = null;
@@ -3201,12 +3205,17 @@ function togglePairedPane() {
 
   if (activePane.kind === 'chat') {
     const target = normalizeAgentId(activePane.agentId || 'main');
-    const existing = findExistingPane('workqueue', (p) => normalizeAgentId(p.agentId || 'main') === target);
+    const exact = findExistingPane('workqueue', (p) =>
+      normalizeAgentId(p.agentId || 'main') === target ||
+      normalizeAgentId(p.workqueue?.queue || '') === target
+    );
+    const workqueuePanes = paneManager.panes.filter((p) => p?.role === 'admin' && p.kind === 'workqueue');
+    const existing = exact || (workqueuePanes.length === 1 ? workqueuePanes[0] : null);
     if (existing) {
       paneManager.focusPanePrimary(existing);
       return;
     }
-    const created = paneManager.addPane('workqueue', { agentId: target, scopeFilter: 'assigned' });
+    const created = paneManager.addPane('workqueue', { agentId: target, queue: target, scopeFilter: 'assigned' });
     if (!created) {
       toast('Unable to open paired Workqueue pane.', 'info');
       return;
@@ -3215,7 +3224,7 @@ function togglePairedPane() {
   }
 
   if (activePane.kind === 'workqueue') {
-    const target = normalizeAgentId(activePane.agentId || 'main');
+    const target = normalizeAgentId(activePane.agentId || activePane.workqueue?.queue || 'main');
     const existing = findExistingPane('chat', (p) => normalizeAgentId(p.agentId || 'main') === target);
     if (existing) {
       paneManager.focusPanePrimary(existing);
