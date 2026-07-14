@@ -115,6 +115,8 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   return `${sec}s`;
 });
 const formatWorkqueueIssueTitle = __appCore.formatWorkqueueIssueTitle || ((item) => String(item?.title || ''));
+const summarizeWorkqueueIssueDuplicateDensity = __appCore.summarizeWorkqueueIssueDuplicateDensity || (() => ({ density: 0, duplicateRows: 0, duplicateGroups: 0, totalRows: 0 }));
+const latestWorkqueueItemsPerCanonicalIssue = __appCore.latestWorkqueueItemsPerCanonicalIssue || ((items) => (Array.isArray(items) ? items.slice() : []));
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
   const n = Number(count);
@@ -3427,6 +3429,7 @@ function renderAgentsModalList() {
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
 const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
 const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
+const WORKQUEUE_CANONICAL_DENSITY_THRESHOLD = 0.2;
 const WORKQUEUE_HEADER_META = {
   title: { label: 'Task', tooltip: 'Sort by task title.' },
   status: { label: 'Status', tooltip: 'Sort by queue status.' },
@@ -4328,6 +4331,31 @@ async function cleanWorkqueueDuplicatesForPane(pane) {
   await fetchAndRenderWorkqueueItemsForPane(pane);
 }
 
+function getWorkqueuePaneViewMode(pane, items) {
+  const selected = String(pane.workqueue?.viewMode || 'auto').toLowerCase();
+  if (selected === 'grouped') return { mode: 'grouped', summary: summarizeWorkqueueIssueDuplicateDensity(items) };
+  if (selected === 'raw') return { mode: 'raw', summary: summarizeWorkqueueIssueDuplicateDensity(items) };
+
+  const summary = summarizeWorkqueueIssueDuplicateDensity(items);
+  return {
+    mode: summary.density >= WORKQUEUE_CANONICAL_DENSITY_THRESHOLD ? 'grouped' : 'raw',
+    summary
+  };
+}
+
+function updateWorkqueuePaneViewSummary(pane, summary, mode) {
+  const el = pane?.elements?.thread?.querySelector?.('[data-wq-view-summary]');
+  if (!el) return;
+  if (!summary?.duplicateRows) {
+    el.textContent = '';
+    return;
+  }
+  const pct = Math.round(Number(summary.density || 0) * 100);
+  el.textContent = mode === 'grouped'
+    ? `Grouped ${summary.duplicateRows} duplicate row${summary.duplicateRows === 1 ? '' : 's'} across ${summary.duplicateGroups} issue${summary.duplicateGroups === 1 ? '' : 's'} (${pct}%).`
+    : `${summary.duplicateRows} duplicate row${summary.duplicateRows === 1 ? '' : 's'} across ${summary.duplicateGroups} issue${summary.duplicateGroups === 1 ? '' : 's'} (${pct}%).`;
+}
+
 function renderWorkqueuePaneItems(pane) {
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
   const empty = pane.elements?.thread?.querySelector('[data-wq-empty]');
@@ -4337,7 +4365,10 @@ function renderWorkqueuePaneItems(pane) {
 
   const scopedItems = filterWorkqueuePaneItemsByScope(pane, pane.workqueue?.items);
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
-  const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const sortedItems = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const { mode: viewMode, summary: viewSummary } = getWorkqueuePaneViewMode(pane, sortedItems);
+  const items = viewMode === 'grouped' ? latestWorkqueueItemsPerCanonicalIssue(sortedItems) : sortedItems;
+  updateWorkqueuePaneViewSummary(pane, viewSummary, viewMode);
   const renderLimit = Math.max(
     WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
     Number(pane.workqueue?.renderLimit || WORKQUEUE_PANE_INITIAL_RENDER_LIMIT)
@@ -4388,11 +4419,12 @@ function renderWorkqueuePaneItems(pane) {
     const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
     const status = String(it.status || '');
     const title = formatWorkqueueIssueTitle(it);
+    const groupSize = Number(it._canonicalGroupSize || 0);
     row.title = title;
     row.setAttribute('aria-label', `Workqueue item: ${title}`);
 
     row.innerHTML = `
-      <div class="wq-col title"><span class="wq-title-text" title="${escapeHtml(title)}">${escapeHtml(title)}</span></div>
+      <div class="wq-col title"><span class="wq-title-text" title="${escapeHtml(title)}">${escapeHtml(title)}</span>${groupSize > 1 ? `<span class="wq-group-count" title="Latest row shown; ${escapeHtml(String(groupSize - 1))} older duplicate row${groupSize === 2 ? '' : 's'} hidden">×${escapeHtml(String(groupSize))}</span>` : ''}</div>
       <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
       <div class="wq-col prio mono">${escapeHtml(String(it.priority ?? ''))}</div>
       <div class="wq-col attempts mono">${escapeHtml(String(it.attempts ?? ''))}</div>
@@ -6311,7 +6343,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, viewMode, cronAgentId, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -6370,7 +6402,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       selectedItemId: null,
       renderLimit: WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
-      sortDir: sortDir === 'asc' ? 'asc' : 'desc'
+      sortDir: sortDir === 'asc' ? 'asc' : 'desc',
+      viewMode: ['auto', 'grouped', 'raw'].includes(String(viewMode || '').toLowerCase()) ? String(viewMode).toLowerCase() : 'auto'
     },
     cronAgentId: typeof cronAgentId === 'string' ? cronAgentId.trim() : '',
     connected: false,
@@ -6597,6 +6630,15 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <button type="button" class="wq-sort-btn" data-wq-sort="updatedAt">Updated</button>
             <button type="button" class="wq-sort-btn" data-wq-sort="createdAt">Created</button>
           </div>
+
+          <label class="wq-field">
+            <span class="wq-label">View</span>
+            <select data-wq-view-mode aria-label="Workqueue row grouping view">
+              <option value="auto">Auto</option>
+              <option value="grouped">Grouped (latest)</option>
+              <option value="raw">Raw rows</option>
+            </select>
+          </label>
         </div>
 
         <details class="wq-enqueue">
@@ -6644,6 +6686,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         </details>
 
         <div class="hint" data-wq-statusline></div>
+        <div class="hint" data-wq-view-summary></div>
         <div class="wq-duplicate-health" data-wq-duplicate-health aria-live="polite" hidden></div>
       </div>
 
@@ -6694,8 +6737,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
     const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
+    const viewModeEl = elements.thread.querySelector('[data-wq-view-mode]');
 
     const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
+    if (viewModeEl) viewModeEl.value = pane.workqueue.viewMode || 'auto';
 
     const statusSet = new Set(
       (Array.isArray(pane.workqueue?.statusFilter) && pane.workqueue.statusFilter.length ? pane.workqueue.statusFilter : DEFAULT_STATUSES)
@@ -7018,6 +7063,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       persistQuickFilters();
       updateQuickFilterUi();
       renderWorkqueuePaneItems(pane);
+    });
+
+    viewModeEl?.addEventListener('change', () => {
+      const mode = String(viewModeEl.value || 'auto').toLowerCase();
+      pane.workqueue.viewMode = ['auto', 'grouped', 'raw'].includes(mode) ? mode : 'auto';
+      resetRenderLimit();
+      renderWorkqueuePaneItems(pane);
+      paneManager.persistAdminPanes();
     });
 
     updateQuickFilterUi();
@@ -7796,6 +7849,7 @@ const paneManager = {
         scopeFilter: cfg.scopeFilter,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
+        viewMode: cfg.viewMode,
         closable: true
       })
     );
@@ -7846,7 +7900,10 @@ const paneManager = {
           };
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
-          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir };
+          const viewMode = ['auto', 'grouped', 'raw'].includes(String(item.viewMode || '').toLowerCase())
+            ? String(item.viewMode).toLowerCase()
+            : 'auto';
+          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, sortKey, sortDir, viewMode };
         }
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
@@ -7893,7 +7950,8 @@ const paneManager = {
             repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos : []
           },
           sortKey: pane.workqueue?.sortKey || 'priority',
-          sortDir: pane.workqueue?.sortDir || 'desc'
+          sortDir: pane.workqueue?.sortDir || 'desc',
+          viewMode: pane.workqueue?.viewMode || 'auto'
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
