@@ -1831,6 +1831,17 @@ kbd {
   margin-bottom: 12px;
 }
 
+.wq-control-group {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.wq-control-group-viewing {
+  border-color: rgba(var(--pane-accent-workqueue-rgb), 0.28);
+}
+
 .wq-actions {
   display: flex;
   flex-direction: column;
@@ -1862,6 +1873,10 @@ kbd {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.wq-action-help {
   margin-bottom: 10px;
 }
 
@@ -2135,6 +2150,10 @@ kbd {
   cursor: pointer;
   user-select: none;
   color: var(--text);
+}
+
+.wq-enqueue-help {
+  margin-top: 8px;
 }
 
 .wq-enqueue-form {

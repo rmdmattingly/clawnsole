@@ -162,6 +162,36 @@ test('workqueue pane: queue target supports search + recent persistence', async 
   await expect(secondSelect.locator('option', { hasText: '★ qa-hotfix' })).toHaveCount(1);
 });
 
+test('workqueue pane: enqueue destination is distinct from worker assignment', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  seedAgentsForWorkqueuePicker();
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const queue = `enqueue-destination-${Date.now()}`;
+  const pane = page.locator('[data-pane]').last();
+  await expect(pane.locator('.wq-control-group-viewing')).toContainText('Viewing queue');
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await pane.locator('details.wq-enqueue summary').click();
+  await expect(pane.locator('.wq-enqueue-help')).toContainText('Enqueue to queue uses the current Viewing queue');
+  await expect(pane.locator('[data-wq-enqueue-submit]')).toHaveText('Enqueue to queue');
+  await expect(pane.locator('[data-wq-claim-agent-search]')).toHaveAttribute('aria-label', 'Search worker assignment target');
+
+  await pane.locator('[data-wq-enqueue-title]').fill('destination clarity item');
+  await pane.locator('[data-wq-enqueue-instructions]').fill('verify destination copy');
+  await pane.locator('[data-wq-enqueue-submit]').click();
+
+  await expect(pane.locator('[data-wq-enqueue-status]')).toContainText(`Enqueued to ${queue}`);
+  await expect(page.getByTestId('workqueue-enqueue-toast')).toContainText(`Enqueued to ${queue}`);
+});
+
 test('workqueue pane: enqueue assignment target supports search, keyboard select, and recents', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);

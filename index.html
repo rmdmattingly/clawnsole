@@ -309,10 +309,13 @@
         </div>
         <div class="modal-body">
           <div class="wq-toolbar">
-            <label class="wq-field">
-              Queue
-              <select id="wqQueueSelect" aria-label="Select workqueue"></select>
-            </label>
+            <div class="wq-control-group wq-control-group-viewing" role="group" aria-labelledby="wqViewingQueueLabel">
+              <label class="wq-field">
+                <span id="wqViewingQueueLabel" class="wq-label">Viewing queue</span>
+                <select id="wqQueueSelect" aria-label="Viewing queue" title="Choose which queue to view and enqueue new items into"></select>
+                <span class="hint">Filters the items shown below.</span>
+              </label>
+            </div>
             <div class="wq-field">
               Status
               <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters"></div>
@@ -335,7 +338,8 @@
           <div class="wq-actions" aria-label="Workqueue actions">
             <div class="wq-actions-row">
               <div class="wq-action-card">
-                <div class="wq-action-title">Enqueue</div>
+                <div class="wq-action-title">Enqueue to selected queue</div>
+                <div class="hint wq-action-help">New items are submitted to the current Viewing queue.</div>
                 <div class="wq-action-grid">
                   <label class="wq-action-field">
                     Title
@@ -355,7 +359,7 @@
                   </label>
                 </div>
                 <div class="wq-action-buttons">
-                  <button id="wqEnqueueBtn" class="primary" type="button">Enqueue</button>
+                  <button id="wqEnqueueBtn" class="primary" type="button" title="Submit this item to the current Viewing queue">Enqueue to queue</button>
                 </div>
               </div>
 
