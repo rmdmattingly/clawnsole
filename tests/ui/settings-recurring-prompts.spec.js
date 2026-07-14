@@ -43,3 +43,27 @@ test('settings: recurring prompt history error state is shown when runs API fail
   await page.locator('#recurringPromptRows [data-rp-action="edit"]').first().click();
   await expect(page.locator('#recurringPromptHistoryEmpty')).toContainText('Failed to load run history.');
 });
+
+test('settings: labeled header controls toggle persists with narrow-width fallback', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  const workqueueLabel = page.locator('#workqueueBtn .btn-label');
+  await expect(workqueueLabel).toBeHidden();
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByLabel('Labeled header controls').check();
+  await expect(page.locator('#topbar')).toHaveClass(/labeled-header-controls/);
+  await expect(workqueueLabel).toBeVisible();
+  await expect(page.locator('#shortcutsBtn .btn-label')).toHaveText('Shortcuts');
+
+  await page.reload();
+  await expect(page.locator('#topbar')).toHaveClass(/labeled-header-controls/);
+  await expect(workqueueLabel).toBeVisible();
+
+  await page.setViewportSize({ width: 800, height: 800 });
+  await expect(workqueueLabel).toBeHidden();
+  await expect(page.locator('#workqueueBtn')).toHaveAttribute('aria-label', 'Open workqueue');
+});

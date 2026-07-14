@@ -153,6 +153,7 @@ body::before {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .agent-switch {
@@ -203,12 +204,6 @@ body::before {
   font-size: 18px;
   min-height: 0;
   padding: 0;
-}
-
-.pane-controls .action-btn {
-  width: auto;
-  min-width: 36px;
-  padding: 0 12px;
 }
 
 .role-pill {
@@ -282,33 +277,47 @@ body::before {
 }
 
 .action-btn {
-  width: auto;
   min-width: 40px;
   height: 40px;
-  gap: 8px;
-  padding: 0 12px;
   font-size: 13px;
   font-weight: 600;
 }
 
-.action-btn .btn-icon {
+.topbar-action-btn .btn-icon {
   font-size: 14px;
   line-height: 1;
 }
 
-.action-btn .btn-label {
+.topbar-action-btn .btn-label {
+  display: none;
   white-space: nowrap;
 }
 
+.topbar.labeled-header-controls .topbar-action-btn {
+  width: auto;
+  max-width: 150px;
+  min-width: 40px;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.topbar.labeled-header-controls .topbar-action-btn .btn-label {
+  display: inline-block;
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 @media (max-width: 920px) {
-  .action-btn {
+  .topbar.labeled-header-controls .topbar-action-btn {
     width: 36px;
+    max-width: 36px;
     min-width: 36px;
     padding: 0;
     gap: 0;
   }
 
-  .action-btn .btn-label {
+  .topbar.labeled-header-controls .topbar-action-btn .btn-label {
     display: none;
   }
 }

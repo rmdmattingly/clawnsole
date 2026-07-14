@@ -19,6 +19,7 @@ const globalElements = {
   recurringPromptHistoryRows: document.getElementById('recurringPromptHistoryRows'),
   recurringPromptHistoryEmpty: document.getElementById('recurringPromptHistoryEmpty'),
   status: document.getElementById('connectionStatus'),
+  topbar: document.getElementById('topbar'),
   paneManagerBtn: document.getElementById('paneManagerBtn'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
@@ -78,6 +79,7 @@ const globalElements = {
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   paneSwitchHudEnabled: document.getElementById('paneSwitchHudEnabled'),
+  labeledHeaderControlsEnabled: document.getElementById('labeledHeaderControlsEnabled'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
   loginPassword: document.getElementById('loginPassword'),
@@ -257,6 +259,7 @@ const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
 const PANE_SWITCH_HUD_ENABLED_KEY = 'clawnsole.admin.paneSwitchHud.enabled';
+const LABELED_HEADER_CONTROLS_ENABLED_KEY = 'clawnsole.admin.labeledHeaderControls.enabled';
 const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
 const WQ_RECENT_ENQUEUE_AGENTS_KEY = 'clawnsole.wq.recentEnqueueAgents';
@@ -1390,6 +1393,9 @@ function openSettings() {
   if (globalElements.paneSwitchHudEnabled) {
     globalElements.paneSwitchHudEnabled.checked = isPaneSwitchHudEnabled();
   }
+  if (globalElements.labeledHeaderControlsEnabled) {
+    globalElements.labeledHeaderControlsEnabled.checked = isLabeledHeaderControlsEnabled();
+  }
   globalElements.settingsModal.classList.add('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'false');
 
@@ -1815,6 +1821,14 @@ function paneSummaryLabel(pane) {
 
 function isPaneSwitchHudEnabled() {
   return String(storage.get(PANE_SWITCH_HUD_ENABLED_KEY, '1') || '1') !== '0';
+}
+
+function isLabeledHeaderControlsEnabled() {
+  return String(storage.get(LABELED_HEADER_CONTROLS_ENABLED_KEY, '0') || '0') === '1';
+}
+
+function applyLabeledHeaderControls(enabled = isLabeledHeaderControlsEnabled()) {
+  globalElements.topbar?.classList.toggle('labeled-header-controls', !!enabled);
 }
 
 let paneSwitchHudHideTimer = null;
@@ -8358,6 +8372,11 @@ globalElements.settingsModal?.addEventListener('click', (event) => {
 globalElements.paneSwitchHudEnabled?.addEventListener('change', () => {
   storage.set(PANE_SWITCH_HUD_ENABLED_KEY, globalElements.paneSwitchHudEnabled.checked ? '1' : '0');
 });
+globalElements.labeledHeaderControlsEnabled?.addEventListener('change', () => {
+  const enabled = !!globalElements.labeledHeaderControlsEnabled.checked;
+  storage.set(LABELED_HEADER_CONTROLS_ENABLED_KEY, enabled ? '1' : '0');
+  applyLabeledHeaderControls(enabled);
+});
 
 globalElements.shortcutsBtn?.addEventListener('click', () => openShortcuts());
 globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
@@ -9217,6 +9236,8 @@ globalElements.addQueuePaneBtn?.addEventListener('click', (event) => {
 });
 
 // layoutSelect deprecated; layout is inferred from pane count.
+
+applyLabeledHeaderControls();
 
 window.addEventListener('online', () => {
   paneManager.connectIfNeeded();
