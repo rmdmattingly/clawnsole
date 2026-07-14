@@ -65,13 +65,37 @@ test('agents modal renders pinned agents in a dedicated top section after reload
 test('agents modal shows live refresh freshness indicators', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
+  let requestCount = 0;
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    requestCount += 1;
+    await route.fulfill({
+      json: {
+        agents: [
+          { id: 'fresh-agent', name: 'fresh-agent', displayName: 'Fresh Agent' },
+          { id: 'stale-agent', name: 'stale-agent', displayName: 'Stale Agent' }
+        ]
+      }
+    });
+  });
   await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      'fresh-agent': Date.now(),
+      'stale-agent': Date.now() - 65_000
+    }));
+  });
 
   await page.getByRole('button', { name: 'Open agents' }).click();
   await expect(page.locator('#agentsModal')).toHaveClass(/open/);
 
-  await expect(page.locator('#agentsLastRefreshed')).toContainText('Last refreshed:');
-  await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText(/\d+[smhd]/);
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Last updated:');
+  const staleRow = page.locator('#agentsList .agents-row').filter({ hasText: 'Stale Agent' });
+  await expect(staleRow).toHaveAttribute('data-freshness', 'stale');
+  await expect(staleRow.locator('.agents-stale-badge')).toHaveText('Stale');
+
+  await page.locator('#agentsSearch').blur();
+  await page.keyboard.press('r');
+  await expect.poll(() => requestCount).toBeGreaterThan(1);
 });
 
 test('agents modal defers auto-refresh while a fleet row is active, then catches up once', async ({ page, clawnsole }) => {
