@@ -59,6 +59,7 @@ const globalElements = {
   workqueueCloseBtn: document.getElementById('workqueueCloseBtn'),
   wqQueueSelect: document.getElementById('wqQueueSelect'),
   wqStatusFilters: document.getElementById('wqStatusFilters'),
+  wqFilterSummary: document.getElementById('wqFilterSummary'),
   wqAutoRefreshEnabled: document.getElementById('wqAutoRefreshEnabled'),
   wqAutoRefreshInterval: document.getElementById('wqAutoRefreshInterval'),
   wqRefreshBtn: document.getElementById('wqRefreshBtn'),
@@ -3465,6 +3466,7 @@ const workqueueState = {
   statusFilter: new Set(['ready', 'pending', 'claimed', 'in_progress']),
   statusCounts: Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0])),
   items: [],
+  totalItemsCount: 0,
   selectedItemId: null,
   sortKey: 'default',
   sortDir: 'desc',
@@ -3510,6 +3512,94 @@ function renderWorkqueueStatusFilters() {
     });
     root.appendChild(label);
   }
+}
+
+function getWorkqueueActiveStatusLabels() {
+  return WORKQUEUE_STATUSES
+    .filter((status) => workqueueState.statusFilter.has(status))
+    .map((status) => formatWorkqueueStatusLabel(status));
+}
+
+function isWorkqueueStatusFilterActive() {
+  if (workqueueState.statusFilter.size !== WORKQUEUE_STATUSES.length) return true;
+  return WORKQUEUE_STATUSES.some((status) => !workqueueState.statusFilter.has(status));
+}
+
+function resetWorkqueueStatusFilter() {
+  workqueueState.statusFilter = new Set(WORKQUEUE_STATUSES);
+}
+
+function renderWorkqueueFilterSummary({ filteredCount = 0, totalCount = 0 } = {}) {
+  const root = globalElements.wqFilterSummary;
+  if (!root) return;
+
+  const queue = String(workqueueState.selectedQueue || '').trim();
+  const hasStatusFilter = isWorkqueueStatusFilterActive();
+  const hasQueueFilter = Boolean(queue);
+  const hasAnyFilter = hasQueueFilter || hasStatusFilter;
+  const pluralCount = hasAnyFilter ? totalCount : filteredCount;
+  const plural = pluralCount === 1 ? 'item' : 'items';
+  const countText = hasAnyFilter
+    ? `Showing ${filteredCount} of ${totalCount} ${plural}`
+    : `Showing ${filteredCount} ${plural}`;
+
+  root.innerHTML = '';
+  root.hidden = false;
+
+  const count = document.createElement('div');
+  count.className = 'wq-filter-count';
+  count.setAttribute('data-wq-filter-count', '');
+  count.textContent = countText;
+  root.appendChild(count);
+
+  if (!hasAnyFilter) return;
+
+  const chips = document.createElement('div');
+  chips.className = 'wq-filter-chips';
+  chips.setAttribute('aria-label', 'Active workqueue filters');
+
+  const addChip = ({ label, onRemove }) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'wq-filter-chip';
+    chip.textContent = label;
+    chip.setAttribute('aria-label', `Clear ${label}`);
+    chip.addEventListener('click', onRemove);
+    chips.appendChild(chip);
+  };
+
+  if (hasQueueFilter) {
+    addChip({
+      label: `Queue: ${queue}`,
+      onRemove: () => {
+        workqueueState.selectedQueue = '';
+        if (globalElements.wqQueueSelect) globalElements.wqQueueSelect.value = '';
+        fetchAndRenderWorkqueueItems();
+      }
+    });
+  }
+
+  if (hasStatusFilter) {
+    const labels = getWorkqueueActiveStatusLabels();
+    addChip({
+      label: `Statuses: ${labels.length ? labels.join(', ') : 'None'}`,
+      onRemove: () => {
+        resetWorkqueueStatusFilter();
+        fetchAndRenderWorkqueueItems();
+      }
+    });
+  }
+
+  const clearAll = document.createElement('button');
+  clearAll.type = 'button';
+  clearAll.className = 'wq-filter-clear';
+  clearAll.textContent = 'Clear all filters';
+  clearAll.addEventListener('click', () => {
+    resetWorkqueueStatusFilter();
+    fetchAndRenderWorkqueueItems();
+  });
+  chips.appendChild(clearAll);
+  root.appendChild(chips);
 }
 
 function ensureWorkqueueModalSorting() {
@@ -3647,6 +3737,7 @@ async function fetchAndRenderWorkqueueItems() {
     }
 
     workqueueState.items = items;
+    workqueueState.totalItemsCount = countItems.length;
     workqueueState.statusCounts = buildWorkqueueStatusCounts(countItems);
     renderWorkqueueStatusFilters();
     renderWorkqueueItems();
@@ -3713,6 +3804,7 @@ function renderWorkqueueItems() {
 
   const itemsRaw = Array.isArray(workqueueState.items) ? workqueueState.items : [];
   const items = sortWorkqueueItems(itemsRaw, { sortKey: workqueueState.sortKey, sortDir: workqueueState.sortDir });
+  renderWorkqueueFilterSummary({ filteredCount: itemsRaw.length, totalCount: Number(workqueueState.totalItemsCount || itemsRaw.length) });
 
   if (!items.length) {
     globalElements.wqListEmpty.hidden = false;
