@@ -79,6 +79,8 @@ const globalElements = {
   workqueueModal: document.getElementById('workqueueModal'),
   workqueueCloseBtn: document.getElementById('workqueueCloseBtn'),
   wqQueueSelect: document.getElementById('wqQueueSelect'),
+  wqItemSearch: document.getElementById('wqItemSearch'),
+  wqFilterSummary: document.getElementById('wqFilterSummary'),
   wqStatusFilters: document.getElementById('wqStatusFilters'),
   wqShowArchivedBtn: document.getElementById('wqShowArchivedBtn'),
   wqArchivedHint: document.getElementById('wqArchivedHint'),
@@ -5974,6 +5976,9 @@ const workqueueState = {
   statusFilter: new Set(WORKQUEUE_ACTIVE_STATUSES),
   statusCounts: Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0])),
   items: [],
+  itemSearchQuery: '',
+  filteredItemCount: 0,
+  countScopeItemCount: 0,
   selectedItemId: null,
   groupMode: 'rows',
   sortKey: 'default',
@@ -6044,6 +6049,115 @@ async function toggleWorkqueueModalArchived() {
   }
   renderWorkqueueStatusFilters();
   await fetchAndRenderWorkqueueItems();
+}
+
+function isDefaultWorkqueueStatusFilter() {
+  if (workqueueState.statusFilter.size !== WORKQUEUE_ACTIVE_STATUSES.length) return false;
+  return WORKQUEUE_ACTIVE_STATUSES.every((status) => workqueueState.statusFilter.has(status));
+}
+
+function setWorkqueueStatuses(statuses) {
+  const next = Array.isArray(statuses) && statuses.length ? statuses : WORKQUEUE_ACTIVE_STATUSES;
+  workqueueState.statusFilter = new Set(next.filter((status) => WORKQUEUE_STATUSES.includes(status)));
+  if (!workqueueState.statusFilter.size) workqueueState.statusFilter = new Set(WORKQUEUE_ACTIVE_STATUSES);
+  renderWorkqueueStatusFilters();
+}
+
+function workqueueItemSearchText(item) {
+  const parts = [
+    item?.id,
+    item?.queue,
+    item?.title,
+    item?.instructions,
+    item?.status,
+    item?.claimedBy,
+    item?.lastNote
+  ];
+  if (item?.meta && typeof item.meta === 'object') {
+    try {
+      parts.push(JSON.stringify(item.meta));
+    } catch {}
+  }
+  return parts.map((v) => String(v ?? '').toLowerCase()).join('\n');
+}
+
+function filterWorkqueueItemsBySearch(items, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return Array.isArray(items) ? items : [];
+  return (Array.isArray(items) ? items : []).filter((item) => workqueueItemSearchText(item).includes(q));
+}
+
+function renderWorkqueueFilterSummary(displayedCount) {
+  const root = globalElements.wqFilterSummary;
+  if (!root) return;
+
+  const queue = String(workqueueState.selectedQueue || '').trim();
+  const search = String(workqueueState.itemSearchQuery || '').trim();
+  const activeStatuses = Array.from(workqueueState.statusFilter).filter((status) => WORKQUEUE_STATUSES.includes(status));
+  const chips = [];
+
+  if (queue) chips.push({ key: 'queue', label: `Queue: ${queue}`, removable: false });
+  if (!isDefaultWorkqueueStatusFilter()) {
+    chips.push({
+      key: 'statuses',
+      label: `Status: ${activeStatuses.length ? activeStatuses.map(formatWorkqueueStatusLabel).join(', ') : 'none'}`,
+      removable: true
+    });
+  }
+  if (search) chips.push({ key: 'search', label: `Search: ${search}`, removable: true });
+
+  const hasActiveFilters = chips.length > 0;
+  root.hidden = !hasActiveFilters;
+  root.innerHTML = '';
+  if (!hasActiveFilters) return;
+
+  const total = Number.isFinite(workqueueState.countScopeItemCount)
+    ? workqueueState.countScopeItemCount
+    : workqueueState.filteredItemCount;
+  const shown = Number.isFinite(displayedCount) ? displayedCount : workqueueState.filteredItemCount;
+  const count = document.createElement('div');
+  count.className = 'wq-filter-count';
+  count.dataset.testid = 'wq-modal-filter-count';
+  count.textContent = `Showing ${shown} of ${total} items`;
+  root.appendChild(count);
+
+  const chipWrap = document.createElement('div');
+  chipWrap.className = 'wq-filter-chips';
+  for (const chip of chips) {
+    const el = document.createElement(chip.removable ? 'button' : 'span');
+    el.className = `wq-filter-chip${chip.removable ? ' removable' : ''}`;
+    el.dataset.testid = `wq-modal-filter-chip-${chip.key}`;
+    el.textContent = chip.label;
+    if (chip.removable) {
+      el.type = 'button';
+      el.setAttribute('aria-label', `Clear ${chip.key} filter`);
+      el.addEventListener('click', () => {
+        if (chip.key === 'statuses') {
+          setWorkqueueStatuses(WORKQUEUE_ACTIVE_STATUSES);
+          fetchAndRenderWorkqueueItems();
+        } else if (chip.key === 'search') {
+          workqueueState.itemSearchQuery = '';
+          if (globalElements.wqItemSearch) globalElements.wqItemSearch.value = '';
+          renderWorkqueueItems();
+        }
+      });
+    }
+    chipWrap.appendChild(el);
+  }
+  root.appendChild(chipWrap);
+
+  const clearAll = document.createElement('button');
+  clearAll.type = 'button';
+  clearAll.className = 'wq-clear-filters';
+  clearAll.dataset.testid = 'wq-modal-clear-filters';
+  clearAll.textContent = 'Clear filters';
+  clearAll.addEventListener('click', () => {
+    setWorkqueueStatuses(WORKQUEUE_ACTIVE_STATUSES);
+    workqueueState.itemSearchQuery = '';
+    if (globalElements.wqItemSearch) globalElements.wqItemSearch.value = '';
+    fetchAndRenderWorkqueueItems();
+  });
+  root.appendChild(clearAll);
 }
 
 function ensureWorkqueueModalSorting() {
@@ -6181,6 +6295,8 @@ async function fetchAndRenderWorkqueueItems() {
     }
 
     workqueueState.items = items;
+    workqueueState.filteredItemCount = items.length;
+    workqueueState.countScopeItemCount = Array.isArray(countItems) ? countItems.length : items.length;
     workqueueState.statusCounts = buildWorkqueueStatusCounts(countItems);
     renderWorkqueueStatusFilters();
     renderWorkqueueItems();
@@ -6247,10 +6363,14 @@ function renderWorkqueueItems() {
   if (header) header.style.display = 'none';
 
   const itemsRaw = Array.isArray(workqueueState.items) ? workqueueState.items : [];
-  const items = sortWorkqueueItems(itemsRaw, { sortKey: workqueueState.sortKey, sortDir: workqueueState.sortDir });
+  const searchedItems = filterWorkqueueItemsBySearch(itemsRaw, workqueueState.itemSearchQuery);
+  const items = sortWorkqueueItems(searchedItems, { sortKey: workqueueState.sortKey, sortDir: workqueueState.sortDir });
+  renderWorkqueueFilterSummary(items.length);
 
   if (!items.length) {
     globalElements.wqListEmpty.hidden = false;
+    const query = String(workqueueState.itemSearchQuery || '').trim();
+    globalElements.wqListEmpty.textContent = query ? `No items match "${query}".` : 'No items match.';
   } else {
     globalElements.wqListEmpty.hidden = true;
   }
@@ -12641,6 +12761,11 @@ globalElements.workqueueModal?.addEventListener('click', (event) => {
 globalElements.wqQueueSelect?.addEventListener('change', () => {
   workqueueState.selectedQueue = globalElements.wqQueueSelect.value;
   fetchAndRenderWorkqueueItems();
+});
+
+globalElements.wqItemSearch?.addEventListener('input', () => {
+  workqueueState.itemSearchQuery = String(globalElements.wqItemSearch.value || '');
+  renderWorkqueueItems();
 });
 
 globalElements.wqAutoRefreshEnabled?.addEventListener('change', () => {

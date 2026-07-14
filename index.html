@@ -339,6 +339,10 @@
               Queue
               <select id="wqQueueSelect" aria-label="Select workqueue"></select>
             </label>
+            <label class="wq-field wq-item-search-field">
+              Items
+              <input id="wqItemSearch" type="search" placeholder="Search items..." aria-label="Search workqueue items" data-testid="wq-modal-item-search" />
+            </label>
             <div class="wq-field">
               Status
               <div class="wq-status-actions">
@@ -411,6 +415,7 @@
 
           <div class="wq-layout">
             <div class="wq-list" aria-label="Workqueue items">
+              <div id="wqFilterSummary" class="wq-filter-summary" data-testid="wq-modal-filter-summary" hidden></div>
               <div class="wq-list-header" role="group" aria-label="Sort workqueue items">
                 <button type="button" class="wq-list-sort" data-wq-modal-sort="title">Task</button>
                 <button type="button" class="wq-list-sort" data-wq-modal-sort="status">Status</button>
