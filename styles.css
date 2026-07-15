@@ -2878,6 +2878,7 @@ kbd {
 .wq-pane .wq-field,
 .wq-pane .wq-scope,
 .wq-pane .wq-sort,
+.wq-pane .wq-control-group,
 .wq-pane .wq-toolbar-row > button {
   flex: 0 0 auto;
 }
@@ -2886,7 +2887,7 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.035);
@@ -2898,12 +2899,8 @@ kbd {
   background: transparent;
 }
 
-.wq-pane .wq-viewing-group .hint {
-  display: none;
-}
-
 .wq-viewing-group {
-  border-color: rgba(127, 209, 185, 0.2);
+  min-width: 240px;
 }
 
 .wq-enqueue-destination {
@@ -2920,6 +2917,16 @@ kbd {
   background: rgba(0, 0, 0, 0.24);
   border: 1px solid rgba(255, 255, 255, 0.1);
   font-size: 13px;
+}
+
+.wq-enqueue-target-group {
+  border-color: rgba(127, 209, 185, 0.28);
+  background: rgba(127, 209, 185, 0.055);
+}
+
+.wq-control-hint {
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .wq-duplicate-health {

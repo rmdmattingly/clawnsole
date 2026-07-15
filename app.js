@@ -9749,9 +9749,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <label class="wq-field">
               <span class="wq-label">Viewing queue</span>
               <input data-wq-queue-search type="search" placeholder="Filter queue list..." aria-label="Search queues to view" title="Filters the queue picker for this pane." autocomplete="off" />
-              <select data-wq-queue-select aria-label="Viewing queue" title="Changes which queue this pane is showing. New items use this queue unless you change it before submitting."></select>
+              <select data-wq-queue-select aria-label="Viewing queue" title="Changes which queue this pane is showing; enqueue destination stays separate."></select>
               <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" aria-label="Custom viewing queue" hidden />
-              <span class="hint">Items shown in this pane</span>
+              <span class="hint wq-control-hint">Filters and rows below use this queue.</span>
             </label>
           </div>
 
@@ -9853,6 +9853,15 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
               <span class="wq-label">Instructions</span>
               <textarea data-wq-enqueue-instructions rows="3" placeholder="Links, context, acceptance criteria"></textarea>
             </label>
+
+            <div class="wq-control-group wq-enqueue-target-group wq-field-wide" role="group" aria-label="Enqueue destination controls">
+              <label class="wq-field">
+                <span class="wq-label">Enqueue to</span>
+                <input data-wq-enqueue-target-search type="search" placeholder="Search destination queues" aria-label="Filter enqueue destination queues" title="Filters destination choices only; it does not change the queue being viewed." autocomplete="off" />
+                <select data-wq-enqueue-target-select size="5" aria-label="Enqueue destination queue" title="New items are created in this destination queue."></select>
+              </label>
+              <span class="hint wq-control-hint">New items go here; the viewed queue stays separate.</span>
+            </div>
 
             <div class="wq-enqueue-actions">
               <label class="wq-field wq-agent-picker-field">
@@ -9962,7 +9971,21 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       if (!enqueueDestination) return;
       const q = getQueueValue() || pane.workqueue.queue || 'dev-team';
       enqueueDestination.textContent = String(q);
-      enqueueDestination.title = `New items will be enqueued to ${q}`;
+      enqueueDestination.title = `Default destination queue: ${q}`;
+    };
+
+    const getKnownQueueValues = () => {
+      const values = [];
+      const current = String(getQueueValue() || pane.workqueue.queue || 'dev-team').trim();
+      if (current) values.push(current);
+      if (queueSelectEl) {
+        for (const opt of Array.from(queueSelectEl.options || [])) {
+          const value = String(opt.value || '').trim();
+          if (!value || value === '__custom__') continue;
+          values.push(value);
+        }
+      }
+      return Array.from(new Set(values));
     };
 
     const initQuick = pane.workqueue?.quickFilters || {};
@@ -10262,12 +10285,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         if (isCustom) queueCustomEl.focus();
       }
       updateEnqueueDestination();
-      doRefresh();
+      doRefresh().then(() => renderEnqueueTargetSelect());
     });
     queueSelectEl?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        doRefresh();
+        doRefresh().then(() => renderEnqueueTargetSelect());
       }
     });
 
@@ -10283,16 +10306,19 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       }
       if (e.key === 'Enter') {
         e.preventDefault();
-        doRefresh();
+        doRefresh().then(() => renderEnqueueTargetSelect());
       }
     });
     renderStatusMultiSelect();
-    populateQueueSelect().then(() => doRefresh());
+    populateQueueSelect().then(() => {
+      renderEnqueueTargetSelect();
+      doRefresh();
+    });
 
     refreshBtn?.addEventListener('click', () => doRefresh());
     queueCustomEl?.addEventListener('input', () => updateEnqueueDestination());
     queueCustomEl?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') doRefresh();
+      if (e.key === 'Enter') doRefresh().then(() => renderEnqueueTargetSelect());
     });
 
     if (statusRootEl) {
@@ -10492,15 +10518,77 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const enqueuePriority = elements.thread.querySelector('[data-wq-enqueue-priority]');
     const enqueueDedupe = elements.thread.querySelector('[data-wq-enqueue-dedupe]');
     const enqueueAssignTo = elements.thread.querySelector('[data-wq-claim-agent]');
+    const enqueueTargetSearch = elements.thread.querySelector('[data-wq-enqueue-target-search]');
+    const enqueueTargetSelect = elements.thread.querySelector('[data-wq-enqueue-target-select]');
 
     const setEnqueueStatus = (text) => {
       if (!enqueueStatus) return;
       enqueueStatus.textContent = String(text || '');
     };
 
+    function renderEnqueueTargetSelect() {
+      if (!enqueueTargetSelect) return;
+      const previous = String(enqueueTargetSelect.value || '').trim();
+      const viewingQueue = String(getQueueValue() || pane.workqueue.queue || 'dev-team').trim();
+      const query = String(enqueueTargetSearch?.value || '').trim().toLowerCase();
+      const queues = getKnownQueueValues();
+      const filtered = query ? queues.filter((q) => q.toLowerCase().includes(query)) : queues;
+      if (query && !filtered.some((q) => q.toLowerCase() === query)) {
+        filtered.unshift(String(enqueueTargetSearch?.value || '').trim());
+      }
+      const recents = readRecentWorkqueueTargets().filter((q) => filtered.includes(q));
+
+      enqueueTargetSelect.innerHTML = '';
+      const appendOption = (parent, value, label = value) => {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = label;
+        parent.appendChild(opt);
+      };
+
+      if (recents.length) {
+        const group = document.createElement('optgroup');
+        group.label = 'Recent';
+        for (const q of recents) appendOption(group, q);
+        enqueueTargetSelect.appendChild(group);
+      }
+
+      const all = document.createElement('optgroup');
+      all.label = recents.length ? 'All queues' : 'Queues';
+      for (const q of filtered) {
+        if (recents.includes(q)) continue;
+        appendOption(all, q);
+      }
+      enqueueTargetSelect.appendChild(all);
+
+      const preferred = [previous, viewingQueue, filtered[0]].find((q) => q && filtered.includes(q));
+      if (preferred) enqueueTargetSelect.value = preferred;
+      else if (enqueueTargetSelect.options.length) enqueueTargetSelect.selectedIndex = 0;
+    }
+
+    enqueueTargetSearch?.addEventListener('input', () => renderEnqueueTargetSelect());
+    enqueueTargetSearch?.addEventListener('keydown', (event) => {
+      if (!enqueueTargetSelect) return;
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        enqueueTargetSelect.selectedIndex = Math.min(enqueueTargetSelect.options.length - 1, Math.max(0, enqueueTargetSelect.selectedIndex + 1));
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        enqueueTargetSelect.selectedIndex = Math.max(0, enqueueTargetSelect.selectedIndex - 1);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (enqueueTargetSelect.value) setEnqueueStatus(`Enqueue destination: ${enqueueTargetSelect.value}`);
+      }
+    });
+
+    enqueueTargetSelect?.addEventListener('change', () => {
+      if (enqueueTargetSelect.value) setEnqueueStatus(`Enqueue destination: ${enqueueTargetSelect.value}`);
+    });
+    renderEnqueueTargetSelect();
+
     enqueueForm?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const queue = (getQueueValue() || pane.workqueue.queue || '').trim();
+      const queue = String(enqueueTargetSelect?.value || getQueueValue() || pane.workqueue.queue || '').trim();
       const title = (enqueueTitle?.value || '').trim();
       const instructions = (enqueueInstructions?.value || '').trim();
       const priority = Number(enqueuePriority?.value || 0) || 0;
@@ -10536,8 +10624,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         const assignLabel = assignToAgentId
           ? `Queued for ${formatAgentLabel(getAgentRecord(assignToAgentId), { includeId: false })}`
           : 'Queued as Unassigned';
-        setEnqueueStatus(item && item._deduped ? `Deduped: ${item.id} (${assignLabel})` : assignLabel);
-        showToast(`Enqueued to ${queue}`, { kind: 'info', timeoutMs: 2400 });
+        const actionLabel = item && item._deduped ? 'Deduped' : 'Enqueued';
+        const idLabel = String(item?.id || '');
+        const viewingQueue = String(getQueueValue() || pane.workqueue.queue || '').trim();
+        const viewNote = viewingQueue && viewingQueue !== queue ? ` Viewing ${viewingQueue}.` : '';
+        setEnqueueStatus(`${actionLabel} to ${queue}: ${idLabel} (${assignLabel})${viewNote}`);
+        showToast(`${actionLabel} to ${queue}: ${String(item?.title || title || idLabel)}`, { kind: 'info', timeoutMs: 3200 });
         if (enqueueTitle) enqueueTitle.value = '';
         if (enqueueInstructions) enqueueInstructions.value = '';
         if (enqueueDedupe) enqueueDedupe.value = '';
