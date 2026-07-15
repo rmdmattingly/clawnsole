@@ -4295,6 +4295,8 @@ function runFleetSelectedAgent() {
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress', 'done', 'failed'];
 const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
 const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
+const WORKQUEUE_ALL_SCOPE_GUARD_THRESHOLD_KEY = 'clawnsole.admin.workqueue.allScopeGuardThreshold';
+const WORKQUEUE_ALL_SCOPE_GUARD_DEFAULT_THRESHOLD = 200;
 const WORKQUEUE_HEADER_META = {
   title: { label: 'Task', tooltip: 'Sort by task title.' },
   status: { label: 'Status', tooltip: 'Sort by queue status.' },
@@ -4340,6 +4342,12 @@ function buildWorkqueueStatusCounts(items) {
     counts[status] += 1;
   }
   return counts;
+}
+
+function getWorkqueueAllScopeGuardThreshold() {
+  const raw = storage.get(WORKQUEUE_ALL_SCOPE_GUARD_THRESHOLD_KEY, String(WORKQUEUE_ALL_SCOPE_GUARD_DEFAULT_THRESHOLD));
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : WORKQUEUE_ALL_SCOPE_GUARD_DEFAULT_THRESHOLD;
 }
 
 const workqueueState = {
@@ -5555,6 +5563,7 @@ function renderWorkqueuePaneItems(pane) {
   const quickResult = getWorkqueueQuickFilterBreakdown(scopedItems, pane.workqueue?.quickFilters);
   const filteredItems = quickResult.items;
   const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  renderWorkqueueAllScopeGuard(pane, items.length);
   const totalCount = Math.max(items.length, countItems.length);
   const hiddenCounts = {
     status: Math.max(0, countItems.length - fetchedItems.length),
@@ -5690,6 +5699,47 @@ function renderWorkqueuePaneItems(pane) {
     pane.workqueue.selectedItemId = null;
     renderWorkqueuePaneInspect(pane, null);
   }
+}
+
+function renderWorkqueueAllScopeGuard(pane, visibleCount) {
+  const root = pane?.elements?.thread?.querySelector?.('[data-wq-all-scope-guard]');
+  if (!root) return;
+
+  const scope = normalizeWorkqueueScope(pane?.workqueue?.scopeFilter || 'all');
+  const threshold = getWorkqueueAllScopeGuardThreshold();
+  const count = Number(visibleCount || 0);
+  const guardKey = `${scope}:${count}:${threshold}`;
+  const shouldShow = scope === 'all' && count > threshold && !pane.workqueue?.allScopeGuardDismissed;
+
+  root.hidden = !shouldShow;
+  if (!shouldShow) {
+    root.innerHTML = '';
+    return;
+  }
+
+  if (pane.workqueue.allScopeGuardShownKey !== guardKey) {
+    pane.workqueue.allScopeGuardShownKey = guardKey;
+    addFeed('event', 'workqueue.guardrail', `all-scope shown count=${count} threshold=${threshold}`);
+  }
+
+  root.innerHTML = `
+    <span class="wq-all-scope-guard-text">Viewing all items (${escapeHtml(String(count))}). Narrow scope?</span>
+    <button type="button" class="wq-scope-btn" data-wq-downscope="assigned">Assigned to active target</button>
+    <button type="button" class="wq-scope-btn" data-wq-downscope="unassigned">Unassigned</button>
+    <button type="button" class="wq-scope-btn wq-guard-dismiss" data-wq-guard-dismiss aria-label="Dismiss all scope guardrail">Dismiss</button>
+  `;
+  root.querySelectorAll('[data-wq-downscope]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const scopeKey = btn.getAttribute('data-wq-downscope') || '';
+      addFeed('event', 'workqueue.guardrail', `all-scope action=${scopeKey} count=${count} threshold=${threshold}`);
+      pane?.elements?.thread?.querySelector?.(`[data-wq-scope="${scopeKey}"]`)?.click?.();
+    });
+  });
+  root.querySelector('[data-wq-guard-dismiss]')?.addEventListener('click', () => {
+    pane.workqueue.allScopeGuardDismissed = true;
+    addFeed('event', 'workqueue.guardrail', `all-scope dismissed count=${count} threshold=${threshold}`);
+    renderWorkqueueAllScopeGuard(pane, count);
+  });
 }
 
 function selectWorkqueuePaneItemByDelta(pane, delta) {
@@ -7981,6 +8031,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <button type="button" class="wq-scope-btn" data-wq-scope="unassigned">Unassigned</button>
             <button type="button" class="wq-scope-btn" data-wq-scope="all">All</button>
           </div>
+          <div class="wq-all-scope-guard" data-wq-all-scope-guard role="status" aria-live="polite" hidden></div>
 
           <div class="wq-field" data-wq-source-group role="group" aria-label="Filter by source">
             <span class="wq-label">Source</span>

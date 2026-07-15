@@ -2506,6 +2506,27 @@ kbd {
   background: rgba(127, 209, 185, 0.12);
 }
 
+.wq-all-scope-guard {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 179, 71, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 179, 71, 0.1);
+  color: var(--text);
+}
+
+.wq-all-scope-guard[hidden] {
+  display: none;
+}
+
+.wq-all-scope-guard-text {
+  font-size: 12px;
+  color: var(--text);
+}
+
 .wq-enqueue {
   margin-top: 10px;
 }
