@@ -2071,6 +2071,29 @@ kbd {
   flex: 0 0 auto;
 }
 
+.wq-target-group,
+.wq-enqueue-destination {
+  padding: 8px;
+  border: 1px solid rgba(255, 179, 71, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 179, 71, 0.08);
+}
+
+.wq-target-group {
+  min-width: 220px;
+  margin-right: 4px;
+}
+
+.wq-enqueue-destination {
+  min-width: 240px;
+}
+
+.wq-enqueue-destination input[readonly] {
+  color: var(--text);
+  border-style: dashed;
+  background: rgba(255, 255, 255, 0.035);
+}
+
 .wq-duplicate-health {
   display: flex;
   align-items: center;

@@ -6537,11 +6537,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     elements.thread.innerHTML = `
       <div class="wq-toolbar">
         <div class="wq-toolbar-row">
-          <label class="wq-field">
-            <span class="wq-label">Queue</span>
+          <label class="wq-field wq-target-group" data-wq-viewing-group title="Controls which queue is shown in this pane.">
+            <span class="wq-label">Viewing queue</span>
             <input data-wq-queue-search type="search" placeholder="Search queues" aria-label="Search queues" autocomplete="off" />
-            <select data-wq-queue-select aria-label="Select workqueue target"></select>
+            <select data-wq-queue-select aria-label="Viewing queue to display"></select>
             <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
+            <span class="hint">Filters the items shown below.</span>
           </label>
 
           <div class="wq-field wq-status-field">
@@ -6622,6 +6623,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
               <textarea data-wq-enqueue-instructions rows="3" placeholder="Links, context, acceptance criteria"></textarea>
             </label>
 
+            <label class="wq-field wq-enqueue-destination">
+              <span class="wq-label">Enqueue to</span>
+              <input data-wq-enqueue-destination type="text" value="${escapeHtml(pane.workqueue.queue || 'dev-team')}" readonly aria-label="Queue new items will be enqueued to" title="New items are enqueued to the current Viewing queue." />
+              <span class="hint">New items go to the selected Viewing queue.</span>
+            </label>
+
             <div class="wq-enqueue-actions">
               <label class="wq-field wq-agent-picker-field">
                 <span class="wq-label">Assign to</span>
@@ -6671,6 +6678,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const queueSearchEl = elements.thread.querySelector('[data-wq-queue-search]');
     const queueSelectEl = elements.thread.querySelector('[data-wq-queue-select]');
     const queueCustomEl = elements.thread.querySelector('[data-wq-queue-custom]');
+    const enqueueDestinationEl = elements.thread.querySelector('[data-wq-enqueue-destination]');
 
     // Make header pill focus the queue selector in the body (no duplicated selector state).
     paneSetHeaderTarget(pane, {
@@ -6707,6 +6715,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       const sel = String(queueSelectEl?.value || '').trim();
       if (sel === '__custom__') return String(queueCustomEl?.value || '').trim();
       return sel;
+    };
+
+    const updateEnqueueDestination = (queue) => {
+      if (!enqueueDestinationEl) return;
+      const q = String(queue || '').trim() || 'dev-team';
+      enqueueDestinationEl.value = q;
+      enqueueDestinationEl.title = `New items will be enqueued to ${q}.`;
     };
 
     const initQuick = pane.workqueue?.quickFilters || {};
@@ -6770,6 +6785,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const doRefresh = async () => {
       const q = getQueueValue() || 'dev-team';
       pane.workqueue.queue = q;
+      updateEnqueueDestination(q);
       resetRenderLimit();
       rememberRecentWorkqueueTarget(q);
       paneSetHeaderTarget(pane, {
@@ -7088,6 +7104,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         setEnqueueStatus('Select a queue first.');
         return;
       }
+      updateEnqueueDestination(queue);
       if (!title) {
         setEnqueueStatus('Title is required.');
         enqueueTitle?.focus();
@@ -7114,7 +7131,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         const assignLabel = assignToAgentId
           ? `Queued for ${formatAgentLabel(getAgentRecord(assignToAgentId), { includeId: false })}`
           : 'Queued as Unassigned';
-        setEnqueueStatus(item && item._deduped ? `Deduped: ${item.id} (${assignLabel})` : assignLabel);
+        setEnqueueStatus(item && item._deduped ? `Deduped: ${item.id} to ${queue} (${assignLabel})` : `Enqueued to ${queue}. ${assignLabel}.`);
         if (enqueueTitle) enqueueTitle.value = '';
         if (enqueueInstructions) enqueueInstructions.value = '';
         if (enqueueDedupe) enqueueDedupe.value = '';

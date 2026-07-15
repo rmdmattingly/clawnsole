@@ -238,6 +238,39 @@ test('workqueue pane: queue target supports search + recent persistence', async 
   await expect(secondSelect.locator('option', { hasText: '★ qa-hotfix' })).toHaveCount(1);
 });
 
+test('workqueue pane: viewing queue and enqueue destination are distinct and confirmed', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  const queueSelect = wqPane.locator('[data-wq-queue-select]');
+  const customQueue = wqPane.locator('[data-wq-queue-custom]');
+
+  await expect(wqPane.locator('[data-wq-viewing-group] .wq-label')).toHaveText('Viewing queue');
+  await expect(queueSelect).toHaveAttribute('aria-label', 'Viewing queue to display');
+
+  await queueSelect.selectOption('__custom__');
+  await customQueue.fill('issue-327-destination');
+  await customQueue.press('Enter');
+
+  await wqPane.locator('details.wq-enqueue summary').click();
+  const destination = wqPane.locator('[data-wq-enqueue-destination]');
+  await expect(wqPane.locator('.wq-enqueue-destination .wq-label')).toHaveText('Enqueue to');
+  await expect(destination).toHaveAttribute('aria-label', 'Queue new items will be enqueued to');
+  await expect(destination).toHaveValue('issue-327-destination');
+
+  await wqPane.locator('[data-wq-enqueue-title]').fill('Unambiguous destination');
+  await wqPane.locator('[data-wq-enqueue-instructions]').fill('prove destination confirmation');
+  await wqPane.locator('[data-wq-enqueue-submit]').click();
+
+  await expect(wqPane.locator('[data-wq-enqueue-status]')).toContainText('Enqueued to issue-327-destination.');
+});
+
 test('workqueue pane: enqueue assignment target supports search, keyboard select, and recents', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
