@@ -252,6 +252,45 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue(agentId || 'main');
 });
 
+test('agents modal shows a sticky selected-agent footer with triage actions', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({ alpha: now, beta: now - 75_000 }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+
+  const row = page.locator('#agentsList .agents-row').filter({ hasText: 'Beta (beta)' });
+  await row.click();
+
+  const footer = page.locator('#agentsSelectionFooter');
+  await expect(footer).toBeVisible();
+  await expect(footer).toContainText('Beta (beta)');
+  await expect(footer.locator('.agents-age-chip')).toContainText(/\d+[smhd]|unknown/);
+  await expect(footer).toHaveCSS('position', 'sticky');
+
+  await footer.getByRole('button', { name: /Open Workqueue for selected agent/ }).click();
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue('beta');
+
+  agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.getByRole('button', { name: 'Close agents' }).click();
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(footer).toBeHidden();
+  await expect(footer.locator('[data-agent-action]')).toHaveCount(0);
+});
+
 test('agents modal triage action opens chat and workqueue from non-chat layout', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
