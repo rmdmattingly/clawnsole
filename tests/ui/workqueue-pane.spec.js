@@ -269,6 +269,37 @@ test('workqueue pane: enqueue assignment target supports search, keyboard select
   await expect(firstRecent.locator('.wq-agent-picker-badge')).toHaveText('recent');
 });
 
+test('workqueue pane: viewing queue and enqueue destination are unambiguous', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  const queue = `enqueue-dest-${Date.now()}`;
+
+  await expect(pane.getByText('Viewing queue')).toBeVisible();
+  await expect(pane.locator('[data-wq-queue-select]')).toHaveAttribute('aria-label', 'Viewing queue');
+
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await pane.locator('details.wq-enqueue summary').click();
+  await expect(pane.getByText('Enqueue to')).toBeVisible();
+  await expect(pane.locator('[data-wq-enqueue-destination]')).toHaveText(queue);
+
+  await pane.locator('[data-wq-enqueue-title]').fill('Destination clarity item');
+  await pane.locator('[data-wq-enqueue-instructions]').fill('Verify destination copy and toast.');
+  await pane.locator('[data-wq-enqueue-submit]').click();
+
+  await expect(page.getByTestId('toast').last()).toContainText(`Enqueued to ${queue}`);
+  await expect(pane.locator('[data-wq-enqueue-status]')).toContainText('Queued');
+});
+
 test('workqueue pane: scope filter toggles assigned/unassigned/all deterministically', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);

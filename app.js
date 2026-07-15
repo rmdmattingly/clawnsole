@@ -6537,12 +6537,15 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     elements.thread.innerHTML = `
       <div class="wq-toolbar">
         <div class="wq-toolbar-row">
-          <label class="wq-field">
-            <span class="wq-label">Queue</span>
-            <input data-wq-queue-search type="search" placeholder="Search queues" aria-label="Search queues" autocomplete="off" />
-            <select data-wq-queue-select aria-label="Select workqueue target"></select>
-            <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
-          </label>
+          <div class="wq-control-group wq-viewing-group" role="group" aria-label="Viewing queue controls">
+            <label class="wq-field">
+              <span class="wq-label">Viewing queue</span>
+              <input data-wq-queue-search type="search" placeholder="Search queues" aria-label="Search queues to view" title="Filters the queue picker for this pane." autocomplete="off" />
+              <select data-wq-queue-select aria-label="Viewing queue" title="Changes which queue this pane is showing. New items use this queue unless you change it before submitting."></select>
+              <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" aria-label="Custom viewing queue" hidden />
+              <span class="hint">Items shown in this pane</span>
+            </label>
+          </div>
 
           <div class="wq-field wq-status-field">
             <span class="wq-label">Status filter</span>
@@ -6602,6 +6605,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         <details class="wq-enqueue">
           <summary>Enqueue new item</summary>
           <form data-wq-enqueue-form class="wq-enqueue-form">
+            <div class="wq-control-group wq-enqueue-destination" role="group" aria-label="Enqueue destination">
+              <div class="wq-label">Enqueue to</div>
+              <div class="wq-enqueue-destination-value" data-wq-enqueue-destination title="New item destination queue">dev-team</div>
+              <span class="hint">Destination for this new item</span>
+            </div>
+
             <label class="wq-field">
               <span class="wq-label">Title</span>
               <input data-wq-enqueue-title type="text" required placeholder="Short title" />
@@ -6694,6 +6703,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
     const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
+    const enqueueDestination = elements.thread.querySelector('[data-wq-enqueue-destination]');
 
     const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
 
@@ -6707,6 +6717,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       const sel = String(queueSelectEl?.value || '').trim();
       if (sel === '__custom__') return String(queueCustomEl?.value || '').trim();
       return sel;
+    };
+
+    const updateEnqueueDestination = () => {
+      if (!enqueueDestination) return;
+      const q = getQueueValue() || pane.workqueue.queue || 'dev-team';
+      enqueueDestination.textContent = String(q);
+      enqueueDestination.title = `New items will be enqueued to ${q}`;
     };
 
     const initQuick = pane.workqueue?.quickFilters || {};
@@ -6770,6 +6787,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const doRefresh = async () => {
       const q = getQueueValue() || 'dev-team';
       pane.workqueue.queue = q;
+      updateEnqueueDestination();
       resetRenderLimit();
       rememberRecentWorkqueueTarget(q);
       paneSetHeaderTarget(pane, {
@@ -6895,6 +6913,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           }
         }
         applyQueueSearchFilter();
+        updateEnqueueDestination();
       } catch {
         // fallback: keep current queue editable
         queueSelectEl.innerHTML = '';
@@ -6908,6 +6927,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         queueSelectEl.appendChild(customOpt);
         queueSelectEl.value = opt.value;
         applyQueueSearchFilter();
+        updateEnqueueDestination();
       }
     };
 
@@ -6917,6 +6937,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         queueCustomEl.hidden = !isCustom;
         if (isCustom) queueCustomEl.focus();
       }
+      updateEnqueueDestination();
       doRefresh();
     });
     queueSelectEl?.addEventListener('keydown', (e) => {
@@ -6926,7 +6947,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       }
     });
 
-    queueSearchEl?.addEventListener('input', () => applyQueueSearchFilter());
+    queueSearchEl?.addEventListener('input', () => {
+      applyQueueSearchFilter();
+      updateEnqueueDestination();
+    });
     queueSearchEl?.addEventListener('keydown', (e) => {
       if (!queueSelectEl) return;
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -6943,6 +6967,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     populateQueueSelect().then(() => doRefresh());
 
     refreshBtn?.addEventListener('click', () => doRefresh());
+    queueCustomEl?.addEventListener('input', () => updateEnqueueDestination());
     queueCustomEl?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doRefresh();
     });
@@ -7115,6 +7140,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           ? `Queued for ${formatAgentLabel(getAgentRecord(assignToAgentId), { includeId: false })}`
           : 'Queued as Unassigned';
         setEnqueueStatus(item && item._deduped ? `Deduped: ${item.id} (${assignLabel})` : assignLabel);
+        showToast(`Enqueued to ${queue}`, { kind: 'info', timeoutMs: 2400 });
         if (enqueueTitle) enqueueTitle.value = '';
         if (enqueueInstructions) enqueueInstructions.value = '';
         if (enqueueDedupe) enqueueDedupe.value = '';

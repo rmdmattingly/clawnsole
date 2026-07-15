@@ -2071,6 +2071,36 @@ kbd {
   flex: 0 0 auto;
 }
 
+.wq-control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.wq-viewing-group {
+  border-color: rgba(127, 209, 185, 0.2);
+}
+
+.wq-enqueue-destination {
+  min-width: 180px;
+}
+
+.wq-enqueue-destination-value {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 7px 9px;
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.24);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 13px;
+}
+
 .wq-duplicate-health {
   display: flex;
   align-items: center;
