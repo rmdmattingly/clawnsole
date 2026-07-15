@@ -318,7 +318,9 @@ const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => (
   rolePillActionLabel: !!state?.authed ? 'Open session details' : 'Focus password input to unlock session',
   rolePillTooltip: !!state?.authed
     ? `Session context: signed in as ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} in ${state?.environment || 'local'}. Click for session details.`
-    : `Session context: signed out in ${state?.environment || 'local'}. Click to unlock this session.`,
+    : String(state?.role || '') === 'admin'
+      ? `Session context: locked as Admin in ${state?.environment || 'local'}. Click to unlock this session.`
+      : `Session context: signed out in ${state?.environment || 'local'}. Click to unlock this session.`,
   authLabel: !!state?.authed ? 'Signed in' : (String(state?.role || '') === 'admin' ? 'Locked' : 'Signed out'),
   principalLabel: !!state?.authed ? (String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')) : 'Not signed in',
   environmentLabel: state?.environment || 'local',

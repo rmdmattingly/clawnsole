@@ -7,12 +7,22 @@ test('visiting /admin without auth shows login overlay', async ({ page, clawnsol
 
   await page.goto(clawnsole.adminUrl);
   await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
-  await expect(page.getByTestId('role-pill')).toContainText('Signed out');
-  await expect(page.getByTestId('role-pill')).toHaveAttribute('data-auth-state', 'signed_out');
+  const chip = page.getByTestId('role-pill');
+  await expect(chip).toHaveText('Locked');
+  await expect(chip).toHaveAttribute('data-auth-state', 'locked');
+  await expect(chip).toHaveAttribute('title', /locked as Admin in local/i);
   await expect(page.getByTestId('connection-status')).toBeHidden();
   await expect(page.getByTestId('panes-indicator')).toBeHidden();
   await expect(page.locator('#logoutBtn')).toContainText('Unlock');
   await expect(page.locator('#logoutBtn')).toBeEnabled();
+  await expect(page.locator('#logoutBtn')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Refresh agent list' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Open agents' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Open fleet pane' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Open workqueue' })).toBeHidden();
+
+  await chip.click();
+  await expect(page.getByTestId('auth-session-popover')).toBeHidden();
 });
 
 test('signed-in auth chip shows session details and actions', async ({ page, clawnsole }) => {
