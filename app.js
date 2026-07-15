@@ -2610,6 +2610,15 @@ function buildCommandPaletteItems() {
       'g a'
     ),
     withShortcut(
+      {
+        id: 'cmd:return-triage-context',
+        label: 'Agents: Return to previous triage context',
+        detail: 'Focus the Agents row/action that opened the current Chat or Workqueue context',
+        run: () => returnToPreviousTriageContext()
+      },
+      '⌘/Ctrl+Shift+B'
+    ),
+    withShortcut(
       { id: 'cmd:pane-cycle', label: 'Panes: Cycle focus', detail: 'Move focus to next pane', run: () => cyclePaneFocus() },
       '⌘/Ctrl+Shift+K'
     ),
@@ -2705,9 +2714,9 @@ function buildCommandPaletteItems() {
       enriched.priority = id === 'cmd:open-workqueue-active-agent' ? 96 : 92;
       return enriched;
     }
-    if (id === 'cmd:refresh-agents') {
+    if (id === 'cmd:refresh-agents' || id === 'cmd:agents-focus-filter' || id === 'cmd:return-triage-context') {
       enriched.group = 'Agents';
-      enriched.priority = 90;
+      enriched.priority = id === 'cmd:return-triage-context' ? 95 : 90;
       return enriched;
     }
     if (id.startsWith('agent:') || label.startsWith('Agent: ')) {
@@ -2995,6 +3004,60 @@ function closeAgentsModal() {
   globalElements.agentsModal?.setAttribute('aria-hidden', 'true');
   stopAgentsModalAutoRefresh();
   stopAgentsModalFreshnessTicker();
+}
+
+const triageReturnState = {
+  anchor: null
+};
+
+function captureAgentsTriageReturnAnchor(agentId, action = 'triage') {
+  if (roleState.role !== 'admin') return;
+  if (!globalElements.agentsModal?.classList.contains('open')) return;
+
+  triageReturnState.anchor = {
+    source: 'agents-modal',
+    agentId: normalizeAgentId(agentId || 'main'),
+    action: String(action || 'triage').trim() || 'triage'
+  };
+}
+
+function returnToPreviousTriageContext() {
+  if (roleState.role !== 'admin') return false;
+  const anchor = triageReturnState.anchor;
+  if (!anchor) {
+    showToast('No previous triage context.', { kind: 'error', timeoutMs: 2600, testId: 'triage-return-toast' });
+    return false;
+  }
+
+  if (anchor.source !== 'agents-modal' || !globalElements.agentsModal?.classList.contains('open')) {
+    showToast('Previous triage context is no longer available.', {
+      kind: 'error',
+      timeoutMs: 3200,
+      testId: 'triage-return-toast'
+    });
+    return false;
+  }
+
+  renderAgentsModalList();
+
+  setTimeout(() => {
+    try {
+      const action = anchor.action || 'triage';
+      const agentId = anchor.agentId || 'main';
+      const actionSelector = `[data-agent-action="${CSS.escape(action)}"][data-agent-id="${CSS.escape(agentId)}"]`;
+      const target =
+        globalElements.agentsList?.querySelector?.(actionSelector) ||
+        globalElements.agentsList?.querySelector?.(`[data-agent-id="${CSS.escape(agentId)}"]`) ||
+        globalElements.agentsSearch;
+      target?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      target?.focus?.();
+    } catch {
+      globalElements.agentsSearch?.focus?.();
+    }
+  }, 0);
+
+  showToast('Returned to previous triage context.', { kind: 'info', timeoutMs: 1800, testId: 'triage-return-toast' });
+  return true;
 }
 
 function findExistingPane(kind, predicate = null) {
@@ -3383,6 +3446,7 @@ function renderAgentsModalList() {
           e.preventDefault();
           e.stopPropagation();
           const action = String(btn.getAttribute('data-agent-action') || '').trim();
+          captureAgentsTriageReturnAnchor(id, action);
           if (action === 'triage') openAgentTriageFromFleet(id);
           else if (action === 'open-chat') openAgentChatFromFleet(id);
           else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
@@ -8939,6 +9003,14 @@ window.addEventListener('keydown', (event) => {
   // If Pane Manager is open, it gets first dibs on keys.
   if (paneManagerHandleKeydown(event)) return;
 
+  // Return-to-triage must work while the Agents modal remains open and focus has moved to a pane control.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'b' && roleState.role === 'admin') {
+    event.preventDefault();
+    event.stopPropagation();
+    returnToPreviousTriageContext();
+    return;
+  }
+
   const blockedReason = blockedGlobalShortcutReason(event);
   if (blockedReason) {
     event.preventDefault();
@@ -9122,6 +9194,12 @@ window.addEventListener('keydown', (event) => {
       shortcutState.lastGAtMs = 0;
       event.preventDefault();
       openTopbarWorkqueueAction();
+      return;
+    }
+    if (key.toLowerCase() === 't' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
+      shortcutState.lastGAtMs = 0;
+      event.preventDefault();
+      returnToPreviousTriageContext();
       return;
     }
   }

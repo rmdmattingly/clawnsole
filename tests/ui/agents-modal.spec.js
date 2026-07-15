@@ -252,6 +252,40 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue(agentId || 'main');
 });
 
+test('agents modal quick actions can return to the source triage row', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const row = page.locator('#agentsList .agents-row').filter({ hasText: 'Alpha (alpha)' });
+  const workqueueAction = page.locator('[data-agent-action="open-workqueue"][data-agent-id="alpha"]').first();
+  await row.locator('[data-agent-action="open-workqueue"]').first().click();
+
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
+
+  const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.press(`${modifier}+Shift+B`);
+
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+  await expect(workqueueAction).toBeFocused();
+  await expect(page.getByTestId('triage-return-toast')).toContainText('Returned to previous triage context.');
+
+  await page.getByRole('button', { name: 'Close agents' }).click();
+  await expect(page.locator('#agentsModal')).not.toHaveClass(/open/);
+
+  await page.keyboard.press(`${modifier}+Shift+B`);
+  await expect(page.getByTestId('triage-return-toast').filter({ hasText: 'Previous triage context is no longer available.' })).toBeVisible();
+});
+
 test('agents modal triage action opens chat and workqueue from non-chat layout', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
