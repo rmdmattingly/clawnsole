@@ -3349,7 +3349,7 @@ kbd {
   position: fixed;
   z-index: 2000;
   display: none;
-  min-width: 180px;
+  min-width: 260px;
   padding: 6px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 10px;
@@ -3360,7 +3360,9 @@ kbd {
 
 .pane-add-menu__item {
   width: 100%;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   text-align: left;
   padding: 10px 12px;
   border-radius: 8px;
@@ -3369,6 +3371,39 @@ kbd {
   color: inherit;
   font: inherit;
   cursor: pointer;
+}
+
+.pane-add-menu__label {
+  font-weight: 650;
+}
+
+.pane-add-menu__summary {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.pane-add-menu__control {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pane-add-menu__control select,
+.pane-add-menu__control input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font: inherit;
 }
 
 .pane-add-menu__item:hover {
