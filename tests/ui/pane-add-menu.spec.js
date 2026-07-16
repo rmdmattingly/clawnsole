@@ -34,6 +34,7 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
   await expect(menu).toBeVisible();
 
   await expect(menu.locator('[data-testid="pane-add-menu-chat"]')).toHaveText(/New Chat pane/);
+  await expect(menu.locator('[data-testid="pane-add-menu-fleet"]')).toHaveText(/New Fleet pane/);
   await expect(menu.locator('[data-testid="pane-add-menu-workqueue"]')).toHaveText(/New Workqueue pane/);
   await expect(menu.locator('[data-testid="pane-add-menu-cron"]')).toHaveText(/New Cron pane/);
   await expect(menu.locator('[data-testid="pane-add-menu-timeline"]')).toHaveText(/New Timeline pane/);
@@ -74,6 +75,42 @@ test('pane add menu: single click reuses matching non-chat pane target', async (
   await menu.locator('[data-testid="pane-add-menu-workqueue"]').click({ modifiers: ['Alt'] });
   const countAfterAlt = await page.locator('[data-pane]').count();
   expect(countAfterAlt).toBe(countBefore + 1);
+});
+
+test('fleet quick action and shortcut open or focus Fleet pane without duplicates', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  const fleetBtn = page.locator('[data-testid="fleet-btn"]');
+  await expect(fleetBtn).toBeVisible();
+
+  await fleetBtn.click();
+  const fleetPane = page.locator('[data-pane][data-pane-kind="fleet"]');
+  await expect(fleetPane).toHaveCount(1);
+  await expect(fleetPane.first().locator('[data-testid="fleet-refresh"]')).toBeFocused();
+
+  await fleetBtn.click();
+  await expect(fleetPane).toHaveCount(1);
+
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'F',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    }));
+  });
+  await expect(fleetPane).toHaveCount(1);
+  await expect(fleetPane.first().locator('[data-testid="fleet-refresh"]')).toBeFocused();
+
+  await fleetBtn.click({ modifiers: ['Alt'] });
+  await expect(fleetPane).toHaveCount(2);
 });
 
 test('pane add shortcuts: Ctrl/Cmd+Shift+T reuses timeline pane; Alt adds anyway', async ({ page }) => {

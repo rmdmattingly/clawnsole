@@ -128,8 +128,10 @@ const normalizePaneKind = __appCore.normalizePaneKind || ((rawKind) => {
   const k = String(rawKind || 'chat').trim().toLowerCase();
   return k === 'chat'
     ? 'chat'
-    : k === 'workqueue' || k === 'cron' || k === 'timeline'
+    : k === 'workqueue' || k === 'cron' || k === 'timeline' || k === 'fleet'
       ? k
+      : k === 'f' || k.startsWith('fl')
+        ? 'fleet'
       : k.startsWith('w')
         ? 'workqueue'
         : k === 'c' || k.startsWith('cr')
@@ -756,6 +758,13 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
       if (pane.kind !== 'cron' && pane.kind !== 'timeline') return;
       try {
         pane._renderAgentFilterOptions?.();
+      } catch {}
+    });
+
+    paneManager.panes.forEach((pane) => {
+      if (!pane || pane.kind !== 'fleet') return;
+      try {
+        pane._renderFleet?.();
       } catch {}
     });
 
@@ -1737,6 +1746,7 @@ const paneManagerUiState = {
   visiblePaneKeys: [],
   collapsedKinds: {
     chat: false,
+    fleet: false,
     workqueue: false,
     cron: false,
     timeline: false
@@ -1749,6 +1759,7 @@ function isPaneManagerOpen() {
 
 function paneLabel(pane) {
   const kind = pane?.kind || 'chat';
+  if (kind === 'fleet') return 'Fleet';
   if (kind === 'workqueue') return 'Workqueue';
   if (kind === 'cron') return 'Cron';
   if (kind === 'timeline') return 'Timeline';
@@ -1757,6 +1768,7 @@ function paneLabel(pane) {
 
 function paneIcon(pane) {
   const kind = pane?.kind || 'chat';
+  if (kind === 'fleet') return 'FL';
   if (kind === 'workqueue') return 'WQ';
   if (kind === 'cron') return '⏰';
   if (kind === 'timeline') return '🕒';
@@ -1776,6 +1788,7 @@ function paneTargetLabel(pane) {
   if (!pane) return '';
   const current = String(pane?.elements?.agentLabel?.textContent || '').trim();
   if (current) return current;
+  if (pane.kind === 'fleet') return 'agents';
   if (pane.kind === 'workqueue') return String(pane.workqueue?.queue || 'dev-team');
   if (pane.kind === 'timeline' || pane.kind === 'cron') return 'gateway';
   return String(pane.agentId || 'main');
@@ -2035,7 +2048,7 @@ function paneSearchText(pane) {
 }
 
 function paneGroupOrder(kind) {
-  const order = { chat: 0, workqueue: 1, cron: 2, timeline: 3 };
+  const order = { chat: 0, fleet: 1, workqueue: 2, cron: 3, timeline: 4 };
   return Number.isInteger(order[kind]) ? order[kind] : 99;
 }
 
@@ -3094,16 +3107,8 @@ function openAgentTimelineFromFleet(agentId) {
 }
 
 function openFleetPane({ forceNew = false } = {}) {
-  const target = 'all';
-  const pane = forceNew
-    ? paneManager.addPane('timeline', { cronAgentId: target, forceNew: true })
-    : findExistingPane('timeline', (p) => String(p.cronAgentId || '').trim() === target) ||
-      findExistingPane('timeline') ||
-      paneManager.addPane('timeline', { cronAgentId: target });
+  const pane = paneManager.addPane('fleet', { forceNew });
   if (!pane) return;
-
-  pane.cronAgentId = target;
-  paneManager.persistAdminPanes();
   paneManager.focusPanePrimary(pane);
 }
 
@@ -6351,9 +6356,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     key,
     role,
     kind: (() => {
-      const allowed = new Set(['chat', 'workqueue', 'cron', 'timeline']);
+      const allowed = new Set(['chat', 'fleet', 'workqueue', 'cron', 'timeline']);
       const k = String(kind || 'chat').trim().toLowerCase();
-      return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
+      return allowed.has(k) ? k : k.startsWith('fl') ? 'fleet' : k.startsWith('w') ? 'workqueue' : 'chat';
     })(),
     agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
     workqueue: {
@@ -6431,6 +6436,17 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
               ['g w', 'open Workqueue modal'],
               ['Cmd/Ctrl+L', 'focus Chat composer'],
               ['Cmd/Ctrl+K', 'cycle focus between panes']
+            ]
+          };
+        }
+        if (pane.kind === 'fleet') {
+          return {
+            title: 'Fleet',
+            lines: ['Shows the current agent fleet list.', 'Use Refresh to update agent identity data.', 'Use Open Agents for full filtering and triage controls.'],
+            shortcuts: [
+              ['Cmd/Ctrl+Shift+F', 'focus or open Fleet'],
+              ['Alt/Option+Cmd/Ctrl+Shift+F', 'open another Fleet pane'],
+              ['?', 'keyboard shortcuts overlay']
             ]
           };
         }
@@ -6518,6 +6534,85 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     clearPaneUnread(pane);
   });
   renderPaneActivityBadge(pane);
+
+  // FLEET PANE
+  if (pane.role === 'admin' && pane.kind === 'fleet') {
+    if (elements.agentWrap) elements.agentWrap.hidden = false;
+    if (elements.inputRow) elements.inputRow.hidden = true;
+    if (elements.scrollDownBtn) elements.scrollDownBtn.hidden = true;
+
+    paneSetHeaderTarget(pane, {
+      label: 'Scope',
+      value: 'agents',
+      ariaLabel: 'Fleet scope: agents'
+    });
+
+    elements.thread.classList.add('fleet-pane');
+    elements.thread.innerHTML = `
+      <div class="wq-toolbar">
+        <div class="wq-toolbar-row">
+          <div class="wq-field" style="min-width: 120px; font-weight: 600;">Fleet</div>
+          <button data-fleet-refresh data-testid="fleet-refresh" class="secondary" type="button">Refresh</button>
+          <button data-fleet-open-agents data-testid="fleet-open-agents" class="secondary" type="button">Open Agents</button>
+        </div>
+        <div class="hint" data-fleet-statusline></div>
+      </div>
+      <div class="wq-layout" style="grid-template-columns: 1fr;">
+        <section class="wq-list" aria-label="Fleet agents">
+          <div class="wq-list-body" data-fleet-body data-testid="fleet-body"></div>
+        </section>
+      </div>
+    `;
+
+    const refreshBtn = elements.thread.querySelector('[data-fleet-refresh]');
+    const openAgentsBtn = elements.thread.querySelector('[data-fleet-open-agents]');
+    const statusline = elements.thread.querySelector('[data-fleet-statusline]');
+    const body = elements.thread.querySelector('[data-fleet-body]');
+
+    pane._renderFleet = () => {
+      const agents = Array.isArray(uiState.agents) ? uiState.agents : [];
+      if (statusline) {
+        const refreshed = agentsLastRefreshedAtMs ? ` · refreshed ${formatRelativeAge(Date.now() - agentsLastRefreshedAtMs)}` : '';
+        statusline.textContent = `${agents.length} agent${agents.length === 1 ? '' : 's'}${refreshed}`;
+      }
+      if (!body) return;
+      if (agents.length === 0) {
+        body.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state__title">No agents loaded</div>
+            <div class="hint">Refresh fleet to load the latest agent list.</div>
+          </div>
+        `;
+        return;
+      }
+      body.innerHTML = `<div class="cron-list">${agents
+        .map((agent) => {
+          const id = String(agent?.id || '').trim();
+          const label = formatAgentLabel(agent, { includeId: true });
+          return `<div class="cron-job" data-testid="fleet-agent-row" data-agent-id="${escapeHtml(id)}">
+            <div class="cron-job__top">
+              <div class="cron-job__title">${escapeHtml(label)}</div>
+              <div class="cron-job__badges"><span class="status-pill connected">agent</span></div>
+            </div>
+            <div class="hint">${escapeHtml(id)}</div>
+          </div>`;
+        })
+        .join('')}</div>`;
+    };
+
+    refreshBtn?.addEventListener('click', () => {
+      refreshAgents({ reason: 'fleet_pane', showSuccessToast: true }).then(() => pane._renderFleet?.()).catch(() => {
+        if (statusline) statusline.textContent = 'Refresh failed';
+      });
+    });
+    openAgentsBtn?.addEventListener('click', () => openAgentsModal());
+
+    setStatusPill(elements.status, 'connected', '');
+    pane.client = null;
+    pane.connected = true;
+    pane._renderFleet();
+    return pane;
+  }
 
   // WORKQUEUE PANE
   if (pane.role === 'admin' && pane.kind === 'workqueue') {
@@ -7827,12 +7922,15 @@ const paneManager = {
         const key = typeof item.key === 'string' && item.key ? item.key : '';
         const rawKind = typeof item.kind === 'string' ? item.kind.trim().toLowerCase() : '';
         const rawMode = typeof item.mode === 'string' ? item.mode.trim().toLowerCase() : '';
-        const kind = rawKind === 'workqueue' || rawKind === 'cron' || rawKind === 'timeline'
+        const kind = rawKind === 'workqueue' || rawKind === 'cron' || rawKind === 'timeline' || rawKind === 'fleet'
           ? rawKind
-          : rawMode === 'workqueue' || rawMode === 'cron' || rawMode === 'timeline'
+          : rawMode === 'workqueue' || rawMode === 'cron' || rawMode === 'timeline' || rawMode === 'fleet'
             ? rawMode
             : 'chat';
         if (!key) return null;
+        if (kind === 'fleet') {
+          return { key, kind };
+        }
         if (kind === 'workqueue') {
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
           const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
@@ -7896,7 +7994,7 @@ const paneManager = {
           sortDir: pane.workqueue?.sortDir || 'desc'
         };
       }
-      if (pane.kind === 'cron' || pane.kind === 'timeline') {
+      if (pane.kind === 'fleet' || pane.kind === 'cron' || pane.kind === 'timeline') {
         return { key: pane.key, kind: pane.kind };
       }
       return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
@@ -7938,6 +8036,9 @@ const paneManager = {
     const forceNew = Boolean(options?.forceNew);
 
     const findMatchingPane = () => {
+      if (normalizedKind === 'fleet') {
+        return this.panes.find((p) => p?.role === 'admin' && p.kind === 'fleet') || null;
+      }
       if (normalizedKind === 'workqueue') {
         return this.panes.find((p) => p?.role === 'admin' && p.kind === 'workqueue' && String(p.workqueue?.queue || '').trim() === nextQueue) || null;
       }
@@ -7956,6 +8057,23 @@ const paneManager = {
     }
 
     if (this.panes.length >= this.maxPanes) return;
+
+    if (normalizedKind === 'fleet') {
+      const pane = createPane({
+        key: `p${randomId().slice(0, 8)}`,
+        role: 'admin',
+        kind: 'fleet',
+        closable: true
+      });
+      this.panes.push(pane);
+      globalElements.paneGrid.appendChild(pane.elements.root);
+      this.updatePaneLabels();
+      this.updateCloseButtons();
+      this.applyInferredLayout();
+      this.persistAdminPanes();
+      this.focusPanePrimary(pane);
+      return pane;
+    }
 
     if (normalizedKind === 'workqueue') {
       const pane = createPane({
@@ -8030,6 +8148,12 @@ const paneManager = {
         if (pane.kind === 'workqueue') {
           const queueSel = pane.elements.thread?.querySelector?.('[data-wq-queue-select]');
           (queueSel || pane.elements.thread)?.focus?.();
+          return;
+        }
+
+        if (pane.kind === 'fleet') {
+          const refresh = pane.elements.thread?.querySelector?.('[data-fleet-refresh]');
+          (refresh || pane.elements.thread)?.focus?.();
           return;
         }
 
@@ -8109,6 +8233,13 @@ const paneManager = {
       wqBtn.dataset.testid = 'pane-add-menu-workqueue';
       wqBtn.title = 'Shortcut: Ctrl/Cmd+Shift+W (Alt/Option+click = Open anyway)';
 
+      const fleetBtn = document.createElement('button');
+      fleetBtn.type = 'button';
+      fleetBtn.className = 'pane-add-menu__item';
+      fleetBtn.textContent = 'New Fleet pane';
+      fleetBtn.dataset.testid = 'pane-add-menu-fleet';
+      fleetBtn.title = 'Shortcut: Ctrl/Cmd+Shift+F (Alt/Option+click = Open anyway)';
+
       const cronBtn = document.createElement('button');
       cronBtn.type = 'button';
       cronBtn.className = 'pane-add-menu__item';
@@ -8124,6 +8255,7 @@ const paneManager = {
       timelineBtn.title = 'Shortcut: Ctrl/Cmd+Shift+T (Alt/Option+click = Open anyway)';
 
       menu.appendChild(chatBtn);
+      menu.appendChild(fleetBtn);
       menu.appendChild(wqBtn);
       menu.appendChild(cronBtn);
       menu.appendChild(timelineBtn);
@@ -8144,6 +8276,8 @@ const paneManager = {
 
       chatBtn.addEventListener('click', onMenuAdd('chat'));
 
+      fleetBtn.addEventListener('click', onMenuAdd('fleet'));
+
       wqBtn.addEventListener('click', onMenuAdd('workqueue'));
 
       cronBtn.addEventListener('click', onMenuAdd('cron'));
@@ -8152,6 +8286,7 @@ const paneManager = {
 
       state.menuEl = menu;
       state.chatBtn = chatBtn;
+      state.fleetBtn = fleetBtn;
       state.wqBtn = wqBtn;
       state.cronBtn = cronBtn;
       state.timelineBtn = timelineBtn;
@@ -8198,6 +8333,7 @@ const paneManager = {
 
     const atMax = this.panes.length >= this.maxPanes;
     state.chatBtn.disabled = atMax;
+    state.fleetBtn.disabled = atMax;
     state.wqBtn.disabled = atMax;
     state.cronBtn.disabled = atMax;
     state.timelineBtn.disabled = atMax;
@@ -8949,13 +9085,14 @@ window.addEventListener('keydown', (event) => {
 
   // Add-pane shortcuts (admin-only)
   // Ctrl/Cmd+Shift+C → new chat
+  // Ctrl/Cmd+Shift+F → focus Fleet pane (Alt/Option adds anyway)
   // Ctrl/Cmd+Shift+W → focus matching workqueue target (Alt/Option adds anyway)
   // Ctrl/Cmd+Shift+R → focus matching cron target (Alt/Option adds anyway)
   // Ctrl/Cmd+Shift+T → focus matching timeline target (Alt/Option adds anyway)
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey;
   if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target) && !isAnyOverlayOpen()) {
     const key = String(event.key || '').toLowerCase();
-    const map = { c: 'chat', w: 'workqueue', r: 'cron', t: 'timeline' };
+    const map = { c: 'chat', f: 'fleet', w: 'workqueue', r: 'cron', t: 'timeline' };
     const kind = map[key];
     if (kind) {
       // Don't hijack add-pane shortcuts while typing or while overlays are active.
