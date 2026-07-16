@@ -4335,9 +4335,12 @@ function renderWorkqueuePaneItems(pane) {
   body.innerHTML = '';
   renderWorkqueueDuplicateHealthForPane(pane);
 
-  const scopedItems = filterWorkqueuePaneItemsByScope(pane, pane.workqueue?.items);
+  const sourceItems = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
+  const scope = pane.workqueue?.scopeFilter || 'all';
+  const scopedItems = filterWorkqueuePaneItemsByScope(pane, sourceItems);
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
   const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  renderWorkqueueAllScopeGuardrail(pane, { totalCount: sourceItems.length, visibleCount: items.length, scope });
   const renderLimit = Math.max(
     WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
     Number(pane.workqueue?.renderLimit || WORKQUEUE_PANE_INITIAL_RENDER_LIMIT)
@@ -4430,6 +4433,68 @@ function renderWorkqueuePaneItems(pane) {
     pane.workqueue.selectedItemId = null;
     renderWorkqueuePaneInspect(pane, null);
   }
+}
+
+function renderWorkqueueAllScopeGuardrail(pane, { totalCount, visibleCount, scope } = {}) {
+  const root = pane.elements?.thread?.querySelector('[data-wq-all-scope-guardrail]');
+  if (!root) return;
+
+  const count = Number(visibleCount ?? totalCount ?? 0);
+  const threshold = getWorkqueueAllScopeGuardrailThreshold();
+  const dismissed = !!pane.workqueue?.allScopeGuardrailDismissed;
+  const show = scope === 'all' && count > threshold && !dismissed;
+  root.hidden = !show;
+  root.innerHTML = '';
+  if (!show) return;
+
+  if (pane.workqueue.allScopeGuardrailLastShownCount !== count) {
+    pane.workqueue.allScopeGuardrailLastShownCount = count;
+    addFeed('event', 'workqueue', `all-scope guardrail shown count=${count} threshold=${threshold}`);
+  }
+
+  const text = document.createElement('span');
+  text.className = 'wq-all-scope-guardrail-text';
+  text.textContent = `Viewing all items (${count}). Narrow scope?`;
+  root.appendChild(text);
+
+  const assignedBtn = document.createElement('button');
+  assignedBtn.type = 'button';
+  assignedBtn.className = 'secondary';
+  assignedBtn.dataset.wqGuardrailAction = 'assigned';
+  assignedBtn.textContent = 'Assigned to active target';
+
+  const unassignedBtn = document.createElement('button');
+  unassignedBtn.type = 'button';
+  unassignedBtn.className = 'secondary';
+  unassignedBtn.dataset.wqGuardrailAction = 'unassigned';
+  unassignedBtn.textContent = 'Unassigned';
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.type = 'button';
+  dismissBtn.className = 'secondary subtle';
+  dismissBtn.dataset.wqGuardrailDismiss = 'true';
+  dismissBtn.setAttribute('aria-label', 'Dismiss all scope guardrail');
+  dismissBtn.textContent = 'Dismiss';
+
+  const chooseScope = (nextScope) => {
+    addFeed('event', 'workqueue', `all-scope guardrail action=${nextScope} count=${count} threshold=${threshold}`);
+    if (typeof pane.workqueue?.setScope === 'function') pane.workqueue.setScope(nextScope);
+    else {
+      pane.workqueue.scopeFilter = normalizeWorkqueueScope(nextScope);
+      storage.set(WORKQUEUE_SCOPE_PREF_KEY, pane.workqueue.scopeFilter);
+      renderWorkqueuePaneItems(pane);
+    }
+  };
+
+  assignedBtn.addEventListener('click', () => chooseScope('assigned'));
+  unassignedBtn.addEventListener('click', () => chooseScope('unassigned'));
+  dismissBtn.addEventListener('click', () => {
+    pane.workqueue.allScopeGuardrailDismissed = true;
+    addFeed('event', 'workqueue', `all-scope guardrail dismissed count=${count} threshold=${threshold}`);
+    renderWorkqueuePaneItems(pane);
+  });
+
+  root.append(assignedBtn, unassignedBtn, dismissBtn);
 }
 
 function renderWorkqueuePaneInspect(pane, item) {
@@ -4934,9 +4999,17 @@ const ADMIN_PANES_KEY = 'clawnsole.admin.panes.v1';
 const ADMIN_LAYOUT_MODE_KEY = 'clawnsole.admin.layoutMode';
 const ADMIN_DEFAULT_AGENT_KEY = 'clawnsole.admin.agentId';
 const WORKQUEUE_SCOPE_PREF_KEY = 'clawnsole.admin.workqueue.scope.v1';
+const WORKQUEUE_ALL_SCOPE_GUARDRAIL_THRESHOLD_KEY = 'clawnsole.admin.workqueue.allScopeGuardrailThreshold.v1';
+const WORKQUEUE_ALL_SCOPE_GUARDRAIL_DEFAULT_THRESHOLD = 200;
 
 function normalizeWorkqueueScope(scope) {
   return scope === 'assigned' || scope === 'unassigned' ? scope : 'all';
+}
+
+function getWorkqueueAllScopeGuardrailThreshold() {
+  const raw = storage.get(WORKQUEUE_ALL_SCOPE_GUARDRAIL_THRESHOLD_KEY, String(WORKQUEUE_ALL_SCOPE_GUARDRAIL_DEFAULT_THRESHOLD));
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : WORKQUEUE_ALL_SCOPE_GUARDRAIL_DEFAULT_THRESHOLD;
 }
 
 function getDefaultWorkqueueScope() {
@@ -6571,6 +6644,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <button type="button" class="wq-scope-btn" data-wq-scope="all">All</button>
           </div>
 
+          <div class="wq-all-scope-guardrail" data-wq-all-scope-guardrail role="status" aria-live="polite" hidden></div>
+
           <div class="wq-field" data-wq-source-group role="group" aria-label="Filter by source">
             <span class="wq-label">Source</span>
             <div class="wq-scope">
@@ -6975,6 +7050,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     };
     const setScope = (scope) => {
       pane.workqueue.scopeFilter = normalizeWorkqueueScope(scope);
+      pane.workqueue.allScopeGuardrailDismissed = false;
       resetRenderLimit();
       storage.set(WORKQUEUE_SCOPE_PREF_KEY, pane.workqueue.scopeFilter);
       pane.workqueue.statusCounts = buildWorkqueueStatusCounts(filterWorkqueuePaneItemsByScope(pane, pane.workqueue.countItems));
@@ -6983,6 +7059,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       renderWorkqueuePaneItems(pane);
       paneManager.persistAdminPanes();
     };
+    pane.workqueue.setScope = setScope;
     scopeBtns.forEach((btn) => {
       btn.addEventListener('click', () => setScope(btn.getAttribute('data-wq-scope')));
     });

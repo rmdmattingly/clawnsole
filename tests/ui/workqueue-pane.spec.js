@@ -20,6 +20,35 @@ test.afterEach(async ({ page }) => {
   }
 });
 
+async function stubWorkqueueItems(page, items) {
+  await page.route('**/api/workqueue/queues', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, queues: ['dev-team'] })
+    });
+  });
+  await page.route('**/api/workqueue/items**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, items })
+    });
+  });
+}
+
+function makeGuardrailItems(count) {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `guardrail-${i + 1}`,
+    queue: 'dev-team',
+    title: `Guardrail item ${i + 1}`,
+    status: 'ready',
+    priority: count - i,
+    attempts: 0,
+    claimedBy: i === 0 ? 'main' : ''
+  }));
+}
+
 function seedAgentsForWorkqueuePicker() {
   const configPath = path.join(env.tempHome, '.openclaw', 'openclaw.json');
   const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -523,6 +552,84 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
     return { overflowY: cs.overflowY };
   });
   expect(['auto', 'scroll']).toContain(listStyles.overflowY);
+});
+
+test('workqueue pane: all-scope guardrail appears over threshold and downscopes', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await stubWorkqueueItems(page, makeGuardrailItems(3));
+
+  await loginAdmin(page, env.serverPort);
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.workqueue.scope.v1', 'all');
+    localStorage.setItem('clawnsole.admin.workqueue.allScopeGuardrailThreshold.v1', '2');
+  });
+
+  await addPane(page, 'Workqueue pane');
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-scope="all"]').click();
+  const guardrail = wqPane.locator('[data-wq-all-scope-guardrail]');
+
+  await expect(guardrail).toBeVisible();
+  await expect(guardrail).toContainText('Viewing all items (3). Narrow scope?');
+
+  await guardrail.locator('[data-wq-guardrail-action="unassigned"]').click();
+  await expect(wqPane.locator('[data-wq-scope="unassigned"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(guardrail).toBeHidden();
+  await expect(wqPane.locator('[data-wq-list-body] .wq-row')).toHaveCount(2);
+});
+
+test('workqueue pane: all-scope guardrail dismiss is session scoped', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await stubWorkqueueItems(page, makeGuardrailItems(3));
+
+  await loginAdmin(page, env.serverPort);
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.workqueue.scope.v1', 'all');
+    localStorage.setItem('clawnsole.admin.workqueue.allScopeGuardrailThreshold.v1', '2');
+  });
+
+  await addPane(page, 'Workqueue pane');
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-scope="all"]').click();
+  const guardrail = wqPane.locator('[data-wq-all-scope-guardrail]');
+
+  await expect(guardrail).toBeVisible();
+  await guardrail.locator('[data-wq-guardrail-dismiss="true"]').click();
+  await expect(guardrail).toBeHidden();
+
+  await wqPane.locator('[data-wq-refresh]').click();
+  await expect(guardrail).toBeHidden();
+
+  await page.reload();
+  const reloadedPane = page.locator('[data-pane]').last();
+  await reloadedPane.locator('[data-wq-scope="all"]').click();
+  await expect(reloadedPane.locator('[data-wq-all-scope-guardrail]')).toBeVisible();
+});
+
+test('workqueue pane: all-scope guardrail stays hidden below threshold', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await stubWorkqueueItems(page, makeGuardrailItems(3));
+
+  await loginAdmin(page, env.serverPort);
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.workqueue.scope.v1', 'all');
+    localStorage.setItem('clawnsole.admin.workqueue.allScopeGuardrailThreshold.v1', '5');
+  });
+
+  await addPane(page, 'Workqueue pane');
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-scope="all"]').click();
+  await expect(wqPane.locator('[data-wq-all-scope-guardrail]')).toBeHidden();
+  await expect(wqPane.locator('[data-wq-list-body] .wq-row')).toHaveCount(3);
 });
 
 test('workqueue pane: large queues render an initial capped slice and load more incrementally', async ({ page }) => {
