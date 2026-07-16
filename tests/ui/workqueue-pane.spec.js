@@ -110,6 +110,50 @@ function seedLegacyIssueTitleVariants(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedFilterSummaryWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, patch = {}) => ({
+    id,
+    queue,
+    title: '[issue] rmdmattingly/clawnsole#323 filter summary',
+    instructions: 'Repo: rmdmattingly/clawnsole\nIssue: https://github.com/rmdmattingly/clawnsole/issues/323',
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-60000),
+    updatedAt: iso(-60000),
+    dedupeKey: `filter-summary-${id}`,
+    ...patch
+  });
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-120000) } },
+    assignments: {},
+    items: [
+      mkItem('summary-clawnsole-ready'),
+      mkItem('summary-other-ready', {
+        title: '[issue] other/repo#9 alternate repo',
+        instructions: 'Repo: other/repo\nIssue: https://github.com/other/repo/issues/9',
+        dedupeKey: 'filter-summary-other'
+      }),
+      mkItem('summary-clawnsole-failed', {
+        title: '[issue] rmdmattingly/clawnsole#324 failed row',
+        status: 'failed',
+        dedupeKey: 'filter-summary-failed'
+      })
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 test('workqueue pane: renders + has queue dropdown + does not show chat composer', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -208,6 +252,51 @@ test('workqueue pane: status filter uses human labels and queue-scoped counts', 
   await customQueue.press('Enter');
   await expect(wqPane.locator('[data-wq-statusline]')).toContainText('1 item');
   await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
+});
+
+test('workqueue pane: filter summary chips show counts and remove filters', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `filter-summary-${Date.now()}`;
+  seedFilterSummaryWorkqueueItems(queue);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+
+  const summary = wqPane.locator('[data-wq-filter-summary]');
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 3 items');
+  await expect(summary).toBeVisible();
+  await expect(summary).toContainText(`Queue ${queue}`);
+  await expect(summary).toContainText('Scope Unassigned');
+  await expect(summary).toContainText('Status Ready');
+  await expect(wqPane.locator('.wq-row')).toHaveCount(2);
+
+  await wqPane.locator('[data-wq-preset-clawnsole]').click();
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 1 of 3 items');
+  await expect(summary).toContainText('Repo rmdmattingly/clawnsole');
+  await expect(wqPane.locator('.wq-row')).toHaveCount(1);
+
+  await summary.getByRole('button', { name: /Remove repo filter rmdmattingly\/clawnsole/ }).click();
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 3 items');
+  await expect(summary).not.toContainText('Repo rmdmattingly/clawnsole');
+  await expect(wqPane.locator('.wq-row')).toHaveCount(2);
+
+  await wqPane.locator('[data-wq-search]').fill('alternate repo');
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 1 of 3 items');
+  await expect(summary).toContainText('Search alternate repo');
+
+  await summary.locator('[data-wq-clear-all-filters]').click();
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 3 items');
+  await expect(summary).not.toContainText('Search alternate repo');
+  await expect(wqPane.locator('[data-wq-queue-custom]')).toHaveValue(queue);
 });
 
 test('workqueue pane: queue target supports search + recent persistence', async ({ page }) => {
