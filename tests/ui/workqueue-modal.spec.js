@@ -72,22 +72,22 @@ test('workqueue modal: status filters use human labels and queue-scoped counts',
   const queueSelect = page.locator('#wqQueueSelect');
   await queueSelect.selectOption('dev-team');
   await expect(page.locator('#wqStatusFilters .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
-  await expect(page.locator('[data-wq-filter-count]')).toHaveText('Showing 1 of 1 item');
+  await expect(page.locator('#wqFilterSummary [data-wq-filter-count]')).toHaveText('Showing 1 of 1 item');
   await expect(page.locator('#wqFilterSummary .wq-filter-chip', { hasText: 'Queue: dev-team' })).toHaveCount(1);
   await expect(page.locator('#wqFilterSummary .wq-filter-chip', { hasText: 'Statuses: Ready, Pending, Claimed, In progress' })).toHaveCount(1);
 
   await queueSelect.selectOption('qa-team');
   await expect(page.locator('#wqStatusFilters .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
   await expect(page.locator('#wqStatusFilters .wq-status-chip', { hasText: 'Done (1)' })).toHaveCount(1);
-  await expect(page.locator('[data-wq-filter-count]')).toHaveText('Showing 1 of 2 items');
+  await expect(page.locator('#wqFilterSummary [data-wq-filter-count]')).toHaveText('Showing 1 of 2 items');
 
   await page.locator('#wqFilterSummary .wq-filter-chip', { hasText: 'Statuses:' }).click();
-  await expect(page.locator('[data-wq-filter-count]')).toHaveText('Showing 2 of 2 items');
+  await expect(page.locator('#wqFilterSummary [data-wq-filter-count]')).toHaveText('Showing 2 of 2 items');
   await expect(page.locator('#wqFilterSummary .wq-filter-chip', { hasText: 'Statuses:' })).toHaveCount(0);
 
   await page.locator('#wqStatusFilters input').first().setChecked(false);
   await expect(page.locator('#wqFilterSummary .wq-filter-chip', { hasText: 'Statuses:' })).toHaveCount(1);
   await page.locator('#wqFilterSummary .wq-filter-clear').click();
   await expect(queueSelect).toHaveValue('qa-team');
-  await expect(page.locator('[data-wq-filter-count]')).toHaveText('Showing 2 of 2 items');
+  await expect(page.locator('#wqFilterSummary [data-wq-filter-count]')).toHaveText('Showing 2 of 2 items');
 });
