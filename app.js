@@ -2352,7 +2352,8 @@ const commandPaletteState = {
   items: [],
   filtered: [],
   selectedIndex: 0,
-  expandedSubgroups: new Set()
+  expandedSubgroups: new Set(),
+  originPaneKey: ''
 };
 
 const COMMAND_PALETTE_GROUP_ORDER = ['Panes', 'Navigation', 'Layout', 'Workqueue', 'Agents', 'Advanced'];
@@ -2373,6 +2374,7 @@ function isCommandPaletteOpen() {
 function closeCommandPalette({ restoreFocus = true } = {}) {
   if (!globalElements.commandPaletteModal) return;
   commandPaletteState.open = false;
+  commandPaletteState.originPaneKey = '';
   globalElements.commandPaletteModal.classList.remove('open');
   globalElements.commandPaletteModal.setAttribute('aria-hidden', 'true');
   if (restoreFocus) {
@@ -2910,6 +2912,7 @@ function openCommandPalette() {
   if (!globalElements.commandPaletteModal) return;
 
   commandPaletteState.open = true;
+  commandPaletteState.originPaneKey = focusedPaneKey() || paneMruOrder()[0] || '';
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
   commandPaletteState.selectedIndex = 0;
@@ -3009,7 +3012,8 @@ function findExistingPane(kind, predicate = null) {
 function getActiveChatAgentPane() {
   const focusedKey = focusedPaneKey();
   const fallbackKey = paneMruOrder()[0] || '';
-  const activeKey = focusedKey || fallbackKey;
+  const originKey = commandPaletteState.open ? String(commandPaletteState.originPaneKey || '') : '';
+  const activeKey = originKey || focusedKey || fallbackKey;
   return (paneManager?.panes || []).find((pane) => String(pane?.key || '') === activeKey && pane.kind === 'chat') || null;
 }
 
@@ -3055,6 +3059,8 @@ function openWorkqueueForActiveChatAgent() {
   };
   setTimeout(focusWorkqueuePane, 0);
   setTimeout(focusWorkqueuePane, 30);
+  setTimeout(focusWorkqueuePane, 120);
+  setTimeout(focusWorkqueuePane, 300);
   showToast(`Workqueue scoped to ${agentId}`, { kind: 'info', timeoutMs: 1600 });
   return pane;
 }
