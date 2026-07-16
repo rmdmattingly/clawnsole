@@ -403,6 +403,73 @@ test('workqueue pane: scope filter toggles assigned/unassigned/all deterministic
   await expect(rows).toHaveCount(2);
 });
 
+test('workqueue pane: all-scope guardrail offers one-click downscope and session dismiss', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `all-scope-guardrail-${Date.now()}`;
+  const dataDir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dataDir, { recursive: true });
+  const now = new Date().toISOString();
+  const items = Array.from({ length: 201 }, (_, idx) => ({
+    id: `bulk-${idx}`,
+    queue,
+    title: idx === 0 ? 'main assigned item' : `other assigned item ${idx}`,
+    instructions: 'bulk all-scope guardrail test',
+    priority: idx,
+    status: 'ready',
+    claimedBy: idx === 0 ? 'main' : 'other-agent',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: now,
+    updatedAt: now
+  }));
+  fs.writeFileSync(
+    path.join(dataDir, 'work-queues.json'),
+    JSON.stringify(
+      {
+        version: 1,
+        queues: { [queue]: { name: queue, createdAt: now } },
+        assignments: {},
+        items
+      },
+      null,
+      2
+    )
+  );
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await wqPane.locator('[data-wq-scope="all"]').click();
+
+  const guardrail = wqPane.getByTestId('wq-all-scope-guardrail');
+  await expect(guardrail).toBeVisible();
+  await expect(guardrail).toContainText('Viewing all items (201).');
+
+  await guardrail.getByRole('button', { name: 'Assigned to active target' }).click();
+  await expect(guardrail).toBeHidden();
+  await expect(wqPane.locator('[data-wq-list-body]')).toContainText('main assigned item');
+  await expect(wqPane.locator('[data-wq-list-body]')).not.toContainText('other assigned item 1');
+
+  await wqPane.locator('[data-wq-scope="all"]').click();
+  await expect(guardrail).toBeVisible();
+  await guardrail.getByRole('button', { name: 'Dismiss all scope warning' }).click();
+  await expect(guardrail).toBeHidden();
+
+  await wqPane.locator('[data-wq-scope="assigned"]').click();
+  await wqPane.locator('[data-wq-scope="all"]').click();
+  await expect(guardrail).toBeHidden();
+});
+
 test('workqueue pane: source chips + clawnsole preset filter items without reload', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);

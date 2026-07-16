@@ -2281,6 +2281,41 @@ kbd {
   background: rgba(127, 209, 185, 0.12);
 }
 
+.wq-all-scope-guardrail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 198, 109, 0.38);
+  border-radius: 8px;
+  background: rgba(255, 198, 109, 0.1);
+  color: var(--text);
+}
+
+.wq-all-scope-guardrail[hidden] {
+  display: none;
+}
+
+.wq-all-scope-guardrail-copy {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.wq-all-scope-guardrail-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.wq-all-scope-guardrail-actions button {
+  font-size: 11px;
+  padding: 5px 8px;
+}
+
 .wq-enqueue {
   margin-top: 10px;
 }
