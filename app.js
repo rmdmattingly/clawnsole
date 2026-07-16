@@ -7275,10 +7275,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
     root,
+    headerLeft: root.querySelector('.pane-header-left'),
     name: root.querySelector('[data-pane-name]'),
     nameToken: root.querySelector('[data-pane-name-token]'),
     nameTarget: root.querySelector('[data-pane-name-target]'),
     nicknameBtn: root.querySelector('[data-pane-nickname]'),
+    indexBadge: null,
     typePill: root.querySelector('[data-pane-type-pill]'),
     typeIcon: root.querySelector('[data-pane-type-icon]'),
     typeText: root.querySelector('[data-pane-type-text]'),
@@ -7380,6 +7382,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
   // Pane header: kind label + type pill (icon + text)
   try {
+    if (elements.headerLeft) {
+      const indexBadge = document.createElement('span');
+      indexBadge.className = 'pane-index-badge';
+      indexBadge.setAttribute('data-pane-index-badge', '');
+      indexBadge.setAttribute('aria-hidden', 'true');
+      elements.headerLeft.insertBefore(indexBadge, elements.headerLeft.firstChild);
+      elements.indexBadge = indexBadge;
+    }
     if (elements.name) {
       if (elements.nameToken && elements.nameTarget) {
         elements.name.replaceChildren(elements.nameToken, elements.nameTarget);
@@ -8914,6 +8924,7 @@ const paneManager = {
     );
     this.panes.forEach((pane) => globalElements.paneGrid.appendChild(pane.elements.root));
     this.updatePaneLabels();
+    updatePaneIndexBadges();
     this.updateCloseButtons();
     this.applyInferredLayout();
     updateBrowserTitle(this.panes[0] || null);
@@ -9538,12 +9549,14 @@ const paneManager = {
     }
 
     this.updatePaneLabels();
+    updatePaneIndexBadges();
     this.persistAdminPanes();
     updateGlobalStatus();
     return true;
   },
   updatePaneLabels() {
     this.panes.forEach((pane) => renderPaneIdentity(pane));
+    updatePaneIndexBadges();
     this.updatePaneGridLabel();
   },
   updatePaneGridLabel() {
@@ -9866,7 +9879,7 @@ globalElements.wqRefreshBtn?.addEventListener('click', () => {
 globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFromUi());
 globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFromUi());
 
-let shortcutState = { lastGAtMs: 0, blockedReasonLastShownAt: new Map() };
+let shortcutState = { lastGAtMs: 0, blockedReasonLastShownAt: new Map(), paneIndexBadgesVisible: false };
 const GO_TO_PANE_TIMEOUT_MS = 1200;
 const SHORTCUT_BLOCK_RATE_LIMIT_MS = 5000;
 const SHORTCUT_BLOCK_MESSAGES = {
@@ -9874,6 +9887,31 @@ const SHORTCUT_BLOCK_MESSAGES = {
   modal: 'Close modal to use this shortcut',
   layout: 'Use Cmd/Ctrl+1..9 on this keyboard layout'
 };
+
+function updatePaneIndexBadges() {
+  const panes = paneManager?.panes || [];
+  panes.forEach((pane, idx) => {
+    const badge = pane?.elements?.indexBadge;
+    const root = pane?.elements?.root;
+    if (!badge || !root) return;
+    const focusNumber = idx + 1;
+    const eligible = focusNumber >= 1 && focusNumber <= 9;
+    badge.textContent = eligible ? String(focusNumber) : '';
+    badge.hidden = !eligible || !shortcutState.paneIndexBadgesVisible;
+    badge.setAttribute('aria-hidden', 'true');
+    root.dataset.paneFocusIndex = eligible ? String(focusNumber) : '';
+    if (eligible) root.setAttribute('aria-keyshortcuts', `Alt+${focusNumber} Meta+Shift+${focusNumber} Control+Shift+${focusNumber}`);
+    else root.removeAttribute('aria-keyshortcuts');
+  });
+}
+
+function setPaneIndexBadgesVisible(visible) {
+  const next = !!visible;
+  if (shortcutState.paneIndexBadgesVisible === next) return;
+  shortcutState.paneIndexBadgesVisible = next;
+  document.body?.classList?.toggle('pane-index-badges-visible', next);
+  updatePaneIndexBadges();
+}
 
 function reportBlockedShortcut(reason) {
   const key = String(reason || '').trim();
@@ -10213,6 +10251,8 @@ function isBlockingOverlayOpenForPaneShortcuts() {
 }
 
 window.addEventListener('keydown', (event) => {
+  if (event.key === 'Alt' || event.altKey) setPaneIndexBadgesVisible(true);
+
   const isEditableTarget = (() => {
     const el = event.target;
     if (!el) return false;
@@ -10434,6 +10474,16 @@ window.addEventListener('keydown', (event) => {
       shortcutState.lastGAtMs = 0;
     }
   }
+});
+
+window.addEventListener('keyup', (event) => {
+  if (event.key === 'Alt' || !event.altKey) setPaneIndexBadgesVisible(false);
+});
+
+window.addEventListener('blur', () => setPaneIndexBadgesVisible(false));
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) setPaneIndexBadgesVisible(false);
 });
 
 globalElements.disconnectBtn?.addEventListener('click', () => {

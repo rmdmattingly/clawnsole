@@ -471,6 +471,28 @@ body::before {
   min-width: 0;
 }
 
+.pane-index-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  border: 1px solid rgba(var(--pane-accent-rgb, 255, 179, 71), 0.58);
+  background: rgba(8, 12, 18, 0.86);
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.pane-index-badge[hidden] {
+  display: inline-flex !important;
+  visibility: hidden;
+}
+
 .pane-name {
   display: inline-flex;
   align-items: center;

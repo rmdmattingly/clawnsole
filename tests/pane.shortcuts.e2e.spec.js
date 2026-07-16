@@ -58,6 +58,36 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
 });
 
+test('holding Alt reveals visible pane focus index badges', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const badges = page.locator('[data-pane-index-badge]');
+  await expect(badges.first()).toHaveText('1');
+  await expect(badges.first()).toBeHidden();
+
+  await page.keyboard.down('Alt');
+  await expect(badges.first()).toBeVisible();
+  await expect(badges.first()).toHaveText('1');
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-chat').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+  await expect(badges.nth(2)).toBeVisible();
+  await expect(badges.nth(2)).toHaveText('3');
+
+  await page.keyboard.up('Alt');
+  await expect(badges.first()).toBeHidden();
+  await expect(badges.nth(2)).toBeHidden();
+});
+
 test('pane-add shortcuts are scoped to workspace and blocked by overlays', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
