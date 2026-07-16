@@ -3449,6 +3449,21 @@ function formatWorkqueueStatusLabel(status) {
     .join(' ');
 }
 
+function formatWorkqueueScopeLabel(scope) {
+  const s = String(scope || '').trim().toLowerCase();
+  if (s === 'assigned') return 'Assigned';
+  if (s === 'unassigned') return 'Unassigned';
+  return 'All';
+}
+
+function formatWorkqueueSourceLabel(source) {
+  const s = String(source || '').trim().toLowerCase();
+  if (s === 'issue') return 'Issue';
+  if (s === 'routine') return 'Routine';
+  if (s === 'coordination') return 'Coordination';
+  return 'Other';
+}
+
 function buildWorkqueueStatusCounts(items) {
   const counts = Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0]));
   for (const it of Array.isArray(items) ? items : []) {
@@ -4185,12 +4200,127 @@ function groupWorkqueueDuplicateIssues(items) {
 function applyWorkqueueQuickFilters(items, quickFilters) {
   const sourceSet = new Set(Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((x) => String(x || '').trim()).filter(Boolean) : []);
   const repoSet = new Set(Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((x) => String(x || '').trim()).filter(Boolean) : []);
+  const search = String(quickFilters?.search || '').trim().toLowerCase();
 
   return (Array.isArray(items) ? items : []).filter((it) => {
     if (sourceSet.size && !sourceSet.has(getWorkqueueItemSource(it))) return false;
     if (repoSet.size && !repoSet.has(getWorkqueueItemRepo(it))) return false;
+    if (search) {
+      const haystack = [
+        it?.id,
+        it?.title,
+        it?.instructions,
+        it?.dedupeKey,
+        it?.status,
+        it?.claimedBy,
+        getWorkqueueItemRepo(it),
+        getWorkqueueItemSource(it)
+      ].map((v) => String(v || '').toLowerCase()).join('\n');
+      if (!haystack.includes(search)) return false;
+    }
     return true;
   });
+}
+
+function formatWorkqueueCountText(shown, total) {
+  const shownNum = Number(shown) || 0;
+  const totalNum = Number(total) || 0;
+  const noun = shownNum === 1 ? 'item' : 'items';
+  if (totalNum > 0 && shownNum !== totalNum) return `Showing ${shownNum} of ${totalNum} ${totalNum === 1 ? 'item' : 'items'}`;
+  return `Showing ${shownNum} ${noun}`;
+}
+
+function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount } = {}) {
+  const root = pane?.elements?.thread?.querySelector?.('[data-wq-filter-summary]');
+  if (!root) return;
+
+  const queue = String(pane.workqueue?.queue || '').trim();
+  const scope = pane.workqueue?.scopeFilter || 'all';
+  const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter.map((s) => String(s || '').trim()).filter(Boolean) : [];
+  const quick = pane.workqueue?.quickFilters || {};
+  const sources = Array.isArray(quick.sources) ? quick.sources.map((s) => String(s || '').trim()).filter(Boolean) : [];
+  const repos = Array.isArray(quick.repos) ? quick.repos.map((s) => String(s || '').trim()).filter(Boolean) : [];
+  const search = String(quick.search || '').trim();
+  const hasFilters = !!queue || !!scope || statuses.length || sources.length || repos.length || !!search;
+
+  root.innerHTML = '';
+  root.hidden = !hasFilters;
+  if (!hasFilters) return;
+
+  const count = document.createElement('span');
+  count.className = 'wq-filter-count';
+  count.textContent = formatWorkqueueCountText(shownCount, totalCount);
+  root.appendChild(count);
+
+  const addToken = ({ label, value, title, action, removable = true }) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'wq-filter-token';
+    btn.title = title || (removable ? `Remove ${label} filter` : label);
+    btn.setAttribute('aria-label', btn.title);
+    btn.disabled = !removable;
+    btn.innerHTML = `<span class="wq-filter-token-label">${escapeHtml(label)}</span> <span>${escapeHtml(value)}</span>${removable ? ' <span aria-hidden="true">×</span>' : ''}`;
+    if (removable && typeof action === 'function') btn.addEventListener('click', action);
+    root.appendChild(btn);
+  };
+
+  if (queue) {
+    addToken({
+      label: 'Queue',
+      value: queue,
+      title: queue === 'dev-team' ? 'Queue target dev-team' : `Reset queue filter ${queue} to dev-team`,
+      removable: queue !== 'dev-team',
+      action: () => pane.workqueue?.setQueue?.('dev-team')
+    });
+  }
+  addToken({
+    label: 'Scope',
+    value: formatWorkqueueScopeLabel(scope),
+    title: `Reset scope filter ${formatWorkqueueScopeLabel(scope)} to All`,
+    removable: scope !== 'all',
+    action: () => pane.workqueue?.setScope?.('all')
+  });
+  for (const status of statuses) {
+    addToken({
+      label: 'Status',
+      value: formatWorkqueueStatusLabel(status),
+      title: `Remove status filter ${formatWorkqueueStatusLabel(status)}`,
+      action: () => pane.workqueue?.applyStatuses?.(statuses.filter((s) => s !== status))
+    });
+  }
+  for (const source of sources) {
+    addToken({
+      label: 'Source',
+      value: formatWorkqueueSourceLabel(source),
+      title: `Remove source filter ${formatWorkqueueSourceLabel(source)}`,
+      action: () => pane.workqueue?.removeQuickFilter?.('source', source)
+    });
+  }
+  for (const repo of repos) {
+    addToken({
+      label: 'Repo',
+      value: repo,
+      title: `Remove repo filter ${repo}`,
+      action: () => pane.workqueue?.removeQuickFilter?.('repo', repo)
+    });
+  }
+  if (search) {
+    addToken({
+      label: 'Search',
+      value: search,
+      title: `Clear search query ${search}`,
+      action: () => pane.workqueue?.setQuickSearch?.('')
+    });
+  }
+
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.className = 'secondary wq-clear-all-filters';
+  clear.setAttribute('data-wq-clear-all-filters', '');
+  clear.textContent = 'Clear all filters';
+  clear.title = 'Clear status, scope, search, source, and repo filters. Queue target is preserved.';
+  clear.addEventListener('click', () => pane.workqueue?.clearAllFilters?.());
+  root.appendChild(clear);
 }
 
 async function fetchAndRenderWorkqueueItemsForPane(pane) {
@@ -4239,7 +4369,6 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
     if (previousSignature && previousSignature !== nextSignature) {
       markPaneUnread(pane, 1, 'workqueue');
     }
-    if (statusLine) statusLine.textContent = `${items.length} item(s)`;
     if (typeof pane.workqueue.renderStatusMultiSelect === 'function') pane.workqueue.renderStatusMultiSelect();
     renderWorkqueuePaneItems(pane);
   } catch (err) {
@@ -4338,6 +4467,10 @@ function renderWorkqueuePaneItems(pane) {
   const scopedItems = filterWorkqueuePaneItemsByScope(pane, pane.workqueue?.items);
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
   const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const totalCount = Array.isArray(pane.workqueue?.countItems) ? pane.workqueue.countItems.length : (Array.isArray(pane.workqueue?.items) ? pane.workqueue.items.length : items.length);
+  const statusLine = pane.elements?.thread?.querySelector('[data-wq-statusline]');
+  if (statusLine) statusLine.textContent = formatWorkqueueCountText(items.length, totalCount);
+  renderWorkqueueFilterSummaryForPane(pane, { shownCount: items.length, totalCount });
   const renderLimit = Math.max(
     WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
     Number(pane.workqueue?.renderLimit || WORKQUEUE_PANE_INITIAL_RENDER_LIMIT)
@@ -6362,7 +6495,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScope()),
       quickFilters: {
         sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
-        repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
+        repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : [],
+        search: String(quickFilters?.search || '').trim()
       },
       statusCounts: Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0])),
       items: [],
@@ -6586,6 +6720,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <div class="wq-scope" data-wq-repo-chips></div>
           </div>
 
+          <label class="wq-field wq-search-field">
+            <span class="wq-label">Search</span>
+            <input data-wq-search type="search" placeholder="Filter tasks" autocomplete="off" />
+          </label>
+
           <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
           <button data-wq-clear-quick class="secondary" type="button">Clear filters</button>
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
@@ -6644,6 +6783,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         </details>
 
         <div class="hint" data-wq-statusline></div>
+        <div class="wq-filter-summary" data-wq-filter-summary aria-live="polite" hidden></div>
         <div class="wq-duplicate-health" data-wq-duplicate-health aria-live="polite" hidden></div>
       </div>
 
@@ -6693,6 +6833,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const repoChipsEl = elements.thread.querySelector('[data-wq-repo-chips]');
     const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
     const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
+    const searchEl = elements.thread.querySelector('[data-wq-search]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
 
     const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
@@ -6712,9 +6853,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const initQuick = pane.workqueue?.quickFilters || {};
     const sourceSet = new Set(Array.isArray(initQuick.sources) ? initQuick.sources.map((x) => String(x || '').trim()).filter(Boolean) : []);
     const repoSet = new Set(Array.isArray(initQuick.repos) ? initQuick.repos.map((x) => String(x || '').trim()).filter(Boolean) : []);
+    let searchQuery = String(initQuick.search || '').trim();
+    if (searchEl) searchEl.value = searchQuery;
 
     const persistQuickFilters = () => {
-      pane.workqueue.quickFilters = { sources: Array.from(sourceSet), repos: Array.from(repoSet) };
+      pane.workqueue.quickFilters = { sources: Array.from(sourceSet), repos: Array.from(repoSet), search: searchQuery };
       paneManager.persistAdminPanes();
     };
 
@@ -6755,6 +6898,24 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       }
     };
 
+    const setQuickSearch = (next) => {
+      searchQuery = String(next || '').trim();
+      if (searchEl && searchEl.value !== searchQuery) searchEl.value = searchQuery;
+      resetRenderLimit();
+      persistQuickFilters();
+      renderWorkqueuePaneItems(pane);
+    };
+
+    const removeQuickFilter = (type, value) => {
+      const key = String(value || '').trim();
+      if (type === 'source') sourceSet.delete(key);
+      if (type === 'repo') repoSet.delete(key);
+      resetRenderLimit();
+      persistQuickFilters();
+      updateQuickFilterUi();
+      renderWorkqueuePaneItems(pane);
+    };
+
     const applyStatuses = async (next, { closeMenu = false } = {}) => {
       statusSet.clear();
       for (const s of next) statusSet.add(s);
@@ -6791,6 +6952,24 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       await fetchAndRenderWorkqueueItemsForPane(pane);
       updateQuickFilterUi();
       paneManager.persistAdminPanes();
+    };
+
+    const setQueue = async (queue) => {
+      const q = String(queue || '').trim() || 'dev-team';
+      if (queueSelectEl) {
+        const existing = Array.from(queueSelectEl.options || []).find((opt) => String(opt.value) === q);
+        if (existing) {
+          queueSelectEl.value = q;
+          if (queueCustomEl) queueCustomEl.hidden = true;
+        } else {
+          queueSelectEl.value = '__custom__';
+          if (queueCustomEl) {
+            queueCustomEl.hidden = false;
+            queueCustomEl.value = q;
+          }
+        }
+      }
+      await doRefresh();
     };
 
     const renderStatusMultiSelect = () => {
@@ -6830,6 +7009,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       }
     };
     pane.workqueue.renderStatusMultiSelect = renderStatusMultiSelect;
+    pane.workqueue.applyStatuses = applyStatuses;
+    pane.workqueue.setQueue = setQueue;
+    pane.workqueue.setQuickSearch = setQuickSearch;
+    pane.workqueue.removeQuickFilter = removeQuickFilter;
 
     const applyQueueSearchFilter = () => {
       if (!queueSelectEl) return;
@@ -6983,6 +7166,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       renderWorkqueuePaneItems(pane);
       paneManager.persistAdminPanes();
     };
+    pane.workqueue.setScope = setScope;
     scopeBtns.forEach((btn) => {
       btn.addEventListener('click', () => setScope(btn.getAttribute('data-wq-scope')));
     });
@@ -7001,6 +7185,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       });
     });
 
+    searchEl?.addEventListener('input', () => setQuickSearch(searchEl.value));
+
     clawnsoleOnlyBtn?.addEventListener('click', () => {
       sourceSet.clear();
       repoSet.clear();
@@ -7011,9 +7197,24 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       renderWorkqueuePaneItems(pane);
     });
 
+    const clearAllFilters = async () => {
+      sourceSet.clear();
+      repoSet.clear();
+      searchQuery = '';
+      if (searchEl) searchEl.value = '';
+      resetRenderLimit();
+      persistQuickFilters();
+      updateQuickFilterUi();
+      setScope('all');
+      await applyStatuses(DEFAULT_STATUSES);
+    };
+    pane.workqueue.clearAllFilters = clearAllFilters;
+
     clearQuickBtn?.addEventListener('click', () => {
       sourceSet.clear();
       repoSet.clear();
+      searchQuery = '';
+      if (searchEl) searchEl.value = '';
       resetRenderLimit();
       persistQuickFilters();
       updateQuickFilterUi();
@@ -7794,6 +7995,7 @@ const paneManager = {
         queue: cfg.queue,
         statusFilter: cfg.statusFilter,
         scopeFilter: cfg.scopeFilter,
+        quickFilters: cfg.quickFilters,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
         closable: true
@@ -7842,7 +8044,8 @@ const paneManager = {
           const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
           const quickFilters = {
             sources: Array.isArray(item?.quickFilters?.sources) ? item.quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
-            repos: Array.isArray(item?.quickFilters?.repos) ? item.quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
+            repos: Array.isArray(item?.quickFilters?.repos) ? item.quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : [],
+            search: String(item?.quickFilters?.search || '').trim()
           };
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
@@ -7890,7 +8093,8 @@ const paneManager = {
           scopeFilter: pane.workqueue?.scopeFilter || 'all',
           quickFilters: {
             sources: Array.isArray(pane.workqueue?.quickFilters?.sources) ? pane.workqueue.quickFilters.sources : [],
-            repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos : []
+            repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos : [],
+            search: String(pane.workqueue?.quickFilters?.search || '').trim()
           },
           sortKey: pane.workqueue?.sortKey || 'priority',
           sortDir: pane.workqueue?.sortDir || 'desc'

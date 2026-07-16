@@ -2106,6 +2106,69 @@ kbd {
   flex: 1;
 }
 
+.wq-search-field {
+  min-width: 220px;
+}
+
+.wq-filter-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  min-height: 28px;
+}
+
+.wq-filter-summary[hidden] {
+  display: none;
+}
+
+.wq-filter-count {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  margin-right: 4px;
+}
+
+.wq-filter-token {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  max-width: 260px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(127, 209, 185, 0.28);
+  background: rgba(127, 209, 185, 0.1);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.wq-filter-token:disabled {
+  cursor: default;
+  opacity: 0.82;
+}
+
+.wq-filter-token span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wq-filter-token-label {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
+.wq-clear-all-filters {
+  min-height: 26px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
 .wq-status-multiselect {
   display: flex;
   flex-direction: column;
