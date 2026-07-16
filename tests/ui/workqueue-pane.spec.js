@@ -340,11 +340,22 @@ test('workqueue pane: source chips + clawnsole preset filter items without reloa
   await enqueue('[ROUTINE] speechee routine item', 'https://github.com/rmdmattingly/speechee/pull/37');
 
   await pane.locator('[data-wq-refresh]').click();
+  await pane.locator('[data-wq-scope="all"]').click();
   await expect(pane.locator('.wq-row')).toHaveCount(2);
+  await expect(pane.locator('[data-wq-filter-count]')).toHaveText('Showing 2 of 2 items');
+  await expect(pane.locator('[data-wq-filter-summary] .wq-filter-chip', { hasText: 'Queue: dev-team' })).toHaveCount(1);
+  await expect(pane.locator('[data-wq-filter-summary] .wq-filter-chip', { hasText: 'Scope: All' })).toHaveCount(1);
+  await expect(pane.locator('[data-wq-filter-summary] .wq-filter-chip', { hasText: 'Statuses:' })).toHaveCount(1);
 
   await pane.locator('[data-wq-source="issue"]').click();
   await expect(pane.locator('.wq-row')).toHaveCount(1);
   await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
+  await expect(pane.locator('[data-wq-filter-count]')).toHaveText('Showing 1 of 2 items');
+  await expect(pane.locator('[data-wq-filter-summary] .wq-filter-chip', { hasText: 'Source: issue' })).toHaveCount(1);
+
+  await pane.locator('[data-wq-filter-summary] .wq-filter-chip', { hasText: 'Source: issue' }).click();
+  await expect(pane.locator('.wq-row')).toHaveCount(2);
+  await expect(pane.locator('[data-wq-filter-summary] .wq-filter-chip', { hasText: 'Source:' })).toHaveCount(0);
 
   await pane.locator('[data-wq-clear-quick]').click();
   await expect(pane.locator('.wq-row')).toHaveCount(2);
@@ -352,6 +363,12 @@ test('workqueue pane: source chips + clawnsole preset filter items without reloa
   await pane.locator('[data-wq-preset-clawnsole]').click();
   await expect(pane.locator('.wq-row')).toHaveCount(1);
   await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
+  await expect(pane.locator('[data-wq-filter-summary] .wq-filter-chip', { hasText: 'Repo: rmdmattingly/clawnsole' })).toHaveCount(1);
+
+  await pane.locator('[data-wq-filter-summary] .wq-filter-clear').click();
+  await expect(pane.locator('[data-wq-queue-select]')).toHaveValue('dev-team');
+  await expect(pane.locator('.wq-row')).toHaveCount(2);
+  await expect(pane.locator('[data-wq-filter-count]')).toHaveText('Showing 2 of 2 items');
 });
 
 test('workqueue pane: normalizes mixed legacy issue title prefixes', async ({ page }) => {

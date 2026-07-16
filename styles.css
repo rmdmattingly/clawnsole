@@ -2007,6 +2007,52 @@ kbd {
   accent-color: var(--accent);
 }
 
+.wq-filter-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.wq-filter-count {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wq-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.wq-filter-chip,
+.wq-filter-clear {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wq-filter-chip::after {
+  content: " x";
+  color: var(--muted);
+}
+
+.wq-filter-clear {
+  color: var(--muted);
+  background: transparent;
+}
+
 .wq-layout {
   display: grid;
   grid-template-columns: 1.2fr 0.8fr;

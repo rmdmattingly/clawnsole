@@ -59,6 +59,7 @@ const globalElements = {
   workqueueCloseBtn: document.getElementById('workqueueCloseBtn'),
   wqQueueSelect: document.getElementById('wqQueueSelect'),
   wqStatusFilters: document.getElementById('wqStatusFilters'),
+  wqFilterSummary: document.getElementById('wqFilterSummary'),
   wqAutoRefreshEnabled: document.getElementById('wqAutoRefreshEnabled'),
   wqAutoRefreshInterval: document.getElementById('wqAutoRefreshInterval'),
   wqRefreshBtn: document.getElementById('wqRefreshBtn'),
@@ -3465,6 +3466,7 @@ const workqueueState = {
   statusFilter: new Set(['ready', 'pending', 'claimed', 'in_progress']),
   statusCounts: Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0])),
   items: [],
+  totalItemsCount: 0,
   selectedItemId: null,
   sortKey: 'default',
   sortDir: 'desc',
@@ -3510,6 +3512,94 @@ function renderWorkqueueStatusFilters() {
     });
     root.appendChild(label);
   }
+}
+
+function getWorkqueueActiveStatusLabels() {
+  return WORKQUEUE_STATUSES
+    .filter((status) => workqueueState.statusFilter.has(status))
+    .map((status) => formatWorkqueueStatusLabel(status));
+}
+
+function isWorkqueueStatusFilterActive() {
+  if (workqueueState.statusFilter.size !== WORKQUEUE_STATUSES.length) return true;
+  return WORKQUEUE_STATUSES.some((status) => !workqueueState.statusFilter.has(status));
+}
+
+function resetWorkqueueStatusFilter() {
+  workqueueState.statusFilter = new Set(WORKQUEUE_STATUSES);
+}
+
+function renderWorkqueueFilterSummary({ filteredCount = 0, totalCount = 0 } = {}) {
+  const root = globalElements.wqFilterSummary;
+  if (!root) return;
+
+  const queue = String(workqueueState.selectedQueue || '').trim();
+  const hasStatusFilter = isWorkqueueStatusFilterActive();
+  const hasQueueFilter = Boolean(queue);
+  const hasAnyFilter = hasQueueFilter || hasStatusFilter;
+  const pluralCount = hasAnyFilter ? totalCount : filteredCount;
+  const plural = pluralCount === 1 ? 'item' : 'items';
+  const countText = hasAnyFilter
+    ? `Showing ${filteredCount} of ${totalCount} ${plural}`
+    : `Showing ${filteredCount} ${plural}`;
+
+  root.innerHTML = '';
+  root.hidden = false;
+
+  const count = document.createElement('div');
+  count.className = 'wq-filter-count';
+  count.setAttribute('data-wq-filter-count', '');
+  count.textContent = countText;
+  root.appendChild(count);
+
+  if (!hasAnyFilter) return;
+
+  const chips = document.createElement('div');
+  chips.className = 'wq-filter-chips';
+  chips.setAttribute('aria-label', 'Active workqueue filters');
+
+  const addChip = ({ label, onRemove }) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'wq-filter-chip';
+    chip.textContent = label;
+    chip.setAttribute('aria-label', `Clear ${label}`);
+    chip.addEventListener('click', onRemove);
+    chips.appendChild(chip);
+  };
+
+  if (hasQueueFilter) {
+    addChip({
+      label: `Queue: ${queue}`,
+      onRemove: () => {
+        workqueueState.selectedQueue = '';
+        if (globalElements.wqQueueSelect) globalElements.wqQueueSelect.value = '';
+        fetchAndRenderWorkqueueItems();
+      }
+    });
+  }
+
+  if (hasStatusFilter) {
+    const labels = getWorkqueueActiveStatusLabels();
+    addChip({
+      label: `Statuses: ${labels.length ? labels.join(', ') : 'None'}`,
+      onRemove: () => {
+        resetWorkqueueStatusFilter();
+        fetchAndRenderWorkqueueItems();
+      }
+    });
+  }
+
+  const clearAll = document.createElement('button');
+  clearAll.type = 'button';
+  clearAll.className = 'wq-filter-clear';
+  clearAll.textContent = 'Clear all filters';
+  clearAll.addEventListener('click', () => {
+    resetWorkqueueStatusFilter();
+    fetchAndRenderWorkqueueItems();
+  });
+  chips.appendChild(clearAll);
+  root.appendChild(chips);
 }
 
 function ensureWorkqueueModalSorting() {
@@ -3647,6 +3737,7 @@ async function fetchAndRenderWorkqueueItems() {
     }
 
     workqueueState.items = items;
+    workqueueState.totalItemsCount = countItems.length;
     workqueueState.statusCounts = buildWorkqueueStatusCounts(countItems);
     renderWorkqueueStatusFilters();
     renderWorkqueueItems();
@@ -3713,6 +3804,7 @@ function renderWorkqueueItems() {
 
   const itemsRaw = Array.isArray(workqueueState.items) ? workqueueState.items : [];
   const items = sortWorkqueueItems(itemsRaw, { sortKey: workqueueState.sortKey, sortDir: workqueueState.sortDir });
+  renderWorkqueueFilterSummary({ filteredCount: itemsRaw.length, totalCount: Number(workqueueState.totalItemsCount || itemsRaw.length) });
 
   if (!items.length) {
     globalElements.wqListEmpty.hidden = false;
@@ -4260,6 +4352,133 @@ function filterWorkqueuePaneItemsByScope(pane, items) {
   });
 }
 
+function getWorkqueuePaneStatusLabels(pane) {
+  const statuses = Array.isArray(pane?.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
+  return statuses.map((status) => formatWorkqueueStatusLabel(status));
+}
+
+function renderWorkqueuePaneFilterSummary(pane, { filteredCount = 0, totalCount = 0 } = {}) {
+  const root = pane?.elements?.thread?.querySelector?.('[data-wq-filter-summary]');
+  if (!root) return;
+
+  const queue = String(pane.workqueue?.queue || '').trim() || 'dev-team';
+  const scope = normalizeWorkqueueScope(pane.workqueue?.scopeFilter || 'all');
+  const quick = pane.workqueue?.quickFilters || {};
+  const sources = Array.isArray(quick.sources) ? quick.sources.map((x) => String(x || '').trim()).filter(Boolean) : [];
+  const repos = Array.isArray(quick.repos) ? quick.repos.map((x) => String(x || '').trim()).filter(Boolean) : [];
+  const statusLabels = getWorkqueuePaneStatusLabels(pane);
+  const hasAnyFilter = Boolean(queue || scope || statusLabels.length || sources.length || repos.length);
+  const pluralBase = hasAnyFilter ? totalCount : filteredCount;
+  const plural = pluralBase === 1 ? 'item' : 'items';
+
+  root.innerHTML = '';
+  root.hidden = false;
+
+  const count = document.createElement('div');
+  count.className = 'wq-filter-count';
+  count.setAttribute('data-wq-filter-count', '');
+  count.textContent = hasAnyFilter
+    ? `Showing ${filteredCount} of ${totalCount} ${plural}`
+    : `Showing ${filteredCount} ${plural}`;
+  root.appendChild(count);
+
+  if (!hasAnyFilter) return;
+
+  const chips = document.createElement('div');
+  chips.className = 'wq-filter-chips';
+  chips.setAttribute('aria-label', 'Active workqueue pane filters');
+
+  const refresh = () => {
+    pane.workqueue.renderLimit = WORKQUEUE_PANE_INITIAL_RENDER_LIMIT;
+    pane.workqueue.statusCounts = buildWorkqueueStatusCounts(filterWorkqueuePaneItemsByScope(pane, pane.workqueue.countItems));
+    if (typeof pane.workqueue.renderStatusMultiSelect === 'function') pane.workqueue.renderStatusMultiSelect();
+    renderWorkqueuePaneItems(pane);
+    paneManager.persistAdminPanes();
+  };
+
+  const addChip = ({ label, onRemove }) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'wq-filter-chip';
+    chip.textContent = label;
+    chip.setAttribute('aria-label', `Clear ${label}`);
+    chip.addEventListener('click', onRemove);
+    chips.appendChild(chip);
+  };
+
+  addChip({ label: `Queue: ${queue}`, onRemove: () => {} });
+  addChip({
+    label: `Scope: ${scope === 'assigned' ? 'Assigned' : scope === 'unassigned' ? 'Unassigned' : 'All'}`,
+    onRemove: () => {
+      if (typeof pane.workqueue.applyScopeFilter === 'function') pane.workqueue.applyScopeFilter('all');
+      else {
+        pane.workqueue.scopeFilter = 'all';
+        storage.set(WORKQUEUE_SCOPE_PREF_KEY, 'all');
+        refresh();
+      }
+    }
+  });
+  addChip({
+    label: `Statuses: ${statusLabels.length ? statusLabels.join(', ') : 'None'}`,
+    onRemove: () => {
+      if (typeof pane.workqueue.applyStatusFilter === 'function') pane.workqueue.applyStatusFilter(Array.from(WORKQUEUE_STATUSES));
+      else {
+        pane.workqueue.statusFilter = Array.from(WORKQUEUE_STATUSES);
+        refresh();
+        fetchAndRenderWorkqueueItemsForPane(pane);
+      }
+    }
+  });
+
+  if (sources.length) {
+    addChip({
+      label: `Source: ${sources.join(', ')}`,
+      onRemove: () => {
+        const next = { sources: [], repos };
+        if (typeof pane.workqueue.applyQuickFilters === 'function') pane.workqueue.applyQuickFilters(next);
+        else {
+          pane.workqueue.quickFilters = next;
+          refresh();
+        }
+      }
+    });
+  }
+
+  if (repos.length) {
+    addChip({
+      label: `Repo: ${repos.join(', ')}`,
+      onRemove: () => {
+        const next = { sources, repos: [] };
+        if (typeof pane.workqueue.applyQuickFilters === 'function') pane.workqueue.applyQuickFilters(next);
+        else {
+          pane.workqueue.quickFilters = next;
+          refresh();
+        }
+      }
+    });
+  }
+
+  const clearAll = document.createElement('button');
+  clearAll.type = 'button';
+  clearAll.className = 'wq-filter-clear';
+  clearAll.textContent = 'Clear all filters';
+  clearAll.addEventListener('click', () => {
+    if (typeof pane.workqueue.applyScopeFilter === 'function') pane.workqueue.applyScopeFilter('all');
+    if (typeof pane.workqueue.applyQuickFilters === 'function') pane.workqueue.applyQuickFilters({ sources: [], repos: [] });
+    if (typeof pane.workqueue.applyStatusFilter === 'function') pane.workqueue.applyStatusFilter(Array.from(WORKQUEUE_STATUSES));
+    if (typeof pane.workqueue.applyScopeFilter !== 'function' || typeof pane.workqueue.applyQuickFilters !== 'function' || typeof pane.workqueue.applyStatusFilter !== 'function') {
+      pane.workqueue.scopeFilter = 'all';
+      pane.workqueue.statusFilter = Array.from(WORKQUEUE_STATUSES);
+      pane.workqueue.quickFilters = { sources: [], repos: [] };
+      storage.set(WORKQUEUE_SCOPE_PREF_KEY, 'all');
+      refresh();
+      fetchAndRenderWorkqueueItemsForPane(pane);
+    }
+  });
+  chips.appendChild(clearAll);
+  root.appendChild(chips);
+}
+
 function renderWorkqueueDuplicateHealthForPane(pane) {
   const root = pane?.elements?.thread?.querySelector?.('[data-wq-duplicate-health]');
   if (!root) return;
@@ -4338,6 +4557,8 @@ function renderWorkqueuePaneItems(pane) {
   const scopedItems = filterWorkqueuePaneItemsByScope(pane, pane.workqueue?.items);
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
   const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const totalItems = Array.isArray(pane.workqueue?.countItems) ? pane.workqueue.countItems.length : filteredItems.length;
+  renderWorkqueuePaneFilterSummary(pane, { filteredCount: filteredItems.length, totalCount: totalItems });
   const renderLimit = Math.max(
     WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
     Number(pane.workqueue?.renderLimit || WORKQUEUE_PANE_INITIAL_RENDER_LIMIT)
@@ -6644,6 +6865,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         </details>
 
         <div class="hint" data-wq-statusline></div>
+        <div class="wq-filter-summary" data-wq-filter-summary aria-live="polite" hidden></div>
         <div class="wq-duplicate-health" data-wq-duplicate-health aria-live="polite" hidden></div>
       </div>
 
@@ -6755,6 +6977,23 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       }
     };
 
+    pane.workqueue.applyQuickFilters = (next = {}) => {
+      sourceSet.clear();
+      repoSet.clear();
+      for (const source of Array.isArray(next.sources) ? next.sources : []) {
+        const key = String(source || '').trim();
+        if (key) sourceSet.add(key);
+      }
+      for (const repo of Array.isArray(next.repos) ? next.repos : []) {
+        const key = String(repo || '').trim();
+        if (key) repoSet.add(key);
+      }
+      resetRenderLimit();
+      persistQuickFilters();
+      updateQuickFilterUi();
+      renderWorkqueuePaneItems(pane);
+    };
+
     const applyStatuses = async (next, { closeMenu = false } = {}) => {
       statusSet.clear();
       for (const s of next) statusSet.add(s);
@@ -6766,6 +7005,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       updateQuickFilterUi();
       paneManager.persistAdminPanes();
     };
+    pane.workqueue.applyStatusFilter = applyStatuses;
 
     const doRefresh = async () => {
       const q = getQueueValue() || 'dev-team';
@@ -6983,6 +7223,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       renderWorkqueuePaneItems(pane);
       paneManager.persistAdminPanes();
     };
+    pane.workqueue.applyScopeFilter = setScope;
     scopeBtns.forEach((btn) => {
       btn.addEventListener('click', () => setScope(btn.getAttribute('data-wq-scope')));
     });
