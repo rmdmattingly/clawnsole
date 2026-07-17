@@ -101,11 +101,18 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   await expect(wqPane.locator('[data-pane-input]')).toBeHidden();
 });
 
-test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
+test('pane: workqueue golden path (enqueue + inspect + transition + edit + delete)', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
 
   installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([{ key: 'ptestchat02', kind: 'chat', agentId: 'main' }])
+    );
+  });
 
   await page.goto(`http://127.0.0.1:${app.serverPort}/`);
   await page.fill('#loginPassword', 'admin');
@@ -145,7 +152,7 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await wqPane.locator('details.wq-enqueue > summary').click();
 
   // Wait for the row to appear in the list.
-  const row = wqPane.locator('.wq-row', { hasText: title });
+  const row = wqPane.getByTestId('workqueue-item-row').filter({ hasText: title });
   await expect(row).toBeVisible();
 
   // Select the row to open the inspect panel.
@@ -154,6 +161,47 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await page.keyboard.press('Enter');
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(title);
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(instructions);
+
+  await expect(wqPane.getByTestId('workqueue-inspect-actions')).toBeVisible();
+
+  await wqPane.getByTestId('workqueue-inspect-status').selectOption('in_progress');
+  const statusResP = page.waitForResponse(
+    (res) => res.url().includes('/api/workqueue/update') && res.request().method() === 'POST',
+    { timeout: 15000 }
+  );
+  await wqPane.getByTestId('workqueue-inspect-save-status').click();
+  const statusRes = await statusResP;
+  expect(statusRes.ok()).toBeTruthy();
+  await expect(wqPane.getByTestId('workqueue-inspect-action-status')).toContainText('Status saved');
+  await expect(row).toContainText('in_progress');
+
+  const editedTitle = `${title}-edited`;
+  const editedInstructions = `${instructions} edited`;
+  await wqPane.getByTestId('workqueue-inspect-edit-details').locator('summary').click();
+  await wqPane.getByTestId('workqueue-inspect-title').fill(editedTitle);
+  await wqPane.getByTestId('workqueue-inspect-instructions').fill(editedInstructions);
+
+  const editResP = page.waitForResponse(
+    (res) => res.url().includes('/api/workqueue/update') && res.request().method() === 'POST',
+    { timeout: 15000 }
+  );
+  await wqPane.getByTestId('workqueue-inspect-edit-form').locator('button[type="submit"]').click();
+  const editRes = await editResP;
+  expect(editRes.ok()).toBeTruthy();
+  await expect(wqPane.getByTestId('workqueue-inspect-action-status')).toContainText('Edit saved');
+  await expect(wqPane.locator('[data-wq-inspect]')).toContainText(editedTitle);
+  await expect(wqPane.locator('[data-wq-inspect]')).toContainText(editedInstructions);
+  await expect(wqPane.getByTestId('workqueue-item-row').filter({ hasText: editedTitle })).toBeVisible();
+
+  const deleteResP = page.waitForResponse(
+    (res) => res.url().includes('/api/workqueue/delete') && res.request().method() === 'POST',
+    { timeout: 15000 }
+  );
+  await wqPane.getByTestId('workqueue-inspect-delete').click();
+  const deleteRes = await deleteResP;
+  expect(deleteRes.ok()).toBeTruthy();
+  await expect(wqPane.getByTestId('workqueue-item-row').filter({ hasText: editedTitle })).toHaveCount(0);
+  await expect(wqPane.locator('[data-wq-inspect]')).toContainText('Select an item to inspect');
 });
 
 test('pane: workqueue scope filter toggles deterministic row counts', async ({ page }) => {
@@ -161,6 +209,13 @@ test('pane: workqueue scope filter toggles deterministic row counts', async ({ p
   test.skip(!!app?.skipReason, app?.skipReason);
 
   installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([{ key: 'ptestchat03', kind: 'chat', agentId: 'main' }])
+    );
+  });
 
   await page.goto(`http://127.0.0.1:${app.serverPort}/`);
   await page.fill('#loginPassword', 'admin');
