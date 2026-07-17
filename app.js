@@ -4521,7 +4521,9 @@ function renderWorkqueuePaneItems(pane) {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'wq-row';
+    row.setAttribute('data-testid', 'workqueue-pane-item');
     if (it.id && it.id === pane.workqueue.selectedItemId) row.classList.add('selected');
+    if (it.id) row.setAttribute('data-wq-item', String(it.id));
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
     const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
@@ -4579,6 +4581,11 @@ function renderWorkqueuePaneInspect(pane, item) {
     return;
   }
   const kv = (k, v) => `<div class="wq-kv"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(String(v ?? ''))}</div></div>`;
+  const statusOptions = WORKQUEUE_STATUSES.map((status) => {
+    const value = String(status || '');
+    return `<option value="${escapeHtml(value)}" ${value === String(item.status || '') ? 'selected' : ''}>${escapeHtml(value)}</option>`;
+  }).join('');
+
   root.innerHTML = `
     <div class="wq-inspect-meta">
       ${kv('id', item.id)}
@@ -4599,7 +4606,95 @@ function renderWorkqueuePaneInspect(pane, item) {
       <pre class="wq-inspect-pre">${escapeHtml(String(item.instructions || ''))}</pre>
     </div>
     ${item.lastError ? `<div class="wq-inspect-block"><div class="wq-inspect-label">Last error</div><pre class="wq-inspect-pre">${escapeHtml(String(item.lastError))}</pre></div>` : ''}
+    <form class="wq-inspect-form" data-wq-pane-edit-form data-testid="workqueue-pane-edit-form">
+      <label class="wq-field">
+        <span class="wq-label">Title</span>
+        <input type="text" data-wq-pane-edit-title data-testid="workqueue-pane-edit-title" value="${escapeHtml(String(item.title || ''))}" />
+      </label>
+      <label class="wq-field">
+        <span class="wq-label">Status</span>
+        <select data-wq-pane-edit-status data-testid="workqueue-pane-edit-status">
+          ${statusOptions}
+        </select>
+      </label>
+      <label class="wq-field wq-field-wide">
+        <span class="wq-label">Instructions</span>
+        <textarea data-wq-pane-edit-instructions data-testid="workqueue-pane-edit-instructions" rows="4">${escapeHtml(String(item.instructions || ''))}</textarea>
+      </label>
+      <div class="wq-inspect-actions">
+        <button type="submit" class="primary" data-testid="workqueue-pane-save">Save</button>
+        <button type="button" class="danger" data-wq-pane-delete data-testid="workqueue-pane-delete">Delete</button>
+        <button type="button" class="danger" data-wq-pane-confirm-delete data-testid="workqueue-pane-confirm-delete" hidden>Confirm delete</button>
+      </div>
+      <div class="hint" data-wq-pane-action-status data-testid="workqueue-pane-action-status" aria-live="polite"></div>
+    </form>
   `;
+
+  const form = root.querySelector('[data-wq-pane-edit-form]');
+  const titleInput = root.querySelector('[data-wq-pane-edit-title]');
+  const statusSelect = root.querySelector('[data-wq-pane-edit-status]');
+  const instructionsInput = root.querySelector('[data-wq-pane-edit-instructions]');
+  const deleteBtn = root.querySelector('[data-wq-pane-delete]');
+  const confirmDeleteBtn = root.querySelector('[data-wq-pane-confirm-delete]');
+  const actionStatus = root.querySelector('[data-wq-pane-action-status]');
+  const setActionStatus = (text) => {
+    if (actionStatus) actionStatus.textContent = String(text || '');
+  };
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const title = String(titleInput?.value || '').trim();
+    const instructions = String(instructionsInput?.value || '');
+    const status = String(statusSelect?.value || '').trim();
+    if (!title) {
+      setActionStatus('Title is required.');
+      titleInput?.focus();
+      return;
+    }
+
+    setActionStatus('Saving...');
+    try {
+      const updated = await workqueueUpdateItem(item.id, { title, instructions, status });
+      pane.workqueue.selectedItemId = updated?.id || item.id;
+      await fetchAndRenderWorkqueueItemsForPane(pane);
+      const refreshed = (Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : []).find((it) => it.id === pane.workqueue.selectedItemId) || updated;
+      renderWorkqueuePaneInspect(pane, refreshed);
+    } catch (err) {
+      setActionStatus('Save failed: ' + String(err));
+    }
+  });
+
+  deleteBtn?.addEventListener('click', () => {
+    if (!confirmDeleteBtn) return;
+    confirmDeleteBtn.hidden = false;
+    confirmDeleteBtn.focus();
+    setActionStatus('Confirm delete to remove this item.');
+  });
+
+  confirmDeleteBtn?.addEventListener('click', async () => {
+    setActionStatus('Deleting...');
+    try {
+      await workqueueDeleteItemById(item.id);
+      if (pane.workqueue.selectedItemId === item.id) pane.workqueue.selectedItemId = null;
+      await fetchAndRenderWorkqueueItemsForPane(pane);
+      renderWorkqueuePaneInspect(pane, null);
+    } catch (err) {
+      setActionStatus('Delete failed: ' + String(err));
+    }
+  });
+}
+
+async function workqueueDeleteItemById(itemId) {
+  if (!itemId) return null;
+  const res = await fetch('/api/workqueue/delete', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ itemId })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data?.ok) throw new Error(String(data?.error || res.status));
+  return data.item;
 }
 
 function startWorkqueueLeaseTicker() {
