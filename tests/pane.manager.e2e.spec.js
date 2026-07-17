@@ -149,6 +149,62 @@ test('pane manager: quick-find filters, highlights, and focuses first match', as
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
 });
 
+test('pane nicknames: set from header and manager, persist, and feed search surfaces', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('Pane nickname');
+    await dialog.accept('Hotfix chat');
+  });
+  await chatPane.getByTestId('pane-nickname').click();
+  await expect(chatPane.getByTestId('pane-type-label')).toContainText('Chat ·');
+  await expect(chatPane.getByTestId('pane-type-label')).toContainText('Hotfix chat');
+
+  await page.keyboard.press('Control+P');
+  const manager = page.getByTestId('pane-manager-modal');
+  await expect(manager).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.getByTestId('pane-manager-nickname')).toHaveText('Hotfix chat');
+
+  const search = page.getByTestId('pane-manager-search');
+  await search.fill('hotfix');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(1);
+  await expect(page.locator('.pane-manager-row').first()).toContainText('Chat ·');
+
+  await search.evaluate((el) => {
+    el.value = '';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect(page.locator('.pane-manager-row')).toHaveCount(2);
+
+  page.once('dialog', async (dialog) => {
+    await dialog.accept('Queue triage');
+  });
+  await page.locator('.pane-manager-row').first().getByTestId('pane-manager-nickname-action').click();
+  await expect(page.getByTestId('pane-manager-nickname')).toHaveText('Queue triage');
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  const restoredChat = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  await expect(restoredChat.getByTestId('pane-type-label')).toContainText('Queue triage');
+
+  await page.keyboard.press('ControlOrMeta+K');
+  const paletteInput = page.locator('#commandPaletteInput');
+  await expect(paletteInput).toBeVisible();
+  await paletteInput.fill('queue triage');
+  const firstHit = page.locator('#commandPaletteList [role="option"]').first();
+  await expect(firstHit.locator('.command-palette-item-label')).toContainText('Queue triage');
+  await expect(firstHit.locator('.command-palette-pane-chip-nickname')).toHaveText('Queue triage');
+});
+
 test('pane manager: shows summary + duplicate badge and supports close others', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);

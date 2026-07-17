@@ -1886,9 +1886,19 @@ function formatWorkqueuePaneQueueLabel(pane) {
   return queue || 'No queue';
 }
 
+function normalizePaneNickname(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 48);
+}
+
+function paneNickname(pane) {
+  return normalizePaneNickname(pane?.nickname || '');
+}
+
 function paneBrowserTitle(pane) {
   if (!pane) return 'Clawnsole';
   const parts = ['Clawnsole', paneLabel(pane)];
+  const nickname = paneNickname(pane);
+  if (nickname) parts.push(nickname);
   if (pane.kind === 'chat' || pane.kind === 'workqueue') {
     const target = paneDisplayTargetLabel(pane);
     if (target) parts.push(target);
@@ -1910,12 +1920,16 @@ function paneIdentityLabel(pane, { includeUnread = false } = {}) {
   const letter = paneHeaderLetter(pane);
   const type = paneLabel(pane);
   const target = paneDisplayTargetLabel(pane);
+  const nickname = paneNickname(pane);
   const unread = paneUnreadCount(pane);
-  return `${letter} ${type} · ${target}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
+  return `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
 }
 
 function paneSummaryLabel(pane) {
-  return paneIdentityLabel(pane, { includeUnread: false });
+  const letter = paneHeaderLetter(pane);
+  const type = paneLabel(pane);
+  const target = paneDisplayTargetLabel(pane);
+  return `${letter} ${type} · ${target}`;
 }
 
 function isPaneSwitchHudEnabled() {
@@ -2143,6 +2157,28 @@ function markPaneUnread(pane, increment = 1, kind = 'chat') {
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
+function setPaneNickname(pane, value) {
+  if (!pane) return;
+  const next = normalizePaneNickname(value);
+  if (pane.nickname === next) return;
+  pane.nickname = next;
+  renderPaneIdentity(pane);
+  paneManager?.persistAdminPanes?.();
+  if (isPaneManagerOpen()) renderPaneManager();
+  if (isCommandPaletteOpen()) {
+    commandPaletteState.items = buildCommandPaletteItems();
+    filterCommandPalette(commandPaletteState.query);
+  }
+}
+
+function promptPaneNickname(pane) {
+  if (!pane) return;
+  const current = paneNickname(pane);
+  const next = window.prompt('Pane nickname', current);
+  if (next === null) return;
+  setPaneNickname(pane, next);
+}
+
 function paneSearchText(pane) {
   return paneSearchFields(pane)
     .map((field) => field.value)
@@ -2166,6 +2202,7 @@ function paneSearchFields(pane) {
     { key: 'kind', value: pane?.kind || '' },
     { key: 'target', value: paneTargetLabel(pane) },
     { key: 'targetDisplay', value: paneDisplayTargetLabel(pane) },
+    { key: 'nickname', value: paneNickname(pane) },
     { key: 'queue', value: queue },
     { key: 'paneId', value: pane?.key || '' }
   ].map((field) => ({ ...field, value: String(field.value || '') })).filter((field) => field.value);
@@ -2315,12 +2352,14 @@ function renderPaneManager() {
         const isDuplicate = duplicateCount > 1;
         const unreadCount = paneUnreadCount(pane);
         const paneIdentity = paneSummaryLabel(pane);
+        const nickname = paneNickname(pane);
 
         row.innerHTML = `
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
               ${paneTypeBadgeMarkup(pane, { extraClass: 'pane-manager-type-badge', testId: 'pane-manager-type-badge' })}
               <span class="pane-manager-kind-label">${paneManagerHighlightHtml(paneIdentity, query)}</span>
+              ${nickname ? `<span class="pane-manager-nickname" data-testid="pane-manager-nickname" title="${escapeHtml(`Pane nickname: ${nickname}`)}">${paneManagerHighlightHtml(nickname, query)}</span>` : ''}
               <span class="pane-manager-pane-id" title="Internal pane id">${paneManagerHighlightHtml(String(pane?.key || ''), query)}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
               ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
@@ -2331,6 +2370,7 @@ function renderPaneManager() {
             <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="Move pane up" aria-label="Move pane up" ${visibleIdx === 0 ? 'disabled' : ''}>↑</button>
             <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="Move pane down" aria-label="Move pane down" ${visibleIdx === visibleKeys.length - 1 ? 'disabled' : ''}>↓</button>
             ${isDuplicate ? '<button class="secondary pane-manager-close-others" type="button" data-action="close-others" data-testid="pane-manager-close-others">Close others</button>' : ''}
+            <button class="secondary pane-manager-nickname-action" type="button" data-action="nickname" data-testid="pane-manager-nickname-action">Nickname</button>
             <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
             <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
           </div>
@@ -2391,6 +2431,10 @@ function renderPaneManager() {
               } catch {}
             });
             renderPaneManager();
+            return;
+          }
+          if (action === 'nickname') {
+            promptPaneNickname(pane);
             return;
           }
           closePaneManager();
@@ -2593,14 +2637,18 @@ function buildCommandPaletteItems() {
     const letter = paneHeaderLetter(pane);
     const type = paneLabel(pane);
     const target = paneDisplayTargetLabel(pane);
+    const nickname = paneNickname(pane);
     items.push(
       withShortcut(
         {
           id: `cmd:focus-pane-${pane.key}`,
-          label: `Focus ${type}: ${target}`,
+          label: `Focus ${type}: ${target}${nickname ? ` · ${nickname}` : ''}`,
           detail: `Pane ${letter} · focus existing`,
-          paneMeta: commandPalettePaneMeta({ type, target, mode: 'focus existing' }),
-          searchText: `open focus existing pane ${letter} ${type} ${target}`,
+          paneMeta: [
+            ...commandPalettePaneMeta({ type, target, mode: 'focus existing' }),
+            ...(nickname ? [{ label: nickname, tone: 'nickname' }] : [])
+          ],
+          searchText: `open focus existing pane ${letter} ${type} ${target} ${nickname}`,
           run: () => paneManager.focusPanePrimary(pane)
         },
         `g ${String(letter || '').toLowerCase()}`
@@ -6815,15 +6863,21 @@ function renderPaneIdentity(pane) {
   const letter = paneHeaderLetter(pane);
   const type = paneLabel(pane);
   const target = paneDisplayTargetLabel(pane);
+  const nickname = paneNickname(pane);
   const unread = paneUnreadCount(pane);
-  const identity = `${letter} ${type} · ${target}${unread > 0 ? ` • ${unread} unread` : ''}`;
+  const identity = `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}`;
   pane.elements.name.title = paneIdentityLabel(pane, { includeUnread: false });
   pane.elements.name.setAttribute('aria-label', identity);
   if (pane.elements.nameToken && pane.elements.nameTarget) {
     pane.elements.nameToken.textContent = `${letter} ${type}`;
-    pane.elements.nameTarget.textContent = ` · ${target}${unread > 0 ? ` • ${unread} unread` : ''}`;
+    pane.elements.nameTarget.textContent = ` · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}`;
   } else {
     pane.elements.name.textContent = identity;
+  }
+  if (pane.elements.nicknameBtn) {
+    pane.elements.nicknameBtn.classList.toggle('has-nickname', !!nickname);
+    pane.elements.nicknameBtn.title = nickname ? `Rename pane nickname: ${nickname}` : 'Set pane nickname';
+    pane.elements.nicknameBtn.setAttribute('aria-label', nickname ? `Rename pane nickname: ${nickname}` : 'Set pane nickname');
   }
   const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
   if (activeKey && String(pane.key || '') === activeKey) updateBrowserTitle(pane);
@@ -7116,7 +7170,7 @@ function normalizeWorkqueueGroupMode(value) {
   return String(value || '').trim().toLowerCase() === 'grouped' ? 'grouped' : 'rows';
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, cronAgentId, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, cronAgentId, nickname, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
@@ -7124,6 +7178,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     name: root.querySelector('[data-pane-name]'),
     nameToken: root.querySelector('[data-pane-name-token]'),
     nameTarget: root.querySelector('[data-pane-name-target]'),
+    nicknameBtn: root.querySelector('[data-pane-nickname]'),
     typePill: root.querySelector('[data-pane-type-pill]'),
     typeIcon: root.querySelector('[data-pane-type-icon]'),
     typeText: root.querySelector('[data-pane-type-text]'),
@@ -7185,6 +7240,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       sortDir: sortDir === 'asc' ? 'asc' : 'desc'
     },
     cronAgentId: typeof cronAgentId === 'string' ? cronAgentId.trim() : '',
+    nickname: normalizePaneNickname(nickname),
     connected: false,
     statusState: 'disconnected',
     statusMeta: '',
@@ -7216,6 +7272,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   } catch {}
 
   elements.root.addEventListener('click', () => notePaneFocused(pane));
+  elements.nicknameBtn?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    promptPaneNickname(pane);
+  });
 
   // Pane header: kind label + type pill (icon + text)
   try {
@@ -8744,6 +8805,7 @@ const paneManager = {
         groupMode: cfg.groupMode,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
+        nickname: cfg.nickname,
         closable: true
       })
     );
@@ -8781,6 +8843,7 @@ const paneManager = {
             ? rawMode
             : 'chat';
         if (!key) return null;
+        const nickname = normalizePaneNickname(item.nickname);
         if (kind === 'workqueue') {
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
           const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
@@ -8796,13 +8859,13 @@ const paneManager = {
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
           const groupMode = normalizeWorkqueueGroupMode(item.groupMode);
-          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir };
+          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, nickname };
         }
         if (kind === 'cron' || kind === 'timeline') {
-          return { key, kind };
+          return { key, kind, nickname };
         }
         const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
-        return { key, kind: 'chat', agentId };
+        return { key, kind: 'chat', agentId, nickname };
       }
       // Super-legacy format: ['pabc','pdef'] (treat as chat panes)
       if (typeof item === 'string' && item) {
@@ -8845,13 +8908,14 @@ const paneManager = {
           },
           groupMode: normalizeWorkqueueGroupMode(pane.workqueue?.groupMode),
           sortKey: pane.workqueue?.sortKey || 'priority',
-          sortDir: pane.workqueue?.sortDir || 'desc'
+          sortDir: pane.workqueue?.sortDir || 'desc',
+          nickname: paneNickname(pane)
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
-        return { key: pane.key, kind: pane.kind };
+        return { key: pane.key, kind: pane.kind, nickname: paneNickname(pane) };
       }
-      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main' };
+      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main', nickname: paneNickname(pane) };
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
@@ -8927,6 +8991,7 @@ const paneManager = {
           : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
         scopeFilter: nextScopeFilter,
         groupMode: normalizeWorkqueueGroupMode(options?.groupMode),
+        nickname: options?.nickname,
         closable: true
       });
       this.panes.push(pane);
@@ -8945,6 +9010,7 @@ const paneManager = {
         role: 'admin',
         kind: normalizedKind,
         cronAgentId: nextCronAgentId,
+        nickname: options?.nickname,
         closable: true
       });
       this.panes.push(pane);
@@ -8961,7 +9027,7 @@ const paneManager = {
     }
 
     const agentId = normalizeAgentId(options?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
-    const pane = createPane({ key: `p${randomId().slice(0, 8)}`, role: 'admin', kind: 'chat', agentId, closable: true });
+    const pane = createPane({ key: `p${randomId().slice(0, 8)}`, role: 'admin', kind: 'chat', agentId, nickname: options?.nickname, closable: true });
     this.panes.push(pane);
     globalElements.paneGrid.appendChild(pane.elements.root);
     this.updatePaneLabels();
