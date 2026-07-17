@@ -46,6 +46,21 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   await expect(wqPane.locator('[data-wq-refresh]')).toBeVisible();
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
   await expect(wqPane.locator('[data-wq-status]')).toBeVisible();
+  const listHeader = wqPane.locator('.wq-list-header');
+  await expect(listHeader.locator('[data-wq-sort="title"]')).toHaveText('Task');
+  await expect(listHeader.locator('[data-wq-sort="status"]')).toHaveText('Status');
+  await expect(listHeader.locator('[data-wq-sort="priority"]')).toHaveText('Priority');
+  await expect(listHeader.locator('[data-wq-sort="attempts"]')).toHaveText('Attempts');
+  await expect(listHeader.locator('[data-wq-sort="claimedBy"]')).toHaveText('Claimed by');
+  await expect(listHeader.locator('[data-wq-sort="leaseUntil"]')).toHaveText('Lease expires');
+  await expect(listHeader.locator('[data-wq-sort="attempts"]')).toHaveAttribute(
+    'title',
+    /how many times this task has been claimed/
+  );
+  await expect(listHeader.locator('[data-wq-sort="leaseUntil"]')).toHaveAttribute(
+    'title',
+    /when the current claim expires/
+  );
 
   // Layout regression: toolbar + list should consume full thread height (no dead space below).
   const thread = wqPane.locator('[data-pane-thread]');
@@ -124,7 +139,7 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await wqPane.locator('[data-wq-enqueue-submit]').click();
   const enqueueRes = await enqueueResP;
   expect(enqueueRes.ok()).toBeTruthy();
-  await expect(wqPane.locator('[data-wq-enqueue-status]')).toContainText('Queued as Unassigned');
+  await expect(wqPane.locator('[data-wq-enqueue-status]')).toContainText('Queued for main');
 
   // Close the enqueue details so it can't block clicks on the list.
   await wqPane.locator('details.wq-enqueue > summary').click();
@@ -158,20 +173,26 @@ test('pane: workqueue scope filter toggles deterministic row counts', async ({ p
 
   const runId = `scope-${Date.now()}`;
   const mkTitle = (s) => `pw-e2e-${runId}-${s}`;
+  const chooseAssignTarget = async (query, expectedValue) => {
+    const pickerSearch = wqPane.locator('[data-wq-claim-agent-search]');
+    await pickerSearch.fill(query);
+    await pickerSearch.press('Enter');
+    await expect(wqPane.locator('[data-wq-claim-agent]')).toHaveValue(expectedValue);
+  };
 
   await wqPane.locator('details.wq-enqueue > summary').click();
 
   // Enqueue one unassigned item.
   await wqPane.locator('[data-wq-enqueue-title]').fill(mkTitle('unassigned'));
   await wqPane.locator('[data-wq-enqueue-instructions]').fill('scope test unassigned');
-  await wqPane.locator('[data-wq-claim-agent]').selectOption('');
+  await chooseAssignTarget('Unassigned', '');
   await wqPane.locator('[data-wq-enqueue-submit]').click();
   await expect(wqPane.locator('[data-wq-enqueue-status]')).toContainText('Queued');
 
   // Enqueue one assigned-to-main item.
   await wqPane.locator('[data-wq-enqueue-title]').fill(mkTitle('assigned-main'));
   await wqPane.locator('[data-wq-enqueue-instructions]').fill('scope test assigned');
-  await wqPane.locator('[data-wq-claim-agent]').selectOption('main');
+  await chooseAssignTarget('main', 'main');
   await wqPane.locator('[data-wq-enqueue-submit]').click();
   await expect(wqPane.locator('[data-wq-enqueue-status]')).toContainText('Queued');
 

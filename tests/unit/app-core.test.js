@@ -4,9 +4,11 @@ const assert = require('node:assert/strict');
 const {
   escapeHtml,
   fmtRemaining,
+  formatWorkqueueIssueTitle,
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
+  normalizeAdminDestination,
   deriveAuthOverlayState,
   deriveGlobalConnectionState,
   deriveDisconnectButtonState,
@@ -29,6 +31,32 @@ test('fmtRemaining formats remaining time', () => {
   assert.equal(fmtRemaining(61_000), '1m 1s');
   assert.equal(fmtRemaining(3_600_000), '1h 0m');
   assert.equal(fmtRemaining(3_660_000), '1h 1m');
+});
+
+test('normalizeAdminDestination accepts only fresh same-origin admin destinations', () => {
+  const origin = 'https://clawnsole.test';
+  const now = 2_000_000;
+
+  assert.deepEqual(
+    normalizeAdminDestination(
+      { href: '/admin?pane=workqueue#item-1', activePaneKey: 'pabc', createdAt: now - 1000 },
+      { origin, now }
+    ),
+    { ok: true, href: '/admin?pane=workqueue#item-1', activePaneKey: 'pabc' }
+  );
+
+  assert.equal(
+    normalizeAdminDestination({ href: 'https://evil.test/admin', createdAt: now }, { origin, now }).reason,
+    'external'
+  );
+  assert.equal(
+    normalizeAdminDestination({ href: '/settings', createdAt: now }, { origin, now }).reason,
+    'outside_admin'
+  );
+  assert.equal(
+    normalizeAdminDestination({ href: '/admin', createdAt: now - 700_000 }, { origin, now, ttlMs: 600_000 }).reason,
+    'stale'
+  );
 });
 
 test('sortWorkqueueItems default groups by status then priority then timestamps', () => {
@@ -57,6 +85,53 @@ test('sortWorkqueueItems supports explicit sort keys and stable ordering fallbac
   // For ties without timestamps, preserve input order.
   const byPrio = sortWorkqueueItems(items, { sortKey: 'priority', sortDir: 'desc' });
   assert.deepEqual(byPrio.map((it) => it.id), ['a', 'b', 'c']);
+});
+
+test('formatWorkqueueIssueTitle normalizes mixed legacy issue prefixes', () => {
+  const base = {
+    queue: 'dev-team',
+    instructions: 'Repo: rmdmattingly/clawnsole\nIssue: #280'
+  };
+
+  assert.equal(
+    formatWorkqueueIssueTitle({
+      ...base,
+      title: '[issue] rmdmattingly/clawnsole#280 UX: Normalize issue-backed Workqueue row titles'
+    }),
+    '[ISSUE] rmdmattingly/clawnsole#280 - UX: Normalize issue-backed Workqueue row titles'
+  );
+  assert.equal(
+    formatWorkqueueIssueTitle({
+      ...base,
+      title: 'Open issue: UX: Normalize issue-backed Workqueue row titles'
+    }),
+    '[ISSUE] rmdmattingly/clawnsole#280 - UX: Normalize issue-backed Workqueue row titles'
+  );
+  assert.equal(
+    formatWorkqueueIssueTitle({
+      ...base,
+      title: 'Issue coverage: UX: Normalize issue-backed Workqueue row titles'
+    }),
+    '[ISSUE] rmdmattingly/clawnsole#280 - UX: Normalize issue-backed Workqueue row titles'
+  );
+});
+
+test('sortWorkqueueItems title sort uses normalized issue display titles', () => {
+  const items = [
+    {
+      id: 'b',
+      title: 'Open issue: Beta',
+      instructions: 'Repo: rmdmattingly/clawnsole\nIssue: #281'
+    },
+    {
+      id: 'a',
+      title: '[issue] rmdmattingly/clawnsole#280 Alpha',
+      instructions: 'Repo: rmdmattingly/clawnsole\nIssue: #280'
+    }
+  ];
+
+  const sorted = sortWorkqueueItems(items, { sortKey: 'title', sortDir: 'asc' });
+  assert.deepEqual(sorted.map((it) => it.id), ['a', 'b']);
 });
 
 test('sortWorkqueueItems priority sort uses updatedAt desc tie-breaker', () => {
