@@ -136,6 +136,39 @@ test('agents modal quick filter narrows list and Esc clears it', async ({ page, 
   await expect(search).toBeFocused();
   await expect(search).toHaveValue('');
   await expect(rows).toHaveCount(initialCount);
+
+  await search.press('Escape');
+  await expect(page.locator('#agentsModal')).not.toHaveClass(/open/);
+});
+
+test('agents modal persists triage query and sort until reset', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const search = page.locator('#agentsSearch');
+  const sort = page.locator('#agentsSort');
+  await search.fill('main');
+  await sort.selectOption('agent_id_asc');
+  await page.getByRole('button', { name: 'Close agents' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(search).toHaveValue('main');
+  await expect(sort).toHaveValue('agent_id_asc');
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsSearch')).toHaveValue('main');
+  await expect(page.locator('#agentsSort')).toHaveValue('agent_id_asc');
+
+  await page.getByRole('button', { name: 'Reset triage view' }).click();
+  await expect(page.locator('#agentsSearch')).toHaveValue('');
+  await expect(page.locator('#agentsSort')).toHaveValue('recent_desc');
+  await expect(page.getByLabel('Fleet triage filters').getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('fleet attention mode sections healthy agents and keeps filters while expanding', async ({ page, clawnsole }) => {
