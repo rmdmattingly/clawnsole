@@ -468,14 +468,51 @@ body::before {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .pane-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.pane-tab-token {
+  flex: 0 0 2.25em;
+  width: 2.25em;
+  min-width: 2.25em;
+  max-width: 2.25em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  border-radius: 6px;
+  background: rgba(var(--pane-accent-rgb, 255, 255, 255), 0.16);
+  border: 1px solid rgba(var(--pane-accent-rgb, 255, 255, 255), 0.36);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.pane-tab-token::before {
+  content: attr(data-pane-token);
+}
+
+.pane-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -679,6 +716,7 @@ body::before {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  flex: 0 0 auto;
 }
 
 .pane-activity-badge {

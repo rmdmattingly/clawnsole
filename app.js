@@ -6164,7 +6164,16 @@ function paneHeaderLetter(pane) {
 
 function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
-  pane.elements.name.textContent = paneIdentityLabel(pane, { includeUnread: true });
+  const label = paneIdentityLabel(pane, { includeUnread: true });
+  pane.elements.name.title = paneIdentityLabel(pane, { includeUnread: false });
+  if (pane.elements.tabToken) {
+    pane.elements.tabToken.dataset.paneToken = paneIcon(pane);
+  }
+  if (pane.elements.tabTitle) {
+    pane.elements.tabTitle.textContent = label;
+  } else {
+    pane.elements.name.textContent = label;
+  }
   const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
   if (activeKey && String(pane.key || '') === activeKey) updateBrowserTitle(pane);
 }
@@ -6457,6 +6466,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   const elements = {
     root,
     name: root.querySelector('[data-pane-name]'),
+    tabToken: root.querySelector('[data-pane-tab-token]'),
+    tabTitle: root.querySelector('[data-pane-tab-title]'),
     typePill: root.querySelector('[data-pane-type-pill]'),
     typeIcon: root.querySelector('[data-pane-type-icon]'),
     typeText: root.querySelector('[data-pane-type-text]'),
@@ -6548,7 +6559,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
   // Pane header: kind label + type pill (icon + text)
   try {
-    if (elements.name) elements.name.textContent = paneLabel(pane);
+    if (elements.tabTitle) elements.tabTitle.textContent = paneLabel(pane);
+    else if (elements.name) elements.name.textContent = paneLabel(pane);
     if (elements.typeIcon) elements.typeIcon.textContent = paneIcon(pane);
     if (elements.typeText) elements.typeText.textContent = String(paneLabel(pane) || pane.kind || 'chat').toUpperCase();
     if (elements.typePill) {
