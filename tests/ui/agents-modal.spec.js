@@ -363,3 +363,45 @@ test('agents modal compact density tightens rows and persists', async ({ page, c
   await expect(page.locator('#agentsList')).toHaveClass(/compact/);
   await expect(page.getByRole('button', { name: 'Compact' })).toHaveAttribute('aria-pressed', 'true');
 });
+
+test('agents modal column picker hides optional columns and persists', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [{ id: 'columns-agent', name: 'columns-agent', displayName: 'Columns Agent' }];
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({ 'columns-agent': Date.now() }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const row = page.locator('#agentsList .agents-row').filter({ hasText: 'Columns Agent' });
+  await expect(row.locator('.agents-id-column')).toHaveText('columns-agent');
+  await expect(row.locator('.agents-heartbeat-column')).toBeVisible();
+  await expect(row.locator('[data-agent-action="open-chat"]').first()).toBeVisible();
+
+  const heartbeatColumn = page.locator('[data-agents-column="heartbeat"]');
+  const statusColumn = page.locator('[data-agents-column="status"]');
+  const actionsColumn = page.locator('[data-agents-column="actions"]');
+  await heartbeatColumn.uncheck();
+  await statusColumn.uncheck();
+  await actionsColumn.uncheck();
+  await expect(row.locator('.agents-heartbeat-column')).toBeHidden();
+  await expect(row.locator('[data-agent-action="open-chat"]').first()).toBeHidden();
+  await expect(row).toHaveClass(/agents-row-no-actions/);
+  await expect(actionsColumn).toBeFocused();
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('[data-agents-column="heartbeat"]')).not.toBeChecked();
+  await expect(page.locator('[data-agents-column="status"]')).not.toBeChecked();
+  await expect(page.locator('[data-agents-column="actions"]')).not.toBeChecked();
+  await expect(page.locator('#agentsList .agents-row').filter({ hasText: 'Columns Agent' }).locator('.agents-heartbeat-column')).toBeHidden();
+});
