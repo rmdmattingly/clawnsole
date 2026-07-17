@@ -2632,6 +2632,16 @@ function buildCommandPaletteItems() {
       'g c'
     ),
     withShortcut(
+      {
+        id: 'cmd:pane-go-to-letter',
+        label: 'Panes: Go to pane by letter',
+        detail: 'Press g, then the visible pane letter A-Z',
+        searchText: 'pane focus go to letter shortcut g then a z visible pane letter',
+        run: () => openShortcuts()
+      },
+      'g then A-Z'
+    ),
+    withShortcut(
       { id: 'cmd:focus-chat-composer', label: 'Chat: Focus composer', detail: 'Jump to the active or most recent Chat composer', run: () => focusChatComposer() },
       '⌘/Ctrl+L'
     ),
@@ -6164,6 +6174,7 @@ function paneHeaderLetter(pane) {
 
 function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
+  pane.elements.root?.setAttribute?.('data-pane-letter', paneHeaderLetter(pane));
   pane.elements.name.textContent = paneIdentityLabel(pane, { includeUnread: true });
   const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
   if (activeKey && String(pane.key || '') === activeKey) updateBrowserTitle(pane);
@@ -6603,6 +6614,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           shortcuts: [
             ['Alt/Option+1..9', 'focus panes 1-9 by visible order'],
             ['Cmd/Ctrl+1..9', 'focus panes 1-9 by visible order'],
+            ['g then A-Z', 'focus pane by visible letter'],
             ['Cmd/Ctrl+L', 'focus Chat composer'],
             ['Cmd/Ctrl+Shift+K', 'focus next pane'],
             ['Cmd/Ctrl+Shift+J', 'focus previous pane']
@@ -8900,6 +8912,7 @@ globalElements.wqRefreshBtn?.addEventListener('click', () => {
 globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFromUi());
 globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFromUi());
 
+const GO_TO_PANE_TIMEOUT_MS = 1200;
 let shortcutState = { lastGAtMs: 0, blockedReasonLastShownAt: new Map() };
 const SHORTCUT_BLOCK_RATE_LIMIT_MS = 5000;
 const SHORTCUT_BLOCK_MESSAGES = {
@@ -9092,6 +9105,16 @@ function focusPaneIndex(idx, { trackMru = true, showHud = false } = {}) {
       }
     }
   }
+}
+
+function focusPaneByHeaderLetter(letter) {
+  const needle = String(letter || '').trim().toUpperCase();
+  if (!/^[A-Z]$/.test(needle)) return false;
+  const panes = paneManager?.panes || [];
+  const idx = panes.findIndex((pane) => paneHeaderLetter(pane) === needle);
+  if (idx < 0) return false;
+  focusPaneIndex(idx, { showHud: true });
+  return true;
 }
 
 function returnToLastActiveChatPane() {
@@ -9423,24 +9446,35 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // 'g' chords jump between common triage surfaces.
+  // 'g' chords jump to pane letters and common triage surfaces.
   const now = Date.now();
-  if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+  if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !isAnyOverlayOpen()) {
     if (key.toLowerCase() === 'g') {
       shortcutState.lastGAtMs = now;
+      event.preventDefault();
       return;
     }
-    if (key.toLowerCase() === 'c' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
+    const pendingGoToPane = shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < GO_TO_PANE_TIMEOUT_MS;
+    if (pendingGoToPane && /^[a-z]$/i.test(key)) {
+      shortcutState.lastGAtMs = 0;
+      event.preventDefault();
+      if (focusPaneByHeaderLetter(key)) return;
+      if (key.toLowerCase() !== 'c' && key.toLowerCase() !== 'w') return;
+    }
+    if (key.toLowerCase() === 'c' && pendingGoToPane) {
       shortcutState.lastGAtMs = 0;
       event.preventDefault();
       returnToLastActiveChatPane();
       return;
     }
-    if (key.toLowerCase() === 'w' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
+    if (key.toLowerCase() === 'w' && pendingGoToPane) {
       shortcutState.lastGAtMs = 0;
       event.preventDefault();
       openTopbarWorkqueueAction();
       return;
+    }
+    if (shortcutState.lastGAtMs && now - shortcutState.lastGAtMs >= GO_TO_PANE_TIMEOUT_MS) {
+      shortcutState.lastGAtMs = 0;
     }
   }
 });
