@@ -154,6 +154,44 @@ function seedFilterSummaryWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedWorkqueueItemSearchItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date().toISOString();
+  const mkItem = (id, patch = {}) => ({
+    id,
+    queue,
+    title: `Search fixture ${id}`,
+    instructions: 'ordinary fixture instructions',
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: now,
+    updatedAt: now,
+    meta: { repo: 'rmdmattingly/clawnsole' },
+    ...patch
+  });
+
+  const data = {
+    version: 1,
+    queues: {
+      [queue]: { name: queue, createdAt: now },
+      [`${queue}-archive`]: { name: `${queue}-archive`, createdAt: now }
+    },
+    assignments: {},
+    items: [
+      mkItem('alpha', { title: 'Alpha visible row' }),
+      mkItem('beta', { title: 'Beta visible row', instructions: 'contains hidden needle token' }),
+      mkItem('gamma', { title: 'Gamma visible row' })
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 test('workqueue pane: renders + has queue dropdown + does not show chat composer', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -325,6 +363,46 @@ test('workqueue pane: queue target supports search + recent persistence', async 
   const secondPane = page.locator('[data-pane]').last();
   const secondSelect = secondPane.locator('[data-wq-queue-select]');
   await expect(secondSelect.locator('option', { hasText: '★ qa-hotfix' })).toHaveCount(1);
+});
+
+test('workqueue pane: queue filter and item search stay distinct', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `item-search-${Date.now()}`;
+  seedWorkqueueItemSearchItems(queue);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await expect(pane.locator('[data-wq-queue-search]')).toHaveAttribute('placeholder', 'Filter queue list...');
+  await expect(pane.locator('[data-wq-search]')).toHaveAttribute('placeholder', 'Search items...');
+
+  await pane.locator('[data-wq-queue-select]').selectOption(queue);
+  const refreshResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
+  await pane.locator('[data-wq-refresh]').click();
+  await refreshResP;
+  await expect(pane.locator('.wq-row')).toHaveCount(3);
+
+  await pane.locator('[data-wq-queue-search]').fill('archive');
+  await expect(pane.locator('.wq-row')).toHaveCount(3);
+
+  const itemSearch = pane.locator('[data-wq-search]');
+  await itemSearch.fill('hidden needle');
+  await expect(pane.locator('.wq-row')).toHaveCount(1);
+  await expect(pane.locator('.wq-row')).toContainText('Beta visible row');
+
+  await itemSearch.fill('definitely absent');
+  await expect(pane.locator('[data-wq-empty]')).toContainText('No items match “definitely absent”.');
+  await pane.locator('[data-wq-empty-clear-search]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(3);
+
+  await pane.locator('.wq-row').first().focus();
+  await page.keyboard.press('/');
+  await expect(itemSearch).toBeFocused();
 });
 
 test('workqueue pane: enqueue assignment target supports search, keyboard select, and recents', async ({ page }) => {
