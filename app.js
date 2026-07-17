@@ -3189,6 +3189,20 @@ function openTopbarWorkqueueAction() {
   openWorkqueue();
 }
 
+function focusActiveWorkqueueItemSearch() {
+  const focusedPane = findActivePaneFromFocus();
+  const rememberedPane = paneMruOrder()
+    .map((key) => paneManager.panes.find((pane) => pane?.key && pane.key === key) || null)
+    .find((pane) => pane?.kind === 'workqueue') || null;
+  const pane = focusedPane?.kind === 'workqueue' ? focusedPane : rememberedPane;
+  const search = pane?.elements?.thread?.querySelector?.('[data-wq-search]');
+  if (!search) return false;
+  notePaneFocused(pane);
+  search.focus?.({ preventScroll: true });
+  search.select?.();
+  return true;
+}
+
 function renderAgentsModalList() {
   const root = globalElements.agentsList;
   if (!root) return;
@@ -4491,21 +4505,36 @@ function renderWorkqueuePaneItems(pane) {
       const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
       const statusLabel = statuses.length ? statuses.join(', ') : 'default';
       const scopeLabel = pane.workqueue?.scopeFilter || 'all';
-      empty.innerHTML = `
-        <div class="empty-state">
-          <div style="font-weight:700; margin-bottom:6px;">No items in this queue.</div>
-          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
-          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
-            <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
-            <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
+      const search = String(pane.workqueue?.quickFilters?.search || '').trim();
+      if (search) {
+        empty.innerHTML = `
+          <div class="empty-state">
+            <div style="font-weight:700; margin-bottom:6px;">No items match “${escapeHtml(search)}”.</div>
+            <div class="hint">Item search is filtering visible rows in <span class="mono">${escapeHtml(queue)}</span>.</div>
+            <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+              <button type="button" class="secondary" data-wq-empty-clear-search>Clear item search</button>
+              <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
+            </div>
           </div>
-          <div class="hint" style="margin-top:8px;">Tip: use “Enqueue new item” above, or configure queues on the server.</div>
-        </div>
-      `;
+        `;
+      } else {
+        empty.innerHTML = `
+          <div class="empty-state">
+            <div style="font-weight:700; margin-bottom:6px;">No items in this queue.</div>
+            <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
+            <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+              <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
+              <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
+            </div>
+            <div class="hint" style="margin-top:8px;">Tip: use “Enqueue new item” above, or configure queues on the server.</div>
+          </div>
+        `;
+      }
 
       const refreshBtn = pane.elements?.thread?.querySelector('[data-wq-refresh]');
       const enqueueDetails = pane.elements?.thread?.querySelector('details.wq-enqueue');
       empty.querySelector('[data-wq-empty-refresh]')?.addEventListener('click', () => refreshBtn?.click());
+      empty.querySelector('[data-wq-empty-clear-search]')?.addEventListener('click', () => pane.workqueue?.setQuickSearch?.(''));
       empty.querySelector('[data-wq-empty-enqueue]')?.addEventListener('click', () => {
         try {
           enqueueDetails?.setAttribute('open', '');
@@ -6680,7 +6709,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         <div class="wq-toolbar-row">
           <label class="wq-field">
             <span class="wq-label">Queue</span>
-            <input data-wq-queue-search type="search" placeholder="Search queues" aria-label="Search queues" autocomplete="off" />
+            <input data-wq-queue-search type="search" placeholder="Filter queue list..." aria-label="Filter queue list" autocomplete="off" />
             <select data-wq-queue-select aria-label="Select workqueue target"></select>
             <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
           </label>
@@ -6728,8 +6757,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           </div>
 
           <label class="wq-field wq-search-field">
-            <span class="wq-label">Search</span>
-            <input data-wq-search type="search" placeholder="Filter tasks" autocomplete="off" />
+            <span class="wq-label">Search items</span>
+            <input data-wq-search type="search" placeholder="Search items..." aria-label="Search workqueue items" title="/ focuses item search" autocomplete="off" />
           </label>
 
           <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
@@ -9323,6 +9352,13 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     switchPaneByMru(event.shiftKey ? -1 : 1);
     return;
+  }
+
+  if (key === '/' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey && roleState.role === 'admin' && !isAnyOverlayOpen()) {
+    if (focusActiveWorkqueueItemSearch()) {
+      event.preventDefault();
+      return;
+    }
   }
 
   const isQuestion = key === '?' || (key === '/' && event.shiftKey);
