@@ -391,6 +391,9 @@ test('agents modal quick filter narrows list and Esc clears it', async ({ page, 
   await expect(search).toBeFocused();
   await expect(search).toHaveValue('');
   await expect(rows).toHaveCount(initialCount);
+
+  await search.press('Escape');
+  await expect(page.locator('#agentsModal')).not.toHaveClass(/open/);
 });
 
 test('agents modal persists triage query and sort until reset', async ({ page, clawnsole }) => {
@@ -439,7 +442,7 @@ test('agents modal persists triage query and sort until reset', async ({ page, c
   await page.getByRole('button', { name: 'Open agents' }).click();
   await page.locator('#agentsSearch').fill('alpha');
   await page.locator('#agentsSort').selectOption('agent_id_asc');
-  await page.getByRole('button', { name: 'Reset agents triage view' }).click();
+  await page.getByRole('button', { name: 'Reset triage view' }).click();
   await expect(page.locator('#agentsSearch')).toHaveValue('');
   await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
   await expect(page.locator('#agentsList .agents-row')).toHaveCount(2);
