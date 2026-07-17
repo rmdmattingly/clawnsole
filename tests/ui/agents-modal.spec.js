@@ -224,6 +224,54 @@ test('agents modal heartbeat heatmap and stale-first sort are toggleable and res
   await expect(page.locator('#agentsSortIndicator')).toHaveText('');
 });
 
+test('fleet list keeps header and identity columns visible while scrolling', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = Array.from({ length: 30 }, (_, index) => {
+    const id = `agent-${String(index + 1).padStart(2, '0')}`;
+    return { id, name: id, displayName: id };
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const list = page.locator('#agentsList');
+  const stickyHeader = list.locator('.agents-grid-header');
+  const firstPin = list.locator('.agents-row .agents-pin').first();
+  const firstIdentity = list.locator('.agents-row .agents-row-main').first();
+
+  await expect(stickyHeader).toBeVisible();
+  await expect(firstIdentity).toBeVisible();
+
+  const beforePin = await firstPin.boundingBox();
+  const beforeIdentity = await firstIdentity.boundingBox();
+
+  await list.evaluate((el) => {
+    el.scrollTop = 420;
+    el.scrollLeft = 360;
+  });
+
+  const listBox = await list.boundingBox();
+  const afterHeader = await stickyHeader.boundingBox();
+  const afterPin = await firstPin.boundingBox();
+  const afterIdentity = await firstIdentity.boundingBox();
+  const headerPosition = await stickyHeader.evaluate((el) => getComputedStyle(el).position);
+  const identityPosition = await firstIdentity.evaluate((el) => getComputedStyle(el).position);
+
+  expect(headerPosition).toBe('sticky');
+  expect(identityPosition).toBe('sticky');
+  expect(listBox && afterHeader && beforePin && afterPin && beforeIdentity && afterIdentity).toBeTruthy();
+  expect((afterHeader?.y || 0) - (listBox?.y || 0)).toBeLessThan(8);
+  expect(Math.abs((afterPin?.x || 0) - (beforePin?.x || 0))).toBeLessThan(4);
+  expect(Math.abs((afterIdentity?.x || 0) - (beforeIdentity?.x || 0))).toBeLessThan(4);
+});
+
 test('agents modal quick actions open/reuse chat, timeline, and workqueue context', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 

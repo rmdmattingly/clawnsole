@@ -1534,10 +1534,20 @@ button.send-btn .btn-icon {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex: 1 1 auto;
+  min-height: 280px;
+  overflow: auto;
+  padding-bottom: 2px;
 }
 
 .agents-list.compact {
   gap: 6px;
+}
+
+#agentsModal .modal-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .agents-health-summary {
@@ -1637,6 +1647,7 @@ button.agents-section-title:hover {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 920px;
 }
 
 .agents-list.compact .agents-rows {
@@ -1649,7 +1660,7 @@ button.agents-section-title:hover {
 
 .agents-row {
   display: grid;
-  grid-template-columns: 42px 1fr auto;
+  grid-template-columns: 42px minmax(280px, 1fr) minmax(220px, 0.9fr) minmax(220px, auto);
   gap: 10px;
   align-items: center;
   border: 1px solid rgba(255, 255, 255, 0.09);
@@ -1683,10 +1694,37 @@ button.agents-section-title:hover {
 }
 
 .agents-list.compact .agents-row {
-  grid-template-columns: 32px minmax(0, 1fr) auto;
+  grid-template-columns: 32px minmax(240px, 1fr) minmax(200px, 0.9fr) minmax(180px, auto);
   gap: 8px;
   border-radius: 10px;
   padding: 3px 8px;
+}
+
+.agents-grid-header {
+  min-width: 920px;
+  display: grid;
+  grid-template-columns: 42px minmax(280px, 1fr) minmax(220px, 0.9fr) minmax(220px, auto);
+  gap: 10px;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  padding: 0 12px 8px;
+  background: linear-gradient(180deg, rgba(12, 15, 19, 0.98), rgba(12, 15, 19, 0.92));
+}
+
+.agents-list.compact .agents-grid-header {
+  grid-template-columns: 32px minmax(240px, 1fr) minmax(200px, 0.9fr) minmax(180px, auto);
+  gap: 8px;
+  padding-inline: 8px;
+}
+
+.agents-grid-cell {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .agents-pin {
@@ -1697,6 +1735,35 @@ button.agents-section-title:hover {
   background: rgba(9, 12, 16, 0.35);
   color: var(--text);
   cursor: pointer;
+}
+
+.agents-grid-cell-pin,
+.agents-pin {
+  position: sticky;
+  left: 12px;
+  z-index: 5;
+}
+
+.agents-grid-cell-pin {
+  background: rgba(12, 15, 19, 0.98);
+}
+
+.agents-grid-cell-agent,
+.agents-row-main {
+  position: sticky;
+  left: 64px;
+  z-index: 4;
+  background: linear-gradient(90deg, rgba(12, 15, 19, 0.98), rgba(12, 15, 19, 0.86));
+}
+
+.agents-list.compact .agents-grid-cell-pin,
+.agents-list.compact .agents-pin {
+  left: 8px;
+}
+
+.agents-list.compact .agents-grid-cell-agent,
+.agents-list.compact .agents-row-main {
+  left: 48px;
 }
 
 .agents-list.compact .agents-pin {
@@ -1829,6 +1896,11 @@ button.agents-section-title:hover {
 
   .agents-row-actions-overflow {
     display: block;
+  }
+
+  .agents-row-actions-menu {
+    position: static;
+    margin-top: 6px;
   }
 }
 
