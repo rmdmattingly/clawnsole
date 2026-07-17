@@ -1806,7 +1806,8 @@ function paneIdentityLabel(pane, { includeUnread = false } = {}) {
   const type = paneLabel(pane);
   const target = paneTargetLabel(pane);
   const unread = paneUnreadCount(pane);
-  return `${letter} ${type} · ${target}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
+  const hasDraft = paneHasDraftChanges(pane);
+  return `${letter} ${type} · ${target}${hasDraft ? ' • draft' : ''}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
 }
 
 function paneSummaryLabel(pane) {
@@ -1973,6 +1974,27 @@ function paneUnreadCount(pane) {
   return Math.max(0, Number(pane?.unreadCount || 0));
 }
 
+function paneDraftStatusLabel(pane) {
+  return paneHasDraftChanges(pane) ? 'Has unsent draft' : 'No unsent draft';
+}
+
+function renderPaneDraftBadge(pane) {
+  const badge = pane?.elements?.draftBadge;
+  if (!badge) return;
+
+  const hasDraft = paneHasDraftChanges(pane);
+  badge.hidden = !hasDraft;
+  badge.textContent = 'Draft';
+  badge.setAttribute('aria-label', paneDraftStatusLabel(pane));
+  badge.title = hasDraft ? 'Unsent draft' : 'No unsent draft';
+}
+
+function paneUpdateDraftState(pane) {
+  renderPaneIdentity(pane);
+  renderPaneDraftBadge(pane);
+  if (isPaneManagerOpen()) renderPaneManager();
+}
+
 function clearPaneUnread(pane) {
   if (!pane) return;
   if (!pane.unreadCount) return;
@@ -2028,7 +2050,8 @@ function paneSearchText(pane) {
     paneSummaryLabel(pane),
     paneLabel(pane),
     paneTargetLabel(pane),
-    pane?.kind || ''
+    pane?.kind || '',
+    paneHasDraftChanges(pane) ? 'draft unsent' : ''
   ]
     .join(' ')
     .toLowerCase();
@@ -2162,6 +2185,7 @@ function renderPaneManager() {
         const isDuplicate = duplicateCount > 1;
         const unreadCount = paneUnreadCount(pane);
         const paneIdentity = paneSummaryLabel(pane);
+        const hasDraft = paneHasDraftChanges(pane);
 
         row.innerHTML = `
           <div class="pane-manager-main">
@@ -2170,6 +2194,7 @@ function renderPaneManager() {
               <span class="pane-manager-kind-label">${escapeHtml(paneIdentity)}</span>
               <span class="pane-manager-pane-id" title="Internal pane id">${escapeHtml(String(pane?.key || ''))}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
+              ${hasDraft ? '<span class="pane-manager-draft-badge" data-testid="pane-manager-draft-badge" title="Unsent draft" aria-label="Has unsent draft">Draft</span>' : ''}
               ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
             </div>
             <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
@@ -2182,6 +2207,7 @@ function renderPaneManager() {
             <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
           </div>
         `;
+        row.setAttribute('aria-label', `${paneIdentity}. ${paneDraftStatusLabel(pane)}.`);
 
         row.querySelector('[data-action="close"]')?.addEventListener('click', (event) => {
           event.preventDefault();
@@ -5515,6 +5541,7 @@ function paneRenderAttachments(pane) {
     remove.addEventListener('click', () => {
       pane.attachments.files.splice(index, 1);
       paneRenderAttachments(pane);
+      paneUpdateDraftState(pane);
     });
     pill.append(name, remove);
     list.appendChild(pill);
@@ -5563,6 +5590,7 @@ async function paneHandleFileSelection(pane, event) {
   }
   event.target.value = '';
   paneRenderAttachments(pane);
+  paneUpdateDraftState(pane);
 }
 
 async function paneUploadAttachments(pane) {
@@ -5582,6 +5610,7 @@ async function paneUploadAttachments(pane) {
   const data = await res.json();
   pane.attachments.files = [];
   paneRenderAttachments(pane);
+  paneUpdateDraftState(pane);
   pane.elements.attachmentStatus.textContent = '';
   return Array.isArray(data.files) ? data.files : [];
 }
@@ -5886,6 +5915,7 @@ async function paneSendChat(pane) {
     paneClearChatHistory(pane, { wipeStorage: true });
     pane.elements.input.value = '';
     paneUpdateCommandHints(pane);
+    paneUpdateDraftState(pane);
     addFeed('event', 'chat', `cleared local history (${pane.sessionKey()})`);
     return;
   }
@@ -5894,6 +5924,7 @@ async function paneSendChat(pane) {
     paneClearChatHistory(pane, { wipeStorage: true });
     pane.elements.input.value = '';
     paneUpdateCommandHints(pane);
+    paneUpdateDraftState(pane);
     pane.client.request('sessions.reset', { key });
     addFeed('event', 'chat', `reset session (${key})`);
     return;
@@ -5975,6 +6006,7 @@ async function paneSendChat(pane) {
 
   pane.elements.input.value = '';
   paneUpdateCommandHints(pane);
+  paneUpdateDraftState(pane);
 }
 
 function handleGatewayFrame(pane, data) {
@@ -6159,6 +6191,7 @@ function paneHeaderLetter(pane) {
 function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
   pane.elements.name.textContent = paneIdentityLabel(pane, { includeUnread: true });
+  pane.elements.root?.setAttribute('aria-label', `${paneIdentityLabel(pane)}. ${paneDraftStatusLabel(pane)}.`);
   const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
   if (activeKey && String(pane.key || '') === activeKey) updateBrowserTitle(pane);
 }
@@ -6397,7 +6430,9 @@ function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true } = {}) {
   renderPaneAgentIdentity(pane);
 
   pane.attachments.files = [];
+  if (pane.elements?.input) pane.elements.input.value = '';
   paneRenderAttachments(pane);
+  paneUpdateDraftState(pane);
   paneStopThinking(pane);
   paneClearChatHistory(pane, { wipeStorage: false });
   paneRestoreChatHistory(pane);
@@ -6453,6 +6488,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     typePill: root.querySelector('[data-pane-type-pill]'),
     typeIcon: root.querySelector('[data-pane-type-icon]'),
     typeText: root.querySelector('[data-pane-type-text]'),
+    draftBadge: root.querySelector('[data-pane-draft-badge]'),
     agentSelect: root.querySelector('[data-pane-agent-select]'),
     agentWrap: root.querySelector('[data-pane-agent-wrap]') || root.querySelector('.pane-agent'),
     targetLabel: root.querySelector('[data-pane-target-label]') || root.querySelector('.agent-label'),
@@ -6652,6 +6688,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     clearPaneUnread(pane);
   });
   renderPaneActivityBadge(pane);
+  renderPaneDraftBadge(pane);
 
   // WORKQUEUE PANE
   if (pane.role === 'admin' && pane.kind === 'workqueue') {
@@ -7931,6 +7968,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
   elements.input.addEventListener('input', () => {
     paneUpdateCommandHints(pane);
+    paneUpdateDraftState(pane);
   });
 
   elements.attachBtn.addEventListener('click', () => {
