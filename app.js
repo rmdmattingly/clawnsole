@@ -2352,7 +2352,8 @@ const commandPaletteState = {
   items: [],
   filtered: [],
   selectedIndex: 0,
-  expandedSubgroups: new Set()
+  expandedSubgroups: new Set(),
+  originPaneKey: ''
 };
 
 const COMMAND_PALETTE_GROUP_ORDER = ['Panes', 'Navigation', 'Layout', 'Workqueue', 'Agents', 'Advanced'];
@@ -2373,6 +2374,7 @@ function isCommandPaletteOpen() {
 function closeCommandPalette({ restoreFocus = true } = {}) {
   if (!globalElements.commandPaletteModal) return;
   commandPaletteState.open = false;
+  commandPaletteState.originPaneKey = '';
   globalElements.commandPaletteModal.classList.remove('open');
   globalElements.commandPaletteModal.setAttribute('aria-hidden', 'true');
   if (restoreFocus) {
@@ -2910,6 +2912,7 @@ function openCommandPalette() {
   if (!globalElements.commandPaletteModal) return;
 
   commandPaletteState.open = true;
+  commandPaletteState.originPaneKey = focusedPaneKey() || paneMruOrder()[0] || '';
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
   commandPaletteState.selectedIndex = 0;
@@ -3009,7 +3012,8 @@ function findExistingPane(kind, predicate = null) {
 function getActiveChatAgentPane() {
   const focusedKey = focusedPaneKey();
   const fallbackKey = paneMruOrder()[0] || '';
-  const activeKey = focusedKey || fallbackKey;
+  const originKey = commandPaletteState.open ? String(commandPaletteState.originPaneKey || '') : '';
+  const activeKey = originKey || focusedKey || fallbackKey;
   return (paneManager?.panes || []).find((pane) => String(pane?.key || '') === activeKey && pane.kind === 'chat') || null;
 }
 
@@ -3055,6 +3059,8 @@ function openWorkqueueForActiveChatAgent() {
   };
   setTimeout(focusWorkqueuePane, 0);
   setTimeout(focusWorkqueuePane, 30);
+  setTimeout(focusWorkqueuePane, 120);
+  setTimeout(focusWorkqueuePane, 300);
   showToast(`Workqueue scoped to ${agentId}`, { kind: 'info', timeoutMs: 1600 });
   return pane;
 }
@@ -6165,10 +6171,11 @@ function renderPaneIdentity(pane) {
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
   if (!pane?.elements) return;
-  const { targetLabel, agentButton, agentLabel, agentSelect, agentWarning } = pane.elements;
+  const { targetLabel, agentButton, agentLabel, agentSelect, agentWarning, destinationValue } = pane.elements;
 
   if (targetLabel && typeof label === 'string') targetLabel.textContent = label;
   if (agentLabel && typeof value === 'string') agentLabel.textContent = value;
+  if (destinationValue && typeof value === 'string') destinationValue.textContent = value;
 
   // Non-chat panes use the pill button as a "focus/chooser" affordance.
   if (agentSelect) agentSelect.hidden = true;
@@ -8143,7 +8150,13 @@ const paneManager = {
 
     const findMatchingPane = () => {
       if (normalizedKind === 'workqueue') {
-        return this.panes.find((p) => p?.role === 'admin' && p.kind === 'workqueue' && String(p.workqueue?.queue || '').trim() === nextQueue) || null;
+        return this.panes.find((p) =>
+          p?.role === 'admin' &&
+          p.kind === 'workqueue' &&
+          String(p.workqueue?.queue || '').trim() === nextQueue &&
+          normalizeAgentId(p.agentId || 'main') === nextAgentId &&
+          normalizeWorkqueueScope(p.workqueue?.scopeFilter) === nextScopeFilter
+        ) || null;
       }
       if (normalizedKind === 'cron' || normalizedKind === 'timeline') {
         return this.panes.find((p) => p?.role === 'admin' && p.kind === normalizedKind && String(p.cronAgentId || '').trim() === nextCronAgentId) || null;
@@ -8299,56 +8312,155 @@ const paneManager = {
       menu.setAttribute('role', 'menu');
       menu.setAttribute('aria-label', 'Add pane');
 
-      const chatBtn = document.createElement('button');
-      chatBtn.type = 'button';
-      chatBtn.className = 'pane-add-menu__item';
-      chatBtn.textContent = 'New Chat pane';
-      chatBtn.dataset.testid = 'pane-add-menu-chat';
-      chatBtn.title = 'Shortcut: Ctrl/Cmd+Shift+C';
+      const makeButton = ({ testId, title, subtitle, shortcut }) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pane-add-menu__item';
+        btn.dataset.testid = testId;
+        btn.title = shortcut;
+        btn.innerHTML = `
+          <span class="pane-add-menu__label">${escapeHtml(title)}</span>
+          <span class="pane-add-menu__summary" data-pane-add-summary>${escapeHtml(subtitle)}</span>
+        `;
+        return btn;
+      };
 
-      const wqBtn = document.createElement('button');
-      wqBtn.type = 'button';
-      wqBtn.className = 'pane-add-menu__item';
-      wqBtn.textContent = 'New Workqueue pane';
-      wqBtn.dataset.testid = 'pane-add-menu-workqueue';
-      wqBtn.title = 'Shortcut: Ctrl/Cmd+Shift+W (Alt/Option+click = Open anyway)';
+      const makeControl = (label, control) => {
+        const wrap = document.createElement('label');
+        wrap.className = 'pane-add-menu__control';
+        const text = document.createElement('span');
+        text.textContent = label;
+        wrap.appendChild(text);
+        wrap.appendChild(control);
+        return wrap;
+      };
 
-      const cronBtn = document.createElement('button');
-      cronBtn.type = 'button';
-      cronBtn.className = 'pane-add-menu__item';
-      cronBtn.textContent = 'New Cron pane';
-      cronBtn.dataset.testid = 'pane-add-menu-cron';
-      cronBtn.title = 'Shortcut: Ctrl/Cmd+Shift+R (Alt/Option+click = Open anyway)';
+      const chatBtn = makeButton({
+        testId: 'pane-add-menu-chat',
+        title: 'New Chat pane',
+        subtitle: 'Chat -> active agent',
+        shortcut: 'Shortcut: Ctrl/Cmd+Shift+C'
+      });
+      const chatAgentSelect = document.createElement('select');
+      chatAgentSelect.dataset.testid = 'pane-add-menu-chat-agent';
+      chatAgentSelect.setAttribute('aria-label', 'Chat agent');
 
-      const timelineBtn = document.createElement('button');
-      timelineBtn.type = 'button';
-      timelineBtn.className = 'pane-add-menu__item';
-      timelineBtn.textContent = 'New Timeline pane';
-      timelineBtn.dataset.testid = 'pane-add-menu-timeline';
-      timelineBtn.title = 'Shortcut: Ctrl/Cmd+Shift+T (Alt/Option+click = Open anyway)';
+      const wqBtn = makeButton({
+        testId: 'pane-add-menu-workqueue',
+        title: 'New Workqueue pane',
+        subtitle: 'Workqueue -> dev-team / unassigned',
+        shortcut: 'Shortcut: Ctrl/Cmd+Shift+W (Alt/Option+click = Open anyway)'
+      });
+      const wqQueueInput = document.createElement('input');
+      wqQueueInput.type = 'text';
+      wqQueueInput.dataset.testid = 'pane-add-menu-workqueue-queue';
+      wqQueueInput.setAttribute('aria-label', 'Workqueue queue');
+      wqQueueInput.autocomplete = 'off';
+      const wqScopeSelect = document.createElement('select');
+      wqScopeSelect.dataset.testid = 'pane-add-menu-workqueue-scope';
+      wqScopeSelect.setAttribute('aria-label', 'Workqueue scope');
+      [
+        ['unassigned', 'Unassigned'],
+        ['assigned', 'Assigned to active target'],
+        ['all', 'All']
+      ].forEach(([value, label]) => {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = label;
+        wqScopeSelect.appendChild(opt);
+      });
+
+      const cronBtn = makeButton({
+        testId: 'pane-add-menu-cron',
+        title: 'New Cron pane',
+        subtitle: 'Cron -> gateway',
+        shortcut: 'Shortcut: Ctrl/Cmd+Shift+R (Alt/Option+click = Open anyway)'
+      });
+
+      const timelineBtn = makeButton({
+        testId: 'pane-add-menu-timeline',
+        title: 'New Timeline pane',
+        subtitle: 'Timeline -> gateway',
+        shortcut: 'Shortcut: Ctrl/Cmd+Shift+T (Alt/Option+click = Open anyway)'
+      });
 
       menu.appendChild(chatBtn);
+      menu.appendChild(makeControl('Agent', chatAgentSelect));
       menu.appendChild(wqBtn);
+      menu.appendChild(makeControl('Queue', wqQueueInput));
+      menu.appendChild(makeControl('Scope', wqScopeSelect));
       menu.appendChild(cronBtn);
       menu.appendChild(timelineBtn);
 
-      const onMenuAdd = (kind) => (event) => {
+      const stopMenuControlEvent = (event) => event.stopPropagation();
+      [chatAgentSelect, wqQueueInput, wqScopeSelect].forEach((el) => {
+        el.addEventListener('click', stopMenuControlEvent);
+        el.addEventListener('mousedown', stopMenuControlEvent);
+      });
+
+      const refreshDestinationControls = () => {
+        const defaultAgent = normalizeAgentId(storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
+        renderAgentOptions(chatAgentSelect, defaultAgent);
+        chatAgentSelect.value = defaultAgent;
+
+        const queues = Array.from(new Set([
+          'dev-team',
+          ...this.panes
+            .filter((pane) => pane?.kind === 'workqueue')
+            .map((pane) => String(pane.workqueue?.queue || '').trim())
+            .filter(Boolean)
+        ]));
+        const preferredQueue = queues[0] || 'dev-team';
+        wqQueueInput.value = preferredQueue;
+        wqQueueInput.setAttribute('list', 'pane-add-workqueue-queues');
+        let datalist = menu.querySelector('#pane-add-workqueue-queues');
+        if (!datalist) {
+          datalist = document.createElement('datalist');
+          datalist.id = 'pane-add-workqueue-queues';
+          menu.appendChild(datalist);
+        }
+        datalist.innerHTML = '';
+        queues.forEach((queue) => {
+          const opt = document.createElement('option');
+          opt.value = queue;
+          datalist.appendChild(opt);
+        });
+        wqScopeSelect.value = getDefaultWorkqueueScope();
+        chatBtn.querySelector('[data-pane-add-summary]').textContent = `Chat -> Agent: ${chatAgentSelect.value || 'main'}`;
+        wqBtn.querySelector('[data-pane-add-summary]').textContent = `Workqueue -> Queue: ${wqQueueInput.value || 'dev-team'} / ${wqScopeSelect.value}`;
+      };
+
+      chatAgentSelect.addEventListener('change', () => {
+        chatBtn.querySelector('[data-pane-add-summary]').textContent = `Chat -> Agent: ${chatAgentSelect.value || 'main'}`;
+      });
+      wqQueueInput.addEventListener('input', () => {
+        wqBtn.querySelector('[data-pane-add-summary]').textContent = `Workqueue -> Queue: ${wqQueueInput.value || 'dev-team'} / ${wqScopeSelect.value}`;
+      });
+      wqScopeSelect.addEventListener('change', () => {
+        wqBtn.querySelector('[data-pane-add-summary]').textContent = `Workqueue -> Queue: ${wqQueueInput.value || 'dev-team'} / ${wqScopeSelect.value}`;
+      });
+
+      const onMenuAdd = (kind, getOptions = () => ({})) => (event) => {
         if (state.menuActionInFlight) return;
         state.menuActionInFlight = true;
         if (event?.preventDefault) event.preventDefault();
         if (event?.stopPropagation) event.stopPropagation();
 
         this.closeAddPaneMenu();
-        this.addPane(kind, { forceNew: !!event?.altKey });
+        this.addPane(kind, { ...getOptions(), forceNew: !!event?.altKey });
 
         queueMicrotask(() => {
           state.menuActionInFlight = false;
         });
       };
 
-      chatBtn.addEventListener('click', onMenuAdd('chat'));
+      chatBtn.addEventListener('click', onMenuAdd('chat', () => ({ agentId: chatAgentSelect.value || 'main' })));
 
-      wqBtn.addEventListener('click', onMenuAdd('workqueue'));
+      wqBtn.addEventListener('click', onMenuAdd('workqueue', () => ({
+        agentId: chatAgentSelect.value || 'main',
+        queue: wqQueueInput.value || 'dev-team',
+        scopeFilter: wqScopeSelect.value || getDefaultWorkqueueScope()
+      })));
 
       cronBtn.addEventListener('click', onMenuAdd('cron'));
 
@@ -8359,6 +8471,7 @@ const paneManager = {
       state.wqBtn = wqBtn;
       state.cronBtn = cronBtn;
       state.timelineBtn = timelineBtn;
+      state.refreshDestinationControls = refreshDestinationControls;
     }
 
     const positionMenu = () => {
@@ -8384,6 +8497,7 @@ const paneManager = {
     document.body.appendChild(state.menuEl);
     state.menuEl.style.display = 'block';
     state.open = true;
+    state.refreshDestinationControls?.();
 
     try {
       anchorEl.setAttribute('aria-expanded', 'true');
