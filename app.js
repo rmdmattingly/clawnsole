@@ -246,6 +246,7 @@ const storage = {
 const ADMIN_AGENT_PINS_KEY = 'clawnsole.admin.agentPins';
 const ADMIN_AGENT_LAST_SEEN_KEY = 'clawnsole.admin.agentLastSeenAtMs';
 const ADMIN_AGENT_FILTER_KEY = 'clawnsole.admin.agents.filter';
+const ADMIN_AGENT_QUERY_KEY = 'clawnsole.admin.agents.query';
 const ADMIN_AGENT_SORT_KEY = 'clawnsole.admin.agents.sort';
 const ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY = 'clawnsole.admin.agents.preHeartbeatSort';
 const ADMIN_AGENT_HEATMAP_KEY = 'clawnsole.admin.agents.heartbeatHeatmap';
@@ -471,6 +472,16 @@ function getFleetFilter() {
   const raw = String(storage.get(ADMIN_AGENT_FILTER_KEY, 'all') || 'all').trim();
   const allowed = new Set(['all', 'active', 'stale', 'offline_error']);
   return allowed.has(raw) ? raw : 'all';
+}
+
+function getAgentsQuickFilterQuery() {
+  return String(storage.get(ADMIN_AGENT_QUERY_KEY, '') || '');
+}
+
+function setAgentsQuickFilterQuery(query) {
+  const next = String(query || '');
+  if (next) storage.set(ADMIN_AGENT_QUERY_KEY, next);
+  else storage.remove(ADMIN_AGENT_QUERY_KEY);
 }
 
 function getFleetSort() {
@@ -2958,6 +2969,7 @@ function openAgentsModal() {
     btn.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
   if (globalElements.agentsSort) globalElements.agentsSort.value = sort;
+  if (globalElements.agentsSearch) globalElements.agentsSearch.value = getAgentsQuickFilterQuery();
   if (globalElements.agentsHeatmapToggle) globalElements.agentsHeatmapToggle.checked = heatmapEnabled;
   if (globalElements.agentsActiveMinutes) {
     const minutes = Number(storage.get(ADMIN_AGENT_ACTIVE_MINUTES_KEY, '10')) || 10;
@@ -2990,6 +3002,15 @@ function resetFleetSort() {
   storage.set(ADMIN_AGENT_SORT_KEY, next);
   storage.remove(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY);
   if (globalElements.agentsSort) globalElements.agentsSort.value = next;
+  renderAgentsModalList();
+}
+
+function resetAgentsTriageView() {
+  storage.remove(ADMIN_AGENT_QUERY_KEY);
+  storage.set(ADMIN_AGENT_SORT_KEY, 'recent_desc');
+  storage.remove(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY);
+  if (globalElements.agentsSearch) globalElements.agentsSearch.value = '';
+  if (globalElements.agentsSort) globalElements.agentsSort.value = 'recent_desc';
   renderAgentsModalList();
 }
 
@@ -8796,6 +8817,15 @@ globalElements.agentsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.agentsModal) closeAgentsModal();
 });
 globalElements.agentsModal?.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && String(globalElements.agentsSearch?.value || '')) {
+    event.preventDefault();
+    event.stopPropagation();
+    setAgentsQuickFilterQuery('');
+    if (globalElements.agentsSearch) globalElements.agentsSearch.value = '';
+    renderAgentsModalList();
+    globalElements.agentsSearch?.focus?.();
+    return;
+  }
   if (isTypingContext(event.target)) return;
   if (String(event.key || '').toLowerCase() !== 'h' || event.metaKey || event.ctrlKey || event.altKey) return;
   event.preventDefault();
@@ -8803,11 +8833,19 @@ globalElements.agentsModal?.addEventListener('keydown', (event) => {
   else resetFleetSort();
 });
 
-globalElements.agentsSearch?.addEventListener('input', () => renderAgentsModalList());
+globalElements.agentsSearch?.addEventListener('input', () => {
+  setAgentsQuickFilterQuery(globalElements.agentsSearch.value);
+  renderAgentsModalList();
+});
 globalElements.agentsSearch?.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
   event.preventDefault();
   event.stopPropagation();
+  if (!String(globalElements.agentsSearch.value || '')) {
+    closeAgentsModal();
+    return;
+  }
+  setAgentsQuickFilterQuery('');
   globalElements.agentsSearch.value = '';
   renderAgentsModalList();
   globalElements.agentsSearch.focus();
@@ -8845,7 +8883,7 @@ globalElements.agentsHeatmapToggle?.addEventListener('change', () => {
 });
 
 globalElements.agentsHeartbeatSortBtn?.addEventListener('click', () => setFleetHeartbeatSort());
-globalElements.agentsSortResetBtn?.addEventListener('click', () => resetFleetSort());
+globalElements.agentsSortResetBtn?.addEventListener('click', () => resetAgentsTriageView());
 
 globalElements.agentsActiveMinutes?.addEventListener('change', () => {
   const minutes = Math.max(1, Number(globalElements.agentsActiveMinutes.value) || 10);
