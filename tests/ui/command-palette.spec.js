@@ -142,6 +142,41 @@ test('pane navigation: returns to the last active chat pane from shortcut and co
   await expect(chatInput).toBeFocused();
 });
 
+test('pane navigation: g then visible pane letter focuses pane with no-match and typing guards', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await loginAdmin(page, env.serverPort);
+
+  const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  const chatInput = chatPane.locator('[data-pane-input]');
+  const workqueuePane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  const queueButton = workqueuePane.getByTestId('pane-agent-button');
+
+  await expect(chatPane).toHaveAttribute('data-pane-letter', 'A');
+  await expect(workqueuePane).toHaveAttribute('data-pane-letter', 'B');
+
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.press('g');
+  await page.keyboard.press('b');
+  await expect(queueButton).toBeFocused();
+
+  const addPaneBtn = page.locator('#addPaneBtn');
+  await addPaneBtn.focus();
+  await expect(addPaneBtn).toBeFocused();
+  await page.keyboard.press('g');
+  await page.keyboard.press('z');
+  await expect(addPaneBtn).toBeFocused();
+
+  await chatInput.click();
+  await expect(chatInput).toBeFocused();
+  await chatInput.fill('');
+  await chatInput.type('gb');
+  await expect(chatInput).toBeFocused();
+  await expect(chatInput).toHaveValue('gb');
+});
+
 test('command palette: opens or focuses Workqueue for active chat agent', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
