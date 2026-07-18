@@ -49,6 +49,9 @@ const globalElements = {
   shortcutsModal: document.getElementById('shortcutsModal'),
   shortcutsDialog: document.getElementById('shortcutsDialog'),
   shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
+  shortcutsSearch: document.getElementById('shortcutsSearch'),
+  shortcutsEmpty: document.getElementById('shortcutsEmpty'),
+  shortcutsFilterButtons: Array.from(document.querySelectorAll('[data-shortcuts-filter]')),
   paneManagerModal: document.getElementById('paneManagerModal'),
   paneManagerCloseBtn: document.getElementById('paneManagerCloseBtn'),
   paneManagerSearch: document.getElementById('paneManagerSearch'),
@@ -1698,6 +1701,10 @@ async function deleteRecurringPrompt(id) {
 }
 
 let shortcutsLastFocusedEl = null;
+const shortcutsUiState = {
+  query: '',
+  category: 'all'
+};
 
 function getModalFocusableElements(modalEl) {
   if (!modalEl || !modalEl.querySelectorAll) return [];
@@ -1711,9 +1718,13 @@ function openShortcuts() {
   shortcutsLastFocusedEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   modal.classList.add('open');
   modal.setAttribute('aria-hidden', 'false');
-  window.setTimeout(() => {
-    (globalElements.shortcutsDialog || globalElements.shortcutsCloseBtn || modal).focus?.();
-  }, 0);
+  shortcutsUiState.query = '';
+  shortcutsUiState.category = 'all';
+  if (globalElements.shortcutsSearch) globalElements.shortcutsSearch.value = '';
+  updateShortcutsFilter();
+  focusShortcutsSearch();
+  window.requestAnimationFrame?.(() => focusShortcutsSearch());
+  window.setTimeout(() => focusShortcutsSearch(), 50);
 }
 
 function closeShortcuts() {
@@ -1725,6 +1736,53 @@ function closeShortcuts() {
     shortcutsLastFocusedEl.focus?.();
   }
   shortcutsLastFocusedEl = null;
+}
+
+function normalizeShortcutSearchText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function updateShortcutsFilter() {
+  const modal = globalElements.shortcutsModal;
+  if (!modal) return;
+  const query = normalizeShortcutSearchText(shortcutsUiState.query);
+  const category = shortcutsUiState.category || 'all';
+  let visibleRows = 0;
+
+  for (const btn of globalElements.shortcutsFilterButtons || []) {
+    const isActive = (btn.getAttribute('data-shortcuts-filter') || 'all') === category;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  }
+
+  for (const group of Array.from(modal.querySelectorAll('.shortcut-group'))) {
+    const categories = new Set(String(group.getAttribute('data-shortcut-category') || '').split(/\s+/).filter(Boolean));
+    const categoryMatches = category === 'all' || categories.has(category);
+    let groupVisibleRows = 0;
+    for (const row of Array.from(group.querySelectorAll('.shortcut-row'))) {
+      const haystack = normalizeShortcutSearchText(`${group.querySelector('.shortcut-group-title')?.textContent || ''} ${row.textContent || ''}`);
+      const rowMatches = categoryMatches && (!query || haystack.includes(query));
+      row.hidden = !rowMatches;
+      if (rowMatches) {
+        groupVisibleRows += 1;
+        visibleRows += 1;
+      }
+    }
+    group.hidden = groupVisibleRows === 0;
+  }
+
+  if (globalElements.shortcutsEmpty) {
+    globalElements.shortcutsEmpty.hidden = visibleRows !== 0;
+  }
+}
+
+function focusShortcutsSearch() {
+  const target = globalElements.shortcutsSearch || globalElements.shortcutsDialog || globalElements.shortcutsCloseBtn || globalElements.shortcutsModal;
+  if (!target?.focus) return;
+  target.focus({ preventScroll: true });
+  if (target === globalElements.shortcutsSearch) {
+    target.select?.();
+  }
 }
 
 // Pane Manager (admin-only)
@@ -8679,6 +8737,17 @@ globalElements.paneSwitchHudEnabled?.addEventListener('change', () => {
 
 globalElements.shortcutsBtn?.addEventListener('click', () => openShortcuts());
 globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
+globalElements.shortcutsSearch?.addEventListener('input', () => {
+  shortcutsUiState.query = globalElements.shortcutsSearch.value || '';
+  updateShortcutsFilter();
+});
+for (const btn of globalElements.shortcutsFilterButtons || []) {
+  btn.addEventListener('click', () => {
+    shortcutsUiState.category = btn.getAttribute('data-shortcuts-filter') || 'all';
+    updateShortcutsFilter();
+    globalElements.shortcutsSearch?.focus?.();
+  });
+}
 globalElements.shortcutsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.shortcutsModal) closeShortcuts();
 });
