@@ -4,6 +4,7 @@ const globalElements = {
   deviceId: document.getElementById('deviceId'),
   disconnectBtn: document.getElementById('disconnectBtn'),
   resetLayoutBtn: document.getElementById('resetLayoutBtn'),
+  triageLayoutBtn: document.getElementById('triageLayoutBtn'),
   recurringPromptTarget: document.getElementById('recurringPromptTarget'),
   recurringPromptInterval: document.getElementById('recurringPromptInterval'),
   recurringPromptTimezone: document.getElementById('recurringPromptTimezone'),
@@ -2575,6 +2576,15 @@ function buildCommandPaletteItems() {
     ),
     withShortcut(
       {
+        id: 'cmd:triage-layout',
+        label: 'Layout: Triage preset',
+        detail: 'Open Chat + Workqueue + Fleet visibility',
+        run: () => applyTriageLayoutPreset()
+      },
+      ''
+    ),
+    withShortcut(
+      {
         id: 'cmd:toggle-shortcuts',
         label: 'Help: Toggle shortcuts overlay',
         detail: 'Show/hide keyboard shortcuts',
@@ -3111,6 +3121,27 @@ function openFleetPane({ forceNew = false } = {}) {
   pane.cronAgentId = target;
   paneManager.persistAdminPanes();
   paneManager.focusPanePrimary(pane);
+}
+
+function applyTriageLayoutPreset() {
+  if (roleState.role !== 'admin') return null;
+
+  const defaultAgent = normalizeAgentId(storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main') || 'main');
+  let chatPane = findExistingPane('chat', (p) => normalizeAgentId(p.agentId || 'main') === defaultAgent) || findExistingPane('chat');
+  if (!chatPane) {
+    chatPane = paneManager.addPane('chat', { agentId: defaultAgent });
+  }
+
+  let workqueuePane = findExistingPane('workqueue', (p) => String(p.workqueue?.queue || '').trim() === 'dev-team') || findExistingPane('workqueue');
+  if (!workqueuePane) {
+    workqueuePane = paneManager.addPane('workqueue', { queue: 'dev-team' });
+  }
+
+  const fleetPane = openFleetPane();
+  paneManager.persistAdminPanes();
+  if (chatPane) paneManager.focusPanePrimary(chatPane);
+  showToast('Triage preset applied', { kind: 'info', timeoutMs: 1600 });
+  return { chatPane, workqueuePane, fleetPane };
 }
 
 function openAgentWorkqueueFromFleet(agentId) {
@@ -9572,6 +9603,10 @@ if (globalElements.resetLayoutBtn) {
 
 globalElements.resetLayoutBtn?.addEventListener('click', () => {
   paneManager.resetAdminLayoutToDefault({ confirm: true });
+});
+
+globalElements.triageLayoutBtn?.addEventListener('click', () => {
+  applyTriageLayoutPreset();
 });
 
 globalElements.paneManagerBtn?.addEventListener('click', (event) => {

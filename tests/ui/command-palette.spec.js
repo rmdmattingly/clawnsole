@@ -178,3 +178,38 @@ test('command palette: opens or focuses Workqueue for active chat agent', async 
   await runCommand('workqueue for active chat agent');
   await expect(page.getByTestId('toast').last()).toContainText('No active chat agent selected');
 });
+
+test('layout triage preset is available and idempotently opens chat workqueue and fleet visibility', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await loginAdminWithChatOnlyPane(page, env.serverPort);
+
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
+  await expect(chatInput).toBeVisible();
+  await chatInput.fill('keep this draft');
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await expect(page.getByTestId('triage-layout-btn')).toBeVisible();
+  await page.locator('#settingsCloseBtn').click();
+
+  const runTriagePreset = async () => {
+    await page.keyboard.press('ControlOrMeta+K');
+    const input = page.locator('#commandPaletteInput');
+    await expect(input).toBeVisible();
+    await input.fill('triage preset');
+    await page.keyboard.press('Enter');
+  };
+
+  await runTriagePreset();
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+  await expect(chatInput).toHaveValue('keep this draft');
+
+  const countAfterFirstRun = await page.locator('[data-pane]').count();
+  await runTriagePreset();
+  await expect(page.locator('[data-pane]')).toHaveCount(countAfterFirstRun);
+  await expect(chatInput).toHaveValue('keep this draft');
+});
