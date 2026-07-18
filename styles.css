@@ -1798,11 +1798,16 @@ button.send-btn .btn-icon {
   color: var(--muted);
 }
 
-.pane-manager-kind-label {
+.pane-manager-kind-label,
+.pane-manager-target-label {
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pane-manager-target-label {
+  min-width: 42px;
 }
 
 .pane-manager-pane-id {
@@ -1868,7 +1873,8 @@ button.send-btn .btn-icon {
   text-transform: uppercase;
 }
 
-.pane-manager-unread-badge {
+.pane-manager-unread-badge,
+.pane-manager-state-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1886,6 +1892,36 @@ button.send-btn .btn-icon {
 .pane-manager-draft-badge {
   height: 18px;
   padding: 0 7px;
+}
+
+.pane-manager-state-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.pane-manager-state-chip {
+  width: auto;
+  min-width: 0;
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.pane-manager-state-chip--draft {
+  border-color: rgba(59, 130, 246, 0.42);
+  background: rgba(59, 130, 246, 0.14);
+  color: #bfdbfe;
+}
+
+.pane-manager-state-chip--disconnected {
+  border-color: rgba(148, 163, 184, 0.45);
+  background: rgba(148, 163, 184, 0.12);
+  color: #cbd5e1;
 }
 
 .pane-manager-state {

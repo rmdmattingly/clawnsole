@@ -80,9 +80,47 @@ test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane 
   await expect(timelinePane.getByTestId('pane-type-label')).toHaveText(/^D Timeline · .+/);
 
   await page.keyboard.press('Control+P');
-  const firstPaneHeaderIdentity = await page.locator('[data-pane]').first().getByTestId('pane-type-label').textContent();
-  await expect(page.locator('.pane-manager-row .pane-manager-kind-label').first()).toHaveText(String(firstPaneHeaderIdentity || '').trim());
+  const firstRow = page.locator('.pane-manager-row').first();
+  await expect(firstRow.getByTestId('pane-manager-letter')).toHaveText('A');
+  await expect(firstRow.getByTestId('pane-manager-type-badge')).toContainText('Chat');
+  await expect(firstRow.locator('.pane-manager-kind-label')).toContainText('Chat · main');
   await expect(page.locator('.pane-manager-row .pane-manager-pane-id').first()).toHaveText(/^[a-zA-Z0-9]+$/);
+});
+
+test('pane manager: rows expose unread, draft, and disconnected state chips', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  await chatPane.locator('[data-pane-input]').fill('unsent draft');
+  await page.evaluate(() => {
+    const script = document.createElement('script');
+    script.textContent = `
+      {
+        const pane = paneManager.panes.find((entry) => entry.kind === 'chat');
+        if (pane) {
+          pane.unreadCount = 2;
+          pane.connected = false;
+          pane.statusState = 'disconnected';
+        }
+      }
+    `;
+    document.body.appendChild(script);
+    script.remove();
+  });
+
+  await page.keyboard.press('Control+P');
+  const chatRow = page.locator('.pane-manager-row', { hasText: 'Chat' }).first();
+  await expect(chatRow.getByTestId('pane-manager-state-chip-unread')).toHaveText('2 unread');
+  await expect(chatRow.getByTestId('pane-manager-state-chip-draft')).toHaveText('draft');
+  await expect(chatRow.getByTestId('pane-manager-state-chip-disconnected')).toHaveText('disconnected');
 });
 
 test('pane manager: quick-find filters, highlights, and focuses first match', async ({ page }) => {
@@ -281,7 +319,7 @@ test('pane manager: status stays in sync with pane header while modal is open', 
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
 
   const chatHeaderStatus = page.locator('[data-pane][data-pane-kind="chat"]').first().getByTestId('pane-connection-status');
-  const chatManagerState = page.locator('.pane-manager-row', { hasText: 'Chat · main' }).first().locator('.pane-manager-state');
+  const chatManagerState = page.locator('.pane-manager-row:has-text("Chat"):has-text("main")').first().locator('.pane-manager-state');
   const workqueueHeaderStatus = page.locator('[data-pane][data-pane-kind="workqueue"]').first().getByTestId('pane-connection-status');
   const workqueueManagerState = page.locator('.pane-manager-row', { hasText: 'Workqueue' }).first().locator('.pane-manager-state');
 
