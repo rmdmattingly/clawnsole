@@ -12788,7 +12788,7 @@ window.addEventListener('load', () => {
       paneManager.connectAll();
 
       const isTouch = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
-      if (!isTouch) {
+      if (!isTouch && !isAnyOverlayOpen()) {
         const firstPane = paneManager.panes[0];
         firstPane?.elements.input?.focus();
       }
