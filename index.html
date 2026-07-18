@@ -280,7 +280,27 @@
             ✕
           </button>
         </div>
-        <div id="shortcutsContent" class="modal-body"></div>
+        <div class="modal-body">
+          <div class="shortcuts-controls" role="search" aria-label="Search keyboard shortcuts">
+            <input
+              id="shortcutsSearchInput"
+              class="shortcuts-search-input"
+              type="search"
+              placeholder="Search keys, actions, or categories"
+              autocomplete="off"
+              data-testid="shortcuts-search"
+            />
+            <div id="shortcutsFilterChips" class="shortcuts-filter-chips" role="toolbar" aria-label="Shortcut category filters">
+              <button class="shortcuts-chip is-active" type="button" data-shortcuts-filter="all" aria-pressed="true">All</button>
+              <button class="shortcuts-chip" type="button" data-shortcuts-filter="global" aria-pressed="false">Global</button>
+              <button class="shortcuts-chip" type="button" data-shortcuts-filter="chat" aria-pressed="false">Chat</button>
+              <button class="shortcuts-chip" type="button" data-shortcuts-filter="workqueue" aria-pressed="false">Workqueue</button>
+              <button class="shortcuts-chip" type="button" data-shortcuts-filter="fleet" aria-pressed="false">Fleet</button>
+            </div>
+          </div>
+          <div id="shortcutsEmpty" class="hint shortcuts-empty" hidden>No shortcuts match your filters.</div>
+          <div id="shortcutsContent"></div>
+        </div>
       </div>
     </div>
 

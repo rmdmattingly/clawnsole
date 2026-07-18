@@ -2449,6 +2449,47 @@ button.agents-section-title:hover {
 
 /* Shortcuts modal */
 
+.shortcuts-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.shortcuts-search-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background: rgba(0, 0, 0, 0.24);
+  color: var(--text);
+}
+
+.shortcuts-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.shortcuts-chip {
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
+.shortcuts-chip.is-active {
+  border-color: rgba(125, 211, 252, 0.7);
+  background: rgba(125, 211, 252, 0.14);
+  color: var(--text);
+}
+
+.shortcuts-empty {
+  margin-bottom: 12px;
+}
+
 .shortcut-group {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
