@@ -614,6 +614,8 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
 
   // Header target should describe queue context (not agent).
   await expect(wqPane.locator('[data-pane-target-label]')).toHaveText('Queue');
+  await expect(wqPane.getByTestId('pane-type-label')).toContainText('Workqueue · dev-team');
+  await expect(wqPane.getByTestId('pane-target-value')).toHaveText('dev-team');
 
   // Refreshing agent list should not flip the workqueue header back to Agent.
   await page.getByLabel('Refresh agent list').click();
