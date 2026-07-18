@@ -207,6 +207,42 @@ test('pane manager: status stays in sync with pane header while modal is open', 
   await expect(chatManagerState).toHaveText('disconnected');
 });
 
+test('pane manager: draft badge appears, persists across panes, and clears on send', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  const workqueuePane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await expect(chatPane.getByTestId('pane-send')).toBeEnabled({ timeout: 90000 });
+
+  await chatPane.getByTestId('pane-input').fill('draft for the right pane');
+  await expect(chatPane.getByTestId('pane-draft-badge')).toBeVisible();
+  await expect(chatPane.getByTestId('pane-type-label')).toHaveAttribute('aria-label', /has unsent draft/);
+
+  await workqueuePane.click();
+  await expect(chatPane.getByTestId('pane-draft-badge')).toBeVisible();
+
+  await page.keyboard.press('Control+P');
+  const chatManagerRow = page.locator('.pane-manager-row[data-pane-kind="chat"]').first();
+  await expect(chatManagerRow.getByTestId('pane-manager-draft-badge')).toBeVisible();
+  await expect(chatManagerRow).toHaveAttribute('aria-label', /has unsent draft/);
+
+  await page.keyboard.press('Escape');
+  await chatPane.getByTestId('pane-send').click();
+  await expect(chatPane.getByTestId('pane-draft-badge')).toBeHidden();
+
+  await page.keyboard.press('Control+P');
+  await expect(chatManagerRow.getByTestId('pane-manager-draft-badge')).toHaveCount(0);
+  await expect(chatManagerRow).toHaveAttribute('aria-label', /no unsent draft/);
+});
+
 test('pane manager: supports reordering panes', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);

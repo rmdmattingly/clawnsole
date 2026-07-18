@@ -1813,6 +1813,10 @@ function paneSummaryLabel(pane) {
   return paneIdentityLabel(pane, { includeUnread: false });
 }
 
+function paneDraftStatusLabel(pane) {
+  return paneHasDraftChanges(pane) ? 'has unsent draft' : 'no unsent draft';
+}
+
 function isPaneSwitchHudEnabled() {
   return String(storage.get(PANE_SWITCH_HUD_ENABLED_KEY, '1') || '1') !== '0';
 }
@@ -2161,14 +2165,17 @@ function renderPaneManager() {
         const duplicateCount = duplicateCounts.get(paneDuplicateKey(pane)) || 0;
         const isDuplicate = duplicateCount > 1;
         const unreadCount = paneUnreadCount(pane);
+        const hasDraft = paneHasDraftChanges(pane);
         const paneIdentity = paneSummaryLabel(pane);
 
+        row.setAttribute('aria-label', `${paneIdentity}; ${paneDraftStatusLabel(pane)}; ${state}`);
         row.innerHTML = `
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
               ${paneTypeBadgeMarkup(pane, { extraClass: 'pane-manager-type-badge', testId: 'pane-manager-type-badge' })}
               <span class="pane-manager-kind-label">${escapeHtml(paneIdentity)}</span>
               <span class="pane-manager-pane-id" title="Internal pane id">${escapeHtml(String(pane?.key || ''))}</span>
+              ${hasDraft ? '<span class="pane-manager-draft-badge" data-testid="pane-manager-draft-badge" title="Unsent draft">Draft</span>' : ''}
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
               ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
             </div>
@@ -5600,6 +5607,7 @@ function paneRenderAttachments(pane) {
     pill.append(name, remove);
     list.appendChild(pill);
   });
+  renderPaneDraftState(pane);
 }
 
 function fileToBase64(file) {
@@ -5670,6 +5678,7 @@ async function paneUploadAttachments(pane) {
 function paneUpdateCommandHints(pane) {
   const hints = pane.elements.commandHints;
   if (!hints) return;
+  renderPaneDraftState(pane);
   const value = pane.elements.input.value.trim();
   if (!value.startsWith('/')) {
     hints.classList.remove('visible');
@@ -6240,8 +6249,26 @@ function paneHeaderLetter(pane) {
 function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
   pane.elements.name.textContent = paneIdentityLabel(pane, { includeUnread: true });
+  renderPaneDraftState(pane, { refreshManager: false });
   const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
   if (activeKey && String(pane.key || '') === activeKey) updateBrowserTitle(pane);
+}
+
+function renderPaneDraftState(pane, { refreshManager = true } = {}) {
+  if (!pane?.elements) return;
+  const hasDraft = paneHasDraftChanges(pane);
+  const status = paneDraftStatusLabel(pane);
+  const identity = paneIdentityLabel(pane, { includeUnread: true });
+  pane.elements.root?.classList?.toggle('has-draft', hasDraft);
+  pane.elements.root?.setAttribute('aria-label', `${identity}; ${status}`);
+  if (pane.elements.name) {
+    pane.elements.name.setAttribute('aria-label', `${identity}; ${status}`);
+  }
+  if (pane.elements.draftBadge) {
+    pane.elements.draftBadge.hidden = !hasDraft;
+    pane.elements.draftBadge.setAttribute('aria-label', status);
+  }
+  if (refreshManager && isPaneManagerOpen()) renderPaneManager();
 }
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
@@ -6432,7 +6459,7 @@ function openAgentChooser(pane) {
 
 function paneHasDraftChanges(pane) {
   if (!pane?.elements) return false;
-  const draftText = String(pane.elements.input?.value || '').trim();
+  const draftText = String(pane.elements.input?.value || '');
   const hasAttachments = Array.isArray(pane.attachments?.files) && pane.attachments.files.length > 0;
   return Boolean(draftText || hasAttachments);
 }
@@ -6532,6 +6559,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   const elements = {
     root,
     name: root.querySelector('[data-pane-name]'),
+    draftBadge: root.querySelector('[data-pane-draft-badge]'),
     typePill: root.querySelector('[data-pane-type-pill]'),
     typeIcon: root.querySelector('[data-pane-type-icon]'),
     typeText: root.querySelector('[data-pane-type-text]'),
