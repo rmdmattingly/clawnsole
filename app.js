@@ -40,6 +40,7 @@ const globalElements = {
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
+  agentsColumnToggles: Array.from(document.querySelectorAll('[data-agents-column]')),
   toastHost: document.getElementById('toastHost'),
   commandPaletteModal: document.getElementById('commandPaletteModal'),
   commandPaletteCloseBtn: document.getElementById('commandPaletteCloseBtn'),
@@ -251,6 +252,7 @@ const ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY = 'clawnsole.admin.agents.preHeartbeatS
 const ADMIN_AGENT_HEATMAP_KEY = 'clawnsole.admin.agents.heartbeatHeatmap';
 const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
+const ADMIN_AGENT_COLUMNS_KEY = 'clawnsole.admin.agents.columns';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
 const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
@@ -485,6 +487,36 @@ function getFleetHeatmapEnabled() {
 
 function getFleetDensity() {
   return String(storage.get(ADMIN_AGENT_DENSITY_KEY, 'comfortable') || 'comfortable') === 'compact' ? 'compact' : 'comfortable';
+}
+
+const FLEET_OPTIONAL_COLUMNS = ['model', 'host', 'heartbeat', 'status'];
+
+function getFleetVisibleColumns() {
+  const raw = readJsonFromStorage(ADMIN_AGENT_COLUMNS_KEY, null);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return new Set(FLEET_OPTIONAL_COLUMNS);
+  const visible = new Set();
+  for (const key of FLEET_OPTIONAL_COLUMNS) {
+    if (raw[key] !== false) visible.add(key);
+  }
+  return visible;
+}
+
+function setFleetColumnVisible(column, visible) {
+  const key = String(column || '').trim();
+  if (!FLEET_OPTIONAL_COLUMNS.includes(key)) return;
+  const current = {};
+  const visibleColumns = getFleetVisibleColumns();
+  for (const col of FLEET_OPTIONAL_COLUMNS) current[col] = visibleColumns.has(col);
+  current[key] = !!visible;
+  writeJsonToStorage(ADMIN_AGENT_COLUMNS_KEY, current);
+}
+
+function syncFleetColumnControls() {
+  const visibleColumns = getFleetVisibleColumns();
+  globalElements.agentsColumnToggles.forEach((toggle) => {
+    const key = String(toggle.getAttribute('data-agents-column') || '').trim();
+    toggle.checked = visibleColumns.has(key);
+  });
 }
 
 function syncFleetDensityControl() {
@@ -1150,7 +1182,10 @@ async function fetchAgents() {
         id: typeof agent?.id === 'string' ? agent.id : '',
         name: typeof agent?.name === 'string' ? agent.name : '',
         displayName: typeof agent?.displayName === 'string' ? agent.displayName : '',
-        emoji: typeof agent?.emoji === 'string' ? agent.emoji : ''
+        emoji: typeof agent?.emoji === 'string' ? agent.emoji : '',
+        model: typeof agent?.model === 'string' ? agent.model : '',
+        host: typeof agent?.host === 'string' ? agent.host : '',
+        hostname: typeof agent?.hostname === 'string' ? agent.hostname : ''
       }))
       .filter((agent) => agent.id);
   } catch {
@@ -2964,6 +2999,7 @@ function openAgentsModal() {
     globalElements.agentsActiveMinutes.value = String(Math.max(1, minutes));
   }
   syncFleetDensityControl();
+  syncFleetColumnControls();
 
   renderAgentsModalList();
   renderAgentsLastRefreshed();
@@ -3199,7 +3235,9 @@ function renderAgentsModalList() {
   const filterMode = getFleetFilter();
   const sortMode = getFleetSort();
   const heatmapEnabled = getFleetHeatmapEnabled();
+  const visibleColumns = getFleetVisibleColumns();
   syncFleetDensityControl();
+  syncFleetColumnControls();
 
   const pins = getPinnedAgentIds();
   const lastSeenMap = getAgentLastSeenMap();
@@ -3346,7 +3384,14 @@ function renderAgentsModalList() {
       const bucketLabel = triage.bucket === 'offline_error' ? 'offline/error' : triage.bucket;
       const heatBucketLabel = heartbeatAgeBucketLabel(triage.ageBucket);
       const statusSnippet = String(statusSnippetMap[id] || '').trim();
-      const statusSnippetHtml = statusSnippet ? ` · <span class="agents-status-snippet">${escapeHtml(statusSnippet)}</span>` : '';
+      const modelLabel = String(agent?.model || '').trim() || 'unknown model';
+      const hostLabel = String(agent?.host || agent?.hostname || '').trim() || 'unknown host';
+      const detailColumns = [
+        visibleColumns.has('model') ? `<span class="agents-row-column" data-agents-row-column="model"><span class="agents-row-column-label">model</span> ${escapeHtml(modelLabel)}</span>` : '',
+        visibleColumns.has('host') ? `<span class="agents-row-column" data-agents-row-column="host"><span class="agents-row-column-label">host</span> ${escapeHtml(hostLabel)}</span>` : '',
+        visibleColumns.has('heartbeat') ? `<span class="agents-row-column" data-agents-row-column="heartbeat"><span class="agents-row-column-label">heartbeat</span> <span class="agents-age-chip" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}">${escapeHtml(heartbeatAge)} · ${escapeHtml(heatBucketLabel)}</span></span>` : '',
+        visibleColumns.has('status') ? `<span class="agents-row-column" data-agents-row-column="status"><span class="agents-row-column-label">status</span> ${escapeHtml(bucketLabel)}${statusSnippet ? ` · <span class="agents-status-snippet">${escapeHtml(statusSnippet)}</span>` : ''}</span>` : ''
+      ].filter(Boolean).join('');
       row.dataset.heartbeatBucket = triage.ageBucket;
       row.classList.toggle('agents-row-heatmap', heatmapEnabled);
 
@@ -3354,7 +3399,8 @@ function renderAgentsModalList() {
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
         <div class="agents-row-main">
           <div class="agents-row-title">${escapeHtml(label)}</div>
-          <div class="agents-row-meta">${escapeHtml(id)} · ${escapeHtml(bucketLabel)} · <span class="agents-age-chip" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}">${escapeHtml(heartbeatAge)} · ${escapeHtml(heatBucketLabel)}</span>${statusSnippetHtml}</div>
+          <div class="agents-row-meta">${escapeHtml(id)}</div>
+          <div class="agents-row-columns">${detailColumns}</div>
         </div>
         <div class="agents-row-actions agents-row-actions-inline" role="group" aria-label="Quick actions for ${escapeHtml(label)}">
           <button type="button" class="secondary agents-action-btn" data-agent-action="triage" data-agent-id="${escapeHtml(id)}" title="Open Chat and Workqueue" aria-label="Triage agent ${escapeHtml(label)}">Triage</button>
@@ -8831,6 +8877,14 @@ globalElements.agentsDensityButtons.forEach((btn) => {
     const density = String(btn.getAttribute('data-agents-density') || 'comfortable') === 'compact' ? 'compact' : 'comfortable';
     storage.set(ADMIN_AGENT_DENSITY_KEY, density);
     syncFleetDensityControl();
+  });
+});
+
+globalElements.agentsColumnToggles.forEach((toggle) => {
+  toggle.addEventListener('change', () => {
+    setFleetColumnVisible(toggle.getAttribute('data-agents-column'), toggle.checked);
+    syncFleetColumnControls();
+    renderAgentsModalList();
   });
 });
 
