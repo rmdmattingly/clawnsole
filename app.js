@@ -4482,6 +4482,11 @@ function renderWorkqueuePaneItems(pane) {
     Number(pane.workqueue?.renderLimit || WORKQUEUE_PANE_INITIAL_RENDER_LIMIT)
   );
   const visibleItems = items.slice(0, renderLimit);
+  pane.workqueue.visibleItemIds = visibleItems.map((it) => it.id).filter(Boolean);
+
+  if (pane.workqueue.keyboardMode && visibleItems.length && !pane.workqueue.selectedItemId) {
+    pane.workqueue.selectedItemId = visibleItems[0].id || null;
+  }
 
   if (empty) {
     const hasItems = items.length > 0;
@@ -4522,6 +4527,7 @@ function renderWorkqueuePaneItems(pane) {
     row.type = 'button';
     row.className = 'wq-row';
     if (it.id && it.id === pane.workqueue.selectedItemId) row.classList.add('selected');
+    if (it.id) row.setAttribute('data-wq-item', it.id);
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
     const leaseLabel = it.leaseUntil ? fmtRemaining(leaseMs) : '';
@@ -4569,6 +4575,75 @@ function renderWorkqueuePaneItems(pane) {
     pane.workqueue.selectedItemId = null;
     renderWorkqueuePaneInspect(pane, null);
   }
+}
+
+function selectWorkqueuePaneItemByDelta(pane, delta) {
+  const ids = Array.isArray(pane?.workqueue?.visibleItemIds) ? pane.workqueue.visibleItemIds : [];
+  if (!ids.length) return;
+  const current = pane.workqueue.selectedItemId;
+  const currentIndex = Math.max(0, ids.indexOf(current));
+  const nextIndex = Math.max(0, Math.min(ids.length - 1, currentIndex + delta));
+  pane.workqueue.selectedItemId = ids[nextIndex] || null;
+  const selected = (pane.workqueue.items || []).find((it) => it.id === pane.workqueue.selectedItemId) || null;
+  renderWorkqueuePaneItems(pane);
+  renderWorkqueuePaneInspect(pane, selected);
+  const row = pane.elements?.thread?.querySelector?.(`[data-wq-item="${CSS.escape(String(pane.workqueue.selectedItemId || ''))}"]`);
+  row?.focus?.({ preventScroll: true });
+  row?.scrollIntoView?.({ block: 'nearest' });
+}
+
+async function setWorkqueuePaneSelectedStatus(pane, status) {
+  const itemId = pane?.workqueue?.selectedItemId;
+  if (!itemId) return;
+  try {
+    const res = await fetch('/api/workqueue/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ itemId, patch: { status } })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) throw new Error(data?.error || String(res.status));
+    const ix = Array.isArray(pane.workqueue.items) ? pane.workqueue.items.findIndex((it) => it.id === itemId) : -1;
+    if (ix >= 0) pane.workqueue.items[ix] = data.item;
+    addFeed('ok', 'workqueue', `Updated ${itemId} to ${status}`);
+    renderWorkqueuePaneItems(pane);
+    renderWorkqueuePaneInspect(pane, data.item);
+  } catch (err) {
+    addFeed('err', 'workqueue', `status update failed: ${String(err)}`);
+  }
+}
+
+function handleWorkqueuePaneKeyboard(event, pane) {
+  if (!pane?.workqueue?.keyboardMode) return false;
+  if (isTypingContext(event.target) || isAnyOverlayOpen()) return false;
+  if (event.metaKey || event.ctrlKey || event.altKey) return false;
+
+  const key = String(event.key || '').toLowerCase();
+  const statusByKey = { '1': 'ready', '2': 'in_progress', '3': 'blocked', '4': 'done' };
+  if (key === 'j' || key === 'arrowdown') {
+    event.preventDefault();
+    selectWorkqueuePaneItemByDelta(pane, 1);
+    return true;
+  }
+  if (key === 'k' || key === 'arrowup') {
+    event.preventDefault();
+    selectWorkqueuePaneItemByDelta(pane, -1);
+    return true;
+  }
+  if (key === 'enter') {
+    event.preventDefault();
+    const selected = (pane.workqueue.items || []).find((it) => it.id === pane.workqueue.selectedItemId) || null;
+    renderWorkqueuePaneInspect(pane, selected);
+    pane.elements?.thread?.querySelector?.('[data-wq-inspect]')?.scrollIntoView?.({ block: 'nearest' });
+    return true;
+  }
+  if (statusByKey[key]) {
+    event.preventDefault();
+    setWorkqueuePaneSelectedStatus(pane, statusByKey[key]);
+    return true;
+  }
+  return false;
 }
 
 function renderWorkqueuePaneInspect(pane, item) {
@@ -6509,6 +6584,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       items: [],
       countItems: [],
       selectedItemId: null,
+      visibleItemIds: [],
+      keyboardMode: false,
       renderLimit: WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
       sortDir: sortDir === 'asc' ? 'asc' : 'desc'
@@ -6570,6 +6647,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             lines: ['Shows queued work items, grouped by status.', 'Drag cards between columns to change status.', 'Use Refresh when another worker updates the queue.'],
             shortcuts: [
               ['g w', 'open Workqueue modal'],
+              ['Keyboard mode: j/k', 'move selected Workqueue row'],
+              ['Keyboard mode: Enter', 'inspect selected Workqueue row'],
+              ['Keyboard mode: 1/2/3/4', 'set ready / in progress / blocked / done'],
               ['Cmd/Ctrl+L', 'focus Chat composer'],
               ['Cmd/Ctrl+K', 'cycle focus between panes']
             ]
@@ -6735,6 +6815,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
           <button data-wq-clear-quick class="secondary" type="button">Clear filters</button>
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
+          <button data-wq-keyboard-mode class="secondary wq-keyboard-toggle" type="button" aria-pressed="false">Keyboard mode</button>
 
           <div class="wq-sort" role="group" aria-label="Sort workqueue items">
             <span class="wq-sort-label">Sort</span>
@@ -6790,6 +6871,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         </details>
 
         <div class="hint" data-wq-statusline></div>
+        <div class="hint wq-keyboard-hint" data-wq-keyboard-hint hidden>j/k move, Enter inspect, 1 ready, 2 in progress, 3 blocked, 4 done</div>
         <div class="wq-filter-summary" data-wq-filter-summary aria-live="polite" hidden></div>
         <div class="wq-duplicate-health" data-wq-duplicate-health aria-live="polite" hidden></div>
       </div>
@@ -6842,6 +6924,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
     const searchEl = elements.thread.querySelector('[data-wq-search]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
+    const keyboardModeBtn = elements.thread.querySelector('[data-wq-keyboard-mode]');
+    const keyboardHint = elements.thread.querySelector('[data-wq-keyboard-hint]');
 
     const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
 
@@ -6871,6 +6955,29 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const resetRenderLimit = () => {
       pane.workqueue.renderLimit = WORKQUEUE_PANE_INITIAL_RENDER_LIMIT;
     };
+
+    const renderKeyboardMode = () => {
+      const enabled = !!pane.workqueue.keyboardMode;
+      keyboardModeBtn?.classList.toggle('active', enabled);
+      keyboardModeBtn?.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+      if (keyboardHint) keyboardHint.hidden = !enabled;
+    };
+
+    keyboardModeBtn?.addEventListener('click', () => {
+      pane.workqueue.keyboardMode = !pane.workqueue.keyboardMode;
+      renderKeyboardMode();
+      renderWorkqueuePaneItems(pane);
+      if (pane.workqueue.keyboardMode) {
+        const selectedId = pane.workqueue.selectedItemId;
+        elements.thread.querySelector(`[data-wq-item="${CSS.escape(String(selectedId || ''))}"]`)?.focus?.();
+      }
+    });
+
+    elements.thread.addEventListener('keydown', (event) => {
+      handleWorkqueuePaneKeyboard(event, pane);
+    });
+
+    renderKeyboardMode();
 
     const updateQuickFilterUi = () => {
       sourceBtns.forEach((btn) => {

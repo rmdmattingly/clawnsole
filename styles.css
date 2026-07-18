@@ -2622,6 +2622,21 @@ kbd {
 
 .wq-row.selected {
   background: rgba(127, 209, 185, 0.12);
+  box-shadow: inset 3px 0 0 rgba(127, 209, 185, 0.85);
+}
+
+.wq-row:focus-visible {
+  outline: 2px solid rgba(127, 209, 185, 0.7);
+  outline-offset: -2px;
+}
+
+.wq-keyboard-toggle.active {
+  border-color: rgba(127, 209, 185, 0.55);
+  background: rgba(127, 209, 185, 0.14);
+}
+
+.wq-keyboard-hint {
+  margin-top: 6px;
 }
 
 .wq-col {
