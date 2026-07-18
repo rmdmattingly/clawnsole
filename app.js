@@ -1776,9 +1776,14 @@ function paneTargetLabel(pane) {
   if (!pane) return '';
   const current = String(pane?.elements?.agentLabel?.textContent || '').trim();
   if (current) return current;
-  if (pane.kind === 'workqueue') return String(pane.workqueue?.queue || 'dev-team');
+  if (pane.kind === 'workqueue') return paneWorkqueueQueueLabel(pane);
   if (pane.kind === 'timeline' || pane.kind === 'cron') return 'gateway';
   return String(pane.agentId || 'main');
+}
+
+function paneWorkqueueQueueLabel(pane) {
+  const queue = String(pane?.workqueue?.queue || '').trim();
+  return queue || 'No queue';
 }
 
 function paneBrowserTitle(pane) {
@@ -6242,6 +6247,7 @@ function renderPaneIdentity(pane) {
   pane.elements.name.textContent = paneIdentityLabel(pane, { includeUnread: true });
   const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
   if (activeKey && String(pane.key || '') === activeKey) updateBrowserTitle(pane);
+  if (isPaneManagerOpen()) renderPaneManager();
 }
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {

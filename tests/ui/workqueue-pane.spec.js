@@ -207,6 +207,8 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
 
   // Header target should describe queue context (not agent).
   await expect(wqPane.locator('[data-pane-target-label]')).toHaveText('Queue');
+  await expect(wqPane.getByTestId('pane-type-label')).toContainText('Workqueue · dev-team');
+  await expect(wqPane.getByTestId('pane-target-value')).toHaveText('dev-team');
 
   // Refreshing agent list should not flip the workqueue header back to Agent.
   await page.getByLabel('Refresh agent list').click();
@@ -215,6 +217,43 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
   // Workqueue pane should not render the chat composer UI.
   await expect(wqPane.locator('.chat-input-row')).toBeHidden();
   await expect(wqPane.locator('[data-pane-input]')).toBeHidden();
+});
+
+test('workqueue pane: queue switch updates pane identity surfaces', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const queue = `identity-${Date.now()}`;
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await expect(wqPane.locator('[data-pane-target-label]')).toHaveText('Queue');
+  await expect(wqPane.getByTestId('pane-target-value')).toHaveText(queue);
+  await expect(wqPane.getByTestId('pane-type-label')).toContainText(`Workqueue · ${queue}`);
+  await expect(page).toHaveTitle(`Clawnsole · Workqueue · ${queue}`);
+
+  await page.getByTestId('panes-indicator').click();
+  const row = page.locator('.pane-manager-row[data-pane-kind="workqueue"]').filter({ hasText: queue }).last();
+  await expect(row).toContainText(`Workqueue · ${queue}`);
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('pane-manager-modal')).toHaveAttribute('aria-hidden', 'true');
+
+  const nextQueue = `${queue}-next`;
+  await wqPane.locator('[data-wq-queue-custom]').fill(nextQueue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await expect(wqPane.getByTestId('pane-target-value')).toHaveText(nextQueue);
+  await expect(wqPane.getByTestId('pane-type-label')).toContainText(`Workqueue · ${nextQueue}`);
+  await expect(page).toHaveTitle(`Clawnsole · Workqueue · ${nextQueue}`);
+  await page.getByTestId('panes-indicator').click();
+  await expect(page.locator('.pane-manager-row[data-pane-kind="workqueue"]').filter({ hasText: nextQueue }).last()).toContainText(`Workqueue · ${nextQueue}`);
 });
 
 test('workqueue pane: keyboard mode navigates rows and updates status', async ({ page }) => {
