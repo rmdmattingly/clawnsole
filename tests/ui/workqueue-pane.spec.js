@@ -154,6 +154,40 @@ function seedFilterSummaryWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedKeyboardTriageWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, title, priority) => ({
+    id,
+    queue,
+    title,
+    instructions: `Keyboard triage seed ${title}`,
+    priority,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-60000 + priority),
+    updatedAt: iso(-60000 + priority),
+    dedupeKey: `keyboard-triage-${id}`
+  });
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-120000) } },
+    assignments: {},
+    items: [
+      mkItem('keyboard-triage-a', 'keyboard triage alpha', 30),
+      mkItem('keyboard-triage-b', 'keyboard triage beta', 20)
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 test('workqueue pane: renders + has queue dropdown + does not show chat composer', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -181,6 +215,48 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
   // Workqueue pane should not render the chat composer UI.
   await expect(wqPane.locator('.chat-input-row')).toBeHidden();
   await expect(wqPane.locator('[data-pane-input]')).toBeHidden();
+});
+
+test('workqueue pane: keyboard mode navigates rows and updates status', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `keyboard-triage-${Date.now()}`;
+  seedKeyboardTriageWorkqueueItems(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  const rows = pane.locator('[data-wq-list-body] .wq-row');
+  await expect(rows).toHaveCount(2);
+  await pane.locator('[data-wq-keyboard-mode]').click();
+  await expect(pane.locator('[data-wq-keyboard-mode]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(rows.nth(0)).toHaveClass(/selected/);
+
+  await page.keyboard.press('j');
+  await expect(rows.nth(1)).toHaveClass(/selected/);
+
+  await page.keyboard.press('Enter');
+  await expect(pane.locator('[data-wq-inspect]')).toContainText('keyboard triage beta');
+
+  await page.keyboard.press('2');
+  await expect(rows.nth(1).locator('.wq-col.status')).toContainText('in_progress');
+
+  await pane.locator('[data-wq-queue-search]').fill('triage');
+  await page.keyboard.press('k');
+  await expect(rows.nth(1)).toHaveClass(/selected/);
+
+  const res = await page.request.get(`http://127.0.0.1:${env.serverPort}/api/workqueue/items?queue=${encodeURIComponent(queue)}&status=ready,in_progress`);
+  expect(res.ok()).toBeTruthy();
+  const data = await res.json();
+  const beta = data.items.find((item) => item.id === 'keyboard-triage-b');
+  expect(beta?.status).toBe('in_progress');
 });
 
 test('workqueue pane: pane grid label switches from chat-only to generic panes', async ({ page }) => {
