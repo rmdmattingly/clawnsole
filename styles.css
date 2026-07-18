@@ -1356,6 +1356,7 @@ button.send-btn .btn-icon {
   gap: 8px;
   align-items: center;
   min-width: 0;
+  flex-wrap: wrap;
 }
 
 .pane-manager-type-badge {
@@ -1382,6 +1383,12 @@ button.send-btn .btn-icon {
 
 .pane-manager-kind-label {
   font-weight: 600;
+  min-width: 0;
+}
+
+.pane-manager-target-label {
+  color: var(--muted);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1409,19 +1416,39 @@ button.send-btn .btn-icon {
   text-transform: uppercase;
 }
 
-.pane-manager-unread-badge {
+.pane-manager-state-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 7px;
+  min-height: 18px;
+  padding: 1px 7px;
   border-radius: 999px;
-  border: 1px solid rgba(239, 68, 68, 0.45);
-  background: rgba(239, 68, 68, 0.14);
-  color: #fecaca;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(148, 163, 184, 0.12);
+  color: rgba(226, 232, 240, 0.84);
   font-size: 10px;
   font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pane-manager-state-chip-unread {
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.14);
+  color: #fecaca;
+}
+
+.pane-manager-state-chip-draft {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: rgba(245, 158, 11, 0.12);
+  color: #fcd34d;
+}
+
+.pane-manager-state-chip-disconnected {
+  border-color: rgba(148, 163, 184, 0.3);
+  background: rgba(148, 163, 184, 0.12);
+  color: rgba(226, 232, 240, 0.78);
 }
 
 .pane-manager-state {

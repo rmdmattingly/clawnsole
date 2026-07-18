@@ -80,9 +80,63 @@ test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane 
   await expect(timelinePane.getByTestId('pane-type-label')).toHaveText(/^D Timeline · .+/);
 
   await page.keyboard.press('Control+P');
-  const firstPaneHeaderIdentity = await page.locator('[data-pane]').first().getByTestId('pane-type-label').textContent();
-  await expect(page.locator('.pane-manager-row .pane-manager-kind-label').first()).toHaveText(String(firstPaneHeaderIdentity || '').trim());
+  const firstRow = page.locator('.pane-manager-row').first();
+  await expect(firstRow.getByTestId('pane-manager-letter')).toHaveText(/^A$/);
+  await expect(firstRow.getByTestId('pane-manager-kind-label')).toHaveText('Chat');
+  await expect(firstRow.getByTestId('pane-manager-target-label')).toContainText('main');
+  await expect(firstRow).toContainText('A');
+  await expect(firstRow).toContainText('Chat');
+  await expect(firstRow).toContainText('· main');
   await expect(page.locator('.pane-manager-row .pane-manager-pane-id').first()).toHaveText(/^[a-zA-Z0-9]+$/);
+});
+
+test('pane manager: rows preserve pane identity and state chips in compact list', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]').fill('unsent draft');
+  await page.evaluate(() => {
+    markPaneUnread(paneManager.panes[1], 2, 'workqueue');
+    paneManager.panes.forEach((pane) => {
+      pane.connected = false;
+      pane.statusState = 'disconnected';
+    });
+  });
+
+  await page.keyboard.press('Control+P');
+  const rows = page.locator('.pane-manager-row');
+  await expect(rows).toHaveCount(2);
+
+  const chatRow = rows.filter({ hasText: 'Chat · main' }).first();
+  await expect(chatRow.getByTestId('pane-manager-letter')).toHaveText('A');
+  await expect(chatRow.getByTestId('pane-manager-type-badge')).toContainText('Chat');
+  await expect(chatRow.getByTestId('pane-manager-target-label')).toContainText('main');
+  await expect(chatRow.locator('[data-chip="draft"]')).toHaveText('draft');
+  await expect(chatRow.locator('[data-chip="disconnected"]')).toHaveText('disconnected');
+
+  const workqueueRow = rows.filter({ hasText: 'Workqueue · dev-team' }).first();
+  await expect(workqueueRow.getByTestId('pane-manager-letter')).toHaveText('B');
+  await expect(workqueueRow.getByTestId('pane-manager-type-badge')).toContainText('Workqueue');
+  await expect(workqueueRow.getByTestId('pane-manager-target-label')).toContainText('dev-team');
+  await expect(workqueueRow.locator('[data-chip="unread"]')).toHaveText('2 unread');
+
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#paneManagerModal')).toHaveAttribute('aria-hidden', 'true');
+
+  const focusedPaneIndex = await page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    return panes.findIndex((p) => p === active || (active && p.contains(active)));
+  });
+  expect(focusedPaneIndex).toBe(1);
 });
 
 test('pane manager: quick-find filters and groups by kind', async ({ page }) => {
