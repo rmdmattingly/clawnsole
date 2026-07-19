@@ -13,7 +13,9 @@ const {
   deriveGlobalConnectionState,
   deriveDisconnectButtonState,
   extractChatText,
-  normalizeHistoryEntries
+  normalizeHistoryEntries,
+  getShortcutGroups,
+  getShortcutIds
 } = require('../../lib/app-core.js');
 
 test('escapeHtml escapes html special chars', () => {
@@ -164,6 +166,23 @@ test('normalizePaneKind handles aliases safely', () => {
   assert.equal(normalizePaneKind('timeline'), 'timeline');
   assert.equal(normalizePaneKind('ti'), 'timeline');
   assert.equal(normalizePaneKind('x'), 'chat');
+});
+
+test('shortcut catalog has stable unique ids and includes fleet shortcuts', () => {
+  const groups = getShortcutGroups();
+  const ids = getShortcutIds();
+  assert.ok(groups.length >= 4);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(ids.includes('fleet.open'));
+  assert.ok(ids.includes('fleet.open-heartbeat-sort'));
+  assert.ok(ids.includes('workqueue.open-active-chat-agent'));
+  assert.ok(
+    groups.some((group) => group.shortcuts.some((shortcut) =>
+      shortcut.id === 'pane.focus.accel-number' &&
+      shortcut.keys.includes('Cmd/Ctrl') &&
+      shortcut.keys.includes('1..9')
+    ))
+  );
 });
 
 test('deriveAuthOverlayState captures auth/role transition flags', () => {
