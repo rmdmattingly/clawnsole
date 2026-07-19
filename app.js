@@ -6641,6 +6641,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   try {
     if (elements.name) {
       if (elements.nameToken && elements.nameTarget) {
+        elements.name.replaceChildren(elements.nameToken, elements.nameTarget);
         elements.nameToken.textContent = `? ${paneLabel(pane)}`;
         elements.nameTarget.textContent = '';
       } else {
