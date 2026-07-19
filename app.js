@@ -48,6 +48,7 @@ const globalElements = {
   commandPaletteEmpty: document.getElementById('commandPaletteEmpty'),
   shortcutsModal: document.getElementById('shortcutsModal'),
   shortcutsDialog: document.getElementById('shortcutsDialog'),
+  shortcutsBody: document.getElementById('shortcutsBody'),
   shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
   paneManagerModal: document.getElementById('paneManagerModal'),
   paneManagerCloseBtn: document.getElementById('paneManagerCloseBtn'),
@@ -116,6 +117,7 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
 });
 const formatWorkqueueIssueTitle = __appCore.formatWorkqueueIssueTitle || ((item) => String(item?.title || ''));
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
+const getShortcutGroups = __appCore.getShortcutGroups || (() => []);
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
   const n = Number(count);
   if (!Number.isFinite(n) || n <= 1) return 1;
@@ -1725,6 +1727,25 @@ function closeShortcuts() {
     shortcutsLastFocusedEl.focus?.();
   }
   shortcutsLastFocusedEl = null;
+}
+
+function renderShortcutsModal() {
+  const body = globalElements.shortcutsBody;
+  if (!body) return;
+  const groups = getShortcutGroups();
+  body.innerHTML = groups.map((group) => `
+    <div class="shortcut-group" data-shortcut-group="${escapeHtml(group.id)}">
+      <h3 class="shortcut-group-title">${escapeHtml(group.title)}</h3>
+      ${group.shortcuts.map((shortcut) => `
+        <div class="shortcut-row" data-shortcut-id="${escapeHtml(shortcut.id)}">
+          <div class="shortcut-keys">
+            ${shortcut.keys.map((key) => `<kbd>${escapeHtml(key)}</kbd>`).join(`<span aria-hidden="true">${escapeHtml(shortcut.joiner || '+')}</span>`)}
+          </div>
+          <div class="shortcut-desc">${escapeHtml(shortcut.description)}</div>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
 }
 
 // Pane Manager (admin-only)
@@ -9689,6 +9710,8 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   paneManager.connectIfNeeded();
 });
+
+renderShortcutsModal();
 
 window.addEventListener('load', () => {
   const loginGuard = setTimeout(() => {

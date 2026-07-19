@@ -52,7 +52,17 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await expect(modal).toContainText('Pane actions');
   await expect(modal).toContainText('Workqueue actions');
   await expect(modal).toContainText('disabled while typing');
-  await expect(modal).toContainText('workspace only');
+  await expect(modal).toContainText('Open or focus Fleet pane');
+  await expect(modal).toContainText('Open Fleet and sort by heartbeat age');
+  await expect(modal).toContainText('Open Workqueue for the active Chat agent');
+  await expect(modal).toContainText('Focus panes 1-9 by visible order');
+
+  const expectedShortcutIds = await page.evaluate(() => window.AppCore.getShortcutIds());
+  const renderedShortcutIds = await modal.locator('[data-shortcut-id]').evaluateAll((rows) =>
+    rows.map((row) => row.getAttribute('data-shortcut-id'))
+  );
+  expect(renderedShortcutIds).toEqual(expectedShortcutIds);
+  expect(new Set(renderedShortcutIds).size).toBe(renderedShortcutIds.length);
 
   await page.keyboard.press('Escape');
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
