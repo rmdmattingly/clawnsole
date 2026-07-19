@@ -49,6 +49,7 @@ const globalElements = {
   shortcutsModal: document.getElementById('shortcutsModal'),
   shortcutsDialog: document.getElementById('shortcutsDialog'),
   shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
+  shortcutsContent: document.getElementById('shortcutsContent'),
   paneManagerModal: document.getElementById('paneManagerModal'),
   paneManagerCloseBtn: document.getElementById('paneManagerCloseBtn'),
   paneManagerSearch: document.getElementById('paneManagerSearch'),
@@ -1699,6 +1700,100 @@ async function deleteRecurringPrompt(id) {
 
 let shortcutsLastFocusedEl = null;
 
+const KEYBOARD_SHORTCUT_GROUPS = [
+  {
+    title: 'Global',
+    shortcuts: [
+      { id: 'global:shortcuts', keys: ['?'], label: 'Open this help overlay' },
+      { id: 'global:escape', keys: ['Esc'], label: 'Close overlay / menus' },
+      { id: 'global:command-palette', keys: ['Cmd/Ctrl', 'K'], label: 'Open command palette' },
+      { id: 'global:pane-manager', keys: ['Cmd/Ctrl', 'P'], label: 'Open Pane Manager' },
+      { id: 'global:chat-composer', keys: ['Cmd/Ctrl', 'L'], label: 'Focus Chat composer' }
+    ]
+  },
+  {
+    title: 'Pane focus/navigation',
+    shortcuts: [
+      { id: 'pane:focus-visible-order', keys: ['Cmd/Ctrl', '1..9'], label: 'Focus panes 1-9 by visible order' },
+      { id: 'pane:focus-visible-order-alt', keys: ['Alt/Option', '1..9'], label: 'Focus panes 1-9 by visible order' },
+      { id: 'pane:cycle-next', keys: ['Cmd/Ctrl', 'Shift', 'K'], label: 'Focus next pane' },
+      { id: 'pane:cycle-previous', keys: ['Cmd/Ctrl', 'Shift', 'J'], label: 'Focus previous pane' },
+      { id: 'pane:chat-cycle-next', keys: ['Cmd/Ctrl', 'Alt/Option', 'K'], label: 'Focus next Chat pane only' },
+      { id: 'pane:chat-cycle-previous', keys: ['Cmd/Ctrl', 'Alt/Option', 'J'], label: 'Focus previous Chat pane only' },
+      { id: 'pane:mru-next', keys: ['Ctrl', 'Tab'], label: 'Switch panes by most-recent focus order' },
+      { id: 'pane:mru-previous', keys: ['Ctrl', 'Shift', 'Tab'], label: 'Reverse most-recent pane traversal' },
+      { id: 'pane:next-unread', keys: ['Cmd/Ctrl', 'Shift', ']'], label: 'Next unread pane' },
+      { id: 'pane:previous-unread', keys: ['Cmd/Ctrl', 'Shift', '['], label: 'Previous unread pane' },
+      { id: 'pane:return-last-chat', keys: ['g', 'c'], label: 'Return to last active Chat pane' }
+    ]
+  },
+  {
+    title: 'Pane actions',
+    shortcuts: [
+      { id: 'pane:add-menu', keys: ['Cmd/Ctrl', 'Shift', 'N'], label: 'Open Add Pane menu' },
+      { id: 'pane:add-chat', keys: ['Cmd/Ctrl', 'Shift', 'C'], label: 'Add Chat pane (workspace only)' },
+      { id: 'pane:add-workqueue', keys: ['Cmd/Ctrl', 'Shift', 'W'], label: 'Open or add Workqueue pane (workspace only)' },
+      { id: 'pane:add-cron', keys: ['Cmd/Ctrl', 'Shift', 'R'], label: 'Open or add Cron pane (workspace only)' },
+      { id: 'pane:add-timeline', keys: ['Cmd/Ctrl', 'Shift', 'T'], label: 'Open or add Timeline pane (workspace only)' },
+      { id: 'pane:add-force', keys: ['Alt/Option', '+ add shortcut'], label: 'Create a new matching pane instead of focusing an existing one' }
+    ]
+  },
+  {
+    title: 'Workqueue actions',
+    shortcuts: [
+      { id: 'workqueue:open-modal', keys: ['g', 'w'], label: 'Open Workqueue modal' },
+      { id: 'workqueue:active-chat-agent', keys: ['Cmd/Ctrl', 'Shift', 'G'], label: 'Open Workqueue for active chat agent' },
+      { id: 'workqueue:keyboard-next', keys: ['j / Down'], label: 'Move selected row down in keyboard mode' },
+      { id: 'workqueue:keyboard-previous', keys: ['k / Up'], label: 'Move selected row up in keyboard mode' },
+      { id: 'workqueue:keyboard-inspect', keys: ['Enter'], label: 'Inspect selected row in keyboard mode' },
+      { id: 'workqueue:keyboard-status', keys: ['1..4'], label: 'Set ready, in progress, blocked, or done in keyboard mode' }
+    ]
+  },
+  {
+    title: 'Fleet',
+    shortcuts: [
+      { id: 'fleet:open-focus', keys: ['Cmd/Ctrl', 'Shift', 'F'], label: 'Open/focus Fleet pane' },
+      { id: 'fleet:open-stale-first', keys: ['Cmd/Ctrl', 'Shift', 'H'], label: 'Open Fleet and sort stale agents first' },
+      { id: 'fleet:refresh-agents', keys: ['Cmd/Ctrl', 'R'], label: 'Refresh agent list' }
+    ]
+  }
+];
+
+function allKeyboardShortcuts() {
+  return KEYBOARD_SHORTCUT_GROUPS.flatMap((group) =>
+    group.shortcuts.map((shortcut) => ({ ...shortcut, group: group.title }))
+  );
+}
+
+function renderShortcutKeys(keys) {
+  return keys.map((key) => `<kbd>${escapeHtml(key)}</kbd>`).join('');
+}
+
+function renderShortcutsHelp() {
+  const root = globalElements.shortcutsContent;
+  if (!root) return;
+
+  const hint = `
+    <div class="hint" style="margin-bottom: 10px;">
+      Most shortcuts are disabled while typing in inputs, textareas, selects, or contenteditable fields. Global keys like <kbd>Esc</kbd>, <kbd>Cmd/Ctrl+P</kbd>, <kbd>Cmd/Ctrl+K</kbd>, and <kbd>Cmd/Ctrl+L</kbd> still work.
+    </div>
+  `;
+
+  const groups = KEYBOARD_SHORTCUT_GROUPS.map((group) => `
+    <div class="shortcut-group" data-shortcut-group="${escapeHtml(group.title)}">
+      <h3 class="shortcut-group-title">${escapeHtml(group.title)}</h3>
+      ${group.shortcuts.map((shortcut) => `
+        <div class="shortcut-row" data-shortcut-id="${escapeHtml(shortcut.id)}">
+          <div class="shortcut-keys">${renderShortcutKeys(shortcut.keys)}</div>
+          <div class="shortcut-desc">${escapeHtml(shortcut.label)}</div>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+
+  root.innerHTML = hint + groups;
+}
+
 function getModalFocusableElements(modalEl) {
   if (!modalEl || !modalEl.querySelectorAll) return [];
   return Array.from(modalEl.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
@@ -1708,6 +1803,7 @@ function getModalFocusableElements(modalEl) {
 function openShortcuts() {
   const modal = globalElements.shortcutsModal;
   if (!modal || modal.classList.contains('open')) return;
+  renderShortcutsHelp();
   shortcutsLastFocusedEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   modal.classList.add('open');
   modal.setAttribute('aria-hidden', 'false');
@@ -1726,6 +1822,11 @@ function closeShortcuts() {
   }
   shortcutsLastFocusedEl = null;
 }
+
+window.__clawnsoleKeyboardShortcuts = {
+  groups: KEYBOARD_SHORTCUT_GROUPS,
+  all: allKeyboardShortcuts
+};
 
 // Pane Manager (admin-only)
 

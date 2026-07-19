@@ -58,6 +58,35 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
 });
 
+test('shortcuts modal renders the registered shortcut catalog without drift or duplicates', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+
+  const catalog = await page.evaluate(() => window.__clawnsoleKeyboardShortcuts.all());
+  const renderedIds = await page.locator('[data-shortcut-id]').evaluateAll((rows) =>
+    rows.map((row) => row.getAttribute('data-shortcut-id'))
+  );
+
+  expect(renderedIds).toEqual(catalog.map((shortcut) => shortcut.id));
+  expect(new Set(renderedIds).size).toBe(renderedIds.length);
+
+  await expect(page.locator('[data-shortcut-id="fleet:open-focus"]')).toContainText('Open/focus Fleet pane');
+  await expect(page.locator('[data-shortcut-id="fleet:open-stale-first"]')).toContainText('Open Fleet and sort stale agents first');
+  await expect(page.locator('[data-shortcut-id="fleet:refresh-agents"]')).toContainText('Refresh agent list');
+  await expect(page.locator('[data-shortcut-id="workqueue:active-chat-agent"]')).toContainText('Open Workqueue for active chat agent');
+  await expect(page.locator('[data-shortcut-id="pane:add-workqueue"]')).toContainText('Open or add Workqueue pane');
+});
+
 test('pane-add shortcuts are scoped to workspace and blocked by overlays', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
