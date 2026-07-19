@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
-const { startTestEnv, loginAdmin, attachConsoleErrorAsserts } = require('./_helpers');
+const { startTestEnv, loginAdmin, waitForAdminUiReady, attachConsoleErrorAsserts } = require('./_helpers');
 
 let env;
 
@@ -31,6 +31,7 @@ async function loginAdminWithChatOnlyPane(page, serverPort, { agentId = 'main' }
   await page.fill('#loginPassword', 'admin');
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await waitForAdminUiReady(page);
 }
 
 test('command palette: keyboard flow can reuse a targeted pane and focus by pane letter', async ({ page }) => {
@@ -177,4 +178,38 @@ test('command palette: opens or focuses Workqueue for active chat agent', async 
   await wqPane.locator('[data-wq-queue-select]').focus();
   await runCommand('workqueue for active chat agent');
   await expect(page.getByTestId('toast').last()).toContainText('No active chat agent selected');
+});
+
+test('triage layout preset reuses panes and preserves chat draft', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await loginAdminWithChatOnlyPane(page, env.serverPort);
+
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
+  await expect(chatInput).toBeVisible();
+  await chatInput.fill('draft survives triage preset');
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const settingsModal = page.locator('#settingsModal');
+  await expect(settingsModal).toHaveClass(/open/);
+  await settingsModal.getByTestId('triage-layout-preset-btn').click();
+
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+  await expect(chatInput).toHaveValue('draft survives triage preset');
+
+  await page.keyboard.press('ControlOrMeta+K');
+  const input = page.locator('#commandPaletteInput');
+  await expect(input).toBeVisible();
+  await input.fill('triage preset');
+  await expect(page.locator('#commandPaletteList [role="option"]').first()).toHaveAttribute('data-command-palette-id', 'cmd:triage-layout-preset');
+  await page.keyboard.press('Enter');
+
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+  await expect(chatInput).toHaveValue('draft survives triage preset');
 });
