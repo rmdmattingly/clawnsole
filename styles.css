@@ -472,10 +472,26 @@ body::before {
 }
 
 .pane-name {
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.pane-name-token {
+  flex: 0 0 auto;
+}
+
+.pane-name-target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

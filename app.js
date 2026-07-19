@@ -6239,7 +6239,19 @@ function paneHeaderLetter(pane) {
 
 function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
-  pane.elements.name.textContent = paneIdentityLabel(pane, { includeUnread: true });
+  const letter = paneHeaderLetter(pane);
+  const type = paneLabel(pane);
+  const target = paneTargetLabel(pane);
+  const unread = paneUnreadCount(pane);
+  const identity = `${letter} ${type} · ${target}${unread > 0 ? ` • ${unread} unread` : ''}`;
+  pane.elements.name.title = paneIdentityLabel(pane, { includeUnread: false });
+  pane.elements.name.setAttribute('aria-label', identity);
+  if (pane.elements.nameToken && pane.elements.nameTarget) {
+    pane.elements.nameToken.textContent = `${letter} ${type}`;
+    pane.elements.nameTarget.textContent = ` · ${target}${unread > 0 ? ` • ${unread} unread` : ''}`;
+  } else {
+    pane.elements.name.textContent = identity;
+  }
   const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
   if (activeKey && String(pane.key || '') === activeKey) updateBrowserTitle(pane);
 }
@@ -6532,6 +6544,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   const elements = {
     root,
     name: root.querySelector('[data-pane-name]'),
+    nameToken: root.querySelector('[data-pane-name-token]'),
+    nameTarget: root.querySelector('[data-pane-name-target]'),
     typePill: root.querySelector('[data-pane-type-pill]'),
     typeIcon: root.querySelector('[data-pane-type-icon]'),
     typeText: root.querySelector('[data-pane-type-text]'),
@@ -6625,7 +6639,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
   // Pane header: kind label + type pill (icon + text)
   try {
-    if (elements.name) elements.name.textContent = paneLabel(pane);
+    if (elements.name) {
+      if (elements.nameToken && elements.nameTarget) {
+        elements.nameToken.textContent = `? ${paneLabel(pane)}`;
+        elements.nameTarget.textContent = '';
+      } else {
+        elements.name.textContent = paneLabel(pane);
+      }
+    }
     if (elements.typeIcon) elements.typeIcon.textContent = paneIcon(pane);
     if (elements.typeText) elements.typeText.textContent = String(paneLabel(pane) || pane.kind || 'chat').toUpperCase();
     if (elements.typePill) {
