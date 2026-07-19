@@ -139,8 +139,12 @@ test('pane manager: shows summary + duplicate badge and supports close others', 
   const rows = page.locator('.pane-manager-row');
   await expect(rows).toHaveCount(3);
 
-  const duplicateRows = page.locator('.pane-manager-row', { hasText: 'Chat · main' });
+  const duplicateRows = page.locator('.pane-manager-row', { hasText: /Chat · main \([12]\)/ });
   await expect(duplicateRows).toHaveCount(2);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]').nth(0).getByTestId('pane-type-label')).toHaveText(/^A Chat · main \(1\)$/);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]').nth(1).getByTestId('pane-type-label')).toHaveText(/^C Chat · main \(2\)$/);
+  await expect(duplicateRows.nth(0).locator('.pane-manager-kind-label')).toContainText('Chat · main (1)');
+  await expect(duplicateRows.nth(1).locator('.pane-manager-kind-label')).toContainText('Chat · main (2)');
   await expect(duplicateRows.first().getByTestId('pane-manager-duplicate-badge')).toHaveText('duplicate');
 
   const chatRowWithCloseOthers = page.locator('.pane-manager-row', { has: page.getByTestId('pane-manager-close-others') }).first();
@@ -152,6 +156,7 @@ test('pane manager: shows summary + duplicate badge and supports close others', 
   await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row')).toHaveCount(2);
   await expect(page.locator('[data-testid="pane-manager-duplicate-badge"]')).toHaveCount(0);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]').first().getByTestId('pane-type-label')).toHaveText(/^A Chat · main$/);
 });
 
 test('pane manager: unread-only filter toggle', async ({ page }) => {
