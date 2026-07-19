@@ -287,6 +287,36 @@ const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
 const WQ_RECENT_ENQUEUE_AGENTS_KEY = 'clawnsole.wq.recentEnqueueAgents';
 const WQ_RECENT_TARGETS_MAX = 6;
+const REGISTERED_GLOBAL_SHORTCUT_ACTIONS = Object.freeze([
+  'shortcut.help.open',
+  'shortcut.overlay.close',
+  'pane.focus.visible.alt',
+  'pane.focus.visible.accel',
+  'pane.manager.open',
+  'pane.focus.next',
+  'pane.focus.previous',
+  'chat.focus.next',
+  'chat.focus.previous',
+  'chat.focus.last',
+  'chat.composer.focus',
+  'pane.focus.mru.next',
+  'pane.focus.mru.previous',
+  'pane.focus.unread.next',
+  'pane.focus.unread.previous',
+  'command.palette.open',
+  'pane.add.menu.open',
+  'pane.add.chat',
+  'pane.add.workqueue',
+  'pane.add.cron',
+  'pane.add.timeline',
+  'fleet.open',
+  'fleet.sort.stale',
+  'agents.refresh',
+  'workqueue.open',
+  'workqueue.open.activeAgent'
+]);
+
+window.CL_REGISTERED_GLOBAL_SHORTCUT_ACTIONS = REGISTERED_GLOBAL_SHORTCUT_ACTIONS;
 
 function readJsonFromStorage(key, fallback) {
   try {
