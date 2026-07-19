@@ -3343,10 +3343,11 @@ function renderAgentsModalList() {
       const heartbeatTs = Number(lastSeenMap[id]) || 0;
       const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
       const triage = classify(id);
-      const bucketLabel = triage.bucket === 'offline_error' ? 'offline/error' : triage.bucket;
+      const healthLabel = triage.bucket === 'offline_error' ? 'Offline/Error' : triage.bucket === 'active' ? 'Healthy' : 'Stale';
       const heatBucketLabel = heartbeatAgeBucketLabel(triage.ageBucket);
       const statusSnippet = String(statusSnippetMap[id] || '').trim();
       const statusSnippetHtml = statusSnippet ? ` · <span class="agents-status-snippet">${escapeHtml(statusSnippet)}</span>` : '';
+      row.dataset.healthState = triage.bucket;
       row.dataset.heartbeatBucket = triage.ageBucket;
       row.classList.toggle('agents-row-heatmap', heatmapEnabled);
 
@@ -3354,7 +3355,11 @@ function renderAgentsModalList() {
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
         <div class="agents-row-main">
           <div class="agents-row-title">${escapeHtml(label)}</div>
-          <div class="agents-row-meta">${escapeHtml(id)} · ${escapeHtml(bucketLabel)} · <span class="agents-age-chip" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}">${escapeHtml(heartbeatAge)} · ${escapeHtml(heatBucketLabel)}</span>${statusSnippetHtml}</div>
+          <div class="agents-row-meta">
+            <span class="agents-row-id">${escapeHtml(id)}</span>
+            <span class="agents-health-state-chip" data-health-state="${escapeHtml(triage.bucket)}">${escapeHtml(healthLabel)}</span>
+            <span class="agents-age-chip" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}">${escapeHtml(heartbeatAge)} · ${escapeHtml(heatBucketLabel)}</span>${statusSnippetHtml}
+          </div>
         </div>
         <div class="agents-row-actions agents-row-actions-inline" role="group" aria-label="Quick actions for ${escapeHtml(label)}">
           <button type="button" class="secondary agents-action-btn" data-agent-action="triage" data-agent-id="${escapeHtml(id)}" title="Open Chat and Workqueue" aria-label="Triage agent ${escapeHtml(label)}">Triage</button>

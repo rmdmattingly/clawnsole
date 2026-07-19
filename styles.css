@@ -1740,6 +1740,10 @@ button.agents-section-title:hover {
 }
 
 .agents-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
   margin-top: 2px;
   font-size: 12px;
   color: var(--muted);
@@ -1754,12 +1758,36 @@ button.agents-section-title:hover {
   text-overflow: ellipsis;
 }
 
+.agents-row-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agents-health-state-chip,
 .agents-age-chip {
   display: inline-block;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 999px;
   padding: 1px 8px;
   color: var(--text);
+  background: rgba(255, 255, 255, 0.035);
+  white-space: nowrap;
+}
+
+.agents-health-state-chip[data-health-state="active"] {
+  border-color: rgba(83, 211, 150, 0.5);
+  background: rgba(83, 211, 150, 0.13);
+}
+
+.agents-health-state-chip[data-health-state="stale"] {
+  border-color: rgba(255, 199, 70, 0.56);
+  background: rgba(255, 199, 70, 0.14);
+}
+
+.agents-health-state-chip[data-health-state="offline_error"] {
+  border-color: rgba(255, 93, 116, 0.66);
+  background: rgba(255, 93, 116, 0.15);
 }
 
 .agents-age-chip[data-heartbeat-bucket="fresh"] {
