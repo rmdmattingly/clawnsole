@@ -53,6 +53,24 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await expect(modal).toContainText('Workqueue actions');
   await expect(modal).toContainText('disabled while typing');
   await expect(modal).toContainText('workspace only');
+  await expect(modal).toContainText('Open/focus Fleet pane');
+  await expect(modal).toContainText('Open Fleet sorted by heartbeat age');
+
+  const shortcutCoverage = await page.evaluate(() => {
+    const registered = window.__clawnsoleShortcutIds || [];
+    const rendered = Array.from(document.querySelectorAll('#shortcutsModal [data-shortcut-id]'))
+      .map((el) => el.getAttribute('data-shortcut-id'));
+    const renderedSet = new Set(rendered);
+    return {
+      registered,
+      rendered,
+      missing: registered.filter((id) => !renderedSet.has(id)),
+      duplicates: rendered.filter((id, idx) => rendered.indexOf(id) !== idx)
+    };
+  });
+  expect(shortcutCoverage.missing).toEqual([]);
+  expect(shortcutCoverage.duplicates).toEqual([]);
+  expect(shortcutCoverage.rendered).toHaveLength(shortcutCoverage.registered.length);
 
   await page.keyboard.press('Escape');
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
@@ -529,4 +547,23 @@ test('fleet quick action button + keyboard shortcut focus existing timeline pane
 
   await fleetBtn.click({ modifiers: ['Alt'] });
   await expect(timelinePanes).toHaveCount(2);
+});
+
+test('fleet heartbeat shortcut opens Fleet sorted by heartbeat age', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.click('#connectionStatus');
+
+  await page.keyboard.press('Control+Shift+H');
+
+  const agentsModal = page.locator('#agentsModal');
+  await expect(agentsModal).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('#agentsSort')).toHaveValue('heartbeat_age_desc');
 });
