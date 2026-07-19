@@ -49,6 +49,7 @@ const globalElements = {
   shortcutsModal: document.getElementById('shortcutsModal'),
   shortcutsDialog: document.getElementById('shortcutsDialog'),
   shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
+  shortcutGroups: document.getElementById('shortcutGroups'),
   paneManagerModal: document.getElementById('paneManagerModal'),
   paneManagerCloseBtn: document.getElementById('paneManagerCloseBtn'),
   paneManagerSearch: document.getElementById('paneManagerSearch'),
@@ -1699,6 +1700,83 @@ async function deleteRecurringPrompt(id) {
 
 let shortcutsLastFocusedEl = null;
 
+const SHORTCUT_HELP_GROUPS = [
+  {
+    title: 'Global',
+    shortcuts: [
+      { id: 'global.open-shortcuts', keys: ['?'], desc: 'Open this help overlay' },
+      { id: 'global.close-overlay', keys: ['Esc'], desc: 'Close overlay / menus' }
+    ]
+  },
+  {
+    title: 'Pane focus/navigation',
+    shortcuts: [
+      { id: 'pane.focus-alt-1-9', keys: ['Alt/Option', '1..9'], desc: 'Focus panes 1-9 by visible order' },
+      { id: 'pane.focus-accel-1-9', keys: ['Cmd/Ctrl', '1..9'], desc: 'Focus panes 1-9 by visible order' },
+      { id: 'pane.manager', keys: ['Cmd/Ctrl', 'P'], desc: 'Open Pane Manager' },
+      { id: 'pane.next', keys: ['Cmd/Ctrl', 'Shift', 'K'], desc: 'Focus next pane' },
+      { id: 'pane.previous', keys: ['Cmd/Ctrl', 'Shift', 'J'], desc: 'Focus previous pane' },
+      { id: 'pane.chat-next', keys: ['Cmd/Ctrl', 'Alt', 'K'], desc: 'Focus next Chat pane only' },
+      { id: 'pane.chat-previous', keys: ['Cmd/Ctrl', 'Alt', 'J'], desc: 'Focus previous Chat pane only' },
+      { id: 'pane.last-chat', keys: ['g', 'c'], desc: 'Return to last active Chat pane' },
+      { id: 'pane.chat-composer', keys: ['Cmd/Ctrl', 'L'], desc: 'Focus Chat composer' },
+      { id: 'pane.mru-next', keys: ['Ctrl', 'Tab'], desc: 'Switch panes by most-recent focus order' },
+      { id: 'pane.mru-previous', keys: ['Ctrl', 'Shift', 'Tab'], desc: 'Reverse most-recent pane traversal' },
+      { id: 'pane.unread-next', keys: ['Cmd/Ctrl', 'Shift', ']'], desc: 'Next unread pane' },
+      { id: 'pane.unread-previous', keys: ['Cmd/Ctrl', 'Shift', '['], desc: 'Previous unread pane' }
+    ]
+  },
+  {
+    title: 'Pane actions',
+    shortcuts: [
+      { id: 'action.command-palette', keys: ['Cmd/Ctrl', 'K'], desc: 'Open command palette' },
+      { id: 'action.add-pane-menu', keys: ['Cmd/Ctrl', 'Shift', 'N'], desc: 'Open Add pane menu' },
+      { id: 'action.add-chat-pane', keys: ['Cmd/Ctrl', 'Shift', 'C'], desc: 'Add Chat pane (workspace only)' },
+      { id: 'action.add-workqueue-pane', keys: ['Cmd/Ctrl', 'Shift', 'W'], desc: 'Add or focus Workqueue pane (workspace only)' },
+      { id: 'action.add-cron-pane', keys: ['Cmd/Ctrl', 'Shift', 'R'], desc: 'Add or focus Cron pane (workspace only)' },
+      { id: 'action.add-timeline-pane', keys: ['Cmd/Ctrl', 'Shift', 'T'], desc: 'Add or focus Timeline pane (workspace only)' },
+      { id: 'action.workqueue-for-chat', keys: ['Cmd/Ctrl', 'Shift', 'G'], desc: 'Open or focus Workqueue for active Chat agent' },
+      { id: 'action.fleet-pane', keys: ['Cmd/Ctrl', 'Shift', 'F'], desc: 'Open/focus Fleet pane' },
+      { id: 'action.fleet-heartbeat-sort', keys: ['Cmd/Ctrl', 'Shift', 'H'], desc: 'Open Fleet sorted by heartbeat age' },
+      { id: 'action.refresh-agents', keys: ['Cmd/Ctrl', 'R'], desc: 'Refresh agent list' }
+    ]
+  },
+  {
+    title: 'Workqueue actions',
+    shortcuts: [
+      { id: 'workqueue.open-modal', keys: ['g', 'w'], desc: 'Open Workqueue modal' },
+      { id: 'workqueue.row-next-prev', keys: ['j/k', 'Arrow up/down'], desc: 'Move selected row in Workqueue keyboard mode' },
+      { id: 'workqueue.inspect-row', keys: ['Enter'], desc: 'Inspect selected Workqueue row in keyboard mode' },
+      { id: 'workqueue.set-status', keys: ['1..4'], desc: 'Set ready, in progress, blocked, or done in keyboard mode' }
+    ]
+  }
+];
+
+const REGISTERED_SHORTCUT_IDS = SHORTCUT_HELP_GROUPS.flatMap((group) => group.shortcuts.map((shortcut) => shortcut.id));
+
+function shortcutKeyHtml(keys) {
+  return keys
+    .map((key) => `<kbd>${escapeHtml(key)}</kbd>`)
+    .join(' ');
+}
+
+function renderShortcutHelp() {
+  const target = globalElements.shortcutGroups;
+  if (!target) return;
+  target.innerHTML = SHORTCUT_HELP_GROUPS.map((group) => `
+    <div class="shortcut-group" data-shortcut-group="${escapeHtml(group.title)}">
+      <h3 class="shortcut-group-title">${escapeHtml(group.title)}</h3>
+      ${group.shortcuts.map((shortcut) => `
+        <div class="shortcut-row" data-shortcut-id="${escapeHtml(shortcut.id)}">
+          <div class="shortcut-keys">${shortcutKeyHtml(shortcut.keys)}</div>
+          <div class="shortcut-desc">${escapeHtml(shortcut.desc)}</div>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+  window.__clawnsoleShortcutIds = REGISTERED_SHORTCUT_IDS.slice();
+}
+
 function getModalFocusableElements(modalEl) {
   if (!modalEl || !modalEl.querySelectorAll) return [];
   return Array.from(modalEl.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
@@ -1708,6 +1786,7 @@ function getModalFocusableElements(modalEl) {
 function openShortcuts() {
   const modal = globalElements.shortcutsModal;
   if (!modal || modal.classList.contains('open')) return;
+  renderShortcutHelp();
   shortcutsLastFocusedEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   modal.classList.add('open');
   modal.setAttribute('aria-hidden', 'false');
