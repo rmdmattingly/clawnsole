@@ -1785,7 +1785,7 @@ function paneBrowserTitle(pane) {
   if (!pane) return 'Clawnsole';
   const parts = ['Clawnsole', paneLabel(pane)];
   if (pane.kind === 'chat' || pane.kind === 'workqueue') {
-    const target = paneTargetLabel(pane);
+    const target = paneDisplayTargetLabel(pane);
     if (target) parts.push(target);
   }
   return parts.join(' · ');
@@ -1804,7 +1804,7 @@ function updateBrowserTitle(pane = null) {
 function paneIdentityLabel(pane, { includeUnread = false } = {}) {
   const letter = paneHeaderLetter(pane);
   const type = paneLabel(pane);
-  const target = paneTargetLabel(pane);
+  const target = paneDisplayTargetLabel(pane);
   const unread = paneUnreadCount(pane);
   return `${letter} ${type} · ${target}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
 }
@@ -1866,6 +1866,21 @@ function showPaneSwitchHud(pane) {
 
 function paneDuplicateKey(pane) {
   return `${String(pane?.kind || 'chat')}::${String(paneTargetLabel(pane) || '').trim().toLowerCase()}`;
+}
+
+function paneDuplicateOrdinal(pane) {
+  const panes = Array.isArray(paneManager?.panes) ? paneManager.panes : [];
+  const duplicateKey = paneDuplicateKey(pane);
+  const matching = panes.filter((entry) => paneDuplicateKey(entry) === duplicateKey);
+  if (matching.length <= 1) return { ordinal: 0, total: matching.length };
+  const index = matching.findIndex((entry) => String(entry?.key || '') === String(pane?.key || ''));
+  return { ordinal: index >= 0 ? index + 1 : 0, total: matching.length };
+}
+
+function paneDisplayTargetLabel(pane) {
+  const target = paneTargetLabel(pane);
+  const { ordinal } = paneDuplicateOrdinal(pane);
+  return ordinal > 0 ? `${target} (${ordinal})` : target;
 }
 
 function focusedPaneKey() {
@@ -2419,7 +2434,7 @@ function buildCommandPaletteItems() {
   paneManager.panes.forEach((pane, idx) => {
     const letter = paneHeaderLetter(pane);
     const type = paneLabel(pane);
-    const target = paneTargetLabel(pane);
+    const target = paneDisplayTargetLabel(pane);
     items.push(
       withShortcut(
         {
@@ -6241,7 +6256,7 @@ function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
   const letter = paneHeaderLetter(pane);
   const type = paneLabel(pane);
-  const target = paneTargetLabel(pane);
+  const target = paneDisplayTargetLabel(pane);
   const unread = paneUnreadCount(pane);
   const identity = `${letter} ${type} · ${target}${unread > 0 ? ` • ${unread} unread` : ''}`;
   pane.elements.name.title = paneIdentityLabel(pane, { includeUnread: false });
@@ -6289,7 +6304,8 @@ function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
     }
   }
 
-  renderPaneIdentity(pane);
+  if (paneManager?.panes?.includes?.(pane)) paneManager.updatePaneLabels();
+  else renderPaneIdentity(pane);
 }
 
 function renderPaneAgentIdentity(pane) {

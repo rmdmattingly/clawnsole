@@ -82,6 +82,32 @@ test('command palette: keyboard flow can reuse a targeted pane and focus by pane
   await expect(firstChatInput).toBeFocused();
 });
 
+test('command palette: duplicate pane focus actions include stable ordinals', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await loginAdmin(page, env.serverPort);
+
+  await page.locator('#addPaneBtn').click();
+  await page.getByTestId('pane-add-menu-chat').click();
+
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]').nth(0).getByTestId('pane-type-label')).toHaveText(/^A Chat · main \(1\)$/);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]').nth(1).getByTestId('pane-type-label')).toHaveText(/^C Chat · main \(2\)$/);
+
+  await page.keyboard.press('ControlOrMeta+K');
+  const input = page.locator('#commandPaletteInput');
+  await expect(input).toBeVisible();
+  await input.fill('focus chat main');
+
+  const focusChatItems = page.locator('#commandPaletteList [role="option"][data-command-palette-id^="cmd:focus-pane-"]', { hasText: /Focus Chat: main/ });
+  await expect(focusChatItems).toHaveCount(2);
+  await expect(focusChatItems.nth(0).locator('.command-palette-item-label')).toHaveText('Focus Chat: main (1)');
+  await expect(focusChatItems.nth(1).locator('.command-palette-item-label')).toHaveText('Focus Chat: main (2)');
+  await expect(focusChatItems.nth(0).locator('.command-palette-pane-chip')).toContainText(['Chat', 'main (1)', 'focus existing']);
+  await expect(focusChatItems.nth(1).locator('.command-palette-pane-chip')).toContainText(['Chat', 'main (2)', 'focus existing']);
+});
+
 test('command palette: groups core actions and collapses per-agent targets until expanded or searched', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
