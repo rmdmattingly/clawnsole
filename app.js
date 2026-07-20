@@ -39,6 +39,7 @@ const globalElements = {
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
   agentsList: document.getElementById('agentsList'),
+  agentsSelectionFooter: document.getElementById('agentsSelectionFooter'),
   agentsEmpty: document.getElementById('agentsEmpty'),
   toastHost: document.getElementById('toastHost'),
   commandPaletteModal: document.getElementById('commandPaletteModal'),
@@ -253,6 +254,7 @@ const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
+let agentsModalSelectedAgentId = '';
 const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
@@ -3161,6 +3163,15 @@ function openAgentTriageFromFleet(agentId) {
   openAgentWorkqueueFromFleet(target);
 }
 
+function runFleetAgentAction(agentId, action) {
+  const target = normalizeAgentId(agentId || 'main');
+  if (!target) return;
+  if (action === 'triage') openAgentTriageFromFleet(target);
+  else if (action === 'open-chat') openAgentChatFromFleet(target);
+  else if (action === 'open-timeline') openAgentTimelineFromFleet(target);
+  else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(target);
+}
+
 function findActivePaneFromFocus() {
   const active = document.activeElement;
   if (!active) return null;
@@ -3363,7 +3374,12 @@ function renderAgentsModalList() {
       const statusSnippet = String(statusSnippetMap[id] || '').trim();
       const statusSnippetHtml = statusSnippet ? ` · <span class="agents-status-snippet">${escapeHtml(statusSnippet)}</span>` : '';
       row.dataset.heartbeatBucket = triage.ageBucket;
+      row.dataset.agentId = id;
       row.classList.toggle('agents-row-heatmap', heatmapEnabled);
+      row.classList.toggle('selected', id === agentsModalSelectedAgentId);
+      row.tabIndex = 0;
+      row.setAttribute('aria-selected', id === agentsModalSelectedAgentId ? 'true' : 'false');
+      row.setAttribute('aria-label', `Select agent ${label}`);
 
       row.innerHTML = `
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
@@ -3398,16 +3414,27 @@ function renderAgentsModalList() {
         renderAgentsModalList();
       });
 
+      row.addEventListener('click', () => {
+        agentsModalSelectedAgentId = id;
+        renderAgentsModalList();
+      });
+      row.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        agentsModalSelectedAgentId = id;
+        renderAgentsModalList();
+        try {
+          globalElements.agentsSelectionFooter?.querySelector?.('[data-agent-action]')?.focus?.();
+        } catch {}
+      });
+
       const actionButtons = Array.from(row.querySelectorAll('[data-agent-action]'));
       actionButtons.forEach((btn) => {
         btn.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
           const action = String(btn.getAttribute('data-agent-action') || '').trim();
-          if (action === 'triage') openAgentTriageFromFleet(id);
-          else if (action === 'open-chat') openAgentChatFromFleet(id);
-          else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
-          else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(id);
+          runFleetAgentAction(id, action);
         });
       });
 
@@ -3418,10 +3445,53 @@ function renderAgentsModalList() {
     root.appendChild(section);
   };
 
+  const renderSelectedAgentFooter = () => {
+    const footer = globalElements.agentsSelectionFooter;
+    if (!footer) return;
+
+    const selectedAgent = ordered.find((agent) => String(agent?.id || '').trim() === agentsModalSelectedAgentId);
+    if (!selectedAgent) {
+      agentsModalSelectedAgentId = '';
+      footer.hidden = true;
+      footer.innerHTML = '';
+      return;
+    }
+
+    const id = String(selectedAgent?.id || '').trim();
+    const label = formatAgentLabel(selectedAgent, { includeId: true });
+    const heartbeatTs = Number(lastSeenMap[id]) || 0;
+    const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
+    const triage = classify(id);
+    const bucketLabel = triage.bucket === 'offline_error' ? 'offline/error' : triage.bucket;
+    const heatBucketLabel = heartbeatAgeBucketLabel(triage.ageBucket);
+
+    footer.hidden = false;
+    footer.innerHTML = `
+      <div class="agents-selection-main">
+        <div class="agents-selection-label">${escapeHtml(label)}</div>
+        <div class="agents-selection-meta">${escapeHtml(id)} · ${escapeHtml(bucketLabel)} · <span class="agents-age-chip" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}">${escapeHtml(heartbeatAge)} · ${escapeHtml(heatBucketLabel)}</span></div>
+      </div>
+      <div class="agents-selection-actions" role="group" aria-label="Selected agent actions for ${escapeHtml(label)}">
+        <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" aria-label="Open Chat for selected agent ${escapeHtml(label)}">Chat</button>
+        <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" aria-label="Open Workqueue for selected agent ${escapeHtml(label)}">Workqueue</button>
+        <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" aria-label="Open Timeline for selected agent ${escapeHtml(label)}">Timeline</button>
+      </div>
+    `;
+
+    footer.querySelectorAll('[data-agent-action]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const action = String(btn.getAttribute('data-agent-action') || '').trim();
+        runFleetAgentAction(id, action);
+      });
+    });
+  };
+
   renderSummary();
   if (pinned.length > 0) renderSection('Pinned', pinned);
   renderSection('Needs attention', needsAttention);
   renderSection('Healthy', healthy, { collapsible: true, collapsed: healthyCollapsed });
+  renderSelectedAgentFooter();
 
   if (globalElements.agentsHeatmapToggle) globalElements.agentsHeatmapToggle.checked = heatmapEnabled;
   if (globalElements.agentsHeartbeatSortBtn) {
