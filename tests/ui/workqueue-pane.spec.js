@@ -110,6 +110,45 @@ function seedLegacyIssueTitleVariants(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedTriageModeWorkqueueItems() {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date().toISOString();
+  const mkItem = (id, patch = {}) => ({
+    id,
+    queue: 'dev-team',
+    title: id,
+    instructions: 'fixture item',
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: now,
+    updatedAt: now,
+    meta: { repo: 'rmdmattingly/clawnsole' },
+    ...patch
+  });
+
+  fs.writeFileSync(
+    path.join(dir, 'work-queues.json'),
+    JSON.stringify({
+      version: 1,
+      queues: { 'dev-team': { name: 'dev-team', createdAt: now }, 'qa-triage': { name: 'qa-triage', createdAt: now } },
+      assignments: {},
+      items: [
+        mkItem('triage high ready', { priority: 90 }),
+        mkItem('triage low pending', { priority: 20, status: 'pending' }),
+        mkItem('triage assigned ready', { priority: 100, claimedBy: 'dev', claimedAt: now, status: 'claimed' }),
+        mkItem('triage blocked', { priority: 80, status: 'blocked' }),
+        mkItem('triage other queue', { queue: 'qa-triage', priority: 200 })
+      ]
+    }, null, 2)
+  );
+}
+
 function seedFilterSummaryWorkqueueItems(queue) {
   const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
   fs.mkdirSync(dir, { recursive: true });
@@ -528,6 +567,41 @@ test('workqueue pane: source chips + clawnsole preset filter items without reloa
   await pane.locator('[data-wq-preset-clawnsole]').click();
   await expect(pane.locator('.wq-row')).toHaveCount(1);
   await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
+});
+
+test('workqueue pane: triage mode applies and persists queue, scope, status, and sort', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  seedTriageModeWorkqueueItems();
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  let pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('qa-triage');
+  await pane.locator('[data-wq-scope="all"]').click();
+  await pane.locator('[data-wq-sort="updatedAt"]').click();
+
+  await pane.locator('[data-wq-triage-mode]').click();
+  await expect(pane.locator('[data-wq-triage-mode]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-triage-active]')).toHaveText('Triage mode active');
+  await expect(pane.locator('[data-wq-queue-select]')).toHaveValue('dev-team');
+  await expect(pane.locator('[data-wq-scope="unassigned"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('.wq-toolbar [data-wq-sort="priority"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-status-selected] .wq-pill')).toHaveText(['Ready', 'Pending']);
+  await expect(pane.locator('.wq-row .wq-col.title')).toHaveText(['triage high ready', 'triage low pending']);
+
+  await page.reload();
+  pane = page.locator('[data-pane]').last();
+  await expect(pane.locator('[data-wq-triage-mode]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-triage-active]')).toHaveText('Triage mode active');
+  await expect(pane.locator('[data-wq-queue-select]')).toHaveValue('dev-team');
+  await expect(pane.locator('[data-wq-scope="unassigned"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('.wq-toolbar [data-wq-sort="priority"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-status-selected] .wq-pill')).toHaveText(['Ready', 'Pending']);
+  await expect(pane.locator('.wq-row .wq-col.title')).toHaveText(['triage high ready', 'triage low pending']);
 });
 
 test('workqueue pane: normalizes mixed legacy issue title prefixes', async ({ page }) => {

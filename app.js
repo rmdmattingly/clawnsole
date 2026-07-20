@@ -4253,6 +4253,28 @@ function formatWorkqueueCountText(shown, total) {
   return `Showing ${shownNum} ${noun}`;
 }
 
+const WORKQUEUE_TRIAGE_PRESET = Object.freeze({
+  queue: 'dev-team',
+  scope: 'unassigned',
+  statuses: Object.freeze(['ready', 'pending']),
+  sortKey: 'priority',
+  sortDir: 'desc'
+});
+
+function isWorkqueueTriagePresetActive(pane) {
+  const statuses = Array.isArray(pane?.workqueue?.statusFilter)
+    ? pane.workqueue.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
+    : [];
+  return (
+    String(pane?.workqueue?.queue || '').trim() === WORKQUEUE_TRIAGE_PRESET.queue &&
+    normalizeWorkqueueScope(pane?.workqueue?.scopeFilter) === WORKQUEUE_TRIAGE_PRESET.scope &&
+    statuses.length === WORKQUEUE_TRIAGE_PRESET.statuses.length &&
+    WORKQUEUE_TRIAGE_PRESET.statuses.every((status) => statuses.includes(status)) &&
+    String(pane?.workqueue?.sortKey || '') === WORKQUEUE_TRIAGE_PRESET.sortKey &&
+    String(pane?.workqueue?.sortDir || '') === WORKQUEUE_TRIAGE_PRESET.sortDir
+  );
+}
+
 function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount } = {}) {
   const root = pane?.elements?.thread?.querySelector?.('[data-wq-filter-summary]');
   if (!root) return;
@@ -4269,6 +4291,14 @@ function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount } = 
   root.innerHTML = '';
   root.hidden = !hasFilters;
   if (!hasFilters) return;
+
+  if (isWorkqueueTriagePresetActive(pane)) {
+    const chip = document.createElement('span');
+    chip.className = 'wq-mode-chip';
+    chip.setAttribute('data-wq-triage-active', '');
+    chip.textContent = 'Triage mode active';
+    root.appendChild(chip);
+  }
 
   const count = document.createElement('span');
   count.className = 'wq-filter-count';
@@ -6974,6 +7004,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <input data-wq-search type="search" placeholder="Filter tasks" autocomplete="off" />
           </label>
 
+          <button data-wq-triage-mode class="secondary" type="button">Triage mode</button>
           <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
           <button data-wq-clear-quick class="secondary" type="button">Clear filters</button>
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
@@ -7088,6 +7119,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const statusClearBtn = elements.thread.querySelector('[data-wq-status-clear]');
     const sourceBtns = Array.from(elements.thread.querySelectorAll('[data-wq-source]'));
     const repoChipsEl = elements.thread.querySelector('[data-wq-repo-chips]');
+    const triageModeBtn = elements.thread.querySelector('[data-wq-triage-mode]');
     const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
     const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
     const searchEl = elements.thread.querySelector('[data-wq-search]');
@@ -7122,6 +7154,17 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
     const resetRenderLimit = () => {
       pane.workqueue.renderLimit = WORKQUEUE_PANE_INITIAL_RENDER_LIMIT;
+    };
+
+    const updateTriageModeUi = () => {
+      const active = isWorkqueueTriagePresetActive(pane);
+      triageModeBtn?.classList.toggle('active', active);
+      triageModeBtn?.setAttribute('aria-pressed', active ? 'true' : 'false');
+      if (triageModeBtn) {
+        triageModeBtn.title = active
+          ? 'Triage mode active'
+          : 'Apply queue dev-team, unassigned scope, ready/pending statuses, and priority sort';
+      }
     };
 
     const renderKeyboardMode = () => {
@@ -7173,6 +7216,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             resetRenderLimit();
             persistQuickFilters();
             updateQuickFilterUi();
+            updateTriageModeUi();
             renderWorkqueuePaneItems(pane);
           });
           repoChipsEl.appendChild(btn);
@@ -7185,6 +7229,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       if (searchEl && searchEl.value !== searchQuery) searchEl.value = searchQuery;
       resetRenderLimit();
       persistQuickFilters();
+      updateTriageModeUi();
       renderWorkqueuePaneItems(pane);
     };
 
@@ -7195,6 +7240,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       resetRenderLimit();
       persistQuickFilters();
       updateQuickFilterUi();
+      updateTriageModeUi();
       renderWorkqueuePaneItems(pane);
     };
 
@@ -7204,9 +7250,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       pane.workqueue.statusFilter = Array.from(statusSet);
       resetRenderLimit();
       renderStatusMultiSelect();
+      updateTriageModeUi();
       if (closeMenu) statusDetailsEl?.removeAttribute('open');
       await fetchAndRenderWorkqueueItemsForPane(pane);
       updateQuickFilterUi();
+      updateTriageModeUi();
       paneManager.persistAdminPanes();
     };
 
@@ -7233,6 +7281,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       }
       await fetchAndRenderWorkqueueItemsForPane(pane);
       updateQuickFilterUi();
+      updateTriageModeUi();
       paneManager.persistAdminPanes();
     };
 
@@ -7445,6 +7494,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       pane.workqueue.statusCounts = buildWorkqueueStatusCounts(filterWorkqueuePaneItemsByScope(pane, pane.workqueue.countItems));
       if (typeof pane.workqueue.renderStatusMultiSelect === 'function') pane.workqueue.renderStatusMultiSelect();
       updateScopeUi();
+      updateTriageModeUi();
       renderWorkqueuePaneItems(pane);
       paneManager.persistAdminPanes();
     };
@@ -7530,6 +7580,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       }
       resetRenderLimit();
       updateSortUi();
+      updateTriageModeUi();
       renderWorkqueuePaneItems(pane);
       paneManager.persistAdminPanes();
     };
@@ -7538,6 +7589,53 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       btn.addEventListener('click', () => setSort(btn.getAttribute('data-wq-sort')));
     });
     updateSortUi();
+
+    triageModeBtn?.addEventListener('click', async () => {
+      const q = WORKQUEUE_TRIAGE_PRESET.queue;
+      if (queueSelectEl) {
+        const existing = Array.from(queueSelectEl.options || []).find((opt) => String(opt.value) === q);
+        if (existing) {
+          queueSelectEl.value = q;
+          if (queueCustomEl) queueCustomEl.hidden = true;
+        } else {
+          queueSelectEl.value = '__custom__';
+          if (queueCustomEl) {
+            queueCustomEl.hidden = false;
+            queueCustomEl.value = q;
+          }
+        }
+      }
+      pane.workqueue.queue = q;
+      statusSet.clear();
+      for (const status of WORKQUEUE_TRIAGE_PRESET.statuses) statusSet.add(status);
+      pane.workqueue.statusFilter = Array.from(statusSet);
+      pane.workqueue.scopeFilter = WORKQUEUE_TRIAGE_PRESET.scope;
+      pane.workqueue.sortKey = WORKQUEUE_TRIAGE_PRESET.sortKey;
+      pane.workqueue.sortDir = WORKQUEUE_TRIAGE_PRESET.sortDir;
+      resetRenderLimit();
+      rememberRecentWorkqueueTarget(q);
+      storage.set(WORKQUEUE_SCOPE_PREF_KEY, pane.workqueue.scopeFilter);
+      paneSetHeaderTarget(pane, {
+        label: 'Queue',
+        value: q,
+        ariaLabel: `Change queue (current: ${q})`,
+        onClick: () => {
+          try {
+            queueSelectEl?.focus?.();
+            queueSelectEl?.click?.();
+          } catch {}
+        }
+      });
+      renderStatusMultiSelect();
+      updateScopeUi();
+      updateSortUi();
+      updateTriageModeUi();
+      await fetchAndRenderWorkqueueItemsForPane(pane);
+      updateQuickFilterUi();
+      updateTriageModeUi();
+      paneManager.persistAdminPanes();
+    });
+    updateTriageModeUi();
 
     const groupModeBtns = Array.from(elements.thread.querySelectorAll('[data-wq-group-mode]'));
     const updateGroupModeUi = () => {
