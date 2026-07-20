@@ -31,6 +31,7 @@ const globalElements = {
   agentsSearch: document.getElementById('agentsSearch'),
   agentsFilterButtons: Array.from(document.querySelectorAll('[data-agents-filter]')),
   agentsDensityButtons: Array.from(document.querySelectorAll('[data-agents-density]')),
+  agentsColumnInputs: Array.from(document.querySelectorAll('[data-agents-column]')),
   agentsSort: document.getElementById('agentsSort'),
   agentsHeatmapToggle: document.getElementById('agentsHeatmapToggle'),
   agentsHeartbeatSortBtn: document.getElementById('agentsHeartbeatSortBtn'),
@@ -251,8 +252,10 @@ const ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY = 'clawnsole.admin.agents.preHeartbeatS
 const ADMIN_AGENT_HEATMAP_KEY = 'clawnsole.admin.agents.heartbeatHeatmap';
 const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
+const ADMIN_AGENT_COLUMNS_KEY = 'clawnsole.admin.agents.columns';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
+const ADMIN_AGENT_COLUMNS = ['state', 'heartbeat', 'status', 'actions'];
 const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
@@ -497,6 +500,39 @@ function syncFleetDensityControl() {
     const active = String(btn.getAttribute('data-agents-density') || '') === density;
     btn.classList.toggle('active', active);
     btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+
+function getFleetVisibleColumns() {
+  const saved = readJsonFromStorage(ADMIN_AGENT_COLUMNS_KEY, null);
+  const source = saved && typeof saved === 'object' ? saved : {};
+  const out = {};
+  ADMIN_AGENT_COLUMNS.forEach((key) => {
+    out[key] = source[key] !== false;
+  });
+  return out;
+}
+
+function setFleetColumnVisible(column, visible) {
+  const key = String(column || '').trim();
+  if (!ADMIN_AGENT_COLUMNS.includes(key)) return;
+  const columns = getFleetVisibleColumns();
+  columns[key] = !!visible;
+  writeJsonToStorage(ADMIN_AGENT_COLUMNS_KEY, columns);
+}
+
+function syncFleetColumnControl(columns = getFleetVisibleColumns()) {
+  if (globalElements.agentsList) {
+    ADMIN_AGENT_COLUMNS.forEach((key) => {
+      globalElements.agentsList.dataset[`show${key.charAt(0).toUpperCase()}${key.slice(1)}`] = columns[key] === false ? 'false' : 'true';
+    });
+    globalElements.agentsList.querySelectorAll('.agents-row').forEach((row) => {
+      row.classList.toggle('agents-row-no-actions', columns.actions === false);
+    });
+  }
+  globalElements.agentsColumnInputs.forEach((input) => {
+    const key = String(input.getAttribute('data-agents-column') || '').trim();
+    input.checked = columns[key] !== false;
   });
 }
 
@@ -3214,7 +3250,9 @@ function renderAgentsModalList() {
   const filterMode = getFleetFilter();
   const sortMode = getFleetSort();
   const heatmapEnabled = getFleetHeatmapEnabled();
+  const visibleColumns = getFleetVisibleColumns();
   syncFleetDensityControl();
+  syncFleetColumnControl(visibleColumns);
 
   const pins = getPinnedAgentIds();
   const lastSeenMap = getAgentLastSeenMap();
@@ -3361,23 +3399,36 @@ function renderAgentsModalList() {
       const bucketLabel = triage.bucket === 'offline_error' ? 'offline/error' : triage.bucket;
       const heatBucketLabel = heartbeatAgeBucketLabel(triage.ageBucket);
       const statusSnippet = String(statusSnippetMap[id] || '').trim();
-      const statusSnippetHtml = statusSnippet ? ` · <span class="agents-status-snippet">${escapeHtml(statusSnippet)}</span>` : '';
+      const stateHtml = visibleColumns.state ? `<span class="agents-state-column">${escapeHtml(bucketLabel)}</span>` : '';
+      const heartbeatHtml = visibleColumns.heartbeat
+        ? `<span class="agents-age-chip agents-heartbeat-column" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}">${escapeHtml(heartbeatAge)} · ${escapeHtml(heatBucketLabel)}</span>`
+        : '';
+      const statusSnippetHtml = visibleColumns.status && statusSnippet
+        ? `<span class="agents-status-snippet agents-status-column">${escapeHtml(statusSnippet)}</span>`
+        : '';
+      const metaParts = [
+        `<span class="agents-id-column">${escapeHtml(id)}</span>`,
+        stateHtml,
+        heartbeatHtml,
+        statusSnippetHtml
+      ].filter(Boolean).join(' <span class="agents-meta-separator">·</span> ');
       row.dataset.heartbeatBucket = triage.ageBucket;
       row.classList.toggle('agents-row-heatmap', heatmapEnabled);
+      row.classList.toggle('agents-row-no-actions', !visibleColumns.actions);
 
       row.innerHTML = `
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
         <div class="agents-row-main">
           <div class="agents-row-title">${escapeHtml(label)}</div>
-          <div class="agents-row-meta">${escapeHtml(id)} · ${escapeHtml(bucketLabel)} · <span class="agents-age-chip" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}">${escapeHtml(heartbeatAge)} · ${escapeHtml(heatBucketLabel)}</span>${statusSnippetHtml}</div>
+          <div class="agents-row-meta">${metaParts}</div>
         </div>
-        <div class="agents-row-actions agents-row-actions-inline" role="group" aria-label="Quick actions for ${escapeHtml(label)}">
+        <div class="agents-row-actions agents-row-actions-inline" role="group" aria-label="Quick actions for ${escapeHtml(label)}" ${visibleColumns.actions ? '' : 'hidden'}>
           <button type="button" class="secondary agents-action-btn" data-agent-action="triage" data-agent-id="${escapeHtml(id)}" title="Open Chat and Workqueue" aria-label="Triage agent ${escapeHtml(label)}">Triage</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Chat</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Timeline</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Workqueue</button>
         </div>
-        <details class="agents-row-actions-overflow">
+        <details class="agents-row-actions-overflow" ${visibleColumns.actions ? '' : 'hidden'}>
           <summary class="secondary" aria-label="More actions for ${escapeHtml(label)}" title="More actions">⋯</summary>
           <div class="agents-row-actions-menu" role="group" aria-label="Quick actions for ${escapeHtml(label)}">
             <button type="button" class="secondary agents-action-btn" data-agent-action="triage" data-agent-id="${escapeHtml(id)}" title="Open Chat and Workqueue" aria-label="Triage agent ${escapeHtml(label)}">Triage agent</button>
@@ -8987,6 +9038,16 @@ globalElements.agentsDensityButtons.forEach((btn) => {
     storage.set(ADMIN_AGENT_DENSITY_KEY, density);
     syncFleetDensityControl();
   });
+});
+
+globalElements.agentsColumnInputs.forEach((input) => {
+  const sync = () => {
+    setFleetColumnVisible(input.getAttribute('data-agents-column'), input.checked);
+    syncFleetColumnControl();
+    renderAgentsModalList();
+  };
+  input.addEventListener('input', sync);
+  input.addEventListener('change', sync);
 });
 
 globalElements.agentsSort?.addEventListener('change', () => {
