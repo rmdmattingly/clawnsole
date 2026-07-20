@@ -9378,6 +9378,18 @@ function cycleUnreadPaneFocus(direction = 1) {
   return true;
 }
 
+function focusPaneByHeaderLetter(letter) {
+  const key = String(letter || '').trim().toUpperCase();
+  if (!/^[A-Z]$/.test(key)) return false;
+
+  const panes = Array.isArray(paneManager?.panes) ? paneManager.panes : [];
+  const idx = panes.findIndex((pane) => paneHeaderLetter(pane) === key);
+  if (idx < 0) return false;
+
+  focusPaneIndex(idx, { showHud: true });
+  return true;
+}
+
 function isBlockingOverlayOpenForPaneShortcuts() {
   const blockers = [
     globalElements.loginOverlay,
@@ -9586,20 +9598,27 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // 'g' chords jump between common triage surfaces.
+  // 'g' chords jump by visible pane letter first, then between common triage surfaces.
   const now = Date.now();
   if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
     if (key.toLowerCase() === 'g') {
       shortcutState.lastGAtMs = now;
       return;
     }
-    if (key.toLowerCase() === 'c' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
+    const keyLower = key.toLowerCase();
+    const hasActiveGPrefix = shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000;
+    if (hasActiveGPrefix && /^[a-z]$/.test(keyLower) && focusPaneByHeaderLetter(keyLower)) {
+      shortcutState.lastGAtMs = 0;
+      event.preventDefault();
+      return;
+    }
+    if (keyLower === 'c' && hasActiveGPrefix) {
       shortcutState.lastGAtMs = 0;
       event.preventDefault();
       returnToLastActiveChatPane();
       return;
     }
-    if (key.toLowerCase() === 'w' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
+    if (keyLower === 'w' && hasActiveGPrefix) {
       shortcutState.lastGAtMs = 0;
       event.preventDefault();
       openTopbarWorkqueueAction();
