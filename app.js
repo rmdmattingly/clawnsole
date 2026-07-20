@@ -630,6 +630,10 @@ let agentAutoRefreshInterval = null;
 let agentsModalAutoRefreshInterval = null;
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
+const fleetModalState = {
+  selectedAgentId: '',
+  notice: ''
+};
 
 function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
@@ -3015,6 +3019,117 @@ function closeAgentsModal() {
   stopAgentsModalFreshnessTicker();
 }
 
+function getFleetScrollContainer() {
+  return globalElements.agentsList?.closest?.('.modal-body') || globalElements.agentsList || null;
+}
+
+function cssEscape(value) {
+  if (window.CSS?.escape) return window.CSS.escape(String(value || ''));
+  return String(value || '').replace(/["\\]/g, '\\$&');
+}
+
+function getVisibleFleetRows() {
+  return Array.from(globalElements.agentsList?.querySelectorAll?.('.agents-row[data-agent-id]') || [])
+    .filter((row) => row.getClientRects().length > 0);
+}
+
+function captureFleetListViewport() {
+  const scroller = getFleetScrollContainer();
+  const scrollerTop = scroller?.getBoundingClientRect?.().top || 0;
+  const rows = getVisibleFleetRows();
+  const anchor = rows.find((row) => row.getBoundingClientRect().bottom >= scrollerTop + 1) || rows[0] || null;
+  return {
+    scrollTop: scroller ? scroller.scrollTop : 0,
+    anchorId: anchor?.dataset?.agentId || '',
+    anchorIndex: anchor ? rows.indexOf(anchor) : -1,
+    rowIds: rows.map((row) => row.dataset?.agentId || '').filter(Boolean),
+    anchorOffset: anchor ? anchor.getBoundingClientRect().top - scrollerTop : 0,
+    activeId: document.activeElement?.closest?.('.agents-row[data-agent-id]')?.dataset?.agentId || ''
+  };
+}
+
+function restoreFleetListViewport(snapshot) {
+  const scroller = getFleetScrollContainer();
+  if (!scroller || !snapshot) return;
+  const restore = () => {
+    const findRow = (id) => id
+      ? globalElements.agentsList?.querySelector?.(`.agents-row[data-agent-id="${cssEscape(id)}"]`)
+      : null;
+    let anchor = findRow(snapshot.anchorId);
+    if (!anchor && Array.isArray(snapshot.rowIds) && snapshot.anchorIndex >= 0) {
+      const candidates = snapshot.rowIds.slice(Math.max(0, snapshot.anchorIndex))
+        .concat(snapshot.rowIds.slice(0, Math.max(0, snapshot.anchorIndex)).reverse());
+      anchor = candidates.map((id) => findRow(id)).find(Boolean) || null;
+    }
+    if (anchor && anchor.getClientRects().length > 0) {
+      const scrollerTop = scroller.getBoundingClientRect().top || 0;
+      scroller.scrollTop += anchor.getBoundingClientRect().top - scrollerTop - snapshot.anchorOffset;
+    } else {
+      scroller.scrollTop = snapshot.scrollTop || 0;
+    }
+    if (snapshot.activeId) {
+      globalElements.agentsList
+        ?.querySelector?.(`.agents-row[data-agent-id="${cssEscape(snapshot.activeId)}"]`)
+        ?.focus?.({ preventScroll: true });
+    }
+  };
+  requestAnimationFrame(restore);
+}
+
+function setFleetSelectedAgent(agentId, { focus = false, scroll = false } = {}) {
+  const id = String(agentId || '').trim();
+  if (!id) return;
+  fleetModalState.selectedAgentId = id;
+  globalElements.agentsList?.querySelectorAll?.('.agents-row[data-agent-id]')?.forEach((row) => {
+    const selected = row.dataset.agentId === id;
+    row.classList.toggle('selected', selected);
+    row.setAttribute('aria-selected', selected ? 'true' : 'false');
+    row.tabIndex = selected ? 0 : -1;
+  });
+  const row = globalElements.agentsList?.querySelector?.(`.agents-row[data-agent-id="${cssEscape(id)}"]`);
+  if (row && focus) row.focus({ preventScroll: !scroll });
+  if (row && scroll) row.scrollIntoView({ block: 'nearest' });
+}
+
+function moveFleetSelection(delta) {
+  const rows = getVisibleFleetRows();
+  if (rows.length === 0) return;
+  const current = fleetModalState.selectedAgentId;
+  const currentIndex = rows.findIndex((row) => row.dataset.agentId === current);
+  const nextIndex = currentIndex === -1
+    ? (delta > 0 ? 0 : rows.length - 1)
+    : Math.max(0, Math.min(rows.length - 1, currentIndex + delta));
+  setFleetSelectedAgent(rows[nextIndex].dataset.agentId, { focus: true, scroll: true });
+}
+
+function handleFleetModalKeydown(event) {
+  if (isTypingContext(event.target)) return false;
+  const key = String(event.key || '').toLowerCase();
+  if (!event.metaKey && !event.ctrlKey && !event.altKey && (key === 'j' || key === 'arrowdown')) {
+    event.preventDefault();
+    moveFleetSelection(1);
+    return true;
+  }
+  if (!event.metaKey && !event.ctrlKey && !event.altKey && (key === 'k' || key === 'arrowup')) {
+    event.preventDefault();
+    moveFleetSelection(-1);
+    return true;
+  }
+  if (!event.metaKey && !event.ctrlKey && !event.altKey && key === 'enter') {
+    const id = fleetModalState.selectedAgentId;
+    if (id) {
+      event.preventDefault();
+      openAgentTriageFromFleet(id);
+      return true;
+    }
+  }
+  if (key !== 'h' || event.metaKey || event.ctrlKey || event.altKey) return false;
+  event.preventDefault();
+  if (event.shiftKey || getFleetSort() !== 'heartbeat_age_desc') setFleetHeartbeatSort();
+  else resetFleetSort();
+  return true;
+}
+
 function findExistingPane(kind, predicate = null) {
   const list = Array.isArray(paneManager?.panes) ? paneManager.panes : [];
   for (const pane of list) {
@@ -3207,6 +3322,7 @@ function openTopbarWorkqueueAction() {
 function renderAgentsModalList() {
   const root = globalElements.agentsList;
   if (!root) return;
+  const viewportSnapshot = captureFleetListViewport();
 
   const search = String(globalElements.agentsSearch?.value || '').trim().toLowerCase();
   const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
@@ -3280,6 +3396,20 @@ function renderAgentsModalList() {
   }, { needsTriage: 0, healthy: 0, disconnected: 0 });
   const healthyCollapseDefault = baseAgents.length > ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD;
   const healthyCollapsed = String(storage.get(ADMIN_AGENT_HEALTHY_COLLAPSED_KEY, healthyCollapseDefault ? '1' : '0')) === '1';
+  const previousSelection = fleetModalState.selectedAgentId;
+  const orderedIds = ordered.map((agent) => String(agent?.id || '').trim()).filter(Boolean);
+  if (orderedIds.length === 0) {
+    fleetModalState.selectedAgentId = '';
+  } else if (!fleetModalState.selectedAgentId) {
+    fleetModalState.selectedAgentId = orderedIds[0];
+  } else if (!orderedIds.includes(fleetModalState.selectedAgentId)) {
+    fleetModalState.selectedAgentId = orderedIds[0];
+    fleetModalState.notice = previousSelection
+      ? `Selected agent ${previousSelection} is no longer in the current filter.`
+      : '';
+  } else {
+    fleetModalState.notice = '';
+  }
 
   root.innerHTML = '';
 
@@ -3323,6 +3453,16 @@ function renderAgentsModalList() {
     root.appendChild(summary);
   };
 
+  const renderNotice = () => {
+    if (!fleetModalState.notice) return;
+    const notice = document.createElement('div');
+    notice.className = 'agents-selection-notice';
+    notice.setAttribute('role', 'status');
+    notice.setAttribute('aria-live', 'polite');
+    notice.textContent = fleetModalState.notice;
+    root.appendChild(notice);
+  };
+
   const renderSection = (title, agents, { collapsible = false, collapsed = false } = {}) => {
     const section = document.createElement('div');
     section.className = 'agents-section';
@@ -3352,6 +3492,8 @@ function renderAgentsModalList() {
       const id = String(agent?.id || '').trim();
       const row = document.createElement('div');
       row.className = 'agents-row';
+      row.dataset.agentId = id;
+      row.setAttribute('role', 'option');
 
       const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
@@ -3388,6 +3530,11 @@ function renderAgentsModalList() {
         </details>
       `;
 
+      row.addEventListener('click', (e) => {
+        if (e.target?.closest?.('button, summary, details, a, input, select, textarea')) return;
+        setFleetSelectedAgent(id, { focus: true });
+      });
+
       const pinBtn = row.querySelector('[data-agent-pin]');
       pinBtn?.addEventListener('click', (e) => {
         e.preventDefault();
@@ -3419,9 +3566,12 @@ function renderAgentsModalList() {
   };
 
   renderSummary();
+  renderNotice();
   if (pinned.length > 0) renderSection('Pinned', pinned);
   renderSection('Needs attention', needsAttention);
   renderSection('Healthy', healthy, { collapsible: true, collapsed: healthyCollapsed });
+  setFleetSelectedAgent(fleetModalState.selectedAgentId);
+  restoreFleetListViewport(viewportSnapshot);
 
   if (globalElements.agentsHeatmapToggle) globalElements.agentsHeatmapToggle.checked = heatmapEnabled;
   if (globalElements.agentsHeartbeatSortBtn) {
@@ -9097,12 +9247,13 @@ globalElements.agentsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.agentsModal) closeAgentsModal();
 });
 globalElements.agentsModal?.addEventListener('keydown', (event) => {
-  if (isTypingContext(event.target)) return;
-  if (String(event.key || '').toLowerCase() !== 'h' || event.metaKey || event.ctrlKey || event.altKey) return;
-  event.preventDefault();
-  if (event.shiftKey || getFleetSort() !== 'heartbeat_age_desc') setFleetHeartbeatSort();
-  else resetFleetSort();
-});
+  handleFleetModalKeydown(event);
+}, true);
+window.addEventListener('keydown', (event) => {
+  if (!globalElements.agentsModal?.classList?.contains('open')) return;
+  if (globalElements.agentsModal.contains(event.target)) return;
+  handleFleetModalKeydown(event);
+}, true);
 
 globalElements.agentsSearch?.addEventListener('input', () => renderAgentsModalList());
 globalElements.agentsSearch?.addEventListener('keydown', (event) => {

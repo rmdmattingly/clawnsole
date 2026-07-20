@@ -138,6 +138,82 @@ test('agents modal quick filter narrows list and Esc clears it', async ({ page, 
   await expect(rows).toHaveCount(initialCount);
 });
 
+test('agents modal preserves selected row and keyboard triage across refresh', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = ['alpha', 'beta', 'gamma'].map((id) => ({ id, name: id, displayName: id }));
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const beta = page.locator('#agentsList .agents-row[data-agent-id="beta"]');
+  await beta.click();
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+
+  agents = ['alpha', 'beta', 'gamma', 'zeta'].map((id) => ({ id, name: id, displayName: id }));
+  await page.evaluate(() => refreshAgents({ reason: 'test' }));
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+
+  await beta.focus();
+  await page.keyboard.press('j');
+  const gamma = page.locator('#agentsList .agents-row[data-agent-id="gamma"]');
+  await expect(gamma).toHaveAttribute('aria-selected', 'true');
+
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pane][data-pane-kind="chat"] [data-pane-agent-select]').last()).toHaveValue('gamma');
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]').last()).toHaveValue('gamma');
+});
+
+test('agents modal keeps scroll anchor and falls back when selected agent disappears', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = Array.from({ length: 45 }, (_, index) => {
+    const id = `agent-${String(index + 1).padStart(2, '0')}`;
+    return { id, name: id, displayName: id };
+  });
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const body = page.locator('#agentsModal .modal-body');
+  await body.evaluate((el) => { el.scrollTop = 620; });
+  const selected = page.locator('#agentsList .agents-row[data-agent-id="agent-18"]');
+  await selected.click();
+  await expect(selected).toHaveAttribute('aria-selected', 'true');
+  const firstVisibleBefore = await page.evaluate(() => {
+    const bodyEl = document.querySelector('#agentsModal .modal-body');
+    const top = bodyEl.getBoundingClientRect().top;
+    return Array.from(document.querySelectorAll('#agentsList .agents-row'))
+      .find((row) => row.getBoundingClientRect().bottom >= top + 1)?.dataset.agentId;
+  });
+  expect(firstVisibleBefore).toBeTruthy();
+
+  agents = agents.filter((agent) => agent.id !== 'agent-18');
+  await page.evaluate(() => refreshAgents({ reason: 'test' }));
+
+  await expect(page.locator('#agentsList .agents-selection-notice')).toContainText('agent-18');
+  await expect(page.locator('#agentsList .agents-row[aria-selected="true"]')).toHaveCount(1);
+  await expect(page.locator('#agentsList .agents-row[data-agent-id="agent-18"]')).toHaveCount(0);
+  await page.waitForFunction((expected) => {
+    const bodyEl = document.querySelector('#agentsModal .modal-body');
+    const top = bodyEl.getBoundingClientRect().top;
+    const visibleIds = Array.from(document.querySelectorAll('#agentsList .agents-row'))
+      .filter((row) => row.getBoundingClientRect().bottom >= top + 1 && row.getBoundingClientRect().top <= bodyEl.getBoundingClientRect().bottom - 1)
+      .map((row) => row.dataset.agentId);
+    return visibleIds.includes(expected) || visibleIds.includes('agent-17') || visibleIds.includes('agent-19');
+  }, firstVisibleBefore);
+});
+
 test('fleet attention mode sections healthy agents and keeps filters while expanding', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 

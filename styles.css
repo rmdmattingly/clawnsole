@@ -1674,6 +1674,26 @@ button.agents-section-title:hover {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.agents-row.selected,
+.agents-row[aria-selected="true"] {
+  border-color: rgba(103, 179, 255, 0.6);
+  background: rgba(103, 179, 255, 0.08);
+}
+
+.agents-row:focus-visible {
+  outline: 2px solid rgba(103, 179, 255, 0.72);
+  outline-offset: 2px;
+}
+
+.agents-selection-notice {
+  border: 1px solid rgba(255, 203, 107, 0.28);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(255, 203, 107, 0.08);
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .agents-row-heatmap {
   border-left-width: 4px;
 }
