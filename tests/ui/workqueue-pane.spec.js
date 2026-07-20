@@ -248,15 +248,26 @@ test('workqueue pane: keyboard mode navigates rows and updates status', async ({
   await page.keyboard.press('2');
   await expect(rows.nth(1).locator('.wq-col.status')).toContainText('in_progress');
 
+  await page.keyboard.press('3');
+  await expect(rows.nth(1).locator('.wq-col.status')).toContainText('blocked');
+
+  let editPromptMessage = '';
+  page.once('dialog', async (dialog) => {
+    editPromptMessage = dialog.message();
+    await dialog.dismiss();
+  });
+  await page.keyboard.press('e');
+  expect(editPromptMessage).toContain('Edit title');
+
   await pane.locator('[data-wq-queue-search]').fill('triage');
   await page.keyboard.press('k');
   await expect(rows.nth(1)).toHaveClass(/selected/);
 
-  const res = await page.request.get(`http://127.0.0.1:${env.serverPort}/api/workqueue/items?queue=${encodeURIComponent(queue)}&status=ready,in_progress`);
+  const res = await page.request.get(`http://127.0.0.1:${env.serverPort}/api/workqueue/items?queue=${encodeURIComponent(queue)}&status=ready,blocked,in_progress`);
   expect(res.ok()).toBeTruthy();
   const data = await res.json();
   const beta = data.items.find((item) => item.id === 'keyboard-triage-b');
-  expect(beta?.status).toBe('in_progress');
+  expect(beta?.status).toBe('blocked');
 });
 
 test('workqueue pane: pane grid label switches from chat-only to generic panes', async ({ page }) => {

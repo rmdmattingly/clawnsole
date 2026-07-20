@@ -340,7 +340,7 @@ function buildDefaultAdminPanes(defaultAgent = 'main') {
       key: `p${randomId().slice(0, 8)}`,
       kind: 'workqueue',
       queue: 'dev-team',
-      statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+      statusFilter: ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
       scopeFilter: getDefaultWorkqueueScope(),
       sortKey: 'priority',
       sortDir: 'desc'
@@ -3445,7 +3445,7 @@ function renderAgentsModalList() {
 
 // Workqueue (admin-only)
 
-const WORKQUEUE_STATUSES = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
+const WORKQUEUE_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress', 'done', 'failed'];
 const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
 const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
 const WORKQUEUE_HEADER_META = {
@@ -3498,7 +3498,7 @@ function buildWorkqueueStatusCounts(items) {
 const workqueueState = {
   queues: [],
   selectedQueue: '',
-  statusFilter: new Set(['ready', 'pending', 'claimed', 'in_progress']),
+  statusFilter: new Set(['ready', 'pending', 'blocked', 'claimed', 'in_progress']),
   statusCounts: Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0])),
   items: [],
   selectedItemId: null,
@@ -3724,6 +3724,7 @@ function getWorkqueueBoardColumns() {
   const defs = [
     { status: 'ready', label: 'Ready' },
     { status: 'pending', label: 'Pending' },
+    { status: 'blocked', label: 'Blocked' },
     { status: 'claimed', label: 'Claimed' },
     { status: 'in_progress', label: 'In progress' },
     { status: 'done', label: 'Done' },
@@ -3913,7 +3914,7 @@ async function workqueueEditItem(item) {
   if (priorityRaw === null) return;
   const priority = Number(priorityRaw);
 
-  const status = prompt('Edit status (ready|pending|claimed|in_progress|done|failed)', String(item.status || 'ready'));
+  const status = prompt('Edit status (ready|pending|blocked|claimed|in_progress|done|failed)', String(item.status || 'ready'));
   if (status === null) return;
 
   try {
@@ -3998,7 +3999,7 @@ async function fetchWorkqueueItems({ queue = '', statuses = [] } = {}) {
 }
 
 function renderWorkqueueCounts(rootEl, counts) {
-  const statuses = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
+  const statuses = WORKQUEUE_STATUSES;
   const list = document.createElement('dl');
   list.className = 'wq-counts';
   for (const s of statuses) {
@@ -4175,7 +4176,7 @@ function getWorkqueueIssueKey(item) {
 }
 
 function chooseWorkqueueDuplicateKeepItem(items) {
-  const statusRank = { in_progress: 5, claimed: 4, ready: 3, pending: 2, done: 1, failed: 0 };
+  const statusRank = { in_progress: 6, claimed: 5, ready: 4, pending: 3, blocked: 2, done: 1, failed: 0 };
   return (Array.isArray(items) ? items : [])
     .slice()
     .sort((a, b) => {
@@ -4624,6 +4625,8 @@ async function setWorkqueuePaneSelectedStatus(pane, status) {
     addFeed('ok', 'workqueue', `Updated ${itemId} to ${status}`);
     renderWorkqueuePaneItems(pane);
     renderWorkqueuePaneInspect(pane, data.item);
+    const row = pane.elements?.thread?.querySelector?.(`[data-wq-item="${CSS.escape(String(itemId))}"]`);
+    row?.focus?.({ preventScroll: true });
   } catch (err) {
     addFeed('err', 'workqueue', `status update failed: ${String(err)}`);
   }
@@ -4651,6 +4654,12 @@ function handleWorkqueuePaneKeyboard(event, pane) {
     const selected = (pane.workqueue.items || []).find((it) => it.id === pane.workqueue.selectedItemId) || null;
     renderWorkqueuePaneInspect(pane, selected);
     pane.elements?.thread?.querySelector?.('[data-wq-inspect]')?.scrollIntoView?.({ block: 'nearest' });
+    return true;
+  }
+  if (key === 'e') {
+    event.preventDefault();
+    const selected = (pane.workqueue.items || []).find((it) => it.id === pane.workqueue.selectedItemId) || null;
+    if (selected) workqueueEditItem(selected);
     return true;
   }
   if (statusByKey[key]) {
@@ -6603,7 +6612,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
-      statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
+      statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
       scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScope()),
       quickFilters: {
         sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
@@ -6687,6 +6696,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
               ['g w', 'open Workqueue modal'],
               ['Keyboard mode: j/k', 'move selected Workqueue row'],
               ['Keyboard mode: Enter', 'inspect selected Workqueue row'],
+              ['Keyboard mode: e', 'edit selected Workqueue row'],
               ['Keyboard mode: 1/2/3/4', 'set ready / in progress / blocked / done'],
               ['Cmd/Ctrl+L', 'focus Chat composer'],
               ['Cmd/Ctrl+K', 'cycle focus between panes']
@@ -6909,7 +6919,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         </details>
 
         <div class="hint" data-wq-statusline></div>
-        <div class="hint wq-keyboard-hint" data-wq-keyboard-hint hidden>j/k move, Enter inspect, 1 ready, 2 in progress, 3 blocked, 4 done</div>
+        <div class="hint wq-keyboard-hint" data-wq-keyboard-hint hidden>j/k move, Enter inspect, e edit, 1 ready, 2 in progress, 3 blocked, 4 done</div>
         <div class="wq-filter-summary" data-wq-filter-summary aria-live="polite" hidden></div>
         <div class="wq-duplicate-health" data-wq-duplicate-health aria-live="polite" hidden></div>
       </div>
@@ -6965,7 +6975,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const keyboardModeBtn = elements.thread.querySelector('[data-wq-keyboard-mode]');
     const keyboardHint = elements.thread.querySelector('[data-wq-keyboard-hint]');
 
-    const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
+    const DEFAULT_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress'];
 
     const statusSet = new Set(
       (Array.isArray(pane.workqueue?.statusFilter) && pane.workqueue.statusFilter.length ? pane.workqueue.statusFilter : DEFAULT_STATUSES)
@@ -8192,7 +8202,7 @@ const paneManager = {
           const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
-            : ['ready', 'pending', 'claimed', 'in_progress'];
+            : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'];
           const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
           const quickFilters = {
             sources: Array.isArray(item?.quickFilters?.sources) ? item.quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
@@ -8328,7 +8338,7 @@ const paneManager = {
         queue: nextQueue,
         statusFilter: Array.isArray(options?.statusFilter) && options.statusFilter.length
           ? options.statusFilter
-          : ['ready', 'pending', 'claimed', 'in_progress'],
+          : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
         scopeFilter: nextScopeFilter,
         closable: true
       });
@@ -9455,6 +9465,14 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     openWorkqueueForActiveChatAgent();
     return;
+  }
+
+  if (!event.defaultPrevented && roleState.role === 'admin') {
+    const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
+    const activePane = (paneManager?.panes || []).find((pane) => String(pane?.key || '') === activeKey);
+    if (activePane?.kind === 'workqueue' && activePane?.workqueue?.keyboardMode) {
+      if (handleWorkqueuePaneKeyboard(event, activePane)) return;
+    }
   }
 
   // Never steal focus / override browser shortcuts while typing.
