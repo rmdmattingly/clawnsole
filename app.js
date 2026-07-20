@@ -2039,14 +2039,73 @@ function markPaneUnread(pane, increment = 1, kind = 'chat') {
 }
 
 function paneSearchText(pane) {
+  const kind = String(pane?.kind || 'chat');
+  const type = paneLabel(pane);
+  const letter = paneHeaderLetter(pane);
+  const target =
+    kind === 'workqueue'
+      ? String(pane?.workqueue?.queue || 'dev-team')
+      : kind === 'cron' || kind === 'timeline'
+        ? 'gateway'
+        : String(pane?.agentId || 'main');
   return [
-    paneSummaryLabel(pane),
-    paneLabel(pane),
-    paneTargetLabel(pane),
-    pane?.kind || ''
+    letter,
+    `${letter} ${type}`,
+    `${letter} ${type} ${target}`,
+    type,
+    target,
+    kind
   ]
     .join(' ')
     .toLowerCase();
+}
+
+function paneManagerSearchTokens() {
+  return String(paneManagerUiState.query || '')
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function paneMatchesSearch(pane, tokens) {
+  if (!tokens.length) return true;
+  const haystack = paneSearchText(pane);
+  return tokens.every((token) => haystack.includes(token));
+}
+
+function highlightPaneManagerMatches(value, tokens) {
+  const text = String(value || '');
+  const filteredTokens = Array.from(new Set((tokens || []).filter(Boolean))).sort((a, b) => b.length - a.length);
+  if (!text || !filteredTokens.length) return escapeHtml(text);
+
+  const lower = text.toLowerCase();
+  const ranges = [];
+  filteredTokens.forEach((token) => {
+    let start = 0;
+    while (start < lower.length) {
+      const idx = lower.indexOf(token, start);
+      if (idx < 0) break;
+      const end = idx + token.length;
+      if (!ranges.some((range) => idx < range.end && end > range.start)) {
+        ranges.push({ start: idx, end });
+      }
+      start = end;
+    }
+  });
+
+  if (!ranges.length) return escapeHtml(text);
+  ranges.sort((a, b) => a.start - b.start);
+
+  let html = '';
+  let pos = 0;
+  ranges.forEach((range) => {
+    html += escapeHtml(text.slice(pos, range.start));
+    html += `<mark class="pane-manager-mark">${escapeHtml(text.slice(range.start, range.end))}</mark>`;
+    pos = range.end;
+  });
+  html += escapeHtml(text.slice(pos));
+  return html;
 }
 
 function paneGroupOrder(kind) {
@@ -2104,10 +2163,11 @@ function renderPaneManager() {
   const empty = globalElements.paneManagerEmpty;
   if (!list || !empty) return;
 
-  const query = String(paneManagerUiState.query || '').trim().toLowerCase();
+  const query = String(paneManagerUiState.query || '').trim();
+  const tokens = paneManagerSearchTokens();
   const filtered = panes.filter((pane) => {
     if (paneManagerUiState.unreadOnly && paneUnreadCount(pane) <= 0) return false;
-    return !query || paneSearchText(pane).includes(query);
+    return paneMatchesSearch(pane, tokens);
   });
 
   const grouped = new Map();
@@ -2132,6 +2192,7 @@ function renderPaneManager() {
 
   list.innerHTML = '';
   empty.hidden = filtered.length > 0;
+  empty.textContent = query ? `No panes match ${query}` : 'No panes match this filter.';
   if (!filtered.length) return;
 
   const maxIndex = Math.max(0, visibleKeys.length - 1);
@@ -2177,13 +2238,14 @@ function renderPaneManager() {
         const isDuplicate = duplicateCount > 1;
         const unreadCount = paneUnreadCount(pane);
         const paneIdentity = paneSummaryLabel(pane);
+        const paneId = String(pane?.key || '');
 
         row.innerHTML = `
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
               ${paneTypeBadgeMarkup(pane, { extraClass: 'pane-manager-type-badge', testId: 'pane-manager-type-badge' })}
-              <span class="pane-manager-kind-label">${escapeHtml(paneIdentity)}</span>
-              <span class="pane-manager-pane-id" title="Internal pane id">${escapeHtml(String(pane?.key || ''))}</span>
+              <span class="pane-manager-kind-label">${highlightPaneManagerMatches(paneIdentity, tokens)}</span>
+              <span class="pane-manager-pane-id" title="Internal pane id">${highlightPaneManagerMatches(paneId, tokens)}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
               ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
             </div>
@@ -2308,13 +2370,31 @@ function closePaneManager({ restoreFocus = true } = {}) {
 function paneManagerHandleKeydown(event) {
   if (!isPaneManagerOpen()) return false;
   const panes = paneManager?.panes || [];
+  const key = String(event.key || '');
+  const activeEl = document.activeElement;
+  if (
+    (key === '/' && activeEl !== globalElements.paneManagerSearch && !event.metaKey && !event.ctrlKey && !event.altKey) ||
+    ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && key.toLowerCase() === 'f')
+  ) {
+    event.preventDefault();
+    globalElements.paneManagerSearch?.focus?.();
+    globalElements.paneManagerSearch?.select?.();
+    return true;
+  }
   if (event.key === 'Escape') {
     event.preventDefault();
+    if (String(globalElements.paneManagerSearch?.value || '').trim()) {
+      globalElements.paneManagerSearch.value = '';
+      paneManagerUiState.query = '';
+      paneManagerUiState.selectedIndex = 0;
+      renderPaneManager();
+      globalElements.paneManagerSearch?.focus?.();
+      return true;
+    }
     closePaneManager();
     return true;
   }
 
-  const activeEl = document.activeElement;
   if (activeEl === globalElements.paneManagerSearch && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
     return false;
   }
@@ -9556,6 +9636,9 @@ window.addEventListener('keydown', (event) => {
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
   })();
 
+  // If Pane Manager is open, it gets first dibs on keys.
+  if (paneManagerHandleKeydown(event)) return;
+
   if (event.key === 'Escape') {
     const closedOverlay = closeTopmostOverlay();
     if (closedOverlay || !isEditableTarget) {
@@ -9564,9 +9647,6 @@ window.addEventListener('keydown', (event) => {
     if (closedOverlay) event.stopPropagation();
     return;
   }
-
-  // If Pane Manager is open, it gets first dibs on keys.
-  if (paneManagerHandleKeydown(event)) return;
 
   const blockedReason = blockedGlobalShortcutReason(event);
   if (blockedReason) {

@@ -1403,6 +1403,12 @@ button.send-btn .btn-icon {
   white-space: nowrap;
 }
 
+.pane-manager-mark {
+  border-radius: 4px;
+  background: rgba(251, 191, 36, 0.22);
+  color: var(--text);
+}
+
 .pane-manager-pane-id {
   font-size: 11px;
   color: var(--muted);
