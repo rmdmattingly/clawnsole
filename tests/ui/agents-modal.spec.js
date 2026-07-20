@@ -74,6 +74,41 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText(/\d+[smhd]/);
 });
 
+test('fleet auto-refresh pauses while interacting and catches up after resume', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  let agentFetches = 0;
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    agentFetches += 1;
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+  await expect(page.locator('#agentsList .agents-row').filter({ hasText: 'Alpha (alpha)' })).toBeVisible();
+
+  const fetchesBeforeLock = agentFetches;
+  const row = page.locator('#agentsList .agents-row').filter({ hasText: 'Alpha (alpha)' });
+  await row.hover();
+  await page.evaluate(() => window.requestAgentsRefresh({ reason: 'fleet_auto_refresh' }));
+
+  await expect(page.getByTestId('agents-refresh-paused')).toContainText('Refresh paused');
+  await expect(row).toBeVisible();
+  expect(agentFetches).toBe(fetchesBeforeLock);
+
+  agents = [{ id: 'beta', name: 'Beta', displayName: 'Beta' }];
+  const catchUpResponse = page.waitForResponse((res) => res.url().includes('/agents') && res.ok(), { timeout: 5000 });
+  await page.locator('#agentsTitle').hover();
+  await catchUpResponse;
+
+  await expect(page.getByTestId('agents-refresh-paused')).toBeHidden();
+  await expect(page.locator('#agentsList .agents-row').filter({ hasText: 'Beta (beta)' })).toBeVisible();
+  expect(agentFetches).toBe(fetchesBeforeLock + 1);
+});
+
 test('agents modal shows fleet health summary counts and refreshes them', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 

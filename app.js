@@ -38,6 +38,7 @@ const globalElements = {
   agentsSortIndicator: document.getElementById('agentsSortIndicator'),
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
+  agentsRefreshPaused: document.getElementById('agentsRefreshPaused'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
   toastHost: document.getElementById('toastHost'),
@@ -630,6 +631,15 @@ let agentAutoRefreshInterval = null;
 let agentsModalAutoRefreshInterval = null;
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
+const agentsModalRefreshLock = {
+  pointerInside: false,
+  focusInside: false,
+  menuOpen: false,
+  deferredRefreshPending: false,
+  lockedAtMs: 0,
+  catchUpTimer: null,
+  handlersInstalled: false
+};
 
 function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
@@ -664,12 +674,107 @@ function renderAgentsLastRefreshed() {
   globalElements.agentsLastRefreshed.textContent = `Last refreshed: ${formatRelativeAge(Date.now() - agentsLastRefreshedAtMs)}`;
 }
 
+function isAgentsModalOpen() {
+  return !!globalElements.agentsModal?.classList?.contains('open');
+}
+
+function isAgentsModalRefreshLocked() {
+  if (!isAgentsModalOpen()) return false;
+  return !!(
+    agentsModalRefreshLock.pointerInside ||
+    agentsModalRefreshLock.focusInside ||
+    agentsModalRefreshLock.menuOpen
+  );
+}
+
+function renderAgentsRefreshPauseState() {
+  const el = globalElements.agentsRefreshPaused;
+  if (!el) return;
+  const locked = isAgentsModalRefreshLocked();
+  if (!locked && !agentsModalRefreshLock.deferredRefreshPending) {
+    el.hidden = true;
+    el.textContent = '';
+    return;
+  }
+  const age = agentsModalRefreshLock.lockedAtMs ? formatRelativeAge(Date.now() - agentsModalRefreshLock.lockedAtMs) : '0s ago';
+  el.hidden = false;
+  el.textContent = locked ? `Refresh paused (${age})` : 'Refresh resuming...';
+}
+
+function setAgentsModalRefreshLock(kind, locked) {
+  if (!agentsModalRefreshLock.lockedAtMs && locked) agentsModalRefreshLock.lockedAtMs = Date.now();
+  if (kind === 'pointer') agentsModalRefreshLock.pointerInside = !!locked;
+  if (kind === 'focus') agentsModalRefreshLock.focusInside = !!locked;
+  if (kind === 'menu') agentsModalRefreshLock.menuOpen = !!locked;
+
+  if (!isAgentsModalRefreshLocked()) {
+    agentsModalRefreshLock.pointerInside = false;
+    agentsModalRefreshLock.focusInside = false;
+    agentsModalRefreshLock.menuOpen = false;
+    agentsModalRefreshLock.lockedAtMs = 0;
+    if (agentsModalRefreshLock.deferredRefreshPending && !agentsModalRefreshLock.catchUpTimer) {
+      agentsModalRefreshLock.catchUpTimer = setTimeout(() => {
+        agentsModalRefreshLock.catchUpTimer = null;
+        if (isAgentsModalRefreshLocked()) return;
+        agentsModalRefreshLock.deferredRefreshPending = false;
+        renderAgentsRefreshPauseState();
+        refreshAgents({ reason: 'fleet_catch_up' }).catch(() => {});
+      }, 200);
+    }
+  }
+
+  renderAgentsRefreshPauseState();
+}
+
+function clearAgentsModalRefreshLock() {
+  agentsModalRefreshLock.pointerInside = false;
+  agentsModalRefreshLock.focusInside = false;
+  agentsModalRefreshLock.menuOpen = false;
+  agentsModalRefreshLock.deferredRefreshPending = false;
+  agentsModalRefreshLock.lockedAtMs = 0;
+  if (agentsModalRefreshLock.catchUpTimer) {
+    clearTimeout(agentsModalRefreshLock.catchUpTimer);
+    agentsModalRefreshLock.catchUpTimer = null;
+  }
+  renderAgentsRefreshPauseState();
+}
+
+function installAgentsModalRefreshLockHandlers() {
+  const root = globalElements.agentsList;
+  if (!root || agentsModalRefreshLock.handlersInstalled) return;
+  agentsModalRefreshLock.handlersInstalled = true;
+
+  root.addEventListener('pointerenter', () => setAgentsModalRefreshLock('pointer', true));
+  root.addEventListener('pointerleave', () => setAgentsModalRefreshLock('pointer', false));
+  root.addEventListener('focusin', () => setAgentsModalRefreshLock('focus', true));
+  root.addEventListener('focusout', () => {
+    setTimeout(() => {
+      const active = document.activeElement;
+      setAgentsModalRefreshLock('focus', !!(active && root.contains(active)));
+    }, 0);
+  });
+}
+
+function requestAgentsRefresh({ reason = 'manual', showSuccessToast = false, manual = false } = {}) {
+  const isManual = manual || reason === 'manual';
+  if (isManual) {
+    clearAgentsModalRefreshLock();
+    return refreshAgents({ reason, showSuccessToast });
+  }
+  if (isAgentsModalRefreshLocked()) {
+    agentsModalRefreshLock.deferredRefreshPending = true;
+    renderAgentsRefreshPauseState();
+    return Promise.resolve(uiState.agents);
+  }
+  return refreshAgents({ reason, showSuccessToast });
+}
+
 function startAgentsModalAutoRefresh() {
   if (agentsModalAutoRefreshInterval) return;
   agentsModalAutoRefreshInterval = setInterval(() => {
-    if (!globalElements.agentsModal?.classList?.contains('open')) return;
+    if (!isAgentsModalOpen()) return;
     if (document.hidden) return;
-    refreshAgents({ reason: 'fleet_auto_refresh' }).catch(() => {});
+    requestAgentsRefresh({ reason: 'fleet_auto_refresh' }).catch(() => {});
   }, 10_000);
 }
 
@@ -682,9 +787,10 @@ function stopAgentsModalAutoRefresh() {
 function startAgentsModalFreshnessTicker() {
   if (agentsModalFreshnessTicker) return;
   agentsModalFreshnessTicker = setInterval(() => {
-    if (!globalElements.agentsModal?.classList?.contains('open')) return;
+    if (!isAgentsModalOpen()) return;
     renderAgentsLastRefreshed();
-    renderAgentsModalList();
+    renderAgentsRefreshPauseState();
+    if (!isAgentsModalRefreshLocked()) renderAgentsModalList();
   }, 1000);
 }
 
@@ -784,7 +890,7 @@ function scheduleAgentRefresh(reason = 'ws_connected') {
   if (agentRefreshTimer) return;
   agentRefreshTimer = setTimeout(() => {
     agentRefreshTimer = null;
-    refreshAgents({ reason }).catch(() => {});
+    requestAgentsRefresh({ reason }).catch(() => {});
   }, 450);
 }
 
@@ -2961,6 +3067,7 @@ function openAgentsModal() {
   if (roleState.role !== 'admin') return;
   globalElements.agentsModal?.classList.add('open');
   globalElements.agentsModal?.setAttribute('aria-hidden', 'false');
+  installAgentsModalRefreshLockHandlers();
 
   // Bootstrap persisted controls.
   const filter = getFleetFilter();
@@ -2982,6 +3089,7 @@ function openAgentsModal() {
 
   renderAgentsModalList();
   renderAgentsLastRefreshed();
+  renderAgentsRefreshPauseState();
   startAgentsModalAutoRefresh();
   startAgentsModalFreshnessTicker();
 
@@ -3011,6 +3119,7 @@ function resetFleetSort() {
 function closeAgentsModal() {
   globalElements.agentsModal?.classList.remove('open');
   globalElements.agentsModal?.setAttribute('aria-hidden', 'true');
+  clearAgentsModalRefreshLock();
   stopAgentsModalAutoRefresh();
   stopAgentsModalFreshnessTicker();
 }
@@ -3408,6 +3517,13 @@ function renderAgentsModalList() {
           else if (action === 'open-chat') openAgentChatFromFleet(id);
           else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
           else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(id);
+        });
+      });
+
+      row.querySelectorAll('.agents-row-actions-overflow').forEach((details) => {
+        details.addEventListener('toggle', () => {
+          const anyOpen = !!root.querySelector('.agents-row-actions-overflow[open]');
+          setAgentsModalRefreshLock('menu', anyOpen);
         });
       });
 
@@ -8940,7 +9056,7 @@ globalElements.recurringPromptRows?.addEventListener('click', (event) => {
 });
 
 globalElements.refreshAgentsBtn?.addEventListener('click', () => {
-  refreshAgents({ reason: 'manual', showSuccessToast: true }).catch(() => {
+  requestAgentsRefresh({ reason: 'manual', showSuccessToast: true, manual: true }).catch(() => {
     showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
   });
 });
