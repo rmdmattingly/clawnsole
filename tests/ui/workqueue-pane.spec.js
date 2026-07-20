@@ -682,11 +682,14 @@ test('workqueue pane: grouped mode collapses duplicate issue rows and expands ch
   await expect(pane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]')).toContainText('3 rows');
   await expect(pane.locator('.wq-row', { hasText: 'unrelated' })).toHaveCount(1);
 
-  await pane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]').click();
+  const groupRow = pane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]');
+  await groupRow.focus();
+  await page.keyboard.press('Enter');
   await expect(pane.locator('.wq-row')).toHaveCount(5);
 
   const child = pane.locator('.wq-row-child', { hasText: 'duplicate health' }).first();
-  await child.click();
+  await child.focus();
+  await page.keyboard.press('Enter');
   await expect(pane.locator('[data-wq-inspect]')).toContainText('legacy-dup');
 });
 
