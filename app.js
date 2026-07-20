@@ -2039,14 +2039,57 @@ function markPaneUnread(pane, increment = 1, kind = 'chat') {
 }
 
 function paneSearchText(pane) {
+  const kind = String(pane?.kind || 'chat');
   return [
+    paneHeaderLetter(pane),
     paneSummaryLabel(pane),
     paneLabel(pane),
     paneTargetLabel(pane),
-    pane?.kind || ''
+    kind === 'workqueue' ? pane?.workqueue?.queue || '' : '',
+    kind === 'chat' || kind === 'workqueue' ? pane?.agentId || '' : '',
+    kind === 'cron' || kind === 'timeline' ? pane?.cronAgentId || '' : '',
+    kind
   ]
     .join(' ')
     .toLowerCase();
+}
+
+function paneManagerSearchTerms() {
+  return String(paneManagerUiState.query || '')
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function paneMatchesSearch(pane, terms) {
+  if (!Array.isArray(terms) || !terms.length) return true;
+  const searchText = paneSearchText(pane);
+  return terms.every((term) => searchText.includes(term));
+}
+
+function highlightPaneManagerMatch(value, terms) {
+  const raw = String(value || '');
+  if (!Array.isArray(terms) || !terms.length) return escapeHtml(raw);
+  const normalizedTerms = Array.from(new Set(terms.map((term) => String(term || '').trim().toLowerCase()).filter(Boolean)))
+    .sort((a, b) => b.length - a.length);
+  if (!normalizedTerms.length) return escapeHtml(raw);
+
+  let html = '';
+  let i = 0;
+  while (i < raw.length) {
+    const lower = raw.slice(i).toLowerCase();
+    const term = normalizedTerms.find((entry) => lower.startsWith(entry));
+    if (term) {
+      const match = raw.slice(i, i + term.length);
+      html += `<mark class="pane-manager-match">${escapeHtml(match)}</mark>`;
+      i += term.length;
+    } else {
+      html += escapeHtml(raw[i]);
+      i += 1;
+    }
+  }
+  return html;
 }
 
 function paneGroupOrder(kind) {
@@ -2104,10 +2147,11 @@ function renderPaneManager() {
   const empty = globalElements.paneManagerEmpty;
   if (!list || !empty) return;
 
-  const query = String(paneManagerUiState.query || '').trim().toLowerCase();
+  const query = String(paneManagerUiState.query || '').trim();
+  const terms = paneManagerSearchTerms();
   const filtered = panes.filter((pane) => {
     if (paneManagerUiState.unreadOnly && paneUnreadCount(pane) <= 0) return false;
-    return !query || paneSearchText(pane).includes(query);
+    return paneMatchesSearch(pane, terms);
   });
 
   const grouped = new Map();
@@ -2132,6 +2176,7 @@ function renderPaneManager() {
 
   list.innerHTML = '';
   empty.hidden = filtered.length > 0;
+  empty.textContent = query ? `No panes match "${query}"` : 'No panes match this filter.';
   if (!filtered.length) return;
 
   const maxIndex = Math.max(0, visibleKeys.length - 1);
@@ -2182,7 +2227,7 @@ function renderPaneManager() {
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
               ${paneTypeBadgeMarkup(pane, { extraClass: 'pane-manager-type-badge', testId: 'pane-manager-type-badge' })}
-              <span class="pane-manager-kind-label">${escapeHtml(paneIdentity)}</span>
+              <span class="pane-manager-kind-label">${highlightPaneManagerMatch(paneIdentity, terms)}</span>
               <span class="pane-manager-pane-id" title="Internal pane id">${escapeHtml(String(pane?.key || ''))}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
               ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
@@ -2308,13 +2353,34 @@ function closePaneManager({ restoreFocus = true } = {}) {
 function paneManagerHandleKeydown(event) {
   if (!isPaneManagerOpen()) return false;
   const panes = paneManager?.panes || [];
-  if (event.key === 'Escape') {
+  const activeEl = document.activeElement;
+  const isAccelFind = (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'f';
+  if (isAccelFind || (event.key === '/' && activeEl !== globalElements.paneManagerSearch)) {
     event.preventDefault();
-    closePaneManager();
+    event.stopPropagation();
+    try {
+      globalElements.paneManagerSearch?.focus?.();
+      globalElements.paneManagerSearch?.select?.();
+    } catch {}
     return true;
   }
 
-  const activeEl = document.activeElement;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    if (String(paneManagerUiState.query || '').trim()) {
+      paneManagerUiState.query = '';
+      if (globalElements.paneManagerSearch) globalElements.paneManagerSearch.value = '';
+      paneManagerUiState.selectedIndex = 0;
+      renderPaneManager();
+      try {
+        globalElements.paneManagerSearch?.focus?.();
+      } catch {}
+    } else {
+      closePaneManager();
+    }
+    return true;
+  }
+
   if (activeEl === globalElements.paneManagerSearch && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
     return false;
   }
@@ -9390,6 +9456,9 @@ window.addEventListener('keydown', (event) => {
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
   })();
 
+  // If Pane Manager is open, it gets first dibs on keys, including Esc clear-then-close.
+  if (paneManagerHandleKeydown(event)) return;
+
   if (event.key === 'Escape') {
     const closedOverlay = closeTopmostOverlay();
     if (closedOverlay || !isEditableTarget) {
@@ -9398,9 +9467,6 @@ window.addEventListener('keydown', (event) => {
     if (closedOverlay) event.stopPropagation();
     return;
   }
-
-  // If Pane Manager is open, it gets first dibs on keys.
-  if (paneManagerHandleKeydown(event)) return;
 
   const blockedReason = blockedGlobalShortcutReason(event);
   if (blockedReason) {

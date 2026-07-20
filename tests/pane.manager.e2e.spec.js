@@ -109,13 +109,43 @@ test('pane manager: quick-find filters and groups by kind', async ({ page }) => 
   await expect(page.locator('.pane-manager-group-header').nth(2)).toContainText('Cron (1)');
 
   const search = page.getByTestId('pane-manager-search');
+  await expect(search).toHaveAttribute('placeholder', 'Find pane (A, Workqueue, dev-agent...)');
   await search.fill('cron');
   await expect(page.locator('.pane-manager-row')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row').first()).toContainText('Cron');
+  await expect(page.locator('.pane-manager-row mark.pane-manager-match').first()).toContainText(/cron/i);
 
   await search.fill('B');
   await expect(page.locator('.pane-manager-row')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row').first()).toContainText('Workqueue');
+
+  await search.fill('dev-team');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(1);
+  await expect(page.locator('.pane-manager-row').first()).toContainText('Workqueue');
+
+  await search.fill('zzz-no-pane');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(0);
+  await expect(page.locator('#paneManagerEmpty')).toHaveText('No panes match "zzz-no-pane"');
+
+  await page.keyboard.press('Escape');
+  await expect(search).toHaveValue('');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  await page.keyboard.press('/');
+  await expect(search).toBeFocused();
+
+  await search.fill('cron');
+  await page.keyboard.press('Control+F');
+  await expect(search).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+  const focusedPaneKind = await page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    const pane = panes.find((entry) => entry === active || (active && entry.contains(active)));
+    return pane?.getAttribute('data-pane-kind') || '';
+  });
+  expect(focusedPaneKind).toBe('cron');
 });
 
 test('pane manager: shows summary + duplicate badge and supports close others', async ({ page }) => {
