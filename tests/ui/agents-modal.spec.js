@@ -74,6 +74,47 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText(/\d+[smhd]/);
 });
 
+test('agents modal rows show explicit health and heartbeat age chips', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'healthy-agent', name: 'healthy-agent', displayName: 'healthy-agent' },
+    { id: 'stale-agent', name: 'stale-agent', displayName: 'stale-agent' },
+    { id: 'offline-agent', name: 'offline-agent', displayName: 'offline-agent' }
+  ];
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      'healthy-agent': Date.now(),
+      'stale-agent': Date.now() - 20 * 60 * 1000
+    }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const healthyRow = page.locator('#agentsList .agents-row').filter({ hasText: 'healthy-agent' });
+  const staleRow = page.locator('#agentsList .agents-row').filter({ hasText: 'stale-agent' });
+  const offlineRow = page.locator('#agentsList .agents-row').filter({ hasText: 'offline-agent' });
+
+  await expect(healthyRow.locator('.agents-health-state-chip')).toHaveText('Healthy');
+  await expect(healthyRow.locator('.agents-health-state-chip')).toHaveAttribute('data-health-state', 'active');
+  await expect(healthyRow.locator('.agents-age-chip')).toContainText(/\d+[smhd] ago/);
+
+  await expect(staleRow.locator('.agents-health-state-chip')).toHaveText('Stale');
+  await expect(staleRow.locator('.agents-health-state-chip')).toHaveAttribute('data-health-state', 'stale');
+  await expect(staleRow.locator('.agents-age-chip')).toContainText(/20m ago/);
+
+  await expect(offlineRow.locator('.agents-health-state-chip')).toHaveText('Offline/Error');
+  await expect(offlineRow.locator('.agents-health-state-chip')).toHaveAttribute('data-health-state', 'offline_error');
+  await expect(offlineRow.locator('.agents-age-chip')).toContainText('unknown');
+});
+
 test('agents modal shows fleet health summary counts and refreshes them', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
