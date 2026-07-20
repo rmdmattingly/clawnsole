@@ -6,6 +6,9 @@ const {
   fmtRemaining,
   formatWorkqueueIssueTitle,
   sortWorkqueueItems,
+  getWorkqueueDedupeIdentity,
+  getWorkqueueExactDuplicateIdentity,
+  collapseWorkqueueDuplicateItems,
   inferPaneCols,
   normalizePaneKind,
   normalizeAdminDestination,
@@ -143,6 +146,49 @@ test('sortWorkqueueItems priority sort uses updatedAt desc tie-breaker', () => {
 
   const sorted = sortWorkqueueItems(items, { sortKey: 'priority', sortDir: 'desc' });
   assert.deepEqual(sorted.map((it) => it.id), ['c', 'b', 'a']);
+});
+
+test('getWorkqueueExactDuplicateIdentity groups dedupe keys and exact title/status fallbacks', () => {
+  const deduped = getWorkqueueExactDuplicateIdentity({
+    queue: 'dev-team',
+    dedupeKey: ' Issue: RMDMATTINGLY/CLAWNSOLE#171 ',
+    title: 'old title',
+    status: 'ready'
+  });
+  assert.equal(
+    getWorkqueueExactDuplicateIdentity({
+      queue: 'dev-team',
+      meta: { dedupeKey: 'issue: rmdmattingly/clawnsole#171' },
+      title: 'new title',
+      status: 'failed'
+    }),
+    deduped
+  );
+
+  const exact = getWorkqueueExactDuplicateIdentity({
+    queue: 'dev-team',
+    title: '  Repeat   Task ',
+    status: 'READY'
+  });
+  assert.equal(exact, 'dev-team::exact::repeat task::ready');
+  assert.notEqual(getWorkqueueExactDuplicateIdentity({ queue: 'dev-team', title: 'Repeat Task', status: 'done' }), exact);
+  assert.notEqual(getWorkqueueExactDuplicateIdentity({ queue: 'ops', title: 'Repeat Task', status: 'ready' }), exact);
+  assert.equal(getWorkqueueDedupeIdentity({ queue: 'dev-team' }), '');
+  assert.equal(getWorkqueueExactDuplicateIdentity({ queue: 'dev-team', title: 'Repeat Task' }), '');
+});
+
+test('collapseWorkqueueDuplicateItems picks newest representative and count badge data', () => {
+  const groups = collapseWorkqueueDuplicateItems([
+    { id: 'older', queue: 'dev-team', title: 'Same', status: 'ready', updatedAt: '2026-01-01T00:00:00Z' },
+    { id: 'single', queue: 'dev-team', title: 'Single', status: 'ready', updatedAt: '2026-01-03T00:00:00Z' },
+    { id: 'newer', queue: 'dev-team', title: ' same ', status: 'READY', updatedAt: '2026-01-04T00:00:00Z' },
+    { id: 'tie-b', queue: 'dev-team', title: 'Tie', status: 'ready', updatedAt: '2026-01-02T00:00:00Z' },
+    { id: 'tie-a', queue: 'dev-team', title: 'Tie', status: 'ready', updatedAt: '2026-01-02T00:00:00Z' }
+  ]);
+
+  assert.deepEqual(groups.map((g) => g.representative.id), ['newer', 'single', 'tie-b']);
+  assert.deepEqual(groups.map((g) => g.duplicateCount), [2, 1, 2]);
+  assert.deepEqual(groups[0].duplicates.map((it) => it.id), ['older']);
 });
 
 test('inferPaneCols maps pane counts to sensible layout widths', () => {

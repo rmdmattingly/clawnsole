@@ -2579,6 +2579,11 @@ kbd {
   outline-offset: -2px;
 }
 
+.wq-card-wrap,
+.wq-row-group {
+  min-width: 0;
+}
+
 .wq-card {
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 12px;
@@ -2651,6 +2656,37 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wq-duplicates {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wq-duplicates-summary {
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.wq-duplicates-list {
+  display: grid;
+  gap: 4px;
+  padding: 0 8px 8px;
+}
+
+.wq-duplicate-btn {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  text-align: left;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.wq-duplicate-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .wq-row {

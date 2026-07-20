@@ -156,6 +156,62 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(instructions);
 });
 
+test('pane: workqueue default view auto-collapses exact title/status duplicates', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue').click();
+
+  const wqPane = page.locator('[data-pane]').last();
+  await expect(wqPane).toHaveAttribute('data-pane-kind', 'workqueue');
+
+  const queue = `pw-dedupe-default-${Date.now()}`;
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await wqPane.locator('details.wq-enqueue > summary').click();
+
+  const title = `default dedupe collapse ${Date.now()}`;
+  for (let i = 0; i < 2; i += 1) {
+    await wqPane.locator('[data-wq-enqueue-title]').fill(title);
+    await wqPane.locator('[data-wq-enqueue-instructions]').fill(`dedupe-default-test ${i}`);
+    await wqPane.locator('[data-wq-enqueue-priority]').fill('5');
+    await wqPane.locator('[data-wq-enqueue-dedupe]').fill('');
+    const enqueueResP = page.waitForResponse(
+      (res) => res.url().includes('/api/workqueue/enqueue') && res.request().method() === 'POST',
+      { timeout: 15000 }
+    );
+    await wqPane.locator('[data-wq-enqueue-submit]').click();
+    const enqueueRes = await enqueueResP;
+    expect(enqueueRes.ok()).toBeTruthy();
+    await expect(wqPane.locator('[data-wq-enqueue-status]')).toContainText('Queued');
+  }
+
+  await wqPane.locator('details.wq-enqueue > summary').click();
+
+  const refreshResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
+  await wqPane.locator('[data-wq-refresh]').click();
+  await refreshResP;
+
+  const groupedRow = wqPane.locator('.wq-row', { hasText: title });
+  await expect(groupedRow).toHaveCount(1);
+  await expect(groupedRow).toContainText('×2');
+
+  const details = wqPane.locator('.wq-row-group', { hasText: title }).locator('details.wq-duplicates');
+  await expect(details.locator('summary')).toContainText('+1 duplicate');
+  await details.locator('summary').click();
+  await expect(details.locator('.wq-duplicate-btn')).toHaveCount(1);
+});
+
 test('pane: workqueue scope filter toggles deterministic row counts', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);

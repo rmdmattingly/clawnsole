@@ -234,22 +234,24 @@ test('workqueue pane: keyboard mode navigates rows and updates status', async ({
   await pane.locator('[data-wq-queue-custom]').press('Enter');
 
   const rows = pane.locator('[data-wq-list-body] .wq-row');
+  const alphaRow = pane.locator('[data-wq-item="keyboard-triage-a"]');
+  const betaRow = pane.locator('[data-wq-item="keyboard-triage-b"]');
   await expect(rows).toHaveCount(2);
   await pane.locator('[data-wq-keyboard-mode]').click();
   await expect(pane.locator('[data-wq-keyboard-mode]')).toHaveAttribute('aria-pressed', 'true');
-  await expect(rows.nth(0)).toHaveClass(/selected/);
+  await expect(alphaRow).toHaveClass(/selected/);
 
   await page.keyboard.press('j');
-  await expect(rows.nth(1)).toHaveClass(/selected/);
+  await expect(betaRow).toHaveClass(/selected/);
 
   await page.keyboard.press('Enter');
   await expect(pane.locator('[data-wq-inspect]')).toContainText('keyboard triage beta');
 
   await page.keyboard.press('2');
-  await expect(rows.nth(1).locator('.wq-col.status')).toContainText('in_progress');
+  await expect(betaRow.locator('.wq-col.status')).toContainText('in_progress');
 
   await page.keyboard.press('3');
-  await expect(rows.nth(1).locator('.wq-col.status')).toContainText('blocked');
+  await expect(betaRow.locator('.wq-col.status')).toContainText('blocked');
 
   let editPromptMessage = '';
   page.once('dialog', async (dialog) => {
@@ -261,7 +263,7 @@ test('workqueue pane: keyboard mode navigates rows and updates status', async ({
 
   await pane.locator('[data-wq-queue-search]').fill('triage');
   await page.keyboard.press('k');
-  await expect(rows.nth(1)).toHaveClass(/selected/);
+  await expect(betaRow).toHaveClass(/selected/);
 
   const res = await page.request.get(`http://127.0.0.1:${env.serverPort}/api/workqueue/items?queue=${encodeURIComponent(queue)}&status=ready,blocked,in_progress`);
   expect(res.ok()).toBeTruthy();

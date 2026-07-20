@@ -116,6 +116,12 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
 });
 const formatWorkqueueIssueTitle = __appCore.formatWorkqueueIssueTitle || ((item) => String(item?.title || ''));
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
+const collapseWorkqueueDuplicateItems = __appCore.collapseWorkqueueDuplicateItems || ((items) => (Array.isArray(items) ? items.map((it) => ({
+  representative: it,
+  members: [it],
+  duplicates: [],
+  duplicateCount: 1
+})) : []));
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
   const n = Number(count);
   if (!Number.isFinite(n) || n <= 1) return 1;
@@ -3761,18 +3767,20 @@ function renderWorkqueueItems() {
 
   const itemsRaw = Array.isArray(workqueueState.items) ? workqueueState.items : [];
   const items = sortWorkqueueItems(itemsRaw, { sortKey: workqueueState.sortKey, sortDir: workqueueState.sortDir });
+  const duplicateGroups = collapseWorkqueueDuplicateItems(items);
+  const visibleItems = duplicateGroups.map((group) => group.representative);
 
-  if (!items.length) {
+  if (!visibleItems.length) {
     globalElements.wqListEmpty.hidden = false;
   } else {
     globalElements.wqListEmpty.hidden = true;
   }
 
   const cols = getWorkqueueBoardColumns();
-  const itemsByStatus = items.reduce((acc, it) => {
-    const st = String(it?.status || 'ready');
+  const groupsByStatus = duplicateGroups.reduce((acc, group) => {
+    const st = String(group?.representative?.status || 'ready');
     if (!acc[st]) acc[st] = [];
-    acc[st].push(it);
+    acc[st].push(group);
     return acc;
   }, {});
 
@@ -3782,13 +3790,13 @@ function renderWorkqueueItems() {
     col.className = 'wq-board-col';
     col.setAttribute('data-wq-col', colDef.status);
 
-    const colItems = Array.isArray(itemsByStatus[colDef.status]) ? itemsByStatus[colDef.status] : [];
+    const colGroups = Array.isArray(groupsByStatus[colDef.status]) ? groupsByStatus[colDef.status] : [];
 
     const head = document.createElement('div');
     head.className = 'wq-board-col-header';
     head.innerHTML = `
       <div class="wq-board-col-title">${escapeHtml(colDef.label)}</div>
-      <div class="wq-board-col-count mono">${escapeHtml(String(colItems.length))}</div>
+      <div class="wq-board-col-count mono">${escapeHtml(String(colGroups.length))}</div>
     `;
 
     const lane = document.createElement('div');
@@ -3813,11 +3821,19 @@ function renderWorkqueueItems() {
       }
     });
 
-    for (const it of colItems) {
+    for (const group of colGroups) {
+      const it = group.representative;
+      const duplicates = Array.isArray(group.duplicates) ? group.duplicates : [];
+      const duplicateCount = Number(group.duplicateCount || 1);
+      const isSelected = [it, ...duplicates].some((entry) => entry?.id && entry.id === workqueueState.selectedItemId);
+
+      const cardWrap = document.createElement('div');
+      cardWrap.className = 'wq-card-wrap';
+
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'wq-card';
-      if (it.id && it.id === workqueueState.selectedItemId) card.classList.add('selected');
+      if (isSelected) card.classList.add('selected');
       if (it.id) card.setAttribute('data-wq-item', it.id);
 
       // Allow dragging the whole card.
@@ -3840,6 +3856,7 @@ function renderWorkqueueItems() {
           <span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span>
           ${age ? `<span class="wq-card-chip mono">age ${escapeHtml(age)}</span>` : ''}
           ${leaseLabel ? `<span class="wq-card-chip mono">lease ${escapeHtml(leaseLabel)}</span>` : ''}
+          ${duplicateCount > 1 ? `<span class="wq-card-chip mono" title="${escapeHtml(`${duplicateCount} exact duplicate rows`)}">×${escapeHtml(String(duplicateCount))}</span>` : ''}
         </div>
         <div class="wq-card-fields">
           <div class="wq-card-field"><span class="k">prio</span> <span class="v mono">${escapeHtml(String(it.priority ?? ''))}</span></div>
@@ -3855,7 +3872,38 @@ function renderWorkqueueItems() {
         renderWorkqueueInspect(it);
       });
 
-      lane.appendChild(card);
+      cardWrap.appendChild(card);
+
+      if (duplicates.length) {
+        const details = document.createElement('details');
+        details.className = 'wq-duplicates';
+
+        const summary = document.createElement('summary');
+        summary.className = 'wq-duplicates-summary mono';
+        summary.textContent = `Show ${duplicates.length} duplicate${duplicates.length === 1 ? '' : 's'}`;
+
+        const list = document.createElement('div');
+        list.className = 'wq-duplicates-list';
+
+        for (const dup of duplicates) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'wq-duplicate-btn';
+          btn.textContent = `${dup.id || ''} · prio ${dup.priority ?? ''} · ${dup.status || ''}`;
+          btn.addEventListener('click', () => {
+            workqueueState.selectedItemId = dup.id || null;
+            renderWorkqueueItems();
+            renderWorkqueueInspect(dup);
+          });
+          list.appendChild(btn);
+        }
+
+        details.appendChild(summary);
+        details.appendChild(list);
+        cardWrap.appendChild(details);
+      }
+
+      lane.appendChild(cardWrap);
     }
 
     col.appendChild(head);
@@ -4422,11 +4470,17 @@ function summarizeWorkqueueIssueGroups(items) {
   return out;
 }
 
-function appendWorkqueuePaneItemRow(pane, body, item, { child = false } = {}) {
+function appendWorkqueuePaneItemRow(pane, body, item, { child = false, duplicateGroup = null } = {}) {
+  const duplicates = Array.isArray(duplicateGroup?.duplicates) ? duplicateGroup.duplicates : [];
+  const duplicateCount = Number(duplicateGroup?.duplicateCount || 1);
+  const isSelected = [item, ...duplicates].some((entry) => entry?.id && entry.id === pane.workqueue.selectedItemId);
+  const wrap = duplicates.length && !child ? document.createElement('div') : null;
+  if (wrap) wrap.className = 'wq-row-group';
+
   const row = document.createElement('button');
   row.type = 'button';
   row.className = child ? 'wq-row wq-row-child' : 'wq-row';
-  if (item.id && item.id === pane.workqueue.selectedItemId) row.classList.add('selected');
+  if (isSelected) row.classList.add('selected');
   if (item.id) row.setAttribute('data-wq-item', item.id);
 
   const leaseMs = item.leaseUntil ? Number(item.leaseUntil) - Date.now() : NaN;
@@ -4437,7 +4491,7 @@ function appendWorkqueuePaneItemRow(pane, body, item, { child = false } = {}) {
   row.setAttribute('aria-label', `Workqueue item: ${title}`);
 
   row.innerHTML = `
-    <div class="wq-col title"><span class="wq-title-text" title="${escapeHtml(title)}">${escapeHtml(title)}</span></div>
+    <div class="wq-col title"><span class="wq-title-text" title="${escapeHtml(title)}">${escapeHtml(title)}</span>${duplicateCount > 1 ? ` <span class="wq-card-chip mono" title="${escapeHtml(`${duplicateCount} exact duplicate rows`)}">×${escapeHtml(String(duplicateCount))}</span>` : ''}</div>
     <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
     <div class="wq-col prio mono">${escapeHtml(String(item.priority ?? ''))}</div>
     <div class="wq-col attempts mono">${escapeHtml(String(item.attempts ?? ''))}</div>
@@ -4451,7 +4505,39 @@ function appendWorkqueuePaneItemRow(pane, body, item, { child = false } = {}) {
     renderWorkqueuePaneInspect(pane, item);
   });
 
-  body.appendChild(row);
+  if (wrap) {
+    wrap.appendChild(row);
+
+    const details = document.createElement('details');
+    details.className = 'wq-duplicates';
+
+    const summary = document.createElement('summary');
+    summary.className = 'wq-duplicates-summary mono';
+    summary.textContent = `+${duplicates.length} duplicate${duplicates.length === 1 ? '' : 's'}`;
+
+    const list = document.createElement('div');
+    list.className = 'wq-duplicates-list';
+
+    for (const dup of duplicates) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'wq-duplicate-btn';
+      btn.textContent = `${dup.id || ''} · prio ${dup.priority ?? ''} · ${dup.status || ''}`;
+      btn.addEventListener('click', () => {
+        pane.workqueue.selectedItemId = dup.id || null;
+        renderWorkqueuePaneItems(pane);
+        renderWorkqueuePaneInspect(pane, dup);
+      });
+      list.appendChild(btn);
+    }
+
+    details.appendChild(summary);
+    details.appendChild(list);
+    wrap.appendChild(details);
+    body.appendChild(wrap);
+  } else {
+    body.appendChild(row);
+  }
   return row;
 }
 
@@ -4599,12 +4685,17 @@ function renderWorkqueuePaneItems(pane) {
   const scopedItems = filterWorkqueuePaneItemsByScope(pane, pane.workqueue?.items);
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
   const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const duplicateGroups = collapseWorkqueueDuplicateItems(items);
+  const collapsedItems = duplicateGroups.map((group) => group.representative);
   const totalCount = Array.isArray(pane.workqueue?.countItems) ? pane.workqueue.countItems.length : (Array.isArray(pane.workqueue?.items) ? pane.workqueue.items.length : items.length);
   const statusLine = pane.elements?.thread?.querySelector('[data-wq-statusline]');
-  if (statusLine) statusLine.textContent = formatWorkqueueCountText(items.length, totalCount);
-  renderWorkqueueFilterSummaryForPane(pane, { shownCount: items.length, totalCount });
   const groupMode = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
-  const rows = groupMode === 'grouped' ? summarizeWorkqueueIssueGroups(items) : items.map((item) => ({ kind: 'item', item }));
+  const rows = groupMode === 'grouped'
+    ? summarizeWorkqueueIssueGroups(items)
+    : duplicateGroups.map((group) => ({ kind: 'item', item: group.representative, duplicateGroup: group }));
+  const shownCount = groupMode === 'grouped' ? rows.length : collapsedItems.length;
+  if (statusLine) statusLine.textContent = formatWorkqueueCountText(shownCount, totalCount);
+  renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount });
   const renderLimit = Math.max(
     WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
     Number(pane.workqueue?.renderLimit || WORKQUEUE_PANE_INITIAL_RENDER_LIMIT)
@@ -4652,7 +4743,7 @@ function renderWorkqueuePaneItems(pane) {
 
   for (const entry of visibleRows) {
     if (entry.kind === 'item') {
-      appendWorkqueuePaneItemRow(pane, body, entry.item);
+      appendWorkqueuePaneItemRow(pane, body, entry.item, { duplicateGroup: entry.duplicateGroup });
       continue;
     }
 
