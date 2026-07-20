@@ -2445,7 +2445,7 @@ function buildCommandPaletteItems() {
           searchText: `open focus existing pane ${letter} ${type} ${target}`,
           run: () => paneManager.focusPanePrimary(pane)
         },
-        idx < 9 ? `⌘/Ctrl+${idx + 1}` : ''
+        `g ${String(letter || '').toLowerCase()}`
       )
     );
   });
@@ -9056,6 +9056,7 @@ globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFro
 globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFromUi());
 
 let shortcutState = { lastGAtMs: 0, blockedReasonLastShownAt: new Map() };
+const GO_TO_PANE_TIMEOUT_MS = 1200;
 const SHORTCUT_BLOCK_RATE_LIMIT_MS = 5000;
 const SHORTCUT_BLOCK_MESSAGES = {
   typing: 'Shortcut paused while typing',
@@ -9247,6 +9248,15 @@ function focusPaneIndex(idx, { trackMru = true, showHud = false } = {}) {
       }
     }
   }
+}
+
+function focusPaneByHeaderLetter(letter, { showHud = true } = {}) {
+  const wanted = String(letter || '').trim().toUpperCase();
+  if (!/^[A-Z]$/.test(wanted)) return false;
+  const idx = paneManager.panes.findIndex((pane) => paneHeaderLetter(pane).toUpperCase() === wanted);
+  if (idx < 0) return false;
+  focusPaneIndex(idx, { showHud });
+  return true;
 }
 
 function returnToLastActiveChatPane() {
@@ -9477,6 +9487,7 @@ window.addEventListener('keydown', (event) => {
 
   // Never steal focus / override browser shortcuts while typing.
   if (isTypingContext(event.target)) return;
+  if (isAnyOverlayOpen()) return;
 
   const key = String(event.key || '');
 
@@ -9591,19 +9602,25 @@ window.addEventListener('keydown', (event) => {
   if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
     if (key.toLowerCase() === 'g') {
       shortcutState.lastGAtMs = now;
+      event.preventDefault();
       return;
     }
-    if (key.toLowerCase() === 'c' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
+    if (shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < GO_TO_PANE_TIMEOUT_MS && /^[a-z]$/i.test(key)) {
       shortcutState.lastGAtMs = 0;
       event.preventDefault();
-      returnToLastActiveChatPane();
+      if (focusPaneByHeaderLetter(key, { showHud: true })) return;
+      if (key.toLowerCase() === 'c') {
+        returnToLastActiveChatPane();
+        return;
+      }
+      if (key.toLowerCase() === 'w') {
+        openTopbarWorkqueueAction();
+        return;
+      }
       return;
     }
-    if (key.toLowerCase() === 'w' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
+    if (shortcutState.lastGAtMs && now - shortcutState.lastGAtMs >= GO_TO_PANE_TIMEOUT_MS) {
       shortcutState.lastGAtMs = 0;
-      event.preventDefault();
-      openTopbarWorkqueueAction();
-      return;
     }
   }
 });
