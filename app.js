@@ -2869,6 +2869,7 @@ function applyShortcutsFilters() {
 }
 
 function focusShortcutsSearch() {
+  if (!globalElements.shortcutsModal?.classList.contains('open')) return;
   const target = globalElements.shortcutsSearchInput || globalElements.shortcutsDialog || globalElements.shortcutsCloseBtn || globalElements.shortcutsModal;
   try {
     target?.focus?.({ preventScroll: true });
@@ -2882,7 +2883,10 @@ function scheduleShortcutsSearchFocus() {
     window.clearInterval(shortcutsFocusTimer);
     shortcutsFocusTimer = null;
   }
+
   focusShortcutsSearch();
+  window.requestAnimationFrame?.(focusShortcutsSearch);
+
   const startedAt = Date.now();
   shortcutsFocusTimer = window.setInterval(() => {
     if (!globalElements.shortcutsModal?.classList.contains('open')) {
@@ -2890,11 +2894,12 @@ function scheduleShortcutsSearchFocus() {
       shortcutsFocusTimer = null;
       return;
     }
-    focusShortcutsSearch();
     if (document.activeElement === globalElements.shortcutsSearchInput || Date.now() - startedAt > 1500) {
       window.clearInterval(shortcutsFocusTimer);
       shortcutsFocusTimer = null;
+      return;
     }
+    focusShortcutsSearch();
   }, 50);
 }
 
