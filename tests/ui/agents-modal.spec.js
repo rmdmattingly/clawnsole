@@ -71,7 +71,7 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await expect(page.locator('#agentsModal')).toHaveClass(/open/);
 
   await expect(page.locator('#agentsLastRefreshed')).toContainText('Last refreshed:');
-  await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText(/\d+[smhd]/);
+  await expect(page.locator('#agentsList [data-agents-row-column="heartbeat"]').first()).toContainText(/\d+[smhd]/);
 });
 
 test('agents modal shows fleet health summary counts and refreshes them', async ({ page, clawnsole }) => {
@@ -222,6 +222,54 @@ test('agents modal heartbeat heatmap and stale-first sort are toggleable and res
   await page.getByRole('button', { name: 'Reset sort' }).click();
   await expect(page.locator('#agentsSort')).toHaveValue('recent_desc');
   await expect(page.locator('#agentsSortIndicator')).toHaveText('');
+});
+
+test('fleet density and optional columns persist across reload', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha', model: 'gpt-5.4', host: 'workstation-a' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta', model: 'gpt-5.4-mini', host: 'workstation-b' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({ alpha: now, beta: now }));
+    localStorage.removeItem('clawnsole.admin.agents.density');
+    localStorage.removeItem('clawnsole.admin.agents.columns');
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+  await expect(page.locator('#agentsList')).toHaveAttribute('data-density', 'comfortable');
+  await expect(page.locator('[data-agents-column="model"]')).toBeChecked();
+  await expect(page.locator('[data-agents-column="host"]')).toBeChecked();
+  await expect(page.locator('#agentsList [data-agents-row-column="model"]')).toHaveCount(2);
+  await expect(page.locator('#agentsList [data-agents-row-column="host"]')).toHaveCount(2);
+  await expect(page.locator('#agentsList [data-agents-row-column="heartbeat"]')).toHaveCount(2);
+  await expect(page.locator('#agentsList [data-agents-row-column="status"]')).toHaveCount(2);
+
+  const firstRow = page.locator('#agentsList .agents-row').first();
+  await expect(firstRow.locator('[data-agent-action="open-chat"]').first()).toBeVisible();
+  await page.locator('[data-agents-column="host"]').uncheck();
+  await page.getByRole('button', { name: 'Compact' }).click();
+  await expect(page.locator('#agentsList')).toHaveAttribute('data-density', 'compact');
+  await expect(page.locator('#agentsList [data-agents-row-column="host"]')).toHaveCount(0);
+  await expect(firstRow.locator('[data-agent-action="open-chat"]').first()).toBeVisible();
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsList')).toHaveAttribute('data-density', 'compact');
+  await expect(page.locator('[data-agents-column="host"]')).not.toBeChecked();
+  await expect(page.locator('[data-agents-column="model"]')).toBeChecked();
+  await expect(page.locator('#agentsList [data-agents-row-column="host"]')).toHaveCount(0);
+  await expect(page.locator('#agentsList [data-agents-row-column="model"]')).toHaveCount(2);
 });
 
 test('agents modal quick actions open/reuse chat, timeline, and workqueue context', async ({ page, clawnsole }) => {

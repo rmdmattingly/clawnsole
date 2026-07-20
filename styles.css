@@ -1754,6 +1754,46 @@ button.agents-section-title:hover {
   text-overflow: ellipsis;
 }
 
+.agents-column-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agents-row-columns {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(96px, 1fr));
+  gap: 6px 10px;
+  margin-top: 6px;
+  align-items: center;
+}
+
+.agents-list.compact .agents-row-columns {
+  grid-template-columns: repeat(4, minmax(72px, 1fr));
+  gap: 3px 8px;
+  margin-top: 2px;
+}
+
+.agents-row-column {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agents-list.compact .agents-row-column {
+  font-size: 11px;
+  line-height: 1.1;
+}
+
+.agents-row-column-label {
+  color: var(--dim);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
 .agents-age-chip {
   display: inline-block;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -1837,6 +1877,11 @@ button.agents-section-title:hover {
 @media (max-width: 860px) {
   .agents-row {
     grid-template-columns: 42px 1fr auto;
+  }
+
+  .agents-row-columns,
+  .agents-list.compact .agents-row-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .agents-row-actions-inline {

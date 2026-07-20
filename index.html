@@ -468,6 +468,27 @@
                 <button type="button" class="agents-chip" data-agents-density="compact" aria-pressed="false">Compact</button>
               </div>
             </div>
+            <div class="agents-field agents-columns">
+              <span class="agents-label">Columns</span>
+              <div class="agents-column-toggle" role="group" aria-label="Fleet columns">
+                <label class="agents-toggle">
+                  <input type="checkbox" data-agents-column="model" checked />
+                  <span>Model</span>
+                </label>
+                <label class="agents-toggle">
+                  <input type="checkbox" data-agents-column="host" checked />
+                  <span>Host</span>
+                </label>
+                <label class="agents-toggle">
+                  <input type="checkbox" data-agents-column="heartbeat" checked />
+                  <span>Heartbeat</span>
+                </label>
+                <label class="agents-toggle">
+                  <input type="checkbox" data-agents-column="status" checked />
+                  <span>Status</span>
+                </label>
+              </div>
+            </div>
           </div>
 
           <div id="agentsList" class="agents-list" aria-label="Agent list"></div>
