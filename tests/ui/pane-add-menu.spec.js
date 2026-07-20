@@ -37,6 +37,8 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
   await expect(menu.locator('[data-testid="pane-add-menu-workqueue"]')).toHaveText(/New Workqueue pane/);
   await expect(menu.locator('[data-testid="pane-add-menu-cron"]')).toHaveText(/New Cron pane/);
   await expect(menu.locator('[data-testid="pane-add-menu-timeline"]')).toHaveText(/New Timeline pane/);
+  await expect(menu.locator('[data-testid="pane-add-menu-chat"]')).toHaveText(/Chat -> Agent: main/);
+  await expect(menu.locator('[data-testid="pane-add-menu-workqueue"]')).toHaveText(/Workqueue -> Queue: dev-team \/ unassigned/);
 
   // Add a workqueue pane and ensure it exists + focus lands on primary control.
   await menu.locator('[data-testid="pane-add-menu-workqueue"]').click();
@@ -47,6 +49,35 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
   const queueSelect = wqPane.locator('[data-wq-queue-select]');
   await expect(queueSelect).toBeVisible();
   await expect(queueSelect).toBeFocused();
+});
+
+test('pane add menu: workqueue override is applied before pane opens', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.layoutMode', 'custom'));
+
+  while (await page.locator('[data-pane]').count() > 1) {
+    await page.locator('[data-pane] button[aria-label="Close pane"]').last().click();
+  }
+
+  await page.locator('#addPaneBtn').click();
+  const menu = page.locator('[data-testid="pane-add-menu"]');
+  await expect(menu).toBeVisible();
+
+  await menu.locator('[data-testid="pane-add-menu-workqueue-queue"]').fill('ci-team');
+  await menu.locator('[data-testid="pane-add-menu-workqueue-scope"]').selectOption('all');
+  await expect(menu.locator('[data-testid="pane-add-menu-workqueue"]')).toHaveText(/Workqueue -> Queue: ci-team \/ all/);
+
+  await menu.locator('[data-testid="pane-add-menu-workqueue"]').click();
+
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await expect(wqPane).toBeVisible();
+  await expect(wqPane.getByTestId('pane-destination-value')).toHaveText('ci-team');
+  await expect(wqPane.locator('[data-wq-scope="all"]')).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('pane add menu: single click reuses matching non-chat pane target', async ({ page }) => {

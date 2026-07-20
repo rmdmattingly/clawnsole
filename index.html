@@ -95,7 +95,10 @@
                   <span class="pane-type-icon" data-pane-type-icon aria-hidden="true">💬</span>
                   <span class="pane-type-text" data-pane-type-text>CHAT</span>
                 </div>
-                <div class="pane-name" data-pane-name data-testid="pane-type-label">Pane</div>
+                <div class="pane-name" data-pane-name data-testid="pane-type-label">
+                  <span class="pane-name-token" data-pane-name-token data-testid="pane-name-token">A Chat</span>
+                  <span class="pane-name-target" data-pane-name-target data-testid="pane-name-target"> · main</span>
+                </div>
                 <div class="pane-agent" data-pane-agent-wrap>
                   <span class="agent-label" data-pane-target-label data-testid="pane-target-label">Agent</span>
                   <button class="agent-pill-btn" type="button" data-pane-agent-button aria-label="Change agent" data-testid="pane-agent-button">
@@ -251,9 +254,12 @@
             <h3 class="shortcut-group-title">Pane focus/navigation</h3>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Alt</kbd>/<kbd>Option</kbd>+<kbd>1</kbd>..<kbd>9</kbd></div><div class="shortcut-desc">Focus panes 1-9 by visible order</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>4</kbd></div><div class="shortcut-desc">Focus pane 1-4</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>a</kbd>..<kbd>z</kbd></div><div class="shortcut-desc">Focus pane by visible letter</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>P</kbd></div><div class="shortcut-desc">Open Pane Manager</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next Chat pane only</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous Chat pane only</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>c</kbd></div><div class="shortcut-desc">Return to last active Chat pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>L</kbd></div><div class="shortcut-desc">Focus Chat composer</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Tab</kbd></div><div class="shortcut-desc">Switch panes by most-recent focus order</div></div>
@@ -274,6 +280,10 @@
           <div class="shortcut-group">
             <h3 class="shortcut-group-title">Workqueue actions</h3>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>w</kbd></div><div class="shortcut-desc">Open Workqueue modal</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>j</kbd>/<kbd>k</kbd></div><div class="shortcut-desc">Move selected row in Workqueue keyboard mode</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Enter</kbd></div><div class="shortcut-desc">Inspect selected Workqueue row in keyboard mode</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>e</kbd></div><div class="shortcut-desc">Edit selected Workqueue row in keyboard mode</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>1</kbd>..<kbd>4</kbd></div><div class="shortcut-desc">Set ready, in progress, blocked, or done in keyboard mode</div></div>
           </div>
         </div>
       </div>

@@ -12,6 +12,21 @@ test.afterAll(() => {
   app?.stop?.();
 });
 
+async function seedChatOnlyPaneLayout(page, serverPort, { agentId = 'main' } = {}) {
+  await page.addInitScript((nextAgentId) => {
+    localStorage.setItem('clawnsole.admin.layoutMode', 'custom');
+    localStorage.setItem('clawnsole.admin.agentId', nextAgentId);
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([{ key: 'ptestchat', kind: 'chat', agentId: nextAgentId }])
+    );
+  }, agentId);
+  await page.goto(`http://127.0.0.1:${serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+}
+
 test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
@@ -164,6 +179,71 @@ test('cmd/ctrl+shift+j focuses previous pane with wraparound from unfocused stat
   await expect.poll(activePaneIndex).toBe(2);
 });
 
+test('cmd/ctrl+alt+j/k cycles chat panes only and keeps typing guard', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  await expect(panes).toHaveCount(2);
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  const triggerChatCycle = async (key, { targetInput = false } = {}) => {
+    await page.evaluate(({ key, targetInput }) => {
+      const event = new KeyboardEvent('keydown', {
+        key,
+        ctrlKey: true,
+        altKey: true,
+        bubbles: true,
+        cancelable: true
+      });
+      const target = targetInput
+        ? document.querySelector('[data-pane][data-pane-kind="chat"] [data-pane-input]')
+        : window;
+      target.dispatchEvent(event);
+    }, { key, targetInput });
+  };
+
+  await page.click('#connectionStatus');
+  await page.evaluate(() => focusPaneIndex(0));
+  await expect.poll(activePaneIndex).toBe(0);
+  await triggerChatCycle('K');
+  await expect.poll(activePaneIndex).toBe(0);
+  await expect(page.getByTestId('toast').last()).toContainText('Only one Chat pane is open.');
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-chat').click();
+  await expect(panes).toHaveCount(3);
+  await expect(panes.nth(1)).toHaveAttribute('data-pane-kind', 'workqueue');
+  await expect(panes.nth(2)).toHaveAttribute('data-pane-kind', 'chat');
+
+  await page.evaluate(() => focusPaneIndex(0));
+  await expect.poll(activePaneIndex).toBe(0);
+  await triggerChatCycle('K');
+  await expect.poll(activePaneIndex).toBe(2);
+  await triggerChatCycle('J');
+  await expect.poll(activePaneIndex).toBe(0);
+
+  const firstPaneInput = panes.first().locator('[data-pane-input]');
+  await firstPaneInput.focus();
+  await expect(firstPaneInput).toBeFocused();
+  await triggerChatCycle('K', { targetInput: true });
+  await expect.poll(activePaneIndex).toBe(0);
+  await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Shortcut paused while typing');
+});
+
 test('alt+1..3 and cmd/ctrl+1..3 focus panes by visible order; shortcuts do not fire while typing', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
@@ -206,6 +286,83 @@ test('alt+1..3 and cmd/ctrl+1..3 focus panes by visible order; shortcuts do not 
 
   await page.keyboard.press('Control+3');
   await expect.poll(activePaneIndex).toBe(0);
+});
+
+test('g then pane letter focuses matching pane and exits cleanly on misses', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('g');
+  await page.keyboard.press('b');
+  await expect.poll(activePaneIndex).toBe(1);
+
+  await page.keyboard.press('g');
+  await page.keyboard.press('z');
+  await expect.poll(activePaneIndex).toBe(1);
+
+  await page.keyboard.press('b');
+  await expect.poll(activePaneIndex).toBe(1);
+});
+
+test('g then pane letter is suppressed while typing and while modals are active', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]')).filter((pane) => pane.getClientRects().length > 0);
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  const firstPaneInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
+  await page.evaluate(() => focusPaneIndex(0));
+  await firstPaneInput.focus();
+  await expect(firstPaneInput).toBeFocused();
+  await expect.poll(activePaneIndex).toBe(0);
+  await page.keyboard.press('g');
+  await page.keyboard.press('b');
+  await expect(firstPaneInput).toHaveValue('gb');
+  await expect.poll(activePaneIndex).toBe(0);
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'false');
+  await page.keyboard.press('g');
+  await page.keyboard.press('b');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'true');
+  await expect.poll(activePaneIndex).not.toBe(1);
 });
 
 test('pane-switch HUD appears for keyboard pane navigation and respects settings', async ({ page }) => {
@@ -394,6 +551,31 @@ test('add-pane shortcuts are scoped away from overlays and menus', async ({ page
 
   await fireAddChatShortcut();
   await expect(panes).toHaveCount(4);
+});
+
+test('ctrl/cmd+shift+g opens or focuses workqueue for active chat agent', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await seedChatOnlyPaneLayout(page, app.serverPort);
+
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(0);
+
+  await chatInput.focus();
+  await page.keyboard.press('ControlOrMeta+Shift+G');
+
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]');
+  await expect(wqPane).toHaveCount(1);
+  await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
+  await expect(wqPane.locator('[data-wq-scope="assigned"]')).toHaveClass(/active/);
+
+  await chatInput.focus();
+  await page.keyboard.press('ControlOrMeta+Shift+G');
+  await expect(wqPane).toHaveCount(1);
+  await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
 });
 
 test('fleet quick action button + keyboard shortcut focus existing timeline pane without duplicates', async ({ page }) => {

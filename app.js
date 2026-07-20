@@ -340,11 +340,10 @@ function buildDefaultAdminPanes(defaultAgent = 'main') {
       key: `p${randomId().slice(0, 8)}`,
       kind: 'workqueue',
       queue: 'dev-team',
-      statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+      statusFilter: ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
       scopeFilter: getDefaultWorkqueueScope(),
       sortKey: 'priority',
-      sortDir: 'desc',
-      groupMode: 'rows'
+      sortDir: 'desc'
     }
   ];
 }
@@ -1786,7 +1785,7 @@ function paneBrowserTitle(pane) {
   if (!pane) return 'Clawnsole';
   const parts = ['Clawnsole', paneLabel(pane)];
   if (pane.kind === 'chat' || pane.kind === 'workqueue') {
-    const target = paneTargetLabel(pane);
+    const target = paneDisplayTargetLabel(pane);
     if (target) parts.push(target);
   }
   return parts.join(' · ');
@@ -1805,7 +1804,7 @@ function updateBrowserTitle(pane = null) {
 function paneIdentityLabel(pane, { includeUnread = false } = {}) {
   const letter = paneHeaderLetter(pane);
   const type = paneLabel(pane);
-  const target = paneTargetLabel(pane);
+  const target = paneDisplayTargetLabel(pane);
   const unread = paneUnreadCount(pane);
   return `${letter} ${type} · ${target}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
 }
@@ -1867,6 +1866,21 @@ function showPaneSwitchHud(pane) {
 
 function paneDuplicateKey(pane) {
   return `${String(pane?.kind || 'chat')}::${String(paneTargetLabel(pane) || '').trim().toLowerCase()}`;
+}
+
+function paneDuplicateOrdinal(pane) {
+  const panes = Array.isArray(paneManager?.panes) ? paneManager.panes : [];
+  const duplicateKey = paneDuplicateKey(pane);
+  const matching = panes.filter((entry) => paneDuplicateKey(entry) === duplicateKey);
+  if (matching.length <= 1) return { ordinal: 0, total: matching.length };
+  const index = matching.findIndex((entry) => String(entry?.key || '') === String(pane?.key || ''));
+  return { ordinal: index >= 0 ? index + 1 : 0, total: matching.length };
+}
+
+function paneDisplayTargetLabel(pane) {
+  const target = paneTargetLabel(pane);
+  const { ordinal } = paneDuplicateOrdinal(pane);
+  return ordinal > 0 ? `${target} (${ordinal})` : target;
 }
 
 function focusedPaneKey() {
@@ -2353,7 +2367,8 @@ const commandPaletteState = {
   items: [],
   filtered: [],
   selectedIndex: 0,
-  expandedSubgroups: new Set()
+  expandedSubgroups: new Set(),
+  originPaneKey: ''
 };
 
 const COMMAND_PALETTE_GROUP_ORDER = ['Panes', 'Navigation', 'Layout', 'Workqueue', 'Agents', 'Advanced'];
@@ -2374,6 +2389,7 @@ function isCommandPaletteOpen() {
 function closeCommandPalette({ restoreFocus = true } = {}) {
   if (!globalElements.commandPaletteModal) return;
   commandPaletteState.open = false;
+  commandPaletteState.originPaneKey = '';
   globalElements.commandPaletteModal.classList.remove('open');
   globalElements.commandPaletteModal.setAttribute('aria-hidden', 'true');
   if (restoreFocus) {
@@ -2418,7 +2434,7 @@ function buildCommandPaletteItems() {
   paneManager.panes.forEach((pane, idx) => {
     const letter = paneHeaderLetter(pane);
     const type = paneLabel(pane);
-    const target = paneTargetLabel(pane);
+    const target = paneDisplayTargetLabel(pane);
     items.push(
       withShortcut(
         {
@@ -2429,7 +2445,7 @@ function buildCommandPaletteItems() {
           searchText: `open focus existing pane ${letter} ${type} ${target}`,
           run: () => paneManager.focusPanePrimary(pane)
         },
-        idx < 9 ? `⌘/Ctrl+${idx + 1}` : ''
+        `g ${String(letter || '').toLowerCase()}`
       )
     );
   });
@@ -2589,6 +2605,15 @@ function buildCommandPaletteItems() {
       'g w'
     ),
     withShortcut(
+      {
+        id: 'cmd:open-workqueue-active-agent',
+        label: 'Workqueue for active chat agent',
+        detail: 'Open/focus a Workqueue pane scoped to the active chat agent',
+        run: () => openWorkqueueForActiveChatAgent()
+      },
+      '⌘/Ctrl+Shift+G'
+    ),
+    withShortcut(
       { id: 'cmd:refresh-agents', label: 'Agents: Refresh', detail: 'Refresh agent list', run: () => globalElements.refreshAgentsBtn?.click?.() },
       ''
     ),
@@ -2608,6 +2633,14 @@ function buildCommandPaletteItems() {
     withShortcut(
       { id: 'cmd:pane-cycle-backward', label: 'Panes: Cycle focus backward', detail: 'Move focus to previous pane', run: () => cyclePaneFocusBackward() },
       '⌘/Ctrl+Shift+J'
+    ),
+    withShortcut(
+      { id: 'cmd:chat-cycle-next', label: 'Chat: Focus next Chat pane', detail: 'Move to the next Chat pane by focus history, skipping non-chat panes', run: () => cycleChatPaneFocus(1) },
+      '⌘/Ctrl+Alt+K'
+    ),
+    withShortcut(
+      { id: 'cmd:chat-cycle-previous', label: 'Chat: Focus previous Chat pane', detail: 'Move to the previous Chat pane by focus history, skipping non-chat panes', run: () => cycleChatPaneFocus(-1) },
+      '⌘/Ctrl+Alt+J'
     ),
     withShortcut(
       { id: 'cmd:pane-return-last-chat', label: 'Panes: Return to last active Chat pane', detail: 'Jump back to the most recent chat pane in focus history', run: () => returnToLastActiveChatPane() },
@@ -2684,9 +2717,9 @@ function buildCommandPaletteItems() {
       enriched.priority = 85;
       return enriched;
     }
-    if (id === 'cmd:open-workqueue') {
+    if (id === 'cmd:open-workqueue' || id === 'cmd:open-workqueue-active-agent') {
       enriched.group = 'Workqueue';
-      enriched.priority = 92;
+      enriched.priority = id === 'cmd:open-workqueue-active-agent' ? 96 : 92;
       return enriched;
     }
     if (id === 'cmd:refresh-agents') {
@@ -2894,6 +2927,7 @@ function openCommandPalette() {
   if (!globalElements.commandPaletteModal) return;
 
   commandPaletteState.open = true;
+  commandPaletteState.originPaneKey = focusedPaneKey() || paneMruOrder()[0] || '';
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
   commandPaletteState.selectedIndex = 0;
@@ -2988,6 +3022,62 @@ function findExistingPane(kind, predicate = null) {
     if (!predicate || predicate(pane)) return pane;
   }
   return null;
+}
+
+function getActiveChatAgentPane() {
+  const focusedKey = focusedPaneKey();
+  const fallbackKey = paneMruOrder()[0] || '';
+  const originKey = commandPaletteState.open ? String(commandPaletteState.originPaneKey || '') : '';
+  const activeKey = originKey || focusedKey || fallbackKey;
+  return (paneManager?.panes || []).find((pane) => String(pane?.key || '') === activeKey && pane.kind === 'chat') || null;
+}
+
+function openWorkqueueForActiveChatAgent() {
+  if (roleState.role !== 'admin') return null;
+  const chatPane = getActiveChatAgentPane();
+  const agentId = normalizeAgentId(chatPane?.agentId || '');
+  if (!chatPane || !agentId) {
+    showToast('No active chat agent selected', { kind: 'error', timeoutMs: 2600 });
+    return null;
+  }
+
+  const queue = 'dev-team';
+  const existing = findExistingPane('workqueue', (pane) =>
+    normalizeAgentId(pane.agentId || 'main') === agentId &&
+    String(pane.workqueue?.queue || '').trim() === queue
+  );
+
+  const pane = existing || paneManager.addPane('workqueue', {
+    forceNew: true,
+    agentId,
+    queue,
+    scopeFilter: 'assigned'
+  });
+  if (!pane) return null;
+
+  pane.agentId = agentId;
+  pane.workqueue.scopeFilter = 'assigned';
+  paneManager.persistAdminPanes();
+  paneManager.focusPanePrimary(pane);
+  try {
+    const scopeBtn = pane.elements?.thread?.querySelector?.('[data-wq-scope="assigned"]');
+    scopeBtn?.click?.();
+  } catch {
+    renderWorkqueuePaneItems(pane);
+  }
+
+  const focusWorkqueuePane = () => {
+    try {
+      const queueSelect = pane.elements?.thread?.querySelector?.('[data-wq-queue-select]');
+      (queueSelect || pane.elements?.thread)?.focus?.();
+    } catch {}
+  };
+  setTimeout(focusWorkqueuePane, 0);
+  setTimeout(focusWorkqueuePane, 30);
+  setTimeout(focusWorkqueuePane, 120);
+  setTimeout(focusWorkqueuePane, 300);
+  showToast(`Workqueue scoped to ${agentId}`, { kind: 'info', timeoutMs: 1600 });
+  return pane;
 }
 
 function openAgentChatFromFleet(agentId) {
@@ -3355,7 +3445,7 @@ function renderAgentsModalList() {
 
 // Workqueue (admin-only)
 
-const WORKQUEUE_STATUSES = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
+const WORKQUEUE_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress', 'done', 'failed'];
 const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
 const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
 const WORKQUEUE_HEADER_META = {
@@ -3380,6 +3470,21 @@ function formatWorkqueueStatusLabel(status) {
     .join(' ');
 }
 
+function formatWorkqueueScopeLabel(scope) {
+  const s = String(scope || '').trim().toLowerCase();
+  if (s === 'assigned') return 'Assigned';
+  if (s === 'unassigned') return 'Unassigned';
+  return 'All';
+}
+
+function formatWorkqueueSourceLabel(source) {
+  const s = String(source || '').trim().toLowerCase();
+  if (s === 'issue') return 'Issue';
+  if (s === 'routine') return 'Routine';
+  if (s === 'coordination') return 'Coordination';
+  return 'Other';
+}
+
 function buildWorkqueueStatusCounts(items) {
   const counts = Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0]));
   for (const it of Array.isArray(items) ? items : []) {
@@ -3393,10 +3498,11 @@ function buildWorkqueueStatusCounts(items) {
 const workqueueState = {
   queues: [],
   selectedQueue: '',
-  statusFilter: new Set(['ready', 'pending', 'claimed', 'in_progress']),
+  statusFilter: new Set(['ready', 'pending', 'blocked', 'claimed', 'in_progress']),
   statusCounts: Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0])),
   items: [],
   selectedItemId: null,
+  groupMode: 'rows',
   sortKey: 'default',
   sortDir: 'desc',
   leaseTicker: null,
@@ -3619,6 +3725,7 @@ function getWorkqueueBoardColumns() {
   const defs = [
     { status: 'ready', label: 'Ready' },
     { status: 'pending', label: 'Pending' },
+    { status: 'blocked', label: 'Blocked' },
     { status: 'claimed', label: 'Claimed' },
     { status: 'in_progress', label: 'In progress' },
     { status: 'done', label: 'Done' },
@@ -3808,7 +3915,7 @@ async function workqueueEditItem(item) {
   if (priorityRaw === null) return;
   const priority = Number(priorityRaw);
 
-  const status = prompt('Edit status (ready|pending|claimed|in_progress|done|failed)', String(item.status || 'ready'));
+  const status = prompt('Edit status (ready|pending|blocked|claimed|in_progress|done|failed)', String(item.status || 'ready'));
   if (status === null) return;
 
   try {
@@ -3893,7 +4000,7 @@ async function fetchWorkqueueItems({ queue = '', statuses = [] } = {}) {
 }
 
 function renderWorkqueueCounts(rootEl, counts) {
-  const statuses = ['ready', 'pending', 'claimed', 'in_progress', 'done', 'failed'];
+  const statuses = WORKQUEUE_STATUSES;
   const list = document.createElement('dl');
   list.className = 'wq-counts';
   for (const s of statuses) {
@@ -4070,7 +4177,7 @@ function getWorkqueueIssueKey(item) {
 }
 
 function chooseWorkqueueDuplicateKeepItem(items) {
-  const statusRank = { in_progress: 5, claimed: 4, ready: 3, pending: 2, done: 1, failed: 0 };
+  const statusRank = { in_progress: 6, claimed: 5, ready: 4, pending: 3, blocked: 2, done: 1, failed: 0 };
   return (Array.isArray(items) ? items : [])
     .slice()
     .sort((a, b) => {
@@ -4116,12 +4223,127 @@ function groupWorkqueueDuplicateIssues(items) {
 function applyWorkqueueQuickFilters(items, quickFilters) {
   const sourceSet = new Set(Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((x) => String(x || '').trim()).filter(Boolean) : []);
   const repoSet = new Set(Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((x) => String(x || '').trim()).filter(Boolean) : []);
+  const search = String(quickFilters?.search || '').trim().toLowerCase();
 
   return (Array.isArray(items) ? items : []).filter((it) => {
     if (sourceSet.size && !sourceSet.has(getWorkqueueItemSource(it))) return false;
     if (repoSet.size && !repoSet.has(getWorkqueueItemRepo(it))) return false;
+    if (search) {
+      const haystack = [
+        it?.id,
+        it?.title,
+        it?.instructions,
+        it?.dedupeKey,
+        it?.status,
+        it?.claimedBy,
+        getWorkqueueItemRepo(it),
+        getWorkqueueItemSource(it)
+      ].map((v) => String(v || '').toLowerCase()).join('\n');
+      if (!haystack.includes(search)) return false;
+    }
     return true;
   });
+}
+
+function formatWorkqueueCountText(shown, total) {
+  const shownNum = Number(shown) || 0;
+  const totalNum = Number(total) || 0;
+  const noun = shownNum === 1 ? 'item' : 'items';
+  if (totalNum > 0 && shownNum !== totalNum) return `Showing ${shownNum} of ${totalNum} ${totalNum === 1 ? 'item' : 'items'}`;
+  return `Showing ${shownNum} ${noun}`;
+}
+
+function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount } = {}) {
+  const root = pane?.elements?.thread?.querySelector?.('[data-wq-filter-summary]');
+  if (!root) return;
+
+  const queue = String(pane.workqueue?.queue || '').trim();
+  const scope = pane.workqueue?.scopeFilter || 'all';
+  const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter.map((s) => String(s || '').trim()).filter(Boolean) : [];
+  const quick = pane.workqueue?.quickFilters || {};
+  const sources = Array.isArray(quick.sources) ? quick.sources.map((s) => String(s || '').trim()).filter(Boolean) : [];
+  const repos = Array.isArray(quick.repos) ? quick.repos.map((s) => String(s || '').trim()).filter(Boolean) : [];
+  const search = String(quick.search || '').trim();
+  const hasFilters = !!queue || !!scope || statuses.length || sources.length || repos.length || !!search;
+
+  root.innerHTML = '';
+  root.hidden = !hasFilters;
+  if (!hasFilters) return;
+
+  const count = document.createElement('span');
+  count.className = 'wq-filter-count';
+  count.textContent = formatWorkqueueCountText(shownCount, totalCount);
+  root.appendChild(count);
+
+  const addToken = ({ label, value, title, action, removable = true }) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'wq-filter-token';
+    btn.title = title || (removable ? `Remove ${label} filter` : label);
+    btn.setAttribute('aria-label', btn.title);
+    btn.disabled = !removable;
+    btn.innerHTML = `<span class="wq-filter-token-label">${escapeHtml(label)}</span> <span>${escapeHtml(value)}</span>${removable ? ' <span aria-hidden="true">×</span>' : ''}`;
+    if (removable && typeof action === 'function') btn.addEventListener('click', action);
+    root.appendChild(btn);
+  };
+
+  if (queue) {
+    addToken({
+      label: 'Queue',
+      value: queue,
+      title: queue === 'dev-team' ? 'Queue target dev-team' : `Reset queue filter ${queue} to dev-team`,
+      removable: queue !== 'dev-team',
+      action: () => pane.workqueue?.setQueue?.('dev-team')
+    });
+  }
+  addToken({
+    label: 'Scope',
+    value: formatWorkqueueScopeLabel(scope),
+    title: `Reset scope filter ${formatWorkqueueScopeLabel(scope)} to All`,
+    removable: scope !== 'all',
+    action: () => pane.workqueue?.setScope?.('all')
+  });
+  for (const status of statuses) {
+    addToken({
+      label: 'Status',
+      value: formatWorkqueueStatusLabel(status),
+      title: `Remove status filter ${formatWorkqueueStatusLabel(status)}`,
+      action: () => pane.workqueue?.applyStatuses?.(statuses.filter((s) => s !== status))
+    });
+  }
+  for (const source of sources) {
+    addToken({
+      label: 'Source',
+      value: formatWorkqueueSourceLabel(source),
+      title: `Remove source filter ${formatWorkqueueSourceLabel(source)}`,
+      action: () => pane.workqueue?.removeQuickFilter?.('source', source)
+    });
+  }
+  for (const repo of repos) {
+    addToken({
+      label: 'Repo',
+      value: repo,
+      title: `Remove repo filter ${repo}`,
+      action: () => pane.workqueue?.removeQuickFilter?.('repo', repo)
+    });
+  }
+  if (search) {
+    addToken({
+      label: 'Search',
+      value: search,
+      title: `Clear search query ${search}`,
+      action: () => pane.workqueue?.setQuickSearch?.('')
+    });
+  }
+
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.className = 'secondary wq-clear-all-filters';
+  clear.setAttribute('data-wq-clear-all-filters', '');
+  clear.textContent = 'Clear all filters';
+  clear.title = 'Clear status, scope, search, source, and repo filters. Queue target is preserved.';
+  clear.addEventListener('click', () => pane.workqueue?.clearAllFilters?.());
+  root.appendChild(clear);
 }
 
 function formatWorkqueueStatusSummary(items) {
@@ -4195,6 +4417,7 @@ function appendWorkqueuePaneItemRow(pane, body, item, { child = false } = {}) {
   row.type = 'button';
   row.className = child ? 'wq-row wq-row-child' : 'wq-row';
   if (item.id && item.id === pane.workqueue.selectedItemId) row.classList.add('selected');
+  if (item.id) row.setAttribute('data-wq-item', item.id);
 
   const leaseMs = item.leaseUntil ? Number(item.leaseUntil) - Date.now() : NaN;
   const leaseLabel = item.leaseUntil ? fmtRemaining(leaseMs) : '';
@@ -4268,7 +4491,6 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
     if (previousSignature && previousSignature !== nextSignature) {
       markPaneUnread(pane, 1, 'workqueue');
     }
-    if (statusLine) statusLine.textContent = `${items.length} item(s)`;
     if (typeof pane.workqueue.renderStatusMultiSelect === 'function') pane.workqueue.renderStatusMultiSelect();
     renderWorkqueuePaneItems(pane);
   } catch (err) {
@@ -4367,6 +4589,10 @@ function renderWorkqueuePaneItems(pane) {
   const scopedItems = filterWorkqueuePaneItemsByScope(pane, pane.workqueue?.items);
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
   const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const totalCount = Array.isArray(pane.workqueue?.countItems) ? pane.workqueue.countItems.length : (Array.isArray(pane.workqueue?.items) ? pane.workqueue.items.length : items.length);
+  const statusLine = pane.elements?.thread?.querySelector('[data-wq-statusline]');
+  if (statusLine) statusLine.textContent = formatWorkqueueCountText(items.length, totalCount);
+  renderWorkqueueFilterSummaryForPane(pane, { shownCount: items.length, totalCount });
   const groupMode = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
   const rows = groupMode === 'grouped' ? summarizeWorkqueueIssueGroups(items) : items.map((item) => ({ kind: 'item', item }));
   const renderLimit = Math.max(
@@ -4374,6 +4600,12 @@ function renderWorkqueuePaneItems(pane) {
     Number(pane.workqueue?.renderLimit || WORKQUEUE_PANE_INITIAL_RENDER_LIMIT)
   );
   const visibleRows = rows.slice(0, renderLimit);
+  const visibleItems = visibleRows.flatMap((entry) => entry.kind === 'group' ? entry.items : [entry.item]).filter(Boolean);
+  pane.workqueue.visibleItemIds = visibleItems.map((it) => it.id).filter(Boolean);
+
+  if (pane.workqueue.keyboardMode && visibleItems.length && !pane.workqueue.selectedItemId) {
+    pane.workqueue.selectedItemId = visibleItems[0].id || null;
+  }
 
   if (empty) {
     const hasItems = items.length > 0;
@@ -4467,6 +4699,83 @@ function renderWorkqueuePaneItems(pane) {
     pane.workqueue.selectedItemId = null;
     renderWorkqueuePaneInspect(pane, null);
   }
+}
+
+function selectWorkqueuePaneItemByDelta(pane, delta) {
+  const ids = Array.isArray(pane?.workqueue?.visibleItemIds) ? pane.workqueue.visibleItemIds : [];
+  if (!ids.length) return;
+  const current = pane.workqueue.selectedItemId;
+  const currentIndex = Math.max(0, ids.indexOf(current));
+  const nextIndex = Math.max(0, Math.min(ids.length - 1, currentIndex + delta));
+  pane.workqueue.selectedItemId = ids[nextIndex] || null;
+  const selected = (pane.workqueue.items || []).find((it) => it.id === pane.workqueue.selectedItemId) || null;
+  renderWorkqueuePaneItems(pane);
+  renderWorkqueuePaneInspect(pane, selected);
+  const row = pane.elements?.thread?.querySelector?.(`[data-wq-item="${CSS.escape(String(pane.workqueue.selectedItemId || ''))}"]`);
+  row?.focus?.({ preventScroll: true });
+  row?.scrollIntoView?.({ block: 'nearest' });
+}
+
+async function setWorkqueuePaneSelectedStatus(pane, status) {
+  const itemId = pane?.workqueue?.selectedItemId;
+  if (!itemId) return;
+  try {
+    const res = await fetch('/api/workqueue/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ itemId, patch: { status } })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) throw new Error(data?.error || String(res.status));
+    const ix = Array.isArray(pane.workqueue.items) ? pane.workqueue.items.findIndex((it) => it.id === itemId) : -1;
+    if (ix >= 0) pane.workqueue.items[ix] = data.item;
+    addFeed('ok', 'workqueue', `Updated ${itemId} to ${status}`);
+    renderWorkqueuePaneItems(pane);
+    renderWorkqueuePaneInspect(pane, data.item);
+    const row = pane.elements?.thread?.querySelector?.(`[data-wq-item="${CSS.escape(String(itemId))}"]`);
+    row?.focus?.({ preventScroll: true });
+  } catch (err) {
+    addFeed('err', 'workqueue', `status update failed: ${String(err)}`);
+  }
+}
+
+function handleWorkqueuePaneKeyboard(event, pane) {
+  if (!pane?.workqueue?.keyboardMode) return false;
+  if (isTypingContext(event.target) || isAnyOverlayOpen()) return false;
+  if (event.metaKey || event.ctrlKey || event.altKey) return false;
+
+  const key = String(event.key || '').toLowerCase();
+  const statusByKey = { '1': 'ready', '2': 'in_progress', '3': 'blocked', '4': 'done' };
+  if (key === 'j' || key === 'arrowdown') {
+    event.preventDefault();
+    selectWorkqueuePaneItemByDelta(pane, 1);
+    return true;
+  }
+  if (key === 'k' || key === 'arrowup') {
+    event.preventDefault();
+    selectWorkqueuePaneItemByDelta(pane, -1);
+    return true;
+  }
+  if (key === 'enter') {
+    event.preventDefault();
+    const selected = (pane.workqueue.items || []).find((it) => it.id === pane.workqueue.selectedItemId) || null;
+    renderWorkqueuePaneInspect(pane, selected);
+    pane.elements?.thread?.querySelector?.('[data-wq-inspect]')?.scrollIntoView?.({ block: 'nearest' });
+    return true;
+  }
+  if (key === 'e') {
+    event.preventDefault();
+    const selected = (pane.workqueue.items || []).find((it) => it.id === pane.workqueue.selectedItemId) || null;
+    if (selected) workqueueEditItem(selected);
+    return true;
+  }
+  if (statusByKey[key]) {
+    event.preventDefault();
+    setWorkqueuePaneSelectedStatus(pane, statusByKey[key]);
+    return true;
+  }
+  return false;
 }
 
 function renderWorkqueuePaneInspect(pane, item) {
@@ -6062,17 +6371,30 @@ function paneHeaderLetter(pane) {
 
 function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
-  pane.elements.name.textContent = paneIdentityLabel(pane, { includeUnread: true });
+  const letter = paneHeaderLetter(pane);
+  const type = paneLabel(pane);
+  const target = paneDisplayTargetLabel(pane);
+  const unread = paneUnreadCount(pane);
+  const identity = `${letter} ${type} · ${target}${unread > 0 ? ` • ${unread} unread` : ''}`;
+  pane.elements.name.title = paneIdentityLabel(pane, { includeUnread: false });
+  pane.elements.name.setAttribute('aria-label', identity);
+  if (pane.elements.nameToken && pane.elements.nameTarget) {
+    pane.elements.nameToken.textContent = `${letter} ${type}`;
+    pane.elements.nameTarget.textContent = ` · ${target}${unread > 0 ? ` • ${unread} unread` : ''}`;
+  } else {
+    pane.elements.name.textContent = identity;
+  }
   const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
   if (activeKey && String(pane.key || '') === activeKey) updateBrowserTitle(pane);
 }
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
   if (!pane?.elements) return;
-  const { targetLabel, agentButton, agentLabel, agentSelect, agentWarning } = pane.elements;
+  const { targetLabel, agentButton, agentLabel, agentSelect, agentWarning, destinationValue } = pane.elements;
 
   if (targetLabel && typeof label === 'string') targetLabel.textContent = label;
   if (agentLabel && typeof value === 'string') agentLabel.textContent = value;
+  if (destinationValue && typeof value === 'string') destinationValue.textContent = value;
 
   // Non-chat panes use the pill button as a "focus/chooser" affordance.
   if (agentSelect) agentSelect.hidden = true;
@@ -6099,7 +6421,8 @@ function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
     }
   }
 
-  renderPaneIdentity(pane);
+  if (paneManager?.panes?.includes?.(pane)) paneManager.updatePaneLabels();
+  else renderPaneIdentity(pane);
 }
 
 function renderPaneAgentIdentity(pane) {
@@ -6358,6 +6681,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   const elements = {
     root,
     name: root.querySelector('[data-pane-name]'),
+    nameToken: root.querySelector('[data-pane-name-token]'),
+    nameTarget: root.querySelector('[data-pane-name-target]'),
     typePill: root.querySelector('[data-pane-type-pill]'),
     typeIcon: root.querySelector('[data-pane-type-icon]'),
     typeText: root.querySelector('[data-pane-type-text]'),
@@ -6399,11 +6724,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
-      statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
+      statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
       scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScope()),
       quickFilters: {
         sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
-        repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
+        repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : [],
+        search: String(quickFilters?.search || '').trim()
       },
       statusCounts: Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0])),
       items: [],
@@ -6411,6 +6737,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       selectedItemId: null,
       expandedGroupKeys: new Set(),
       groupMode: normalizeWorkqueueGroupMode(groupMode),
+      visibleItemIds: [],
+      keyboardMode: false,
       renderLimit: WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
       sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
       sortDir: sortDir === 'asc' ? 'asc' : 'desc'
@@ -6450,7 +6778,15 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
   // Pane header: kind label + type pill (icon + text)
   try {
-    if (elements.name) elements.name.textContent = paneLabel(pane);
+    if (elements.name) {
+      if (elements.nameToken && elements.nameTarget) {
+        elements.name.replaceChildren(elements.nameToken, elements.nameTarget);
+        elements.nameToken.textContent = `? ${paneLabel(pane)}`;
+        elements.nameTarget.textContent = '';
+      } else {
+        elements.name.textContent = paneLabel(pane);
+      }
+    }
     if (elements.typeIcon) elements.typeIcon.textContent = paneIcon(pane);
     if (elements.typeText) elements.typeText.textContent = String(paneLabel(pane) || pane.kind || 'chat').toUpperCase();
     if (elements.typePill) {
@@ -6472,6 +6808,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             lines: ['Shows queued work items, grouped by status.', 'Drag cards between columns to change status.', 'Use Refresh when another worker updates the queue.'],
             shortcuts: [
               ['g w', 'open Workqueue modal'],
+              ['Keyboard mode: j/k', 'move selected Workqueue row'],
+              ['Keyboard mode: Enter', 'inspect selected Workqueue row'],
+              ['Keyboard mode: e', 'edit selected Workqueue row'],
+              ['Keyboard mode: 1/2/3/4', 'set ready / in progress / blocked / done'],
               ['Cmd/Ctrl+L', 'focus Chat composer'],
               ['Cmd/Ctrl+K', 'cycle focus between panes']
             ]
@@ -6629,9 +6969,15 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <div class="wq-scope" data-wq-repo-chips></div>
           </div>
 
+          <label class="wq-field wq-search-field">
+            <span class="wq-label">Search</span>
+            <input data-wq-search type="search" placeholder="Filter tasks" autocomplete="off" />
+          </label>
+
           <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
           <button data-wq-clear-quick class="secondary" type="button">Clear filters</button>
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
+          <button data-wq-keyboard-mode class="secondary wq-keyboard-toggle" type="button" aria-pressed="false">Keyboard mode</button>
 
           <div class="wq-sort" role="group" aria-label="Sort workqueue items">
             <span class="wq-sort-label">Sort</span>
@@ -6693,6 +7039,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         </details>
 
         <div class="hint" data-wq-statusline></div>
+        <div class="hint wq-keyboard-hint" data-wq-keyboard-hint hidden>j/k move, Enter inspect, e edit, 1 ready, 2 in progress, 3 blocked, 4 done</div>
+        <div class="wq-filter-summary" data-wq-filter-summary aria-live="polite" hidden></div>
         <div class="wq-duplicate-health" data-wq-duplicate-health aria-live="polite" hidden></div>
       </div>
 
@@ -6742,9 +7090,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const repoChipsEl = elements.thread.querySelector('[data-wq-repo-chips]');
     const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
     const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
+    const searchEl = elements.thread.querySelector('[data-wq-search]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
+    const keyboardModeBtn = elements.thread.querySelector('[data-wq-keyboard-mode]');
+    const keyboardHint = elements.thread.querySelector('[data-wq-keyboard-hint]');
 
-    const DEFAULT_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
+    const DEFAULT_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress'];
 
     const statusSet = new Set(
       (Array.isArray(pane.workqueue?.statusFilter) && pane.workqueue.statusFilter.length ? pane.workqueue.statusFilter : DEFAULT_STATUSES)
@@ -6761,15 +7112,40 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const initQuick = pane.workqueue?.quickFilters || {};
     const sourceSet = new Set(Array.isArray(initQuick.sources) ? initQuick.sources.map((x) => String(x || '').trim()).filter(Boolean) : []);
     const repoSet = new Set(Array.isArray(initQuick.repos) ? initQuick.repos.map((x) => String(x || '').trim()).filter(Boolean) : []);
+    let searchQuery = String(initQuick.search || '').trim();
+    if (searchEl) searchEl.value = searchQuery;
 
     const persistQuickFilters = () => {
-      pane.workqueue.quickFilters = { sources: Array.from(sourceSet), repos: Array.from(repoSet) };
+      pane.workqueue.quickFilters = { sources: Array.from(sourceSet), repos: Array.from(repoSet), search: searchQuery };
       paneManager.persistAdminPanes();
     };
 
     const resetRenderLimit = () => {
       pane.workqueue.renderLimit = WORKQUEUE_PANE_INITIAL_RENDER_LIMIT;
     };
+
+    const renderKeyboardMode = () => {
+      const enabled = !!pane.workqueue.keyboardMode;
+      keyboardModeBtn?.classList.toggle('active', enabled);
+      keyboardModeBtn?.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+      if (keyboardHint) keyboardHint.hidden = !enabled;
+    };
+
+    keyboardModeBtn?.addEventListener('click', () => {
+      pane.workqueue.keyboardMode = !pane.workqueue.keyboardMode;
+      renderKeyboardMode();
+      renderWorkqueuePaneItems(pane);
+      if (pane.workqueue.keyboardMode) {
+        const selectedId = pane.workqueue.selectedItemId;
+        elements.thread.querySelector(`[data-wq-item="${CSS.escape(String(selectedId || ''))}"]`)?.focus?.();
+      }
+    });
+
+    elements.thread.addEventListener('keydown', (event) => {
+      handleWorkqueuePaneKeyboard(event, pane);
+    });
+
+    renderKeyboardMode();
 
     const updateQuickFilterUi = () => {
       sourceBtns.forEach((btn) => {
@@ -6802,6 +7178,24 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           repoChipsEl.appendChild(btn);
         }
       }
+    };
+
+    const setQuickSearch = (next) => {
+      searchQuery = String(next || '').trim();
+      if (searchEl && searchEl.value !== searchQuery) searchEl.value = searchQuery;
+      resetRenderLimit();
+      persistQuickFilters();
+      renderWorkqueuePaneItems(pane);
+    };
+
+    const removeQuickFilter = (type, value) => {
+      const key = String(value || '').trim();
+      if (type === 'source') sourceSet.delete(key);
+      if (type === 'repo') repoSet.delete(key);
+      resetRenderLimit();
+      persistQuickFilters();
+      updateQuickFilterUi();
+      renderWorkqueuePaneItems(pane);
     };
 
     const applyStatuses = async (next, { closeMenu = false } = {}) => {
@@ -6842,6 +7236,24 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       paneManager.persistAdminPanes();
     };
 
+    const setQueue = async (queue) => {
+      const q = String(queue || '').trim() || 'dev-team';
+      if (queueSelectEl) {
+        const existing = Array.from(queueSelectEl.options || []).find((opt) => String(opt.value) === q);
+        if (existing) {
+          queueSelectEl.value = q;
+          if (queueCustomEl) queueCustomEl.hidden = true;
+        } else {
+          queueSelectEl.value = '__custom__';
+          if (queueCustomEl) {
+            queueCustomEl.hidden = false;
+            queueCustomEl.value = q;
+          }
+        }
+      }
+      await doRefresh();
+    };
+
     const renderStatusMultiSelect = () => {
       if (!statusRootEl || !statusSelectedEl || !statusOptionsEl) return;
 
@@ -6879,6 +7291,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       }
     };
     pane.workqueue.renderStatusMultiSelect = renderStatusMultiSelect;
+    pane.workqueue.applyStatuses = applyStatuses;
+    pane.workqueue.setQueue = setQueue;
+    pane.workqueue.setQuickSearch = setQuickSearch;
+    pane.workqueue.removeQuickFilter = removeQuickFilter;
 
     const applyQueueSearchFilter = () => {
       if (!queueSelectEl) return;
@@ -7032,6 +7448,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       renderWorkqueuePaneItems(pane);
       paneManager.persistAdminPanes();
     };
+    pane.workqueue.setScope = setScope;
     scopeBtns.forEach((btn) => {
       btn.addEventListener('click', () => setScope(btn.getAttribute('data-wq-scope')));
     });
@@ -7050,6 +7467,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       });
     });
 
+    searchEl?.addEventListener('input', () => setQuickSearch(searchEl.value));
+
     clawnsoleOnlyBtn?.addEventListener('click', () => {
       sourceSet.clear();
       repoSet.clear();
@@ -7060,9 +7479,24 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       renderWorkqueuePaneItems(pane);
     });
 
+    const clearAllFilters = async () => {
+      sourceSet.clear();
+      repoSet.clear();
+      searchQuery = '';
+      if (searchEl) searchEl.value = '';
+      resetRenderLimit();
+      persistQuickFilters();
+      updateQuickFilterUi();
+      setScope('all');
+      await applyStatuses(DEFAULT_STATUSES);
+    };
+    pane.workqueue.clearAllFilters = clearAllFilters;
+
     clearQuickBtn?.addEventListener('click', () => {
       sourceSet.clear();
       repoSet.clear();
+      searchQuery = '';
+      if (searchEl) searchEl.value = '';
       resetRenderLimit();
       persistQuickFilters();
       updateQuickFilterUi();
@@ -7115,10 +7549,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         btn.setAttribute('aria-pressed', active ? 'true' : 'false');
       });
     };
+
     groupModeBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
         pane.workqueue.groupMode = normalizeWorkqueueGroupMode(btn.getAttribute('data-wq-group-mode'));
-        pane.workqueue.renderLimit = WORKQUEUE_PANE_INITIAL_RENDER_LIMIT;
+        resetRenderLimit();
         updateGroupModeUi();
         renderWorkqueuePaneItems(pane);
         paneManager.persistAdminPanes();
@@ -7864,6 +8299,8 @@ const paneManager = {
         queue: cfg.queue,
         statusFilter: cfg.statusFilter,
         scopeFilter: cfg.scopeFilter,
+        quickFilters: cfg.quickFilters,
+        groupMode: cfg.groupMode,
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
         closable: true
@@ -7908,15 +8345,16 @@ const paneManager = {
           const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
-            : ['ready', 'pending', 'claimed', 'in_progress'];
+            : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'];
           const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
           const quickFilters = {
             sources: Array.isArray(item?.quickFilters?.sources) ? item.quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
-            repos: Array.isArray(item?.quickFilters?.repos) ? item.quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
+            repos: Array.isArray(item?.quickFilters?.repos) ? item.quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : [],
+            search: String(item?.quickFilters?.search || '').trim()
           };
-          const groupMode = normalizeWorkqueueGroupMode(item.groupMode);
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
+          const groupMode = normalizeWorkqueueGroupMode(item.groupMode);
           return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir };
         }
         if (kind === 'cron' || kind === 'timeline') {
@@ -7961,7 +8399,8 @@ const paneManager = {
           scopeFilter: pane.workqueue?.scopeFilter || 'all',
           quickFilters: {
             sources: Array.isArray(pane.workqueue?.quickFilters?.sources) ? pane.workqueue.quickFilters.sources : [],
-            repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos : []
+            repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos : [],
+            search: String(pane.workqueue?.quickFilters?.search || '').trim()
           },
           groupMode: normalizeWorkqueueGroupMode(pane.workqueue?.groupMode),
           sortKey: pane.workqueue?.sortKey || 'priority',
@@ -8006,11 +8445,18 @@ const paneManager = {
     const nextQueue = String(options?.queue || 'dev-team').trim() || 'dev-team';
     const nextAgentId = normalizeAgentId(options?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
     const nextCronAgentId = String(options?.cronAgentId || '').trim();
+    const nextScopeFilter = normalizeWorkqueueScope(options?.scopeFilter ?? getDefaultWorkqueueScope());
     const forceNew = Boolean(options?.forceNew);
 
     const findMatchingPane = () => {
       if (normalizedKind === 'workqueue') {
-        return this.panes.find((p) => p?.role === 'admin' && p.kind === 'workqueue' && String(p.workqueue?.queue || '').trim() === nextQueue) || null;
+        return this.panes.find((p) =>
+          p?.role === 'admin' &&
+          p.kind === 'workqueue' &&
+          String(p.workqueue?.queue || '').trim() === nextQueue &&
+          normalizeAgentId(p.agentId || 'main') === nextAgentId &&
+          normalizeWorkqueueScope(p.workqueue?.scopeFilter) === nextScopeFilter
+        ) || null;
       }
       if (normalizedKind === 'cron' || normalizedKind === 'timeline') {
         return this.panes.find((p) => p?.role === 'admin' && p.kind === normalizedKind && String(p.cronAgentId || '').trim() === nextCronAgentId) || null;
@@ -8037,8 +8483,8 @@ const paneManager = {
         queue: nextQueue,
         statusFilter: Array.isArray(options?.statusFilter) && options.statusFilter.length
           ? options.statusFilter
-          : ['ready', 'pending', 'claimed', 'in_progress'],
-        scopeFilter: normalizeWorkqueueScope(options?.scopeFilter ?? getDefaultWorkqueueScope()),
+          : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
+        scopeFilter: nextScopeFilter,
         groupMode: normalizeWorkqueueGroupMode(options?.groupMode),
         closable: true
       });
@@ -8167,56 +8613,155 @@ const paneManager = {
       menu.setAttribute('role', 'menu');
       menu.setAttribute('aria-label', 'Add pane');
 
-      const chatBtn = document.createElement('button');
-      chatBtn.type = 'button';
-      chatBtn.className = 'pane-add-menu__item';
-      chatBtn.textContent = 'New Chat pane';
-      chatBtn.dataset.testid = 'pane-add-menu-chat';
-      chatBtn.title = 'Shortcut: Ctrl/Cmd+Shift+C';
+      const makeButton = ({ testId, title, subtitle, shortcut }) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pane-add-menu__item';
+        btn.dataset.testid = testId;
+        btn.title = shortcut;
+        btn.innerHTML = `
+          <span class="pane-add-menu__label">${escapeHtml(title)}</span>
+          <span class="pane-add-menu__summary" data-pane-add-summary>${escapeHtml(subtitle)}</span>
+        `;
+        return btn;
+      };
 
-      const wqBtn = document.createElement('button');
-      wqBtn.type = 'button';
-      wqBtn.className = 'pane-add-menu__item';
-      wqBtn.textContent = 'New Workqueue pane';
-      wqBtn.dataset.testid = 'pane-add-menu-workqueue';
-      wqBtn.title = 'Shortcut: Ctrl/Cmd+Shift+W (Alt/Option+click = Open anyway)';
+      const makeControl = (label, control) => {
+        const wrap = document.createElement('label');
+        wrap.className = 'pane-add-menu__control';
+        const text = document.createElement('span');
+        text.textContent = label;
+        wrap.appendChild(text);
+        wrap.appendChild(control);
+        return wrap;
+      };
 
-      const cronBtn = document.createElement('button');
-      cronBtn.type = 'button';
-      cronBtn.className = 'pane-add-menu__item';
-      cronBtn.textContent = 'New Cron pane';
-      cronBtn.dataset.testid = 'pane-add-menu-cron';
-      cronBtn.title = 'Shortcut: Ctrl/Cmd+Shift+R (Alt/Option+click = Open anyway)';
+      const chatBtn = makeButton({
+        testId: 'pane-add-menu-chat',
+        title: 'New Chat pane',
+        subtitle: 'Chat -> active agent',
+        shortcut: 'Shortcut: Ctrl/Cmd+Shift+C'
+      });
+      const chatAgentSelect = document.createElement('select');
+      chatAgentSelect.dataset.testid = 'pane-add-menu-chat-agent';
+      chatAgentSelect.setAttribute('aria-label', 'Chat agent');
 
-      const timelineBtn = document.createElement('button');
-      timelineBtn.type = 'button';
-      timelineBtn.className = 'pane-add-menu__item';
-      timelineBtn.textContent = 'New Timeline pane';
-      timelineBtn.dataset.testid = 'pane-add-menu-timeline';
-      timelineBtn.title = 'Shortcut: Ctrl/Cmd+Shift+T (Alt/Option+click = Open anyway)';
+      const wqBtn = makeButton({
+        testId: 'pane-add-menu-workqueue',
+        title: 'New Workqueue pane',
+        subtitle: 'Workqueue -> dev-team / unassigned',
+        shortcut: 'Shortcut: Ctrl/Cmd+Shift+W (Alt/Option+click = Open anyway)'
+      });
+      const wqQueueInput = document.createElement('input');
+      wqQueueInput.type = 'text';
+      wqQueueInput.dataset.testid = 'pane-add-menu-workqueue-queue';
+      wqQueueInput.setAttribute('aria-label', 'Workqueue queue');
+      wqQueueInput.autocomplete = 'off';
+      const wqScopeSelect = document.createElement('select');
+      wqScopeSelect.dataset.testid = 'pane-add-menu-workqueue-scope';
+      wqScopeSelect.setAttribute('aria-label', 'Workqueue scope');
+      [
+        ['unassigned', 'Unassigned'],
+        ['assigned', 'Assigned to active target'],
+        ['all', 'All']
+      ].forEach(([value, label]) => {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = label;
+        wqScopeSelect.appendChild(opt);
+      });
+
+      const cronBtn = makeButton({
+        testId: 'pane-add-menu-cron',
+        title: 'New Cron pane',
+        subtitle: 'Cron -> gateway',
+        shortcut: 'Shortcut: Ctrl/Cmd+Shift+R (Alt/Option+click = Open anyway)'
+      });
+
+      const timelineBtn = makeButton({
+        testId: 'pane-add-menu-timeline',
+        title: 'New Timeline pane',
+        subtitle: 'Timeline -> gateway',
+        shortcut: 'Shortcut: Ctrl/Cmd+Shift+T (Alt/Option+click = Open anyway)'
+      });
 
       menu.appendChild(chatBtn);
+      menu.appendChild(makeControl('Agent', chatAgentSelect));
       menu.appendChild(wqBtn);
+      menu.appendChild(makeControl('Queue', wqQueueInput));
+      menu.appendChild(makeControl('Scope', wqScopeSelect));
       menu.appendChild(cronBtn);
       menu.appendChild(timelineBtn);
 
-      const onMenuAdd = (kind) => (event) => {
+      const stopMenuControlEvent = (event) => event.stopPropagation();
+      [chatAgentSelect, wqQueueInput, wqScopeSelect].forEach((el) => {
+        el.addEventListener('click', stopMenuControlEvent);
+        el.addEventListener('mousedown', stopMenuControlEvent);
+      });
+
+      const refreshDestinationControls = () => {
+        const defaultAgent = normalizeAgentId(storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
+        renderAgentOptions(chatAgentSelect, defaultAgent);
+        chatAgentSelect.value = defaultAgent;
+
+        const queues = Array.from(new Set([
+          'dev-team',
+          ...this.panes
+            .filter((pane) => pane?.kind === 'workqueue')
+            .map((pane) => String(pane.workqueue?.queue || '').trim())
+            .filter(Boolean)
+        ]));
+        const preferredQueue = queues[0] || 'dev-team';
+        wqQueueInput.value = preferredQueue;
+        wqQueueInput.setAttribute('list', 'pane-add-workqueue-queues');
+        let datalist = menu.querySelector('#pane-add-workqueue-queues');
+        if (!datalist) {
+          datalist = document.createElement('datalist');
+          datalist.id = 'pane-add-workqueue-queues';
+          menu.appendChild(datalist);
+        }
+        datalist.innerHTML = '';
+        queues.forEach((queue) => {
+          const opt = document.createElement('option');
+          opt.value = queue;
+          datalist.appendChild(opt);
+        });
+        wqScopeSelect.value = getDefaultWorkqueueScope();
+        chatBtn.querySelector('[data-pane-add-summary]').textContent = `Chat -> Agent: ${chatAgentSelect.value || 'main'}`;
+        wqBtn.querySelector('[data-pane-add-summary]').textContent = `Workqueue -> Queue: ${wqQueueInput.value || 'dev-team'} / ${wqScopeSelect.value}`;
+      };
+
+      chatAgentSelect.addEventListener('change', () => {
+        chatBtn.querySelector('[data-pane-add-summary]').textContent = `Chat -> Agent: ${chatAgentSelect.value || 'main'}`;
+      });
+      wqQueueInput.addEventListener('input', () => {
+        wqBtn.querySelector('[data-pane-add-summary]').textContent = `Workqueue -> Queue: ${wqQueueInput.value || 'dev-team'} / ${wqScopeSelect.value}`;
+      });
+      wqScopeSelect.addEventListener('change', () => {
+        wqBtn.querySelector('[data-pane-add-summary]').textContent = `Workqueue -> Queue: ${wqQueueInput.value || 'dev-team'} / ${wqScopeSelect.value}`;
+      });
+
+      const onMenuAdd = (kind, getOptions = () => ({})) => (event) => {
         if (state.menuActionInFlight) return;
         state.menuActionInFlight = true;
         if (event?.preventDefault) event.preventDefault();
         if (event?.stopPropagation) event.stopPropagation();
 
         this.closeAddPaneMenu();
-        this.addPane(kind, { forceNew: !!event?.altKey });
+        this.addPane(kind, { ...getOptions(), forceNew: !!event?.altKey });
 
         queueMicrotask(() => {
           state.menuActionInFlight = false;
         });
       };
 
-      chatBtn.addEventListener('click', onMenuAdd('chat'));
+      chatBtn.addEventListener('click', onMenuAdd('chat', () => ({ agentId: chatAgentSelect.value || 'main' })));
 
-      wqBtn.addEventListener('click', onMenuAdd('workqueue'));
+      wqBtn.addEventListener('click', onMenuAdd('workqueue', () => ({
+        agentId: chatAgentSelect.value || 'main',
+        queue: wqQueueInput.value || 'dev-team',
+        scopeFilter: wqScopeSelect.value || getDefaultWorkqueueScope()
+      })));
 
       cronBtn.addEventListener('click', onMenuAdd('cron'));
 
@@ -8227,6 +8772,7 @@ const paneManager = {
       state.wqBtn = wqBtn;
       state.cronBtn = cronBtn;
       state.timelineBtn = timelineBtn;
+      state.refreshDestinationControls = refreshDestinationControls;
     }
 
     const positionMenu = () => {
@@ -8252,6 +8798,7 @@ const paneManager = {
     document.body.appendChild(state.menuEl);
     state.menuEl.style.display = 'block';
     state.open = true;
+    state.refreshDestinationControls?.();
 
     try {
       anchorEl.setAttribute('aria-expanded', 'true');
@@ -8655,6 +9202,7 @@ globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFro
 globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFromUi());
 
 let shortcutState = { lastGAtMs: 0, blockedReasonLastShownAt: new Map() };
+const GO_TO_PANE_TIMEOUT_MS = 1200;
 const SHORTCUT_BLOCK_RATE_LIMIT_MS = 5000;
 const SHORTCUT_BLOCK_MESSAGES = {
   typing: 'Shortcut paused while typing',
@@ -8731,6 +9279,7 @@ function isNonTrivialGlobalShortcut(event) {
   const hasMetaCtrl = !!(event.metaKey || event.ctrlKey);
   const isAccel = hasMetaCtrl && event.shiftKey;
   if (isAccel && ['c', 'w', 'r', 't', 'k', 'j', 'n', 'f', 'h'].includes(lower)) return true;
+  if (hasMetaCtrl && event.altKey && !event.shiftKey && ['k', 'j'].includes(lower)) return true;
   if (isAccel && (key === ']' || key === '}' || key === '[' || key === '{')) return true;
   if (hasMetaCtrl && !event.shiftKey && !event.altKey && ['p', 'k', 'r'].includes(lower)) return true;
   if (hasMetaCtrl && !event.shiftKey && !event.altKey && lower === 'l') return true;
@@ -8847,6 +9396,15 @@ function focusPaneIndex(idx, { trackMru = true, showHud = false } = {}) {
   }
 }
 
+function focusPaneByHeaderLetter(letter, { showHud = true } = {}) {
+  const wanted = String(letter || '').trim().toUpperCase();
+  if (!/^[A-Z]$/.test(wanted)) return false;
+  const idx = paneManager.panes.findIndex((pane) => paneHeaderLetter(pane).toUpperCase() === wanted);
+  if (idx < 0) return false;
+  focusPaneIndex(idx, { showHud });
+  return true;
+}
+
 function returnToLastActiveChatPane() {
   const panes = paneManager?.panes || [];
   if (!panes.length) return false;
@@ -8923,6 +9481,34 @@ function cyclePaneFocusBackward() {
   const idx = panes.findIndex((p) => p.elements?.root && (p.elements.root === active || p.elements.root.contains(active)));
   const next = idx >= 0 ? (idx - 1 + panes.length) % panes.length : panes.length - 1;
   focusPaneIndex(next, { showHud: true });
+}
+
+function cycleChatPaneFocus(direction = 1) {
+  const panes = paneManager?.panes || [];
+  const chatPanes = panes.filter((pane) => pane?.kind === 'chat');
+  if (chatPanes.length < 2) {
+    showToast('Only one Chat pane is open.', { kind: 'info', timeoutMs: 1600 });
+    return false;
+  }
+
+  const activeKey = focusedPaneKey();
+  const orderedKeys = [
+    activeKey,
+    ...paneMruOrder().filter((key) => key !== activeKey)
+  ].filter((key) => chatPanes.some((pane) => pane.key === key));
+
+  chatPanes.forEach((pane) => {
+    if (pane?.key && !orderedKeys.includes(pane.key)) orderedKeys.push(pane.key);
+  });
+
+  const currentIndex = Math.max(0, orderedKeys.indexOf(activeKey));
+  const step = direction >= 0 ? 1 : -1;
+  const nextKey = orderedKeys[(currentIndex + step + orderedKeys.length) % orderedKeys.length];
+  const nextIndex = panes.findIndex((pane) => pane?.key === nextKey);
+  if (nextIndex < 0) return false;
+
+  focusPaneIndex(nextIndex, { showHud: true });
+  return true;
 }
 
 function cycleUnreadPaneFocus(direction = 1) {
@@ -9030,8 +9616,24 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
+  // Cmd/Ctrl+Shift+G targets the focused chat pane, so allow it from the chat input.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'g' && roleState.role === 'admin') {
+    event.preventDefault();
+    openWorkqueueForActiveChatAgent();
+    return;
+  }
+
+  if (!event.defaultPrevented && roleState.role === 'admin') {
+    const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
+    const activePane = (paneManager?.panes || []).find((pane) => String(pane?.key || '') === activeKey);
+    if (activePane?.kind === 'workqueue' && activePane?.workqueue?.keyboardMode) {
+      if (handleWorkqueuePaneKeyboard(event, activePane)) return;
+    }
+  }
+
   // Never steal focus / override browser shortcuts while typing.
   if (isTypingContext(event.target)) return;
+  if (isAnyOverlayOpen()) return;
 
   const key = String(event.key || '');
 
@@ -9081,6 +9683,18 @@ window.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'j') {
     event.preventDefault();
     cyclePaneFocusBackward();
+    return;
+  }
+
+  // Cmd/Ctrl+Alt+K/J cycles only Chat panes, skipping Workqueue/Cron/Timeline/Fleet panes.
+  if ((event.metaKey || event.ctrlKey) && event.altKey && !event.shiftKey && key.toLowerCase() === 'k') {
+    event.preventDefault();
+    cycleChatPaneFocus(1);
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.altKey && !event.shiftKey && key.toLowerCase() === 'j') {
+    event.preventDefault();
+    cycleChatPaneFocus(-1);
     return;
   }
 
@@ -9134,19 +9748,25 @@ window.addEventListener('keydown', (event) => {
   if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
     if (key.toLowerCase() === 'g') {
       shortcutState.lastGAtMs = now;
+      event.preventDefault();
       return;
     }
-    if (key.toLowerCase() === 'c' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
+    if (shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < GO_TO_PANE_TIMEOUT_MS && /^[a-z]$/i.test(key)) {
       shortcutState.lastGAtMs = 0;
       event.preventDefault();
-      returnToLastActiveChatPane();
+      if (focusPaneByHeaderLetter(key, { showHud: true })) return;
+      if (key.toLowerCase() === 'c') {
+        returnToLastActiveChatPane();
+        return;
+      }
+      if (key.toLowerCase() === 'w') {
+        openTopbarWorkqueueAction();
+        return;
+      }
       return;
     }
-    if (key.toLowerCase() === 'w' && shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < 1000) {
+    if (shortcutState.lastGAtMs && now - shortcutState.lastGAtMs >= GO_TO_PANE_TIMEOUT_MS) {
       shortcutState.lastGAtMs = 0;
-      event.preventDefault();
-      openTopbarWorkqueueAction();
-      return;
     }
   }
 });
