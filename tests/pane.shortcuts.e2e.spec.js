@@ -22,9 +22,25 @@ async function seedChatOnlyPaneLayout(page, serverPort, { agentId = 'main' } = {
     );
   }, agentId);
   await page.goto(`http://127.0.0.1:${serverPort}/`);
-  await page.fill('#loginPassword', 'admin');
-  await page.click('#loginBtn');
+  if (await page.locator('#loginPassword').isVisible()) {
+    await page.fill('#loginPassword', 'admin');
+    await page.click('#loginBtn');
+  } else if (!/\/admin\/?$/.test(page.url())) {
+    await page.goto(`http://127.0.0.1:${serverPort}/admin`);
+  }
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+}
+
+async function triggerPairedPaneShortcut(page) {
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Y',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    }));
+  });
 }
 
 test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page }) => {
@@ -32,6 +48,26 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   test.skip(!!app?.skipReason, app?.skipReason);
 
   installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.addInitScript(() => {
+    localStorage.setItem('clawnsole.admin.layoutMode', 'custom');
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([
+        { key: 'ptestchat', kind: 'chat', agentId: 'main' },
+        {
+          key: 'ptestwq',
+          kind: 'workqueue',
+          agentId: 'main',
+          queue: 'dev-team',
+          statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+          scopeFilter: 'all',
+          sortKey: 'priority',
+          sortDir: 'desc'
+        }
+      ])
+    );
+  });
 
   await page.goto(`http://127.0.0.1:${app.serverPort}/`);
   await page.fill('#loginPassword', 'admin');
@@ -529,4 +565,42 @@ test('fleet quick action button + keyboard shortcut focus existing timeline pane
 
   await fleetBtn.click({ modifiers: ['Alt'] });
   await expect(timelinePanes).toHaveCount(2);
+});
+
+test('paired-pane toggle shortcut focuses existing pair and opens missing pair', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  // Existing pair path: from Chat, jump to the existing Workqueue pane.
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+  const workqueuePanes = page.locator('[data-pane][data-pane-kind="workqueue"]');
+  const initialWorkqueueCount = await workqueuePanes.count();
+  expect(initialWorkqueueCount).toBeGreaterThan(0);
+
+  await chatInput.focus();
+  await triggerPairedPaneShortcut(page);
+  await expect.poll(activePaneIndex).toBe(1);
+  await expect(workqueuePanes).toHaveCount(initialWorkqueueCount);
+
+  // Missing pair path: reload with a chat-only layout, then toggle creates+focuses Workqueue.
+  await seedChatOnlyPaneLayout(page, app.serverPort);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(0);
+  await page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first().focus();
+  await triggerPairedPaneShortcut(page);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect.poll(activePaneIndex).toBeGreaterThan(0);
 });
