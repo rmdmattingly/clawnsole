@@ -1772,11 +1772,15 @@ function paneTypeBadgeMarkup(pane, { extraClass = '', testId = '' } = {}) {
   return `<span class="${escapeHtml(classes)}" data-pane-type-badge data-pane-accent="${escapeHtml(kind)}"${testAttr} aria-label="${escapeHtml(`Pane type: ${label}`)}"><span class="pane-type-icon" aria-hidden="true">${escapeHtml(icon)}</span><span class="pane-type-text">${escapeHtml(label)}</span></span>`;
 }
 
+function paneWorkqueueTargetLabel(pane) {
+  return String(pane?.workqueue?.queue || '').trim() || 'No queue';
+}
+
 function paneTargetLabel(pane) {
   if (!pane) return '';
+  if (pane.kind === 'workqueue') return paneWorkqueueTargetLabel(pane);
   const current = String(pane?.elements?.agentLabel?.textContent || '').trim();
   if (current) return current;
-  if (pane.kind === 'workqueue') return String(pane.workqueue?.queue || 'dev-team');
   if (pane.kind === 'timeline' || pane.kind === 'cron') return 'gateway';
   return String(pane.agentId || 'main');
 }
@@ -6911,8 +6915,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     // Header should describe the pane's primary target (queue), not an agent.
     paneSetHeaderTarget(pane, {
       label: 'Queue',
-      value: String(pane.workqueue.queue || 'dev-team'),
-      ariaLabel: `Change queue (current: ${String(pane.workqueue.queue || 'dev-team')})`
+      value: paneWorkqueueTargetLabel(pane),
+      ariaLabel: `Change queue (current: ${paneWorkqueueTargetLabel(pane)})`
     });
 
     // Replace thread with workqueue list + inspect.
@@ -7072,8 +7076,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     // Make header pill focus the queue selector in the body (no duplicated selector state).
     paneSetHeaderTarget(pane, {
       label: 'Queue',
-      value: String(pane.workqueue.queue || 'dev-team'),
-      ariaLabel: `Change queue (current: ${String(pane.workqueue.queue || 'dev-team')})`,
+      value: paneWorkqueueTargetLabel(pane),
+      ariaLabel: `Change queue (current: ${paneWorkqueueTargetLabel(pane)})`,
       onClick: () => {
         try {
           queueSelectEl?.focus?.();
@@ -7217,8 +7221,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       rememberRecentWorkqueueTarget(q);
       paneSetHeaderTarget(pane, {
         label: 'Queue',
-        value: String(q),
-        ariaLabel: `Change queue (current: ${String(q)})`,
+        value: paneWorkqueueTargetLabel(pane),
+        ariaLabel: `Change queue (current: ${paneWorkqueueTargetLabel(pane)})`,
         onClick: () => {
           try {
             queueSelectEl?.focus?.();
