@@ -240,13 +240,28 @@
             Most shortcuts are disabled while typing in inputs, textareas, selects, or contenteditable fields. Global keys like <kbd>Esc</kbd>, <kbd>Cmd/Ctrl+P</kbd>, and <kbd>Cmd/Ctrl+K</kbd> still work.
           </div>
 
-          <div class="shortcut-group">
+          <div class="shortcut-tools" aria-label="Filter keyboard shortcuts">
+            <label class="shortcut-search-label" for="shortcutsSearch">Search shortcuts</label>
+            <input id="shortcutsSearch" class="shortcut-search" type="search" placeholder="Search keys, actions, categories" autocomplete="off" data-testid="shortcuts-search" />
+            <div class="shortcut-filter-chips" role="group" aria-label="Shortcut category filters">
+              <button type="button" class="shortcut-filter-chip active" data-shortcut-filter="all" aria-pressed="true">All</button>
+              <button type="button" class="shortcut-filter-chip" data-shortcut-filter="global" aria-pressed="false">Global</button>
+              <button type="button" class="shortcut-filter-chip" data-shortcut-filter="chat" aria-pressed="false">Chat</button>
+              <button type="button" class="shortcut-filter-chip" data-shortcut-filter="pane" aria-pressed="false">Pane</button>
+              <button type="button" class="shortcut-filter-chip" data-shortcut-filter="workqueue" aria-pressed="false">Workqueue</button>
+              <button type="button" class="shortcut-filter-chip" data-shortcut-filter="fleet" aria-pressed="false">Fleet</button>
+            </div>
+          </div>
+
+          <div class="shortcut-empty" id="shortcutsEmpty" hidden>No shortcuts match.</div>
+
+          <div class="shortcut-group" data-shortcut-category="global">
             <h3 class="shortcut-group-title">Global</h3>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>?</kbd></div><div class="shortcut-desc">Open this help overlay</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Esc</kbd></div><div class="shortcut-desc">Close overlay / menus</div></div>
           </div>
 
-          <div class="shortcut-group">
+          <div class="shortcut-group" data-shortcut-category="pane">
             <h3 class="shortcut-group-title">Pane focus/navigation</h3>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Alt</kbd>/<kbd>Option</kbd>+<kbd>1</kbd>..<kbd>9</kbd></div><div class="shortcut-desc">Focus panes 1-9 by visible order</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>4</kbd></div><div class="shortcut-desc">Focus pane 1-4</div></div>
@@ -257,7 +272,7 @@
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd></div><div class="shortcut-desc">Previous unread pane</div></div>
           </div>
 
-          <div class="shortcut-group">
+          <div class="shortcut-group" data-shortcut-category="pane fleet">
             <h3 class="shortcut-group-title">Pane actions</h3>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Open command palette</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="shortcut-desc">Add pane</div></div>
@@ -265,7 +280,13 @@
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>R</kbd></div><div class="shortcut-desc">Refresh agent list</div></div>
           </div>
 
-          <div class="shortcut-group">
+          <div class="shortcut-group" data-shortcut-category="chat">
+            <h3 class="shortcut-group-title">Chat actions</h3>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Enter</kbd></div><div class="shortcut-desc">Send chat message from the composer</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Shift</kbd>+<kbd>Enter</kbd></div><div class="shortcut-desc">Insert a new line in the composer</div></div>
+          </div>
+
+          <div class="shortcut-group" data-shortcut-category="workqueue">
             <h3 class="shortcut-group-title">Workqueue actions</h3>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>w</kbd></div><div class="shortcut-desc">Open Workqueue modal</div></div>
           </div>

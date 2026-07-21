@@ -44,6 +44,10 @@ const globalElements = {
   shortcutsModal: document.getElementById('shortcutsModal'),
   shortcutsDialog: document.getElementById('shortcutsDialog'),
   shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
+  shortcutsSearch: document.getElementById('shortcutsSearch'),
+  shortcutsEmpty: document.getElementById('shortcutsEmpty'),
+  shortcutsFilterButtons: Array.from(document.querySelectorAll('[data-shortcut-filter]')),
+  shortcutGroups: Array.from(document.querySelectorAll('[data-shortcut-category]')),
   paneManagerModal: document.getElementById('paneManagerModal'),
   paneManagerCloseBtn: document.getElementById('paneManagerCloseBtn'),
   paneManagerSearch: document.getElementById('paneManagerSearch'),
@@ -1292,6 +1296,19 @@ async function deleteRecurringPrompt(id) {
 }
 
 let shortcutsLastFocusedEl = null;
+let shortcutsActiveFilter = 'all';
+
+function shortcutsEl(id) {
+  return document.getElementById(id);
+}
+
+function shortcutFilterButtons() {
+  return Array.from(document.querySelectorAll('[data-shortcut-filter]'));
+}
+
+function shortcutGroups() {
+  return Array.from(document.querySelectorAll('[data-shortcut-category]'));
+}
 
 function getModalFocusableElements(modalEl) {
   if (!modalEl || !modalEl.querySelectorAll) return [];
@@ -1299,19 +1316,65 @@ function getModalFocusableElements(modalEl) {
     .filter((el) => !el.disabled && !el.hidden && el.getAttribute('aria-hidden') !== 'true');
 }
 
+function shortcutGroupMatches(group, query, filter) {
+  const categories = String(group?.dataset?.shortcutCategory || '')
+    .split(/\s+/)
+    .filter(Boolean);
+  if (filter && filter !== 'all' && !categories.includes(filter)) return false;
+  if (!query) return true;
+  const searchable = `${categories.join(' ')} ${group.textContent || ''}`.toLowerCase();
+  return searchable.includes(query);
+}
+
+function renderShortcutsFilters() {
+  const query = String(shortcutsEl('shortcutsSearch')?.value || '').trim().toLowerCase();
+  let visibleCount = 0;
+  shortcutFilterButtons().forEach((btn) => {
+    const filter = btn.getAttribute('data-shortcut-filter') || 'all';
+    const active = filter === shortcutsActiveFilter;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  shortcutGroups().forEach((group) => {
+    const visible = shortcutGroupMatches(group, query, shortcutsActiveFilter);
+    group.hidden = !visible;
+    if (visible) visibleCount += 1;
+  });
+  const empty = shortcutsEl('shortcutsEmpty');
+  if (empty) empty.hidden = visibleCount > 0;
+}
+
+function resetShortcutsFilters() {
+  shortcutsActiveFilter = 'all';
+  const search = shortcutsEl('shortcutsSearch');
+  if (search) search.value = '';
+  renderShortcutsFilters();
+}
+
+function focusShortcutsSearch() {
+  const search = shortcutsEl('shortcutsSearch');
+  const target = search || shortcutsEl('shortcutsDialog') || shortcutsEl('shortcutsCloseBtn') || shortcutsEl('shortcutsModal');
+  if (!target) return;
+  target.focus?.({ preventScroll: true });
+  if (target === search) target.select?.();
+}
+
 function openShortcuts() {
-  const modal = globalElements.shortcutsModal;
+  const modal = shortcutsEl('shortcutsModal') || globalElements.shortcutsModal;
   if (!modal || modal.classList.contains('open')) return;
   shortcutsLastFocusedEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  resetShortcutsFilters();
   modal.classList.add('open');
   modal.setAttribute('aria-hidden', 'false');
-  window.setTimeout(() => {
-    (globalElements.shortcutsDialog || globalElements.shortcutsCloseBtn || modal).focus?.();
-  }, 0);
+  focusShortcutsSearch();
+  window.requestAnimationFrame?.(() => focusShortcutsSearch());
+  window.setTimeout(() => focusShortcutsSearch(), 0);
+  window.setTimeout(() => focusShortcutsSearch(), 50);
+  window.setTimeout(() => focusShortcutsSearch(), 150);
 }
 
 function closeShortcuts() {
-  const modal = globalElements.shortcutsModal;
+  const modal = shortcutsEl('shortcutsModal') || globalElements.shortcutsModal;
   if (!modal || !modal.classList.contains('open')) return;
   modal.classList.remove('open');
   modal.setAttribute('aria-hidden', 'true');
@@ -7005,6 +7068,14 @@ globalElements.settingsModal?.addEventListener('click', (event) => {
 
 globalElements.shortcutsBtn?.addEventListener('click', () => openShortcuts());
 globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
+globalElements.shortcutsSearch?.addEventListener('input', () => renderShortcutsFilters());
+globalElements.shortcutsFilterButtons?.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    shortcutsActiveFilter = btn.getAttribute('data-shortcut-filter') || 'all';
+    renderShortcutsFilters();
+    focusShortcutsSearch();
+  });
+});
 globalElements.shortcutsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.shortcutsModal) closeShortcuts();
 });

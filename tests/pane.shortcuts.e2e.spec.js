@@ -36,10 +36,49 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await expect(modal).toContainText('Pane focus/navigation');
   await expect(modal).toContainText('Pane actions');
   await expect(modal).toContainText('Workqueue actions');
+  await expect(page.locator('#shortcutsSearch')).toBeFocused();
   await expect(modal).toContainText('disabled while typing');
 
   await page.keyboard.press('Escape');
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
+});
+
+test('shortcuts modal supports search, category chips, and empty state', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const modal = page.locator('#shortcutsModal');
+  const search = page.locator('#shortcutsSearch');
+
+  await page.locator('#connectionStatus').click();
+  await page.keyboard.press('Shift+/');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await expect(search).toBeFocused();
+
+  await search.fill('fleet');
+  await expect(modal.locator('.shortcut-group:visible')).toHaveCount(1);
+  await expect(modal.locator('.shortcut-group:visible')).toContainText('Open/focus Fleet pane');
+
+  await modal.locator('[data-shortcut-filter="workqueue"]').click();
+  await expect(search).toBeFocused();
+  await expect(modal.locator('.shortcut-group:visible')).toHaveCount(0);
+  await expect(page.locator('#shortcutsEmpty')).toBeVisible();
+
+  await search.fill('');
+  await expect(modal.locator('.shortcut-group:visible')).toHaveCount(1);
+  await expect(modal.locator('.shortcut-group:visible')).toContainText('Workqueue actions');
+
+  await modal.locator('[data-shortcut-filter="chat"]').click();
+  await search.fill('enter');
+  await expect(modal.locator('.shortcut-group:visible')).toHaveCount(1);
+  await expect(modal.locator('.shortcut-group:visible')).toContainText('Chat actions');
 });
 
 test('shortcuts modal restores prior focus on close', async ({ page }) => {

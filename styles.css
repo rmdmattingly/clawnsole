@@ -1590,6 +1590,67 @@ button.agents-section-title:hover {
 
 /* Shortcuts modal */
 
+.shortcut-tools {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px 0;
+}
+
+.shortcut-search-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  opacity: 0.88;
+}
+
+.shortcut-search {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(5, 10, 20, 0.58);
+  color: var(--text);
+}
+
+.shortcut-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.shortcut-filter-chip {
+  min-height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.shortcut-filter-chip:hover,
+.shortcut-filter-chip:focus-visible {
+  border-color: rgba(125, 211, 252, 0.62);
+}
+
+.shortcut-filter-chip.active {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(125, 211, 252, 0.72);
+}
+
+.shortcut-empty {
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+
+.shortcut-empty[hidden] {
+  display: none;
+}
+
 .shortcut-group {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
