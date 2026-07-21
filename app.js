@@ -630,6 +630,89 @@ let agentAutoRefreshInterval = null;
 let agentsModalAutoRefreshInterval = null;
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
+const fleetRefreshLock = {
+  lockedAtMs: 0,
+  pointerInsideRow: false,
+  deferredRefreshPending: false,
+  deferredReason: '',
+  catchupTimer: null
+};
+
+function isAgentsModalOpen() {
+  return !!globalElements.agentsModal?.classList?.contains('open');
+}
+
+function getFleetRefreshPausedEl() {
+  return document.getElementById('agentsRefreshPaused');
+}
+
+function renderFleetRefreshPaused() {
+  const el = getFleetRefreshPausedEl();
+  if (!el) return;
+  if (!fleetRefreshLock.lockedAtMs) {
+    el.hidden = true;
+    el.textContent = '';
+    return;
+  }
+  el.hidden = false;
+  el.textContent = `Refresh paused \u2022 ${formatRelativeAge(Date.now() - fleetRefreshLock.lockedAtMs)}`;
+}
+
+function hasFleetRowInteraction() {
+  if (!isAgentsModalOpen()) return false;
+  if (fleetRefreshLock.pointerInsideRow) return true;
+  const active = document.activeElement;
+  if (active && globalElements.agentsList?.contains(active) && active.closest?.('.agents-row')) return true;
+  return !!globalElements.agentsList?.querySelector?.('.agents-row-actions-overflow[open]');
+}
+
+function setFleetRefreshLock(locked) {
+  const nextLocked = !!locked && isAgentsModalOpen();
+  if (nextLocked) {
+    if (!fleetRefreshLock.lockedAtMs) fleetRefreshLock.lockedAtMs = Date.now();
+    renderFleetRefreshPaused();
+    return;
+  }
+  if (hasFleetRowInteraction()) return;
+  if (!fleetRefreshLock.lockedAtMs) {
+    renderFleetRefreshPaused();
+    return;
+  }
+  fleetRefreshLock.lockedAtMs = 0;
+  renderFleetRefreshPaused();
+  if (!fleetRefreshLock.deferredRefreshPending) return;
+  fleetRefreshLock.deferredRefreshPending = false;
+  const reason = fleetRefreshLock.deferredReason || 'fleet_interaction_resume';
+  fleetRefreshLock.deferredReason = '';
+  clearTimeout(fleetRefreshLock.catchupTimer);
+  fleetRefreshLock.catchupTimer = setTimeout(() => {
+    fleetRefreshLock.catchupTimer = null;
+    if (hasFleetRowInteraction()) {
+      fleetRefreshLock.deferredRefreshPending = true;
+      fleetRefreshLock.deferredReason = reason;
+      setFleetRefreshLock(true);
+      return;
+    }
+    refreshAgents({ reason }).catch(() => {});
+  }, 250);
+}
+
+function deferFleetRefresh(reason) {
+  fleetRefreshLock.deferredRefreshPending = true;
+  fleetRefreshLock.deferredReason = String(reason || fleetRefreshLock.deferredReason || 'fleet_interaction_resume');
+  setFleetRefreshLock(true);
+  return uiState.agents;
+}
+
+function clearFleetRefreshLock() {
+  fleetRefreshLock.pointerInsideRow = false;
+  fleetRefreshLock.lockedAtMs = 0;
+  fleetRefreshLock.deferredRefreshPending = false;
+  fleetRefreshLock.deferredReason = '';
+  clearTimeout(fleetRefreshLock.catchupTimer);
+  fleetRefreshLock.catchupTimer = null;
+  renderFleetRefreshPaused();
+}
 
 function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
@@ -667,7 +750,7 @@ function renderAgentsLastRefreshed() {
 function startAgentsModalAutoRefresh() {
   if (agentsModalAutoRefreshInterval) return;
   agentsModalAutoRefreshInterval = setInterval(() => {
-    if (!globalElements.agentsModal?.classList?.contains('open')) return;
+    if (!isAgentsModalOpen()) return;
     if (document.hidden) return;
     refreshAgents({ reason: 'fleet_auto_refresh' }).catch(() => {});
   }, 10_000);
@@ -682,8 +765,10 @@ function stopAgentsModalAutoRefresh() {
 function startAgentsModalFreshnessTicker() {
   if (agentsModalFreshnessTicker) return;
   agentsModalFreshnessTicker = setInterval(() => {
-    if (!globalElements.agentsModal?.classList?.contains('open')) return;
+    if (!isAgentsModalOpen()) return;
     renderAgentsLastRefreshed();
+    renderFleetRefreshPaused();
+    if (fleetRefreshLock.lockedAtMs) return;
     renderAgentsModalList();
   }, 1000);
 }
@@ -697,6 +782,7 @@ function stopAgentsModalFreshnessTicker() {
 async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {}) {
   if (roleState.role !== 'admin') return uiState.agents;
   if (!uiState.authed) return uiState.agents;
+  if (reason !== 'manual' && hasFleetRowInteraction()) return deferFleetRefresh(reason);
 
   if (agentRefreshInFlight) return agentRefreshInFlight;
 
@@ -2982,6 +3068,7 @@ function openAgentsModal() {
 
   renderAgentsModalList();
   renderAgentsLastRefreshed();
+  renderFleetRefreshPaused();
   startAgentsModalAutoRefresh();
   startAgentsModalFreshnessTicker();
 
@@ -3009,6 +3096,7 @@ function resetFleetSort() {
 }
 
 function closeAgentsModal() {
+  clearFleetRefreshLock();
   globalElements.agentsModal?.classList.remove('open');
   globalElements.agentsModal?.setAttribute('aria-hidden', 'true');
   stopAgentsModalAutoRefresh();
@@ -3418,6 +3506,25 @@ function renderAgentsModalList() {
           else if (action === 'open-chat') openAgentChatFromFleet(id);
           else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
           else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(id);
+        });
+      });
+
+      row.addEventListener('mouseenter', () => {
+        fleetRefreshLock.pointerInsideRow = true;
+        setFleetRefreshLock(true);
+      });
+      row.addEventListener('mouseleave', () => {
+        fleetRefreshLock.pointerInsideRow = false;
+        setTimeout(() => setFleetRefreshLock(false), 80);
+      });
+      row.addEventListener('focusin', () => setFleetRefreshLock(true));
+      row.addEventListener('focusout', () => {
+        setTimeout(() => setFleetRefreshLock(false), 80);
+      });
+      row.querySelectorAll('.agents-row-actions-overflow').forEach((details) => {
+        details.addEventListener('toggle', () => {
+          setFleetRefreshLock(details.open);
+          if (!details.open) setTimeout(() => setFleetRefreshLock(false), 80);
         });
       });
 
@@ -4101,6 +4208,7 @@ async function renderWorkqueuePane(rootEl, { queue = '' } = {}) {
 // In DevTools: window.__debug.renderWorkqueuePane(document.querySelector('#someRoot'), { queue: 'dev-team' })
 window.__debug = window.__debug || {};
 window.__debug.renderWorkqueuePane = renderWorkqueuePane;
+window.__debug.refreshAgents = refreshAgents;
 
 function getWorkqueueItemRepo(item) {
   const repo = String(item?.meta?.repo || '').trim();
@@ -9096,15 +9204,22 @@ globalElements.recurringPromptRows?.addEventListener('click', (event) => {
 });
 
 globalElements.refreshAgentsBtn?.addEventListener('click', () => {
+  clearFleetRefreshLock();
   refreshAgents({ reason: 'manual', showSuccessToast: true }).catch(() => {
     showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
   });
 });
 
 globalElements.agentsBtn?.addEventListener('click', () => openAgentsModal());
-globalElements.agentsCloseBtn?.addEventListener('click', () => closeAgentsModal());
+globalElements.agentsCloseBtn?.addEventListener('click', () => {
+  clearFleetRefreshLock();
+  closeAgentsModal();
+});
 globalElements.agentsModal?.addEventListener('click', (event) => {
-  if (event.target === globalElements.agentsModal) closeAgentsModal();
+  if (event.target === globalElements.agentsModal) {
+    clearFleetRefreshLock();
+    closeAgentsModal();
+  }
 });
 globalElements.agentsModal?.addEventListener('keydown', (event) => {
   if (isTypingContext(event.target)) return;
@@ -9166,13 +9281,13 @@ globalElements.agentsActiveMinutes?.addEventListener('change', () => {
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (!globalElements.agentsModal?.classList?.contains('open')) return;
+  if (!isAgentsModalOpen()) return;
   if (document.hidden) return;
   refreshAgents({ reason: 'fleet_visibility_resume' }).catch(() => {});
 });
 
 window.addEventListener('focus', () => {
-  if (!globalElements.agentsModal?.classList?.contains('open')) return;
+  if (!isAgentsModalOpen()) return;
   if (document.hidden) return;
   refreshAgents({ reason: 'fleet_focus_resume' }).catch(() => {});
 });

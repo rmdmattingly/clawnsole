@@ -74,6 +74,64 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText(/\d+[smhd]/);
 });
 
+test('agents modal defers auto-refresh while a fleet row is active, then catches up once', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const row = page.locator('#agentsList .agents-row').filter({ hasText: 'Alpha (alpha)' });
+  await expect(row).toBeVisible();
+  await row.locator('[data-agent-action="open-chat"]').first().focus();
+
+  agents = [{ id: 'beta', name: 'Beta', displayName: 'Beta' }];
+  await page.evaluate(() => window.__debug.refreshAgents({ reason: 'fleet_auto_refresh' }));
+
+  await expect(page.locator('#agentsRefreshPaused')).toContainText('Refresh paused');
+  await expect(row).toBeVisible();
+  await expect(page.locator('#agentsList')).not.toContainText('Beta (beta)');
+
+  await page.locator('#agentsSearch').focus();
+  await expect(page.locator('#agentsRefreshPaused')).toBeHidden();
+  await expect(page.locator('#agentsList')).toContainText('Beta (beta)');
+  await expect(page.locator('#agentsList')).not.toContainText('Alpha (alpha)');
+});
+
+test('agents modal keeps an open row menu stable during a paused refresh', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  await page.evaluate(() => {
+    const details = document.querySelector('#agentsList .agents-row-actions-overflow');
+    details.open = true;
+    details.dispatchEvent(new Event('toggle', { bubbles: true }));
+  });
+
+  agents = [{ id: 'beta', name: 'Beta', displayName: 'Beta' }];
+  await page.evaluate(() => window.__debug.refreshAgents({ reason: 'fleet_auto_refresh' }));
+
+  await expect(page.locator('#agentsRefreshPaused')).toContainText('Refresh paused');
+  await expect(page.locator('#agentsList .agents-row-actions-overflow').first()).toHaveAttribute('open', '');
+  await expect(page.locator('#agentsList')).toContainText('Alpha (alpha)');
+  await expect(page.locator('#agentsList')).not.toContainText('Beta (beta)');
+});
+
 test('agents modal shows fleet health summary counts and refreshes them', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
