@@ -1873,9 +1873,9 @@ function paneTypeBadgeMarkup(pane, { extraClass = '', testId = '' } = {}) {
 
 function paneTargetLabel(pane) {
   if (!pane) return '';
+  if (pane.kind === 'workqueue') return String(pane.workqueue?.queue || '').trim() || 'No queue';
   const current = String(pane?.elements?.agentLabel?.textContent || '').trim();
   if (current) return current;
-  if (pane.kind === 'workqueue') return String(pane.workqueue?.queue || 'dev-team');
   if (pane.kind === 'timeline' || pane.kind === 'cron') return 'gateway';
   return String(pane.agentId || 'main');
 }

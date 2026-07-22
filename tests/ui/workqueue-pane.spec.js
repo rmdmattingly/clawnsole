@@ -207,10 +207,22 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
 
   // Header target should describe queue context (not agent).
   await expect(wqPane.locator('[data-pane-target-label]')).toHaveText('Queue');
+  await expect(wqPane.getByTestId('pane-type-label')).toHaveText(/^[A-Z] Workqueue · dev-team$/);
+
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill('identity-qa');
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await expect(wqPane.getByTestId('pane-type-label')).toHaveText(/^[A-Z] Workqueue · identity-qa$/);
+
+  await page.locator('#paneManagerBtn').click();
+  const managerRow = page.locator('.pane-manager-row', { hasText: 'Workqueue · identity-qa' }).first();
+  await expect(managerRow.locator('.pane-manager-kind-label')).toContainText('Workqueue · identity-qa');
+  await page.keyboard.press('Escape');
 
   // Refreshing agent list should not flip the workqueue header back to Agent.
   await page.getByLabel('Refresh agent list').click();
   await expect(wqPane.locator('[data-pane-target-label]')).toHaveText('Queue');
+  await expect(wqPane.getByTestId('pane-type-label')).toHaveText(/^[A-Z] Workqueue · identity-qa$/);
 
   // Workqueue pane should not render the chat composer UI.
   await expect(wqPane.locator('.chat-input-row')).toBeHidden();
