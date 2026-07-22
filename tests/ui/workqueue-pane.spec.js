@@ -207,10 +207,31 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
 
   // Header target should describe queue context (not agent).
   await expect(wqPane.locator('[data-pane-target-label]')).toHaveText('Queue');
+  await expect(wqPane.locator('[data-pane-name]')).toContainText('Workqueue · dev-team');
+  await expect(wqPane.locator('[data-pane-agent-label]')).toHaveText('dev-team');
 
   // Refreshing agent list should not flip the workqueue header back to Agent.
   await page.getByLabel('Refresh agent list').click();
   await expect(wqPane.locator('[data-pane-target-label]')).toHaveText('Queue');
+  await expect(wqPane.locator('[data-pane-name]')).toContainText('Workqueue · dev-team');
+
+  await page.keyboard.press('Control+P');
+  const manager = page.getByTestId('pane-manager-modal');
+  await expect(manager).toHaveAttribute('aria-hidden', 'false');
+  await expect(manager.locator('.pane-manager-row[data-pane-kind="workqueue"] .pane-manager-kind-label')).toContainText('Workqueue · dev-team');
+  await page.keyboard.press('Escape');
+
+  const nextQueue = `issue-339-${Date.now()}`;
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(nextQueue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await expect(wqPane.locator('[data-pane-name]')).toContainText(`Workqueue · ${nextQueue}`);
+  await expect(wqPane.locator('[data-pane-agent-label]')).toHaveText(nextQueue);
+
+  await page.keyboard.press('Control+P');
+  await expect(manager).toHaveAttribute('aria-hidden', 'false');
+  await expect(manager.locator('.pane-manager-row[data-pane-kind="workqueue"] .pane-manager-kind-label')).toContainText(`Workqueue · ${nextQueue}`);
+  await page.keyboard.press('Escape');
 
   // Workqueue pane should not render the chat composer UI.
   await expect(wqPane.locator('.chat-input-row')).toBeHidden();
