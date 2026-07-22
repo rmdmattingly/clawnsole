@@ -159,10 +159,11 @@
             <div class="chat-input-row">
               <div class="chat-input-stack">
                 <div class="destination-strip" data-pane-destination-strip data-testid="pane-destination-strip">
-                  <span class="destination-strip-label">Sending to</span>
+                  <span class="destination-strip-label" data-pane-destination-label>Context</span>
                   <button class="destination-strip-target" type="button" data-pane-destination-button aria-label="Change destination" data-testid="pane-destination-button">
                     <span data-pane-destination-value data-testid="pane-destination-value">main</span>
                   </button>
+                  <span class="destination-strip-confirm" data-pane-destination-confirm role="status" aria-live="polite"></span>
                 </div>
                 <textarea data-pane-input placeholder="Message..." data-testid="pane-input"></textarea>
                 <div data-pane-command-hints class="command-hints" aria-live="polite"></div>
@@ -507,6 +508,10 @@
             <label class="inline-checkbox">
               <input id="paneSwitchHudEnabled" type="checkbox" checked />
               Show pane-switch HUD
+            </label>
+            <label class="inline-checkbox">
+              <input id="composerConfirmGuardEnabled" type="checkbox" checked />
+              Confirm quick sends after switching panes
             </label>
           </section>
 
