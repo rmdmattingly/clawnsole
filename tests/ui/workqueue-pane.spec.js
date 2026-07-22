@@ -154,6 +154,31 @@ function seedFilterSummaryWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+test('workqueue pane: queue switch updates pane identity everywhere', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `identity-${Date.now()}`;
+  await loginAdmin(page, env.serverPort);
+
+  const pane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await expect(pane.getByTestId('pane-type-label')).toHaveText(/^B Workqueue · dev-team$/);
+
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await expect(pane.getByTestId('pane-type-label')).toHaveText(`B Workqueue · ${queue}`);
+  await expect(pane.getByTestId('pane-name-target')).toHaveText(` · ${queue}`);
+
+  await page.keyboard.press('Control+P');
+  const managerRow = page.locator('.pane-manager-row[data-pane-kind="workqueue"]').first();
+  await expect(managerRow.locator('.pane-manager-kind-label')).toHaveText(`B Workqueue · ${queue}`);
+  await expect(managerRow).not.toContainText('main');
+});
+
 function seedKeyboardTriageWorkqueueItems(queue) {
   const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
   fs.mkdirSync(dir, { recursive: true });
