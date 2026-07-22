@@ -1912,6 +1912,29 @@ function paneSummaryLabel(pane) {
   return paneIdentityLabel(pane, { includeUnread: false });
 }
 
+function paneManagerStateChipMarkup(pane, state, unreadCount) {
+  const chips = [];
+  if (unreadCount > 0) {
+    chips.push({
+      key: 'unread',
+      label: unreadCount > 99 ? '99+ unread' : `${unreadCount} unread`,
+      title: `${unreadCount} unread`
+    });
+  }
+  if (pane?.kind === 'chat' && paneHasDraftChanges(pane)) {
+    chips.push({ key: 'draft', label: 'draft', title: 'Unsent draft' });
+  }
+  if (String(state || '').toLowerCase() === 'disconnected') {
+    chips.push({ key: 'disconnected', label: 'disconnected', title: 'Pane disconnected' });
+  }
+  return chips
+    .map(
+      (chip) =>
+        `<span class="pane-manager-state-chip pane-manager-state-chip-${escapeHtml(chip.key)}" data-testid="pane-manager-state-chip" data-chip="${escapeHtml(chip.key)}" title="${escapeHtml(chip.title)}">${escapeHtml(chip.label)}</span>`
+    )
+    .join('');
+}
+
 function isPaneSwitchHudEnabled() {
   return String(storage.get(PANE_SWITCH_HUD_ENABLED_KEY, '1') || '1') !== '0';
 }
@@ -2276,15 +2299,21 @@ function renderPaneManager() {
         const isDuplicate = duplicateCount > 1;
         const unreadCount = paneUnreadCount(pane);
         const paneIdentity = paneSummaryLabel(pane);
+        const letter = paneHeaderLetter(pane);
+        const type = paneLabel(pane);
+        const target = paneTargetLabel(pane);
+        const stateChips = paneManagerStateChipMarkup(pane, state, unreadCount);
 
         row.innerHTML = `
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
+              <span class="pane-manager-letter" data-testid="pane-manager-letter" aria-label="${escapeHtml(`Pane ${letter}`)}">${escapeHtml(letter)}</span>
               ${paneTypeBadgeMarkup(pane, { extraClass: 'pane-manager-type-badge', testId: 'pane-manager-type-badge' })}
-              <span class="pane-manager-kind-label">${escapeHtml(paneIdentity)}</span>
+              <span class="pane-manager-kind-label" data-testid="pane-manager-kind-label">${escapeHtml(type)}</span>
+              <span class="pane-manager-target-label" data-testid="pane-manager-target-label"><span aria-hidden="true">· </span>${escapeHtml(target)}</span>
               <span class="pane-manager-pane-id" title="Internal pane id">${escapeHtml(String(pane?.key || ''))}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
-              ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
+              ${stateChips}
             </div>
             <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
           </div>
