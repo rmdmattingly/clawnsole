@@ -2125,14 +2125,46 @@ function markPaneUnread(pane, increment = 1, kind = 'chat') {
 }
 
 function paneSearchText(pane) {
-  return [
-    paneSummaryLabel(pane),
-    paneLabel(pane),
-    paneTargetLabel(pane),
-    pane?.kind || ''
-  ]
+  return paneSearchFields(pane)
+    .map((field) => field.value)
     .join(' ')
     .toLowerCase();
+}
+
+function paneMatchesSearchQuery(pane, query) {
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return true;
+  if (needle.length === 1) return String(paneHeaderLetter(pane) || '').toLowerCase() === needle;
+  return paneSearchText(pane).includes(needle);
+}
+
+function paneSearchFields(pane) {
+  const queue = pane?.kind === 'workqueue' ? String(pane?.workqueue?.queue || '') : '';
+  return [
+    { key: 'letter', value: paneHeaderLetter(pane) },
+    { key: 'label', value: paneSummaryLabel(pane) },
+    { key: 'kindLabel', value: paneLabel(pane) },
+    { key: 'kind', value: pane?.kind || '' },
+    { key: 'target', value: paneTargetLabel(pane) },
+    { key: 'targetDisplay', value: paneDisplayTargetLabel(pane) },
+    { key: 'queue', value: queue },
+    { key: 'paneId', value: pane?.key || '' }
+  ].map((field) => ({ ...field, value: String(field.value || '') })).filter((field) => field.value);
+}
+
+function paneManagerHighlightHtml(value, query) {
+  const text = String(value || '');
+  const needle = String(query || '').trim();
+  if (!text || !needle) return escapeHtml(text);
+  const lowerText = text.toLowerCase();
+  const lowerNeedle = needle.toLowerCase();
+  const index = lowerText.indexOf(lowerNeedle);
+  if (index < 0) return escapeHtml(text);
+  return [
+    escapeHtml(text.slice(0, index)),
+    `<mark class="pane-manager-match">${escapeHtml(text.slice(index, index + needle.length))}</mark>`,
+    escapeHtml(text.slice(index + needle.length))
+  ].join('');
 }
 
 function paneGroupOrder(kind) {
@@ -2193,7 +2225,7 @@ function renderPaneManager() {
   const query = String(paneManagerUiState.query || '').trim().toLowerCase();
   const filtered = panes.filter((pane) => {
     if (paneManagerUiState.unreadOnly && paneUnreadCount(pane) <= 0) return false;
-    return !query || paneSearchText(pane).includes(query);
+    return paneMatchesSearchQuery(pane, query);
   });
 
   const grouped = new Map();
@@ -2218,6 +2250,7 @@ function renderPaneManager() {
 
   list.innerHTML = '';
   empty.hidden = filtered.length > 0;
+  empty.textContent = query ? `No panes match "${String(paneManagerUiState.query || '').trim()}"` : 'No panes match this filter.';
   if (!filtered.length) return;
 
   const maxIndex = Math.max(0, visibleKeys.length - 1);
@@ -2268,8 +2301,8 @@ function renderPaneManager() {
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
               ${paneTypeBadgeMarkup(pane, { extraClass: 'pane-manager-type-badge', testId: 'pane-manager-type-badge' })}
-              <span class="pane-manager-kind-label">${escapeHtml(paneIdentity)}</span>
-              <span class="pane-manager-pane-id" title="Internal pane id">${escapeHtml(String(pane?.key || ''))}</span>
+              <span class="pane-manager-kind-label">${paneManagerHighlightHtml(paneIdentity, query)}</span>
+              <span class="pane-manager-pane-id" title="Internal pane id">${paneManagerHighlightHtml(String(pane?.key || ''), query)}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
               ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
             </div>
@@ -2394,13 +2427,33 @@ function closePaneManager({ restoreFocus = true } = {}) {
 function paneManagerHandleKeydown(event) {
   if (!isPaneManagerOpen()) return false;
   const panes = paneManager?.panes || [];
+  const key = String(event.key || '');
+  const activeEl = document.activeElement;
+  const searchEl = globalElements.paneManagerSearch;
+  const isSearchFocused = activeEl === searchEl;
+
+  if ((key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !isSearchFocused) ||
+    ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && key.toLowerCase() === 'f')) {
+    event.preventDefault();
+    searchEl?.focus?.();
+    searchEl?.select?.();
+    return true;
+  }
+
   if (event.key === 'Escape') {
     event.preventDefault();
+    const query = String(paneManagerUiState.query || '').trim();
+    if (query) {
+      paneManagerUiState.query = '';
+      if (searchEl) searchEl.value = '';
+      renderPaneManager();
+      searchEl?.focus?.();
+      return true;
+    }
     closePaneManager();
     return true;
   }
 
-  const activeEl = document.activeElement;
   if (activeEl === globalElements.paneManagerSearch && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
     return false;
   }
@@ -9929,6 +9982,10 @@ globalElements.paneManagerSearch?.addEventListener('input', () => {
   paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
   paneManagerUiState.selectedIndex = 0;
   renderPaneManager();
+});
+
+globalElements.paneManagerSearch?.addEventListener('keydown', (event) => {
+  if (paneManagerHandleKeydown(event)) event.stopPropagation();
 });
 
 globalElements.paneManagerUnreadOnly?.addEventListener('change', () => {

@@ -85,7 +85,7 @@ test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane 
   await expect(page.locator('.pane-manager-row .pane-manager-pane-id').first()).toHaveText(/^[a-zA-Z0-9]+$/);
 });
 
-test('pane manager: quick-find filters and groups by kind', async ({ page }) => {
+test('pane manager: quick-find filters, highlights, and focuses first match', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
 
@@ -109,13 +109,44 @@ test('pane manager: quick-find filters and groups by kind', async ({ page }) => 
   await expect(page.locator('.pane-manager-group-header').nth(2)).toContainText('Cron (1)');
 
   const search = page.getByTestId('pane-manager-search');
+  await expect(search).toHaveAttribute('placeholder', 'Find pane (A, Workqueue, dev-agent...)');
   await search.fill('cron');
   await expect(page.locator('.pane-manager-row')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row').first()).toContainText('Cron');
+  await expect(page.locator('.pane-manager-match').first()).toHaveText(/cron/i);
+
+  await page.keyboard.press('Enter');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+  const focusedPaneKind = await page.evaluate(() => {
+    const active = document.activeElement;
+    const pane = Array.from(document.querySelectorAll('[data-pane]')).find((entry) => entry === active || (active && entry.contains(active)));
+    return pane?.getAttribute('data-pane-kind') || '';
+  });
+  expect(focusedPaneKind).toBe('cron');
+
+  await page.keyboard.press('Control+P');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await page.keyboard.press('/');
+  await expect(search).toBeFocused();
+  await search.fill('dev-team');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(1);
+  await expect(page.locator('.pane-manager-row').first()).toContainText('Workqueue');
 
   await search.fill('B');
   await expect(page.locator('.pane-manager-row')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row').first()).toContainText('Workqueue');
+
+  await page.keyboard.press('Control+F');
+  await expect(search).toBeFocused();
+  await search.fill('no-such-pane');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(0);
+  await expect(page.locator('#paneManagerEmpty')).toHaveText('No panes match "no-such-pane"');
+
+  await page.keyboard.press('Escape');
+  await expect(search).toHaveValue('');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
 });
 
 test('pane manager: shows summary + duplicate badge and supports close others', async ({ page }) => {
