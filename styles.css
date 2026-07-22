@@ -2217,6 +2217,19 @@ kbd {
   margin-right: 4px;
 }
 
+.wq-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 179, 71, 0.42);
+  background: rgba(255, 179, 71, 0.14);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .wq-filter-token {
   display: inline-flex;
   align-items: center;
