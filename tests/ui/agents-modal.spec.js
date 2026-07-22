@@ -237,6 +237,84 @@ test('agents modal quick filter narrows list and Esc clears it', async ({ page, 
   await expect(rows).toHaveCount(initialCount);
 });
 
+test('fleet refresh preserves selected row and falls back when it disappears', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' },
+    { id: 'gamma', name: 'Gamma', displayName: 'Gamma' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+
+  const beta = page.locator('#agentsList .agents-row').filter({ hasText: 'Beta (beta)' });
+  await beta.click();
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+
+  await page.locator('#agentsModalRefreshBtn').click();
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#agentsSortIndicator')).toHaveText('');
+
+  agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'gamma', name: 'Gamma', displayName: 'Gamma' }
+  ];
+  await page.locator('#agentsModalRefreshBtn').click();
+  await expect(page.locator('#agentsList .agents-row').filter({ hasText: 'Gamma (gamma)' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#agentsSortIndicator')).toContainText('Selected agent no longer in current filter');
+});
+
+test('fleet refresh keeps scroll anchor and keyboard triage selection', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = Array.from({ length: 36 }, (_, index) => {
+    const id = `agent-${String(index + 1).padStart(2, '0')}`;
+    return { id, name: id, displayName: id };
+  });
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await page.evaluate(() => {
+    const list = document.querySelector('#agentsList');
+    if (!list) return;
+    list.style.maxHeight = '220px';
+    list.style.overflow = 'auto';
+    document.querySelector('.agents-row[data-agent-id="agent-20"]')?.scrollIntoView();
+  });
+  const before = await page.locator('#agentsList').evaluate((el) => el.scrollTop);
+  expect(before).toBeGreaterThan(0);
+
+  await page.locator('#agentsModalRefreshBtn').click();
+  const after = await page.locator('#agentsList').evaluate((el) => el.scrollTop);
+  expect(Math.abs(after - before)).toBeLessThan(24);
+
+  const row20 = page.locator('#agentsList .agents-row[data-agent-id="agent-20"]');
+  await row20.click();
+  await page.keyboard.press('j');
+  await expect(page.locator('#agentsList .agents-row[data-agent-id="agent-21"]')).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('k');
+  await expect(row20).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (
+    page.locator('[data-pane][data-pane-kind="chat"] [data-pane-agent-select]')
+      .evaluateAll((els) => els.map((el) => el.value))
+  )).toContain('agent-20');
+  await expect.poll(async () => (
+    page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')
+      .evaluateAll((els) => els.map((el) => el.value))
+  )).toContain('agent-20');
+});
+
 test('fleet attention mode sections healthy agents and keeps filters while expanding', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 

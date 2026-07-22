@@ -27,6 +27,7 @@ const globalElements = {
   refreshAgentsBtn: document.getElementById('refreshAgentsBtn'),
   agentsBtn: document.getElementById('agentsBtn'),
   agentsModal: document.getElementById('agentsModal'),
+  agentsModalRefreshBtn: document.getElementById('agentsModalRefreshBtn'),
   agentsCloseBtn: document.getElementById('agentsCloseBtn'),
   agentsSearch: document.getElementById('agentsSearch'),
   agentsFilterButtons: Array.from(document.querySelectorAll('[data-agents-filter]')),
@@ -104,6 +105,11 @@ const escapeHtml = __appCore.escapeHtml || ((value) => {
     .replace(/\"/g, '&quot;')
     .replace(/'/g, '&#39;');
 });
+function cssEscape(value) {
+  const s = String(value ?? '');
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(s);
+  return s.replace(/["\\\n\r\f]/g, '\\$&');
+}
 const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   if (!Number.isFinite(msUntil)) return '';
   if (msUntil <= 0) return 'expired';
@@ -713,6 +719,13 @@ function clearFleetRefreshLock() {
   fleetRefreshLock.catchupTimer = null;
   renderFleetRefreshPaused();
 }
+
+const fleetSelectionState = {
+  selectedAgentId: '',
+  selectedIndex: 0,
+  notice: '',
+  missingAgentId: ''
+};
 
 function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
@@ -3296,6 +3309,7 @@ function renderAgentsModalList() {
   const root = globalElements.agentsList;
   if (!root) return;
 
+  const scrollAnchor = captureFleetScrollAnchor(root);
   const search = String(globalElements.agentsSearch?.value || '').trim().toLowerCase();
   const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
   const activeWindowMs = withinMinutes * 60_000;
@@ -3368,6 +3382,8 @@ function renderAgentsModalList() {
   }, { needsTriage: 0, healthy: 0, disconnected: 0 });
   const healthyCollapseDefault = baseAgents.length > ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD;
   const healthyCollapsed = String(storage.get(ADMIN_AGENT_HEALTHY_COLLAPSED_KEY, healthyCollapseDefault ? '1' : '0')) === '1';
+  const visibleAgents = [...pinned, ...needsAttention, ...(healthyCollapsed ? [] : healthy)];
+  reconcileFleetSelection(visibleAgents);
 
   root.innerHTML = '';
 
@@ -3440,6 +3456,10 @@ function renderAgentsModalList() {
       const id = String(agent?.id || '').trim();
       const row = document.createElement('div');
       row.className = 'agents-row';
+      row.tabIndex = 0;
+      row.dataset.agentId = id;
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', id && id === fleetSelectionState.selectedAgentId ? 'true' : 'false');
 
       const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
@@ -3495,6 +3515,12 @@ function renderAgentsModalList() {
         paneManager.panes.forEach((p) => renderAgentOptions(p.elements?.agentSelect, p.agentId));
         renderAgentsModalList();
       });
+
+      row.addEventListener('click', (e) => {
+        if (e.target instanceof Element && e.target.closest('button, summary, details')) return;
+        selectFleetAgent(id, { focusRow: true });
+      });
+      row.addEventListener('focus', () => selectFleetAgent(id));
 
       const actionButtons = Array.from(row.querySelectorAll('[data-agent-action]'));
       actionButtons.forEach((btn) => {
@@ -3553,11 +3579,106 @@ function renderAgentsModalList() {
     globalElements.agentsSortIndicator.textContent =
       sortMode === 'heartbeat_age_desc'
         ? 'Sorted by heartbeat age: stale first. Reset sort returns to the prior/default order.'
-        : '';
+        : fleetSelectionState.notice;
   }
 
   const empty = ordered.length === 0;
   if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
+  restoreFleetScrollAnchor(root, scrollAnchor);
+}
+
+function captureFleetScrollAnchor(root) {
+  if (!root) return null;
+  const rows = Array.from(root.querySelectorAll('.agents-row[data-agent-id]')).filter((row) => row.offsetParent !== null);
+  const top = Number(root.scrollTop) || 0;
+  const anchor = rows.find((row) => row.offsetTop >= top) || rows[0] || null;
+  return {
+    scrollTop: top,
+    agentId: String(anchor?.dataset?.agentId || ''),
+    offset: anchor ? anchor.offsetTop - top : 0
+  };
+}
+
+function restoreFleetScrollAnchor(root, anchor) {
+  if (!root || !anchor) return;
+  const safeScrollTop = Math.max(0, Number(anchor.scrollTop) || 0);
+  if (!anchor.agentId) {
+    root.scrollTop = safeScrollTop;
+    return;
+  }
+  const row = root.querySelector(`.agents-row[data-agent-id="${cssEscape(anchor.agentId)}"]`);
+  if (!row || row.offsetParent === null) {
+    root.scrollTop = safeScrollTop;
+    return;
+  }
+  root.scrollTop = Math.max(0, row.offsetTop - (Number(anchor.offset) || 0));
+}
+
+function reconcileFleetSelection(visibleAgents) {
+  const agents = Array.isArray(visibleAgents) ? visibleAgents : [];
+  const ids = agents.map((agent) => String(agent?.id || '').trim()).filter(Boolean);
+  if (!ids.length) {
+    fleetSelectionState.selectedAgentId = '';
+    fleetSelectionState.selectedIndex = 0;
+    fleetSelectionState.notice = '';
+    fleetSelectionState.missingAgentId = '';
+    return;
+  }
+  const previousId = String(fleetSelectionState.selectedAgentId || '').trim();
+  const existingIndex = previousId ? ids.indexOf(previousId) : -1;
+  if (existingIndex >= 0) {
+    fleetSelectionState.selectedIndex = existingIndex;
+    if (!fleetSelectionState.missingAgentId) fleetSelectionState.notice = '';
+    return;
+  }
+  const fallbackIndex = Math.max(0, Math.min(Number(fleetSelectionState.selectedIndex) || 0, ids.length - 1));
+  fleetSelectionState.selectedAgentId = ids[fallbackIndex];
+  fleetSelectionState.selectedIndex = fallbackIndex;
+  fleetSelectionState.missingAgentId = previousId;
+  fleetSelectionState.notice = previousId ? 'Selected agent no longer in current filter.' : '';
+}
+
+function getFleetSelectableRows() {
+  const root = globalElements.agentsList;
+  if (!root) return [];
+  return Array.from(root.querySelectorAll('.agents-row[data-agent-id]')).filter((row) => row.offsetParent !== null);
+}
+
+function selectFleetAgent(agentId, { focusRow = false } = {}) {
+  const id = String(agentId || '').trim();
+  const rows = getFleetSelectableRows();
+  const ix = rows.findIndex((row) => String(row.dataset.agentId || '') === id);
+  if (ix < 0) return false;
+  fleetSelectionState.selectedAgentId = id;
+  fleetSelectionState.selectedIndex = ix;
+  fleetSelectionState.notice = '';
+  fleetSelectionState.missingAgentId = '';
+  rows.forEach((row, index) => row.setAttribute('aria-selected', index === ix ? 'true' : 'false'));
+  if (focusRow) {
+    try {
+      rows[ix].focus({ preventScroll: true });
+    } catch {}
+  }
+  return true;
+}
+
+function moveFleetSelection(delta) {
+  const rows = getFleetSelectableRows();
+  if (!rows.length) return false;
+  const current = rows.findIndex((row) => String(row.dataset.agentId || '') === String(fleetSelectionState.selectedAgentId || ''));
+  const start = current >= 0 ? current : Math.max(0, Math.min(Number(fleetSelectionState.selectedIndex) || 0, rows.length - 1));
+  const next = Math.max(0, Math.min(start + delta, rows.length - 1));
+  const id = String(rows[next].dataset.agentId || '');
+  if (!selectFleetAgent(id, { focusRow: true })) return false;
+  rows[next].scrollIntoView({ block: 'nearest' });
+  return true;
+}
+
+function runFleetSelectedAgent() {
+  const id = String(fleetSelectionState.selectedAgentId || '').trim();
+  if (!id) return false;
+  openAgentTriageFromFleet(id);
+  return true;
 }
 
 // Workqueue (admin-only)
@@ -9209,6 +9330,11 @@ globalElements.refreshAgentsBtn?.addEventListener('click', () => {
     showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
   });
 });
+globalElements.agentsModalRefreshBtn?.addEventListener('click', () => {
+  refreshAgents({ reason: 'manual', showSuccessToast: true }).catch(() => {
+    showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
+  });
+});
 
 globalElements.agentsBtn?.addEventListener('click', () => openAgentsModal());
 globalElements.agentsCloseBtn?.addEventListener('click', () => {
@@ -9223,7 +9349,26 @@ globalElements.agentsModal?.addEventListener('click', (event) => {
 });
 globalElements.agentsModal?.addEventListener('keydown', (event) => {
   if (isTypingContext(event.target)) return;
-  if (String(event.key || '').toLowerCase() !== 'h' || event.metaKey || event.ctrlKey || event.altKey) return;
+  const key = String(event.key || '');
+  const lower = key.toLowerCase();
+  if (!event.metaKey && !event.ctrlKey && !event.altKey) {
+    if (key === 'ArrowDown' || lower === 'j') {
+      event.preventDefault();
+      moveFleetSelection(1);
+      return;
+    }
+    if (key === 'ArrowUp' || lower === 'k') {
+      event.preventDefault();
+      moveFleetSelection(-1);
+      return;
+    }
+    if (key === 'Enter') {
+      event.preventDefault();
+      runFleetSelectedAgent();
+      return;
+    }
+  }
+  if (lower !== 'h' || event.metaKey || event.ctrlKey || event.altKey) return;
   event.preventDefault();
   if (event.shiftKey || getFleetSort() !== 'heartbeat_age_desc') setFleetHeartbeatSort();
   else resetFleetSort();
