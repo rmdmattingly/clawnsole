@@ -723,7 +723,8 @@ function clearFleetRefreshLock() {
 const fleetSelectionState = {
   selectedAgentId: '',
   selectedIndex: 0,
-  notice: ''
+  notice: '',
+  missingAgentId: ''
 };
 
 function startAgentAutoRefresh() {
@@ -3620,18 +3621,20 @@ function reconcileFleetSelection(visibleAgents) {
     fleetSelectionState.selectedAgentId = '';
     fleetSelectionState.selectedIndex = 0;
     fleetSelectionState.notice = '';
+    fleetSelectionState.missingAgentId = '';
     return;
   }
   const previousId = String(fleetSelectionState.selectedAgentId || '').trim();
   const existingIndex = previousId ? ids.indexOf(previousId) : -1;
   if (existingIndex >= 0) {
     fleetSelectionState.selectedIndex = existingIndex;
-    fleetSelectionState.notice = '';
+    if (!fleetSelectionState.missingAgentId) fleetSelectionState.notice = '';
     return;
   }
   const fallbackIndex = Math.max(0, Math.min(Number(fleetSelectionState.selectedIndex) || 0, ids.length - 1));
   fleetSelectionState.selectedAgentId = ids[fallbackIndex];
   fleetSelectionState.selectedIndex = fallbackIndex;
+  fleetSelectionState.missingAgentId = previousId;
   fleetSelectionState.notice = previousId ? 'Selected agent no longer in current filter.' : '';
 }
 
@@ -3649,6 +3652,7 @@ function selectFleetAgent(agentId, { focusRow = false } = {}) {
   fleetSelectionState.selectedAgentId = id;
   fleetSelectionState.selectedIndex = ix;
   fleetSelectionState.notice = '';
+  fleetSelectionState.missingAgentId = '';
   rows.forEach((row, index) => row.setAttribute('aria-selected', index === ix ? 'true' : 'false'));
   if (focusRow) {
     try {
