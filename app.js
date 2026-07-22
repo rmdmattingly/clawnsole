@@ -1860,11 +1860,16 @@ function paneTypeBadgeMarkup(pane, { extraClass = '', testId = '' } = {}) {
 
 function paneTargetLabel(pane) {
   if (!pane) return '';
+  if (pane.kind === 'workqueue') return formatWorkqueuePaneQueueLabel(pane);
   const current = String(pane?.elements?.agentLabel?.textContent || '').trim();
   if (current) return current;
-  if (pane.kind === 'workqueue') return String(pane.workqueue?.queue || 'dev-team');
   if (pane.kind === 'timeline' || pane.kind === 'cron') return 'gateway';
   return String(pane.agentId || 'main');
+}
+
+function formatWorkqueuePaneQueueLabel(pane) {
+  const queue = String(pane?.workqueue?.queue || '').trim();
+  return queue || 'No queue';
 }
 
 function paneBrowserTitle(pane) {
@@ -7029,8 +7034,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     // Header should describe the pane's primary target (queue), not an agent.
     paneSetHeaderTarget(pane, {
       label: 'Queue',
-      value: String(pane.workqueue.queue || 'dev-team'),
-      ariaLabel: `Change queue (current: ${String(pane.workqueue.queue || 'dev-team')})`
+      value: formatWorkqueuePaneQueueLabel(pane),
+      ariaLabel: `Change queue (current: ${formatWorkqueuePaneQueueLabel(pane)})`
     });
 
     // Replace thread with workqueue list + inspect.
@@ -7190,8 +7195,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     // Make header pill focus the queue selector in the body (no duplicated selector state).
     paneSetHeaderTarget(pane, {
       label: 'Queue',
-      value: String(pane.workqueue.queue || 'dev-team'),
-      ariaLabel: `Change queue (current: ${String(pane.workqueue.queue || 'dev-team')})`,
+      value: formatWorkqueuePaneQueueLabel(pane),
+      ariaLabel: `Change queue (current: ${formatWorkqueuePaneQueueLabel(pane)})`,
       onClick: () => {
         try {
           queueSelectEl?.focus?.();
@@ -7335,8 +7340,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       rememberRecentWorkqueueTarget(q);
       paneSetHeaderTarget(pane, {
         label: 'Queue',
-        value: String(q),
-        ariaLabel: `Change queue (current: ${String(q)})`,
+        value: formatWorkqueuePaneQueueLabel(pane),
+        ariaLabel: `Change queue (current: ${formatWorkqueuePaneQueueLabel(pane)})`,
         onClick: () => {
           try {
             queueSelectEl?.focus?.();
