@@ -8045,11 +8045,10 @@ function renderPaneIdentity(pane) {
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
   if (!pane?.elements) return;
-  const { targetLabel, agentButton, agentLabel, agentSelect, agentWarning, destinationValue } = pane.elements;
+  const { targetLabel, agentButton, agentLabel, agentSelect, agentWarning } = pane.elements;
 
   if (targetLabel && typeof label === 'string') targetLabel.textContent = label;
   if (agentLabel && typeof value === 'string') agentLabel.textContent = value;
-  if (destinationValue && typeof value === 'string') destinationValue.textContent = value;
 
   // Non-chat panes use the pill button as a "focus/chooser" affordance.
   if (agentSelect) agentSelect.hidden = true;
@@ -8078,6 +8077,7 @@ function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
 
   if (paneManager?.panes?.includes?.(pane)) paneManager.updatePaneLabels();
   else renderPaneIdentity(pane);
+  paneSetDestinationStrip(pane);
 }
 
 function renderPaneAgentIdentity(pane) {

@@ -503,6 +503,11 @@ body::before {
   grid-template-columns: 1fr;
 }
 
+.pane-kind-cron .chat-input-row,
+.pane-kind-timeline .chat-input-row {
+  display: none !important;
+}
+
 .pane-kind-workqueue textarea[data-pane-input],
 .pane-kind-workqueue .chat-actions,
 .pane-kind-workqueue .command-hints,
