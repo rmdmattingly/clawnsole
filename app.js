@@ -3188,8 +3188,14 @@ function getActiveChatAgentPane() {
   const focusedKey = focusedPaneKey();
   const fallbackKey = paneMruOrder()[0] || '';
   const originKey = commandPaletteState.open ? String(commandPaletteState.originPaneKey || '') : '';
-  const activeKey = originKey || focusedKey || fallbackKey;
-  return (paneManager?.panes || []).find((pane) => String(pane?.key || '') === activeKey && pane.kind === 'chat') || null;
+  const panes = paneManager?.panes || [];
+  if (originKey) {
+    const origin = panes.find((pane) => String(pane?.key || '') === originKey) || null;
+    return origin?.kind === 'chat' ? origin : null;
+  }
+
+  const activeKey = focusedKey || fallbackKey;
+  return panes.find((pane) => String(pane?.key || '') === activeKey && pane.kind === 'chat') || null;
 }
 
 function openWorkqueueForActiveChatAgent() {
@@ -9049,8 +9055,9 @@ const paneManager = {
         if (event?.preventDefault) event.preventDefault();
         if (event?.stopPropagation) event.stopPropagation();
 
+        const options = getOptions();
         this.closeAddPaneMenu();
-        this.addPane(kind, { ...getOptions(), forceNew: !!event?.altKey });
+        this.addPane(kind, { ...options, forceNew: !!event?.altKey });
 
         queueMicrotask(() => {
           state.menuActionInFlight = false;
