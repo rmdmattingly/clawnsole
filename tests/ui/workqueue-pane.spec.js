@@ -452,6 +452,40 @@ test('workqueue pane: filter summary chips show counts and remove filters', asyn
   await expect(wqPane.locator('[data-wq-queue-custom]')).toHaveValue(queue);
 });
 
+test('workqueue pane: default rows collapse exact duplicates with expandable members', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `exact-duplicates-${Date.now()}`;
+  seedExactDuplicateWorkqueueItems(queue);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await wqPane.locator('[data-wq-scope="all"]').click();
+
+  const rows = wqPane.locator('[data-wq-list-body] .wq-row');
+  const duplicateRow = wqPane.locator('[data-wq-duplicate-row]').first();
+
+  await expect(wqPane.locator('[data-wq-group-mode="rows"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 4 items');
+  await expect(rows).toHaveCount(3);
+  await expect(duplicateRow).toContainText('x2');
+  await expect(duplicateRow).toContainText('duplicate collapse');
+  await expect(duplicateRow).toHaveAttribute('data-wq-item', 'exact-dup-latest');
+  await expect(wqPane.locator('[data-wq-list-body] .wq-row-child')).toHaveCount(0);
+
+  await duplicateRow.press('Enter');
+  await expect(duplicateRow).toHaveAttribute('aria-expanded', 'true');
+  await expect(wqPane.locator('[data-wq-list-body] .wq-row-child')).toHaveCount(2);
+});
+
 test('workqueue pane: queue target supports search + recent persistence', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
