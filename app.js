@@ -78,6 +78,7 @@ const globalElements = {
   settingsBtn: document.getElementById('settingsBtn'),
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
+  triageLayoutPresetBtn: document.getElementById('triageLayoutPresetBtn'),
   paneSwitchHudEnabled: document.getElementById('paneSwitchHudEnabled'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
@@ -2747,6 +2748,17 @@ function buildCommandPaletteItems() {
     ),
     withShortcut(
       {
+        id: 'cmd:triage-layout-preset',
+        label: 'Layout: Triage preset',
+        detail: 'Open Chat + Workqueue + Fleet without duplicating existing panes',
+        paneMeta: commandPalettePaneMeta({ type: 'Layout', target: 'triage', mode: 'create or focus' }),
+        searchText: 'triage preset chat workqueue fleet layout',
+        run: () => applyTriageLayoutPreset()
+      },
+      ''
+    ),
+    withShortcut(
+      {
         id: 'cmd:toggle-shortcuts',
         label: 'Help: Toggle shortcuts overlay',
         detail: 'Show/hide keyboard shortcuts',
@@ -2864,9 +2876,9 @@ function buildCommandPaletteItems() {
       }
       return enriched;
     }
-    if (id === 'cmd:reset-layout') {
+    if (id === 'cmd:reset-layout' || id === 'cmd:triage-layout-preset') {
       enriched.group = 'Layout';
-      enriched.priority = 100;
+      enriched.priority = id === 'cmd:triage-layout-preset' ? 110 : 100;
       return enriched;
     }
     if (id === 'cmd:toggle-shortcuts') {
@@ -3285,6 +3297,26 @@ function openFleetPane({ forceNew = false } = {}) {
   pane.cronAgentId = target;
   paneManager.persistAdminPanes();
   paneManager.focusPanePrimary(pane);
+  return pane;
+}
+
+function applyTriageLayoutPreset() {
+  if (roleState.role !== 'admin') return;
+
+  const existingChat = findExistingPane('chat');
+  const chatPane = existingChat || paneManager.addPane('chat');
+  const agentId = normalizeAgentId(chatPane?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
+
+  paneManager.addPane('workqueue', { queue: 'dev-team', agentId });
+  const fleetPane = openFleetPane();
+
+  paneManager.persistAdminPanes();
+  if (uiState.authed) paneManager.connectIfNeeded();
+
+  if (fleetPane) paneManager.focusPanePrimary(fleetPane);
+  else if (chatPane) paneManager.focusPanePrimary(chatPane);
+
+  showToast('Triage preset applied', { kind: 'info', timeoutMs: 1600 });
 }
 
 function openAgentWorkqueueFromFleet(agentId) {
@@ -9319,6 +9351,10 @@ globalElements.settingsBtn?.addEventListener('click', () => openSettings());
 globalElements.settingsCloseBtn?.addEventListener('click', () => closeSettings());
 globalElements.settingsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.settingsModal) closeSettings();
+});
+globalElements.triageLayoutPresetBtn?.addEventListener('click', () => {
+  closeSettings();
+  applyTriageLayoutPreset();
 });
 globalElements.paneSwitchHudEnabled?.addEventListener('change', () => {
   storage.set(PANE_SWITCH_HUD_ENABLED_KEY, globalElements.paneSwitchHudEnabled.checked ? '1' : '0');
