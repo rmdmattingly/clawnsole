@@ -5,6 +5,7 @@ const {
   escapeHtml,
   fmtRemaining,
   formatWorkqueueIssueTitle,
+  collapseWorkqueueDuplicateItems,
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
@@ -85,6 +86,57 @@ test('sortWorkqueueItems supports explicit sort keys and stable ordering fallbac
   // For ties without timestamps, preserve input order.
   const byPrio = sortWorkqueueItems(items, { sortKey: 'priority', sortDir: 'desc' });
   assert.deepEqual(byPrio.map((it) => it.id), ['a', 'b', 'c']);
+});
+
+test('collapseWorkqueueDuplicateItems collapses exact dedupeKey title status matches', () => {
+  const items = [
+    {
+      id: 'old',
+      title: 'Duplicate task',
+      status: 'ready',
+      dedupeKey: 'issue:1',
+      updatedAt: '2026-01-01T00:00:00Z'
+    },
+    {
+      id: 'new',
+      title: 'Duplicate task',
+      status: 'ready',
+      dedupeKey: 'issue:1',
+      updatedAt: '2026-01-03T00:00:00Z'
+    },
+    {
+      id: 'different-status',
+      title: 'Duplicate task',
+      status: 'blocked',
+      dedupeKey: 'issue:1',
+      updatedAt: '2026-01-04T00:00:00Z'
+    },
+    {
+      id: 'different-title',
+      title: 'Other task',
+      status: 'ready',
+      dedupeKey: 'issue:1',
+      updatedAt: '2026-01-05T00:00:00Z'
+    }
+  ];
+
+  const rows = collapseWorkqueueDuplicateItems(items);
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].item.id, 'new');
+  assert.equal(rows[0].duplicateCount, 2);
+  assert.deepEqual(rows[0].duplicateMembers.map((it) => it.id), ['new', 'old']);
+  assert.deepEqual(rows.slice(1).map((row) => row.item.id), ['different-status', 'different-title']);
+});
+
+test('collapseWorkqueueDuplicateItems uses normalized title and status fallback', () => {
+  const rows = collapseWorkqueueDuplicateItems([
+    { id: 'b', title: '  Same   Task ', status: 'READY', updatedAt: '2026-01-02T00:00:00Z' },
+    { id: 'a', title: 'same task', status: 'ready', updatedAt: '2026-01-02T00:00:00Z' }
+  ]);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].item.id, 'a');
+  assert.equal(rows[0].duplicateCount, 2);
 });
 
 test('formatWorkqueueIssueTitle normalizes mixed legacy issue prefixes', () => {

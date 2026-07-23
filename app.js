@@ -121,6 +121,7 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   return `${sec}s`;
 });
 const formatWorkqueueIssueTitle = __appCore.formatWorkqueueIssueTitle || ((item) => String(item?.title || ''));
+const collapseWorkqueueDuplicateItems = __appCore.collapseWorkqueueDuplicateItems || ((items) => (Array.isArray(items) ? items : []).map((item) => ({ kind: 'item', item, duplicateCount: 1, duplicateMembers: [item] })));
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
   const n = Number(count);
@@ -4709,7 +4710,7 @@ function summarizeWorkqueueIssueGroups(items) {
   return out;
 }
 
-function appendWorkqueuePaneItemRow(pane, body, item, { child = false } = {}) {
+function appendWorkqueuePaneItemRow(pane, body, item, { child = false, duplicateCount = 1, duplicateMembers = null } = {}) {
   const row = document.createElement('button');
   row.type = 'button';
   row.className = child ? 'wq-row wq-row-child' : 'wq-row';
@@ -4720,11 +4721,24 @@ function appendWorkqueuePaneItemRow(pane, body, item, { child = false } = {}) {
   const leaseLabel = item.leaseUntil ? fmtRemaining(leaseMs) : '';
   const status = String(item.status || '');
   const title = formatWorkqueueIssueTitle(item);
+  const duplicateIds = (Array.isArray(duplicateMembers) ? duplicateMembers : [])
+    .map((member) => String(member?.id || '').trim())
+    .filter(Boolean);
+  const duplicateTitle = duplicateCount > 1
+    ? `Collapsed ${duplicateCount} exact duplicate rows. Representative is newest member ${item.id || 'unknown'}${duplicateIds.length ? `; members: ${duplicateIds.join(', ')}` : ''}.`
+    : title;
   row.title = title;
   row.setAttribute('aria-label', `Workqueue item: ${title}`);
+  if (duplicateCount > 1) {
+    row.setAttribute('data-wq-duplicate-count', String(duplicateCount));
+    row.title = duplicateTitle;
+  }
 
   row.innerHTML = `
-    <div class="wq-col title"><span class="wq-title-text" title="${escapeHtml(title)}">${escapeHtml(title)}</span></div>
+    <div class="wq-col title">
+      <span class="wq-title-text" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
+      ${duplicateCount > 1 ? `<span class="wq-duplicate-count" title="${escapeHtml(duplicateTitle)}">×${escapeHtml(String(duplicateCount))}</span>` : ''}
+    </div>
     <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
     <div class="wq-col prio mono">${escapeHtml(String(item.priority ?? ''))}</div>
     <div class="wq-col attempts mono">${escapeHtml(String(item.attempts ?? ''))}</div>
@@ -4885,13 +4899,16 @@ function renderWorkqueuePaneItems(pane) {
 
   const scopedItems = filterWorkqueuePaneItemsByScope(pane, pane.workqueue?.items);
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
-  const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const groupMode = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
+  const collapsedRows = groupMode === 'rows' ? collapseWorkqueueDuplicateItems(filteredItems) : [];
+  const sortableItems = groupMode === 'rows' ? collapsedRows.map((entry) => entry.item).filter(Boolean) : filteredItems;
+  const items = sortWorkqueueItems(sortableItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
   const totalCount = Array.isArray(pane.workqueue?.countItems) ? pane.workqueue.countItems.length : (Array.isArray(pane.workqueue?.items) ? pane.workqueue.items.length : items.length);
   const statusLine = pane.elements?.thread?.querySelector('[data-wq-statusline]');
   if (statusLine) statusLine.textContent = formatWorkqueueCountText(items.length, totalCount);
   renderWorkqueueFilterSummaryForPane(pane, { shownCount: items.length, totalCount });
-  const groupMode = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
-  const rows = groupMode === 'grouped' ? summarizeWorkqueueIssueGroups(items) : items.map((item) => ({ kind: 'item', item }));
+  const collapsedById = new Map(collapsedRows.map((entry) => [entry.item?.id, entry]));
+  const rows = groupMode === 'grouped' ? summarizeWorkqueueIssueGroups(items) : items.map((item) => collapsedById.get(item?.id) || { kind: 'item', item });
   const renderLimit = Math.max(
     WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
     Number(pane.workqueue?.renderLimit || WORKQUEUE_PANE_INITIAL_RENDER_LIMIT)
@@ -4939,7 +4956,10 @@ function renderWorkqueuePaneItems(pane) {
 
   for (const entry of visibleRows) {
     if (entry.kind === 'item') {
-      appendWorkqueuePaneItemRow(pane, body, entry.item);
+      appendWorkqueuePaneItemRow(pane, body, entry.item, {
+        duplicateCount: entry.duplicateCount,
+        duplicateMembers: entry.duplicateMembers
+      });
       continue;
     }
 

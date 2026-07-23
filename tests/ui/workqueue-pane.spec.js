@@ -75,6 +75,51 @@ function seedLegacyDuplicateWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedExactDuplicateWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, offsetMs) => ({
+    id,
+    queue,
+    title: '[issue] rmdmattingly/clawnsole#348 collapse exact duplicates',
+    instructions: 'Repo: rmdmattingly/clawnsole\nIssue: https://github.com/rmdmattingly/clawnsole/issues/348',
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-60000),
+    updatedAt: iso(offsetMs),
+    dedupeKey: 'issue:rmdmattingly/clawnsole#348'
+  });
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-120000) } },
+    assignments: {},
+    items: [
+      mkItem('exact-dup-old', -30000),
+      mkItem('exact-dup-newest', -10000),
+      mkItem('exact-dup-middle', -20000),
+      {
+        ...mkItem('exact-dup-blocked', -5000),
+        status: 'blocked'
+      },
+      {
+        ...mkItem('exact-unrelated', -40000),
+        title: 'unrelated',
+        dedupeKey: 'exact-unrelated',
+        priority: 1
+      }
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 function seedLegacyIssueTitleVariants(queue) {
   const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
   fs.mkdirSync(dir, { recursive: true });
@@ -716,6 +761,35 @@ test('workqueue pane: grouped mode collapses duplicate issue rows and expands ch
   await child.focus();
   await page.keyboard.press('Enter');
   await expect(pane.locator('[data-wq-inspect]')).toContainText('legacy-dup');
+});
+
+test('workqueue pane: rows mode auto-collapses exact duplicate rows with count badge', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `exact-duplicates-${Date.now()}`;
+  seedExactDuplicateWorkqueueItems(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  const rows = pane.locator('[data-wq-list-body] .wq-row');
+  await expect(rows).toHaveCount(3);
+
+  const collapsed = pane.locator('[data-wq-duplicate-count="3"]');
+  await expect(collapsed).toHaveCount(1);
+  await expect(collapsed.locator('.wq-duplicate-count')).toHaveText('×3');
+
+  await collapsed.focus();
+  await page.keyboard.press('Enter');
+  await expect(pane.locator('[data-wq-inspect]')).toContainText('exact-dup-newest');
+  await expect(pane.locator('[data-wq-inspect]')).not.toContainText('exact-dup-old');
 });
 
 test('workqueue pane: controls toolbar is sticky and list scrolls independently', async ({ page }) => {
