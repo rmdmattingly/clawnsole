@@ -2771,11 +2771,15 @@ kbd {
 }
 
 .wq-col.title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 600;
 }
 
 .wq-title-text {
   display: block;
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2804,6 +2808,22 @@ kbd {
 .wq-badge-in_progress { background: rgba(104, 201, 255, 0.12); border-color: rgba(104, 201, 255, 0.25); }
 .wq-badge-done { background: rgba(120, 255, 170, 0.10); border-color: rgba(120, 255, 170, 0.22); }
 .wq-badge-failed { background: rgba(255, 104, 104, 0.10); border-color: rgba(255, 104, 104, 0.22); }
+
+.wq-duplicate-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
 
 .wq-col.prio,
 .wq-col.attempts {

@@ -122,6 +122,7 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
 });
 const formatWorkqueueIssueTitle = __appCore.formatWorkqueueIssueTitle || ((item) => String(item?.title || ''));
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
+const collapseWorkqueueDuplicateRows = __appCore.collapseWorkqueueDuplicateRows || ((items) => (Array.isArray(items) ? items.slice() : []));
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
   const n = Number(count);
   if (!Number.isFinite(n) || n <= 1) return 1;
@@ -4045,7 +4046,7 @@ function renderWorkqueueItems() {
   const header = listRoot?.querySelector('.wq-list-header');
   if (header) header.style.display = 'none';
 
-  const itemsRaw = Array.isArray(workqueueState.items) ? workqueueState.items : [];
+  const itemsRaw = collapseWorkqueueDuplicateRows(Array.isArray(workqueueState.items) ? workqueueState.items : []);
   const items = sortWorkqueueItems(itemsRaw, { sortKey: workqueueState.sortKey, sortDir: workqueueState.sortDir });
 
   if (!items.length) {
@@ -4119,11 +4120,13 @@ function renderWorkqueueItems() {
       const status = String(it.status || '');
       const age = fmtAge(it.createdAt || it.updatedAt);
       const next = String(it.lastNote || '').trim();
+      const duplicateCount = Number(it.duplicateCount || 0);
 
       card.innerHTML = `
         <div class="wq-card-title">${escapeHtml(formatWorkqueueIssueTitle(it))}</div>
         <div class="wq-card-meta">
           <span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span>
+          ${duplicateCount > 1 ? `<span class="wq-duplicate-count" title="${escapeHtml(`${duplicateCount} exact duplicate rows collapsed`)}">×${escapeHtml(String(duplicateCount))}</span>` : ''}
           ${age ? `<span class="wq-card-chip mono">age ${escapeHtml(age)}</span>` : ''}
           ${leaseLabel ? `<span class="wq-card-chip mono">lease ${escapeHtml(leaseLabel)}</span>` : ''}
         </div>
@@ -4720,11 +4723,12 @@ function appendWorkqueuePaneItemRow(pane, body, item, { child = false } = {}) {
   const leaseLabel = item.leaseUntil ? fmtRemaining(leaseMs) : '';
   const status = String(item.status || '');
   const title = formatWorkqueueIssueTitle(item);
+  const duplicateCount = Number(item.duplicateCount || 0);
   row.title = title;
   row.setAttribute('aria-label', `Workqueue item: ${title}`);
 
   row.innerHTML = `
-    <div class="wq-col title"><span class="wq-title-text" title="${escapeHtml(title)}">${escapeHtml(title)}</span></div>
+    <div class="wq-col title"><span class="wq-title-text" title="${escapeHtml(title)}">${escapeHtml(title)}</span>${duplicateCount > 1 ? `<span class="wq-duplicate-count" title="${escapeHtml(`${duplicateCount} exact duplicate rows collapsed`)}">×${escapeHtml(String(duplicateCount))}</span>` : ''}</div>
     <div class="wq-col status"><span class="wq-badge wq-badge-${escapeHtml(status)}">${escapeHtml(status)}</span></div>
     <div class="wq-col prio mono">${escapeHtml(String(item.priority ?? ''))}</div>
     <div class="wq-col attempts mono">${escapeHtml(String(item.attempts ?? ''))}</div>
@@ -4885,12 +4889,13 @@ function renderWorkqueuePaneItems(pane) {
 
   const scopedItems = filterWorkqueuePaneItemsByScope(pane, pane.workqueue?.items);
   const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
-  const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const groupMode = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
+  const rowItems = groupMode === 'grouped' ? filteredItems : collapseWorkqueueDuplicateRows(filteredItems);
+  const items = sortWorkqueueItems(rowItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
   const totalCount = Array.isArray(pane.workqueue?.countItems) ? pane.workqueue.countItems.length : (Array.isArray(pane.workqueue?.items) ? pane.workqueue.items.length : items.length);
   const statusLine = pane.elements?.thread?.querySelector('[data-wq-statusline]');
   if (statusLine) statusLine.textContent = formatWorkqueueCountText(items.length, totalCount);
   renderWorkqueueFilterSummaryForPane(pane, { shownCount: items.length, totalCount });
-  const groupMode = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
   const rows = groupMode === 'grouped' ? summarizeWorkqueueIssueGroups(items) : items.map((item) => ({ kind: 'item', item }));
   const renderLimit = Math.max(
     WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,

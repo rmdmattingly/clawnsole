@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   escapeHtml,
   fmtRemaining,
+  collapseWorkqueueDuplicateRows,
   formatWorkqueueIssueTitle,
   sortWorkqueueItems,
   inferPaneCols,
@@ -143,6 +144,56 @@ test('sortWorkqueueItems priority sort uses updatedAt desc tie-breaker', () => {
 
   const sorted = sortWorkqueueItems(items, { sortKey: 'priority', sortDir: 'desc' });
   assert.deepEqual(sorted.map((it) => it.id), ['c', 'b', 'a']);
+});
+
+test('collapseWorkqueueDuplicateRows collapses exact duplicate title, status, and dedupe key rows', () => {
+  const items = [
+    {
+      id: 'older',
+      title: 'Duplicate Task',
+      status: 'ready',
+      dedupeKey: 'dupe-1',
+      updatedAt: '2026-01-01T00:00:00Z'
+    },
+    {
+      id: 'newer',
+      title: '  duplicate   task ',
+      status: 'ready',
+      dedupeKey: 'dupe-1',
+      updatedAt: '2026-01-03T00:00:00Z'
+    },
+    {
+      id: 'different-status',
+      title: 'Duplicate Task',
+      status: 'in_progress',
+      dedupeKey: 'dupe-1',
+      updatedAt: '2026-01-04T00:00:00Z'
+    },
+    {
+      id: 'different-title',
+      title: 'Duplicate Task follow-up',
+      status: 'ready',
+      dedupeKey: 'dupe-1',
+      updatedAt: '2026-01-05T00:00:00Z'
+    }
+  ];
+
+  const collapsed = collapseWorkqueueDuplicateRows(items);
+  assert.deepEqual(collapsed.map((it) => it.id), ['newer', 'different-status', 'different-title']);
+  assert.equal(collapsed[0].duplicateCount, 2);
+  assert.deepEqual(collapsed[0].duplicateMembers.map((it) => it.id), ['older', 'newer']);
+});
+
+test('collapseWorkqueueDuplicateRows uses normalized title and status fallback with deterministic tie-break', () => {
+  const items = [
+    { id: 'a', title: 'Fallback task', status: 'pending', updatedAt: '2026-01-01T00:00:00Z' },
+    { id: 'c', title: 'fallback   task', status: 'pending', updatedAt: '2026-01-01T00:00:00Z' },
+    { id: 'b', title: 'Fallback task', status: 'ready', updatedAt: '2026-01-01T00:00:00Z' }
+  ];
+
+  const collapsed = collapseWorkqueueDuplicateRows(items);
+  assert.deepEqual(collapsed.map((it) => it.id), ['c', 'b']);
+  assert.equal(collapsed[0].duplicateCount, 2);
 });
 
 test('inferPaneCols maps pane counts to sensible layout widths', () => {
