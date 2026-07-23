@@ -154,6 +154,47 @@ function seedFilterSummaryWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedExactDuplicateWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const title = '[issue] rmdmattingly/clawnsole#348 exact duplicate collapse';
+  const mkItem = (id, patch = {}) => ({
+    id,
+    queue,
+    title,
+    instructions: 'Repo: rmdmattingly/clawnsole\nIssue: https://github.com/rmdmattingly/clawnsole/issues/348',
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-120000),
+    updatedAt: iso(-120000),
+    dedupeKey: 'rmdmattingly/clawnsole#348',
+    ...patch
+  });
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-180000) } },
+    assignments: {},
+    items: [
+      mkItem('exact-dup-old', { priority: 20, updatedAt: iso(-90000) }),
+      mkItem('exact-dup-latest', { priority: 5, attempts: 2, updatedAt: iso(-10000) }),
+      mkItem('exact-dup-different-status', { status: 'pending', updatedAt: iso(-5000) }),
+      mkItem('exact-dup-different-title', {
+        title: '[issue] rmdmattingly/clawnsole#348 exact duplicate collapse follow-up',
+        updatedAt: iso(-3000)
+      })
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 test('workqueue pane: queue switch updates pane identity everywhere', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -682,6 +723,36 @@ test('workqueue pane: duplicate health summary cleans legacy issue duplicates', 
   expect(issue290.filter((it) => it.status !== 'failed')).toHaveLength(1);
   expect(issue290.find((it) => it.id === 'legacy-dup-keep')?.status).toBe('ready');
   expect(issue290.filter((it) => it.status === 'failed').every((it) => String(it.lastError || '').includes('duplicate-cleanup:rmdmattingly/clawnsole#290'))).toBeTruthy();
+});
+
+test('workqueue pane: default rows auto-collapse exact duplicates with count and member expansion', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `exact-duplicates-${Date.now()}`;
+  seedExactDuplicateWorkqueueItems(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  const duplicateRow = pane.locator('[data-wq-duplicate-row]').first();
+  await expect(pane.locator('[data-wq-group-mode="rows"]')).toHaveClass(/active/);
+  await expect(duplicateRow).toBeVisible();
+  await expect(duplicateRow).toContainText('x2');
+  await expect(duplicateRow).toHaveAttribute('data-wq-item', 'exact-dup-latest');
+  await expect(pane.locator('.wq-row')).toHaveCount(3);
+  await expect(pane.locator('[data-wq-item="exact-dup-different-status"]')).toBeVisible();
+
+  await duplicateRow.focus();
+  await page.keyboard.press('Enter');
+  await expect(pane.locator('[data-wq-inspect]')).toContainText('exact-dup-latest');
+  await expect(pane.locator('.wq-row-child', { hasText: 'exact duplicate collapse' })).toHaveCount(2);
 });
 
 test('workqueue pane: grouped mode collapses duplicate issue rows and expands child actions', async ({ page }) => {
