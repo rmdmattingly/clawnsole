@@ -4702,6 +4702,84 @@ function newestWorkqueueUpdatedAt(items) {
   return best;
 }
 
+function normalizeWorkqueueExactDuplicateText(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function getWorkqueueExactDuplicateKey(item) {
+  if (!item) return '';
+  const meta = item.meta && typeof item.meta === 'object' ? item.meta : {};
+  const status = normalizeWorkqueueExactDuplicateText(item.status);
+  const title = normalizeWorkqueueExactDuplicateText(formatWorkqueueIssueTitle(item) || item.title);
+  if (!status || !title) return '';
+
+  const dedupeKey = normalizeWorkqueueExactDuplicateText(meta.dedupeKey || item.dedupeKey);
+  if (dedupeKey) return `dedupe:${dedupeKey}|title:${title}|status:${status}`;
+  return `title:${title}|status:${status}`;
+}
+
+function chooseWorkqueueExactDuplicateRepresentative(items) {
+  return (Array.isArray(items) ? items : [])
+    .slice()
+    .sort((a, b) => {
+      const ua = Date.parse(String(a?.updatedAt || a?.createdAt || '')) || 0;
+      const ub = Date.parse(String(b?.updatedAt || b?.createdAt || '')) || 0;
+      if (ub !== ua) return ub - ua;
+      const pr = Number(b?.priority || 0) - Number(a?.priority || 0);
+      if (pr !== 0) return pr;
+      const ca = Date.parse(String(a?.createdAt || '')) || 0;
+      const cb = Date.parse(String(b?.createdAt || '')) || 0;
+      if (cb !== ca) return cb - ca;
+      return String(a?.id || '').localeCompare(String(b?.id || ''));
+    })[0] || null;
+}
+
+function summarizeWorkqueueExactDuplicateRows(items) {
+  const groups = new Map();
+  const sourceEntries = (Array.isArray(items) ? items : []).map((item) => ({ kind: 'item', item }));
+  for (const item of Array.isArray(items) ? items : []) {
+    const key = getWorkqueueExactDuplicateKey(item);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+
+  const emitted = new Set();
+  const out = [];
+  for (const entry of sourceEntries) {
+    const item = entry.item;
+    const key = getWorkqueueExactDuplicateKey(item);
+    const groupItems = key ? groups.get(key) || [] : [];
+    if (!key || groupItems.length <= 1) {
+      out.push({ kind: 'item', item });
+      continue;
+    }
+    if (emitted.has(key)) continue;
+    emitted.add(key);
+    const representative = chooseWorkqueueExactDuplicateRepresentative(groupItems) || item;
+    out.push({
+      kind: 'exact-duplicate',
+      key,
+      items: groupItems,
+      representative,
+      title: formatWorkqueueIssueTitle(representative),
+      newestUpdatedAt: newestWorkqueueUpdatedAt(groupItems)
+    });
+  }
+  return out;
+}
+
+function sortWorkqueueRowEntries(entries, { sortKey, sortDir } = {}) {
+  const rows = Array.isArray(entries) ? entries : [];
+  const sortable = rows.map((entry, index) => {
+    const item = entry.kind === 'exact-duplicate' ? entry.representative : entry.item;
+    return { ...(item || {}), __wqRowIndex: index };
+  });
+  return sortWorkqueueItems(sortable, { sortKey, sortDir })
+    .map((item) => rows[Number(item?.__wqRowIndex)])
+    .filter(Boolean);
+}
+
 function summarizeWorkqueueIssueGroups(items) {
   const map = new Map();
   for (const item of Array.isArray(items) ? items : []) {
@@ -4936,13 +5014,19 @@ function renderWorkqueuePaneItems(pane) {
   if (statusLine) statusLine.textContent = formatWorkqueueVisibleSummary(items.length, totalCount, hiddenCounts);
   renderWorkqueueFilterSummaryForPane(pane, { shownCount: items.length, totalCount, hiddenCounts });
   const groupMode = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
-  const rows = groupMode === 'grouped' ? summarizeWorkqueueIssueGroups(items) : items.map((item) => ({ kind: 'item', item }));
+  const rows = groupMode === 'grouped'
+    ? summarizeWorkqueueIssueGroups(items)
+    : sortWorkqueueRowEntries(summarizeWorkqueueExactDuplicateRows(items), { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
   const renderLimit = Math.max(
     WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
     Number(pane.workqueue?.renderLimit || WORKQUEUE_PANE_INITIAL_RENDER_LIMIT)
   );
   const visibleRows = rows.slice(0, renderLimit);
-  const visibleItems = visibleRows.flatMap((entry) => entry.kind === 'group' ? entry.items : [entry.item]).filter(Boolean);
+  const visibleItems = visibleRows.flatMap((entry) => {
+    if (entry.kind === 'group') return entry.items;
+    if (entry.kind === 'exact-duplicate') return [entry.representative];
+    return [entry.item];
+  }).filter(Boolean);
   pane.workqueue.visibleItemIds = visibleItems.map((it) => it.id).filter(Boolean);
 
   if (pane.workqueue.keyboardMode && visibleItems.length && !pane.workqueue.selectedItemId) {
@@ -4992,26 +5076,36 @@ function renderWorkqueuePaneItems(pane) {
       continue;
     }
 
+    const isExactDuplicate = entry.kind === 'exact-duplicate';
+    const representative = isExactDuplicate ? entry.representative : null;
     const expanded = pane.workqueue.expandedGroupKeys?.has(entry.key);
     const row = document.createElement('button');
     row.type = 'button';
-    row.className = 'wq-row wq-group-row';
-    row.setAttribute('data-wq-group-row', entry.key);
+    row.className = isExactDuplicate ? 'wq-row wq-group-row wq-exact-duplicate-row' : 'wq-row wq-group-row';
+    row.setAttribute(isExactDuplicate ? 'data-wq-duplicate-row' : 'data-wq-group-row', entry.key);
+    if (isExactDuplicate && representative?.id) {
+      row.setAttribute('data-wq-item', representative.id);
+      if (representative.id === pane.workqueue.selectedItemId) row.classList.add('selected');
+    }
     row.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     row.title = entry.title;
     row.innerHTML = `
       <div class="wq-col title">
         <span class="wq-group-caret">${expanded ? '-' : '+'}</span>
         <span class="wq-title-text" title="${escapeHtml(entry.title)}">${escapeHtml(entry.title)}</span>
-        <span class="wq-group-count">${escapeHtml(String(entry.items.length))} rows</span>
+        <span class="wq-group-count">${isExactDuplicate ? `x${escapeHtml(String(entry.items.length))}` : `${escapeHtml(String(entry.items.length))} rows`}</span>
       </div>
-      <div class="wq-col status">${escapeHtml(entry.statusSummary || '')}</div>
-      <div class="wq-col prio mono">${escapeHtml(String(entry.priority ?? ''))}</div>
-      <div class="wq-col attempts mono">${escapeHtml(String(entry.items.length))}</div>
-      <div class="wq-col claimedBy">grouped</div>
+      <div class="wq-col status">${isExactDuplicate ? `<span class="wq-badge wq-badge-${escapeHtml(String(representative?.status || ''))}">${escapeHtml(String(representative?.status || ''))}</span>` : escapeHtml(entry.statusSummary || '')}</div>
+      <div class="wq-col prio mono">${escapeHtml(String(isExactDuplicate ? representative?.priority ?? '' : entry.priority ?? ''))}</div>
+      <div class="wq-col attempts mono">${escapeHtml(String(isExactDuplicate ? representative?.attempts ?? '' : entry.items.length))}</div>
+      <div class="wq-col claimedBy">${escapeHtml(String(isExactDuplicate ? representative?.claimedBy || '' : 'grouped'))}</div>
       <div class="wq-col lease mono">${escapeHtml(entry.newestUpdatedAt || '')}</div>
     `;
     row.addEventListener('click', () => {
+      if (isExactDuplicate && representative) {
+        pane.workqueue.selectedItemId = representative.id || null;
+        renderWorkqueuePaneInspect(pane, representative);
+      }
       if (!pane.workqueue.expandedGroupKeys) pane.workqueue.expandedGroupKeys = new Set();
       if (pane.workqueue.expandedGroupKeys.has(entry.key)) pane.workqueue.expandedGroupKeys.delete(entry.key);
       else pane.workqueue.expandedGroupKeys.add(entry.key);
