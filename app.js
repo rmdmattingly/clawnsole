@@ -4518,28 +4518,7 @@ function groupWorkqueueDuplicateIssues(items) {
 }
 
 function applyWorkqueueQuickFilters(items, quickFilters) {
-  const sourceSet = new Set(Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((x) => String(x || '').trim()).filter(Boolean) : []);
-  const repoSet = new Set(Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((x) => String(x || '').trim()).filter(Boolean) : []);
-  const search = String(quickFilters?.search || '').trim().toLowerCase();
-
-  return (Array.isArray(items) ? items : []).filter((it) => {
-    if (sourceSet.size && !sourceSet.has(getWorkqueueItemSource(it))) return false;
-    if (repoSet.size && !repoSet.has(getWorkqueueItemRepo(it))) return false;
-    if (search) {
-      const haystack = [
-        it?.id,
-        it?.title,
-        it?.instructions,
-        it?.dedupeKey,
-        it?.status,
-        it?.claimedBy,
-        getWorkqueueItemRepo(it),
-        getWorkqueueItemSource(it)
-      ].map((v) => String(v || '').toLowerCase()).join('\n');
-      if (!haystack.includes(search)) return false;
-    }
-    return true;
-  });
+  return getWorkqueueQuickFilterBreakdown(items, quickFilters).items;
 }
 
 function formatWorkqueueCountText(shown, total) {
@@ -4550,7 +4529,65 @@ function formatWorkqueueCountText(shown, total) {
   return `Showing ${shownNum} ${noun}`;
 }
 
-function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount } = {}) {
+function formatWorkqueueHiddenBreakdown(hiddenCounts = {}) {
+  const parts = [
+    ['status', hiddenCounts.status],
+    ['scope', hiddenCounts.scope],
+    ['source', hiddenCounts.source],
+    ['repo', hiddenCounts.repo],
+    ['search', hiddenCounts.search]
+  ]
+    .map(([label, count]) => [label, Math.max(0, Number(count) || 0)])
+    .filter(([, count]) => count > 0)
+    .map(([label, count]) => `${label} ${count}`);
+  return parts.length ? `hidden: ${parts.join(', ')}` : '';
+}
+
+function formatWorkqueueVisibleSummary(shown, total, hiddenCounts = {}) {
+  const base = formatWorkqueueCountText(shown, total);
+  const hidden = formatWorkqueueHiddenBreakdown(hiddenCounts);
+  return hidden ? `${base} · ${hidden}` : base;
+}
+
+function getWorkqueueQuickFilterBreakdown(items, quickFilters) {
+  let current = Array.isArray(items) ? items.slice() : [];
+  const hidden = { source: 0, repo: 0, search: 0 };
+  const sourceSet = new Set(Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((x) => String(x || '').trim()).filter(Boolean) : []);
+  const repoSet = new Set(Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((x) => String(x || '').trim()).filter(Boolean) : []);
+  const search = String(quickFilters?.search || '').trim().toLowerCase();
+
+  if (sourceSet.size) {
+    const next = current.filter((it) => sourceSet.has(getWorkqueueItemSource(it)));
+    hidden.source = current.length - next.length;
+    current = next;
+  }
+  if (repoSet.size) {
+    const next = current.filter((it) => repoSet.has(getWorkqueueItemRepo(it)));
+    hidden.repo = current.length - next.length;
+    current = next;
+  }
+  if (search) {
+    const next = current.filter((it) => {
+      const haystack = [
+        it?.id,
+        it?.title,
+        it?.instructions,
+        it?.dedupeKey,
+        it?.status,
+        it?.claimedBy,
+        getWorkqueueItemRepo(it),
+        getWorkqueueItemSource(it)
+      ].map((v) => String(v || '').toLowerCase()).join('\n');
+      return haystack.includes(search);
+    });
+    hidden.search = current.length - next.length;
+    current = next;
+  }
+
+  return { items: current, hidden };
+}
+
+function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount, hiddenCounts } = {}) {
   const root = pane?.elements?.thread?.querySelector?.('[data-wq-filter-summary]');
   if (!root) return;
 
@@ -4569,7 +4606,7 @@ function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount } = 
 
   const count = document.createElement('span');
   count.className = 'wq-filter-count';
-  count.textContent = formatWorkqueueCountText(shownCount, totalCount);
+  count.textContent = formatWorkqueueVisibleSummary(shownCount, totalCount, hiddenCounts);
   root.appendChild(count);
 
   const addToken = ({ label, value, title, action, removable = true }) => {
@@ -4961,16 +4998,22 @@ function renderWorkqueuePaneItems(pane) {
   body.innerHTML = '';
   renderWorkqueueDuplicateHealthForPane(pane);
 
-  const scopedItems = filterWorkqueuePaneItemsByScope(pane, pane.workqueue?.items);
-  const filteredItems = applyWorkqueueQuickFilters(scopedItems, pane.workqueue?.quickFilters);
-  const groupMode = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
-  const items = groupMode === 'grouped'
-    ? sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir })
-    : filteredItems;
-  const totalCount = Array.isArray(pane.workqueue?.countItems) ? pane.workqueue.countItems.length : (Array.isArray(pane.workqueue?.items) ? pane.workqueue.items.length : items.length);
+  const fetchedItems = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
+  const countItems = Array.isArray(pane.workqueue?.countItems) ? pane.workqueue.countItems : fetchedItems;
+  const scopedItems = filterWorkqueuePaneItemsByScope(pane, fetchedItems);
+  const quickResult = getWorkqueueQuickFilterBreakdown(scopedItems, pane.workqueue?.quickFilters);
+  const filteredItems = quickResult.items;
+  const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
+  const totalCount = Math.max(items.length, countItems.length);
+  const hiddenCounts = {
+    status: Math.max(0, countItems.length - fetchedItems.length),
+    scope: Math.max(0, fetchedItems.length - scopedItems.length),
+    ...quickResult.hidden
+  };
   const statusLine = pane.elements?.thread?.querySelector('[data-wq-statusline]');
-  if (statusLine) statusLine.textContent = formatWorkqueueCountText(items.length, totalCount);
-  renderWorkqueueFilterSummaryForPane(pane, { shownCount: items.length, totalCount });
+  if (statusLine) statusLine.textContent = formatWorkqueueVisibleSummary(items.length, totalCount, hiddenCounts);
+  renderWorkqueueFilterSummaryForPane(pane, { shownCount: items.length, totalCount, hiddenCounts });
+  const groupMode = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
   const rows = groupMode === 'grouped'
     ? summarizeWorkqueueIssueGroups(items)
     : sortWorkqueueRowEntries(summarizeWorkqueueExactDuplicateRows(items), { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
@@ -4998,10 +5041,14 @@ function renderWorkqueuePaneItems(pane) {
       const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
       const statusLabel = statuses.length ? statuses.join(', ') : 'default';
       const scopeLabel = pane.workqueue?.scopeFilter || 'all';
+      const filtersHidingAll = totalCount > 0;
+      const title = filtersHidingAll ? 'No items match current filters.' : 'No items in this queue.';
+      const hiddenSummary = formatWorkqueueHiddenBreakdown(hiddenCounts);
       empty.innerHTML = `
         <div class="empty-state">
-          <div style="font-weight:700; margin-bottom:6px;">No items in this queue.</div>
+          <div style="font-weight:700; margin-bottom:6px;">${escapeHtml(title)}</div>
           <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
+          ${filtersHidingAll ? `<div class="hint" style="margin-top:6px;">Showing 0 of <span class="mono">${escapeHtml(String(totalCount))}</span> items${hiddenSummary ? ` · ${escapeHtml(hiddenSummary)}` : ''}.</div>` : ''}
           <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
             <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
             <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
