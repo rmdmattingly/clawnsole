@@ -51,6 +51,7 @@ const globalElements = {
   commandPaletteEmpty: document.getElementById('commandPaletteEmpty'),
   shortcutsModal: document.getElementById('shortcutsModal'),
   shortcutsDialog: document.getElementById('shortcutsDialog'),
+  shortcutsContent: document.getElementById('shortcutsContent'),
   shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
   paneManagerModal: document.getElementById('paneManagerModal'),
   paneManagerCloseBtn: document.getElementById('paneManagerCloseBtn'),
@@ -81,6 +82,7 @@ const globalElements = {
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   paneSwitchHudEnabled: document.getElementById('paneSwitchHudEnabled'),
+  keybindConflictList: document.getElementById('keybindConflictList'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
   loginPassword: document.getElementById('loginPassword'),
@@ -278,8 +280,232 @@ const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
 const PANE_SWITCH_HUD_ENABLED_KEY = 'clawnsole.admin.paneSwitchHud.enabled';
+const KEYBIND_OVERRIDES_KEY = 'clawnsole.admin.keybindOverrides.v1';
 const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
+
+const KEYBIND_CATALOG = [
+  { id: 'help.shortcuts', group: 'Global', label: 'Open this help overlay', binding: { key: '?', display: '?' } },
+  { id: 'global.escape', group: 'Global', label: 'Close overlay / menus', binding: { key: 'Escape', display: 'Esc' } },
+  {
+    id: 'pane.focusVisible',
+    group: 'Pane focus/navigation',
+    label: 'Focus panes 1-9 by visible order',
+    binding: { alt: true, key: '1..9', display: 'Alt/Option+1..9' },
+    risk: { kind: 'layout', reason: 'Layout-sensitive on some international keyboards', alternative: { accel: true, key: '1..9', display: 'Cmd/Ctrl+1..9' } }
+  },
+  { id: 'pane.focusVisibleAccel', group: 'Pane focus/navigation', label: 'Focus pane 1-9', binding: { accel: true, key: '1..9', display: 'Cmd/Ctrl+1..9' } },
+  { id: 'pane.focusByLetter', group: 'Pane focus/navigation', label: 'Focus pane by visible letter', binding: { chord: ['g', 'a..z'], display: 'g a..z' } },
+  { id: 'pane.manager', group: 'Pane focus/navigation', label: 'Open Pane Manager', binding: { accel: true, key: 'p', display: 'Cmd/Ctrl+P' } },
+  { id: 'pane.next', group: 'Pane focus/navigation', label: 'Focus next pane', binding: { accel: true, shift: true, key: 'k', display: 'Cmd/Ctrl+Shift+K' } },
+  { id: 'pane.prev', group: 'Pane focus/navigation', label: 'Focus previous pane', binding: { accel: true, shift: true, key: 'j', display: 'Cmd/Ctrl+Shift+J' } },
+  { id: 'chat.next', group: 'Pane focus/navigation', label: 'Focus next Chat pane only', binding: { accel: true, alt: true, key: 'k', display: 'Cmd/Ctrl+Alt+K' } },
+  { id: 'chat.prev', group: 'Pane focus/navigation', label: 'Focus previous Chat pane only', binding: { accel: true, alt: true, key: 'j', display: 'Cmd/Ctrl+Alt+J' } },
+  { id: 'chat.return', group: 'Pane focus/navigation', label: 'Return to last active Chat pane', binding: { chord: ['g', 'c'], display: 'g c' } },
+  {
+    id: 'chat.composer',
+    group: 'Pane focus/navigation',
+    label: 'Focus Chat composer',
+    binding: { accel: true, key: 'l', display: 'Cmd/Ctrl+L' },
+    risk: { kind: 'browser', reason: 'Reserved by browser location bar', alternative: { accel: true, shift: true, key: 'm', display: 'Cmd/Ctrl+Shift+M' } }
+  },
+  {
+    id: 'pane.mruNext',
+    group: 'Pane focus/navigation',
+    label: 'Switch panes by most-recent focus order',
+    binding: { ctrlOnly: true, key: 'Tab', display: 'Ctrl+Tab' },
+    risk: { kind: 'browser', reason: 'Reserved by browser tab switching', alternative: { accel: true, alt: true, key: ']', display: 'Cmd/Ctrl+Alt+]' } }
+  },
+  {
+    id: 'pane.mruPrev',
+    group: 'Pane focus/navigation',
+    label: 'Reverse most-recent pane traversal',
+    binding: { ctrlOnly: true, shift: true, key: 'Tab', display: 'Ctrl+Shift+Tab' },
+    risk: { kind: 'browser', reason: 'Reserved by browser tab switching', alternative: { accel: true, alt: true, key: '[', display: 'Cmd/Ctrl+Alt+[' } }
+  },
+  { id: 'pane.unreadNext', group: 'Pane focus/navigation', label: 'Next unread pane', binding: { accel: true, shift: true, key: ']', display: 'Cmd/Ctrl+Shift+]' } },
+  { id: 'pane.unreadPrev', group: 'Pane focus/navigation', label: 'Previous unread pane', binding: { accel: true, shift: true, key: '[', display: 'Cmd/Ctrl+Shift+[' } },
+  { id: 'command.palette', group: 'Pane actions', label: 'Open command palette', binding: { accel: true, key: 'k', display: 'Cmd/Ctrl+K' } },
+  { id: 'pane.addMenu', group: 'Pane actions', label: 'Add pane', binding: { accel: true, shift: true, key: 'n', display: 'Cmd/Ctrl+Shift+N' } },
+  { id: 'pane.addChat', group: 'Pane actions', label: 'Add Chat pane (workspace only)', binding: { accel: true, shift: true, key: 'c', display: 'Cmd/Ctrl+Shift+C' } },
+  { id: 'pane.addWorkqueue', group: 'Pane actions', label: 'Add Workqueue pane (workspace only)', binding: { accel: true, shift: true, key: 'w', display: 'Cmd/Ctrl+Shift+W' } },
+  { id: 'pane.addCron', group: 'Pane actions', label: 'Add Cron pane (workspace only)', binding: { accel: true, shift: true, key: 'r', display: 'Cmd/Ctrl+Shift+R' } },
+  { id: 'pane.addTimeline', group: 'Pane actions', label: 'Add Timeline pane (workspace only)', binding: { accel: true, shift: true, key: 't', display: 'Cmd/Ctrl+Shift+T' } },
+  { id: 'fleet.open', group: 'Pane actions', label: 'Open/focus Fleet pane', binding: { accel: true, shift: true, key: 'f', display: 'Cmd/Ctrl+Shift+F' } },
+  {
+    id: 'agents.refresh',
+    group: 'Pane actions',
+    label: 'Refresh agent list',
+    binding: { accel: true, key: 'r', display: 'Cmd/Ctrl+R' },
+    risk: { kind: 'browser', reason: 'Reserved by browser reload', alternative: { accel: true, shift: true, key: 'y', display: 'Cmd/Ctrl+Shift+Y' } }
+  },
+  { id: 'workqueue.open', group: 'Workqueue actions', label: 'Open Workqueue modal', binding: { chord: ['g', 'w'], display: 'g w' } },
+  { id: 'workqueue.move', group: 'Workqueue actions', label: 'Move selected row in Workqueue keyboard mode', binding: { key: 'j/k', display: 'j/k' } },
+  { id: 'workqueue.inspect', group: 'Workqueue actions', label: 'Inspect selected Workqueue row in keyboard mode', binding: { key: 'Enter', display: 'Enter' } },
+  { id: 'workqueue.edit', group: 'Workqueue actions', label: 'Edit selected Workqueue row in keyboard mode', binding: { key: 'e', display: 'e' } },
+  { id: 'workqueue.status', group: 'Workqueue actions', label: 'Set ready, in progress, blocked, or done in keyboard mode', binding: { key: '1..4', display: '1..4' } }
+];
+
+function readKeybindOverrides() {
+  try {
+    const parsed = JSON.parse(storage.get(KEYBIND_OVERRIDES_KEY, '{}'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeKeybindOverrides(overrides) {
+  storage.set(KEYBIND_OVERRIDES_KEY, JSON.stringify(overrides && typeof overrides === 'object' ? overrides : {}));
+}
+
+function keybindEntry(id) {
+  return KEYBIND_CATALOG.find((entry) => entry.id === id) || null;
+}
+
+function keybindFor(id) {
+  const entry = keybindEntry(id);
+  if (!entry) return null;
+  const override = readKeybindOverrides()[id];
+  return override && typeof override === 'object' ? override : entry.binding;
+}
+
+function isKeybindCustomized(id) {
+  return Object.prototype.hasOwnProperty.call(readKeybindOverrides(), id);
+}
+
+function setKeybindOverride(id, binding) {
+  const entry = keybindEntry(id);
+  if (!entry || !binding) return false;
+  const overrides = readKeybindOverrides();
+  overrides[id] = binding;
+  writeKeybindOverrides(overrides);
+  renderKeyboardSettings();
+  renderShortcutsContent();
+  return true;
+}
+
+function resetKeybindOverride(id) {
+  const overrides = readKeybindOverrides();
+  if (!Object.prototype.hasOwnProperty.call(overrides, id)) return false;
+  delete overrides[id];
+  writeKeybindOverrides(overrides);
+  renderKeyboardSettings();
+  renderShortcutsContent();
+  return true;
+}
+
+function shortcutDisplay(id) {
+  const binding = keybindFor(id);
+  return String(binding?.display || keybindEntry(id)?.binding?.display || '');
+}
+
+function renderShortcutKeys(display) {
+  const parts = String(display || '')
+    .split(/(\+|\/|\s+)/)
+    .filter((part) => part !== '');
+  return parts
+    .map((part) => {
+      if (part === '+') return '<span class="shortcut-sep">+</span>';
+      if (part === '/') return '<span class="shortcut-sep">/</span>';
+      if (/^\s+$/.test(part)) return '<span class="shortcut-sep"> </span>';
+      return `<kbd>${escapeHtml(part)}</kbd>`;
+    })
+    .join('');
+}
+
+function renderShortcutsContent() {
+  const root = globalElements.shortcutsContent;
+  if (!root) return;
+  const groups = [];
+  for (const entry of KEYBIND_CATALOG) {
+    let group = groups.find((g) => g.name === entry.group);
+    if (!group) {
+      group = { name: entry.group, entries: [] };
+      groups.push(group);
+    }
+    group.entries.push(entry);
+  }
+  const hint = `
+    <div class="hint" style="margin-bottom: 10px;">
+      Most shortcuts are disabled while typing in inputs, textareas, selects, or contenteditable fields. Global keys like <kbd>Esc</kbd>, <kbd>${escapeHtml(shortcutDisplay('pane.manager'))}</kbd>, and <kbd>${escapeHtml(shortcutDisplay('command.palette'))}</kbd> still work.
+    </div>
+  `;
+  const html = groups.map((group) => `
+    <div class="shortcut-group">
+      <h3 class="shortcut-group-title">${escapeHtml(group.name)}</h3>
+      ${group.entries.map((entry) => `
+        <div class="shortcut-row" data-shortcut-id="${escapeHtml(entry.id)}">
+          <div class="shortcut-keys">${renderShortcutKeys(shortcutDisplay(entry.id))}</div>
+          <div class="shortcut-desc">${escapeHtml(entry.label)}${isKeybindCustomized(entry.id) ? ' <span class="shortcut-custom">custom</span>' : ''}</div>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+  root.innerHTML = hint + html;
+}
+
+function renderKeyboardSettings() {
+  const root = globalElements.keybindConflictList;
+  if (!root) return;
+  const conflicted = KEYBIND_CATALOG.filter((entry) => entry.risk && !isKeybindCustomized(entry.id));
+  const customized = KEYBIND_CATALOG.filter((entry) => entry.risk && isKeybindCustomized(entry.id));
+  const rows = [...conflicted, ...customized].map((entry) => {
+    const isCustom = isKeybindCustomized(entry.id);
+    const reason = isCustom ? 'Using app-safe replacement' : entry.risk.reason;
+    const action = isCustom
+      ? `<button type="button" class="secondary keybind-action" data-keybind-reset="${escapeHtml(entry.id)}">Reset</button>`
+      : `<button type="button" class="secondary keybind-action" data-keybind-apply="${escapeHtml(entry.id)}">Use ${escapeHtml(entry.risk.alternative.display)}</button>`;
+    return `
+      <div class="keybind-conflict-row ${isCustom ? 'resolved' : 'warning'}" data-keybind-row="${escapeHtml(entry.id)}">
+        <div class="keybind-conflict-main">
+          <div class="keybind-conflict-title">${escapeHtml(entry.label)}</div>
+          <div class="keybind-conflict-meta">
+            <span class="keybind-chip">${escapeHtml(shortcutDisplay(entry.id))}</span>
+            <span>${escapeHtml(reason)}</span>
+          </div>
+        </div>
+        ${action}
+      </div>
+    `;
+  }).join('');
+  root.innerHTML = rows || '<div class="hint">No risky keyboard shortcuts detected.</div>';
+  root.querySelectorAll('[data-keybind-apply]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const entry = keybindEntry(button.getAttribute('data-keybind-apply'));
+      if (!entry?.risk?.alternative) return;
+      setKeybindOverride(entry.id, entry.risk.alternative);
+      toast(`Updated ${entry.label} shortcut.`, 'ok');
+    });
+  });
+  root.querySelectorAll('[data-keybind-reset]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = button.getAttribute('data-keybind-reset');
+      const entry = keybindEntry(id);
+      resetKeybindOverride(id);
+      toast(`Reset ${entry?.label || 'shortcut'}.`, 'info');
+    });
+  });
+}
+
+function matchesKeybind(event, id) {
+  const binding = keybindFor(id);
+  if (!binding || binding.chord) return false;
+  const key = String(event?.key || '');
+  const lower = key.toLowerCase();
+  if (binding.accel && !(event.metaKey || event.ctrlKey)) return false;
+  if (binding.ctrlOnly && !(event.ctrlKey && !event.metaKey)) return false;
+  if (!binding.accel && !binding.ctrlOnly && (event.metaKey || event.ctrlKey)) return false;
+  if (!!binding.shift !== !!event.shiftKey) return false;
+  if (!!binding.alt !== !!event.altKey) return false;
+  const wanted = String(binding.key || '');
+  if (wanted === 'Tab') return key === 'Tab';
+  if (wanted === '1..9') {
+    const n = Number.parseInt(key, 10);
+    return Number.isFinite(n) && n >= 1 && n <= 9;
+  }
+  return lower === wanted.toLowerCase() || key === wanted;
+}
 const WQ_RECENT_ENQUEUE_AGENTS_KEY = 'clawnsole.wq.recentEnqueueAgents';
 const WQ_RECENT_TARGETS_MAX = 6;
 
@@ -1550,6 +1776,7 @@ function openSettings() {
   if (globalElements.paneSwitchHudEnabled) {
     globalElements.paneSwitchHudEnabled.checked = isPaneSwitchHudEnabled();
   }
+  renderKeyboardSettings();
   globalElements.settingsModal.classList.add('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'false');
 
@@ -1868,6 +2095,7 @@ function getModalFocusableElements(modalEl) {
 function openShortcuts() {
   const modal = globalElements.shortcutsModal;
   if (!modal || modal.classList.contains('open')) return;
+  renderShortcutsContent();
   shortcutsLastFocusedEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   modal.classList.add('open');
   modal.setAttribute('aria-hidden', 'false');
@@ -9939,6 +10167,7 @@ function isTypingShortcutExempt(event) {
 
 function isNonTrivialGlobalShortcut(event) {
   if (!event) return false;
+  if (KEYBIND_CATALOG.some((entry) => matchesKeybind(event, entry.id))) return true;
   const key = String(event.key || '');
   const lower = key.toLowerCase();
   const hasMetaCtrl = !!(event.metaKey || event.ctrlKey);
@@ -10248,9 +10477,14 @@ window.addEventListener('keydown', (event) => {
   // Ctrl/Cmd+Shift+T → focus matching timeline target (Alt/Option adds anyway)
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey;
   if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target) && !isAnyOverlayOpen()) {
-    const key = String(event.key || '').toLowerCase();
-    const map = { c: 'chat', w: 'workqueue', r: 'cron', t: 'timeline' };
-    const kind = map[key];
+    const addPaneShortcuts = [
+      ['pane.addChat', 'chat'],
+      ['pane.addWorkqueue', 'workqueue'],
+      ['pane.addCron', 'cron'],
+      ['pane.addTimeline', 'timeline']
+    ];
+    const match = addPaneShortcuts.find(([id]) => matchesKeybind(event, id));
+    const kind = match?.[1] || '';
     if (kind) {
       // Don't hijack add-pane shortcuts while typing or while overlays are active.
       event.preventDefault();
@@ -10261,21 +10495,21 @@ window.addEventListener('keydown', (event) => {
   }
 
   // Cmd/Ctrl+P opens Pane Manager (even while typing).
-  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'p') {
+  if (matchesKeybind(event, 'pane.manager')) {
     event.preventDefault();
     openPaneManager();
     return;
   }
 
   // Cmd/Ctrl+K opens command palette (even while typing).
-  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'k') {
+  if (matchesKeybind(event, 'command.palette')) {
     event.preventDefault();
     openCommandPalette();
     return;
   }
 
   // Cmd/Ctrl+L focuses the active/most recent Chat composer (even while typing).
-  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'l') {
+  if (matchesKeybind(event, 'chat.composer')) {
     event.preventDefault();
     focusChatComposer();
     return;
@@ -10303,10 +10537,10 @@ window.addEventListener('keydown', (event) => {
   const key = String(event.key || '');
 
   // Ctrl+Tab walks panes in most-recently-used order; Shift reverses the traversal.
-  if (event.ctrlKey && !event.metaKey && !event.altKey && key === 'Tab') {
+  if (matchesKeybind(event, 'pane.mruNext') || matchesKeybind(event, 'pane.mruPrev')) {
     if (isTypingContext(document.activeElement) && !paneMruTraversal) return;
     event.preventDefault();
-    switchPaneByMru(event.shiftKey ? -1 : 1);
+    switchPaneByMru(matchesKeybind(event, 'pane.mruPrev') ? -1 : 1);
     return;
   }
 
@@ -10328,7 +10562,7 @@ window.addEventListener('keydown', (event) => {
   }
 
   // Cmd/Ctrl+1..9 focuses panes by visible order (layout-safe fallback to Alt/Option).
-  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
+  if (matchesKeybind(event, 'pane.focusVisibleAccel')) {
     const n = Number.parseInt(key, 10);
     if (Number.isFinite(n) && n >= 1 && n <= 9) {
       event.preventDefault();
@@ -10338,52 +10572,52 @@ window.addEventListener('keydown', (event) => {
   }
 
   // Cmd/Ctrl+Shift+K cycles focus across panes.
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'k') {
+  if (matchesKeybind(event, 'pane.next')) {
     event.preventDefault();
     cyclePaneFocus();
     return;
   }
 
   // Cmd/Ctrl+Shift+J cycles focus backward across panes.
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'j') {
+  if (matchesKeybind(event, 'pane.prev')) {
     event.preventDefault();
     cyclePaneFocusBackward();
     return;
   }
 
   // Cmd/Ctrl+Alt+K/J cycles only Chat panes, skipping Workqueue/Cron/Timeline/Fleet panes.
-  if ((event.metaKey || event.ctrlKey) && event.altKey && !event.shiftKey && key.toLowerCase() === 'k') {
+  if (matchesKeybind(event, 'chat.next')) {
     event.preventDefault();
     cycleChatPaneFocus(1);
     return;
   }
-  if ((event.metaKey || event.ctrlKey) && event.altKey && !event.shiftKey && key.toLowerCase() === 'j') {
+  if (matchesKeybind(event, 'chat.prev')) {
     event.preventDefault();
     cycleChatPaneFocus(-1);
     return;
   }
 
   // Cmd/Ctrl+Shift+] jumps to next unread pane; Cmd/Ctrl+Shift+[ goes backward.
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && (key === ']' || key === '}')) {
+  if (matchesKeybind(event, 'pane.unreadNext')) {
     event.preventDefault();
     cycleUnreadPaneFocus(1);
     return;
   }
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && (key === '[' || key === '{')) {
+  if (matchesKeybind(event, 'pane.unreadPrev')) {
     event.preventDefault();
     cycleUnreadPaneFocus(-1);
     return;
   }
 
   // Cmd/Ctrl+Shift+N opens Add pane menu.
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'n' && !isAnyOverlayOpen()) {
+  if (matchesKeybind(event, 'pane.addMenu') && !isAnyOverlayOpen()) {
     event.preventDefault();
     paneManager.openAddPaneMenu(globalElements.addPaneBtn);
     return;
   }
 
   // Cmd/Ctrl+Shift+F opens/focuses Fleet pane.
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'f') {
+  if (matchesKeybind(event, 'fleet.open')) {
     event.preventDefault();
     openFleetPane();
     return;
@@ -10401,7 +10635,7 @@ window.addEventListener('keydown', (event) => {
   }
 
   // Cmd/Ctrl+R refreshes agent list (instead of page reload).
-  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && key.toLowerCase() === 'r') {
+  if (matchesKeybind(event, 'agents.refresh')) {
     event.preventDefault();
     globalElements.refreshAgentsBtn?.click?.();
     toast('Refreshed agents.', 'info');

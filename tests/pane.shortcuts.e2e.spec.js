@@ -141,6 +141,32 @@ test('shortcuts modal restores prior focus on close', async ({ page }) => {
   await expect(openBtn).toBeFocused();
 });
 
+test('keyboard settings flags risky shortcuts and updates cheatsheet after applying replacement', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const conflictList = page.getByTestId('keybind-conflict-list');
+  await expect(conflictList).toContainText('Focus Chat composer');
+  await expect(conflictList).toContainText('Reserved by browser location bar');
+  await conflictList.getByRole('button', { name: 'Use Cmd/Ctrl+Shift+M' }).click();
+  await expect(conflictList).toContainText('Using app-safe replacement');
+
+  await page.keyboard.press('Escape');
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  const modal = page.locator('#shortcutsModal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await expect(modal.locator('[data-shortcut-id="chat.composer"]')).toContainText('Cmd/Ctrl+Shift+M');
+});
+
 test('cmd/ctrl+shift+j focuses previous pane with wraparound from unfocused state', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
