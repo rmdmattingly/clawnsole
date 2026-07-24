@@ -216,8 +216,9 @@ test('workqueue pane: queue switch updates pane identity everywhere', async ({ p
 
   await page.keyboard.press('Control+P');
   const managerRow = page.locator('.pane-manager-row[data-pane-kind="workqueue"]').first();
-  await expect(managerRow.locator('.pane-manager-kind-label')).toHaveText(`B Workqueue · ${queue}`);
-  await expect(managerRow).not.toContainText('main');
+  const managerKindLabel = managerRow.locator('.pane-manager-kind-label');
+  await expect(managerKindLabel).toHaveText(`B Workqueue · ${queue}`);
+  await expect(managerKindLabel).not.toContainText('main');
 });
 
 function seedKeyboardTriageWorkqueueItems(queue) {
