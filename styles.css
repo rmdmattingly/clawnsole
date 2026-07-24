@@ -2738,6 +2738,10 @@ kbd {
   font-weight: 600;
 }
 
+.wq-duplicate-row {
+  background: rgba(255, 255, 255, 0.028);
+}
+
 .wq-row-child {
   padding-left: 28px;
   background: rgba(0, 0, 0, 0.1);
