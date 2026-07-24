@@ -3460,6 +3460,19 @@ function renderAgentsModalList() {
 
   root.innerHTML = '';
 
+  const renderGridHeader = () => {
+    const header = document.createElement('div');
+    header.className = 'agents-grid-header';
+    header.setAttribute('aria-hidden', 'true');
+    header.innerHTML = `
+      <div class="agents-grid-cell agents-grid-cell-pin">Pin</div>
+      <div class="agents-grid-cell agents-grid-cell-agent">Agent / state</div>
+      <div class="agents-grid-cell">Actions</div>
+      <div class="agents-grid-cell">More</div>
+    `;
+    root.appendChild(header);
+  };
+
   const renderSummary = () => {
     const summary = document.createElement('div');
     summary.className = 'agents-health-summary';
@@ -3635,6 +3648,7 @@ function renderAgentsModalList() {
   };
 
   renderSummary();
+  renderGridHeader();
   if (pinned.length > 0) renderSection('Pinned', pinned);
   renderSection('Needs attention', needsAttention);
   renderSection('Healthy', healthy, { collapsible: true, collapsed: healthyCollapsed });
