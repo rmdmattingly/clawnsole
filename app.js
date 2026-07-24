@@ -32,6 +32,8 @@ const globalElements = {
   agentsSearch: document.getElementById('agentsSearch'),
   agentsFilterButtons: Array.from(document.querySelectorAll('[data-agents-filter]')),
   agentsDensityButtons: Array.from(document.querySelectorAll('[data-agents-density]')),
+  agentsColumnPicker: document.getElementById('agentsColumnPicker'),
+  agentsColumnOptions: document.getElementById('agentsColumnOptions'),
   agentsSort: document.getElementById('agentsSort'),
   agentsHeatmapToggle: document.getElementById('agentsHeatmapToggle'),
   agentsHeartbeatSortBtn: document.getElementById('agentsHeartbeatSortBtn'),
@@ -259,8 +261,19 @@ const ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY = 'clawnsole.admin.agents.preHeartbeatS
 const ADMIN_AGENT_HEATMAP_KEY = 'clawnsole.admin.agents.heartbeatHeatmap';
 const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
+const ADMIN_AGENT_COLUMNS_KEY = 'clawnsole.admin.agents.columns';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
+const FLEET_COLUMN_DEFS = [
+  { key: 'id', label: 'Agent id', defaultVisible: true },
+  { key: 'health', label: 'Health', defaultVisible: true },
+  { key: 'heartbeat', label: 'Heartbeat age', defaultVisible: true },
+  { key: 'heartbeatDetail', label: 'Heartbeat detail', defaultVisible: true },
+  { key: 'status', label: 'Status detail', defaultVisible: true },
+  { key: 'model', label: 'Model', defaultVisible: false },
+  { key: 'host', label: 'Host', defaultVisible: false },
+  { key: 'actions', label: 'Actions', defaultVisible: true }
+];
 const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
@@ -493,6 +506,50 @@ function getFleetHeatmapEnabled() {
 
 function getFleetDensity() {
   return String(storage.get(ADMIN_AGENT_DENSITY_KEY, 'comfortable') || 'comfortable') === 'compact' ? 'compact' : 'comfortable';
+}
+
+function getFleetColumns() {
+  const defaults = {};
+  FLEET_COLUMN_DEFS.forEach((col) => {
+    defaults[col.key] = !!col.defaultVisible;
+  });
+  const saved = readJsonFromStorage(ADMIN_AGENT_COLUMNS_KEY, {});
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return defaults;
+  FLEET_COLUMN_DEFS.forEach((col) => {
+    if (typeof saved[col.key] === 'boolean') defaults[col.key] = saved[col.key];
+  });
+  return defaults;
+}
+
+function setFleetColumn(key, visible) {
+  const allowed = new Set(FLEET_COLUMN_DEFS.map((col) => col.key));
+  if (!allowed.has(key)) return;
+  const next = getFleetColumns();
+  next[key] = !!visible;
+  writeJsonToStorage(ADMIN_AGENT_COLUMNS_KEY, next);
+}
+
+function renderFleetColumnPicker() {
+  const root = globalElements.agentsColumnOptions;
+  if (!root) return;
+  const visible = getFleetColumns();
+  root.innerHTML = '';
+  FLEET_COLUMN_DEFS.forEach((col) => {
+    const id = `agentsColumn_${col.key}`;
+    const label = document.createElement('label');
+    label.className = 'agents-column-option';
+    label.setAttribute('for', id);
+    label.innerHTML = `
+      <input id="${id}" type="checkbox" data-agents-column="${escapeHtml(col.key)}" ${visible[col.key] ? 'checked' : ''} />
+      <span>${escapeHtml(col.label)}</span>
+    `;
+    label.querySelector('input')?.addEventListener('change', (event) => {
+      const input = event.currentTarget;
+      setFleetColumn(col.key, !!input.checked);
+      renderAgentsModalList();
+    });
+    root.appendChild(label);
+  });
 }
 
 function syncFleetDensityControl() {
@@ -1251,7 +1308,9 @@ async function fetchAgents() {
         id: typeof agent?.id === 'string' ? agent.id : '',
         name: typeof agent?.name === 'string' ? agent.name : '',
         displayName: typeof agent?.displayName === 'string' ? agent.displayName : '',
-        emoji: typeof agent?.emoji === 'string' ? agent.emoji : ''
+        emoji: typeof agent?.emoji === 'string' ? agent.emoji : '',
+        model: typeof agent?.model === 'string' ? agent.model : '',
+        host: typeof agent?.host === 'string' ? agent.host : ''
       }))
       .filter((agent) => agent.id);
   } catch {
@@ -3199,6 +3258,7 @@ function openAgentsModal() {
     globalElements.agentsActiveMinutes.value = String(Math.max(1, minutes));
   }
   syncFleetDensityControl();
+  renderFleetColumnPicker();
 
   renderAgentsModalList();
   renderAgentsLastRefreshed();
@@ -3431,12 +3491,16 @@ function renderAgentsModalList() {
   if (!root) return;
 
   const scrollAnchor = captureFleetScrollAnchor(root);
+  const focusedAgentId = document.activeElement instanceof Element
+    ? String(document.activeElement.closest?.('.agents-row')?.dataset?.agentId || '')
+    : '';
   const search = String(globalElements.agentsSearch?.value || '').trim().toLowerCase();
   const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
   const activeWindowMs = withinMinutes * 60_000;
   const filterMode = getFleetFilter();
   const sortMode = getFleetSort();
   const heatmapEnabled = getFleetHeatmapEnabled();
+  const visibleColumns = getFleetColumns();
   syncFleetDensityControl();
 
   const pins = getPinnedAgentIds();
@@ -3594,22 +3658,19 @@ function renderAgentsModalList() {
           : 'Healthy';
       const heatBucketLabel = heartbeatAgeBucketLabel(triage.ageBucket);
       const statusSnippet = String(statusSnippetMap[id] || '').trim();
-      const statusSnippetHtml = statusSnippet ? ` · <span class="agents-status-snippet">${escapeHtml(statusSnippet)}</span>` : '';
-      row.dataset.heartbeatBucket = triage.ageBucket;
-      row.dataset.healthState = triage.bucket;
-      row.classList.toggle('agents-row-heatmap', heatmapEnabled);
-
-      row.innerHTML = `
-        <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
-        <div class="agents-row-main">
-          <div class="agents-row-title">${escapeHtml(label)}</div>
-          <div class="agents-row-meta">
-            <span class="agents-row-id">${escapeHtml(id)}</span>
-            <span class="agents-health-state-chip" data-health-state="${escapeHtml(triage.bucket)}">${escapeHtml(healthLabel)}</span>
-            <span class="agents-age-chip" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}" title="Heartbeat age: ${escapeHtml(heartbeatAge)} (${escapeHtml(heatBucketLabel)})">${escapeHtml(heartbeatAge)}</span>
-            <span class="agents-age-label">${escapeHtml(heatBucketLabel)}</span>${statusSnippetHtml}
-          </div>
-        </div>
+      const statusSnippetHtml = visibleColumns.status && statusSnippet
+        ? `<span class="agents-status-snippet" data-fleet-column="status">${escapeHtml(statusSnippet)}</span>`
+        : '';
+      const model = String(agent?.model || '').trim();
+      const host = String(agent?.host || '').trim();
+      const modelHtml = visibleColumns.model && model
+        ? `<span class="agents-optional-chip" data-fleet-column="model" title="Model">${escapeHtml(model)}</span>`
+        : '';
+      const hostHtml = visibleColumns.host && host
+        ? `<span class="agents-optional-chip" data-fleet-column="host" title="Host">${escapeHtml(host)}</span>`
+        : '';
+      const rowActionsHtml = visibleColumns.actions
+        ? `
         <div class="agents-row-actions agents-row-actions-inline" role="group" aria-label="Quick actions for ${escapeHtml(label)}">
           <button type="button" class="secondary agents-action-btn" data-agent-action="triage" data-agent-id="${escapeHtml(id)}" title="Open Chat and Workqueue" aria-label="Triage agent ${escapeHtml(label)}">Triage</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Chat</button>
@@ -3625,6 +3686,25 @@ function renderAgentsModalList() {
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Open Workqueue</button>
           </div>
         </details>
+      `
+        : '';
+      row.dataset.heartbeatBucket = triage.ageBucket;
+      row.dataset.healthState = triage.bucket;
+      row.classList.toggle('agents-row-heatmap', heatmapEnabled);
+      row.classList.toggle('agents-row-no-actions', !visibleColumns.actions);
+
+      row.innerHTML = `
+        <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
+        <div class="agents-row-main">
+          <div class="agents-row-title">${escapeHtml(label)}</div>
+          <div class="agents-row-meta">
+            ${visibleColumns.id ? `<span class="agents-row-id" data-fleet-column="id">${escapeHtml(id)}</span>` : ''}
+            ${visibleColumns.health ? `<span class="agents-health-state-chip" data-fleet-column="health" data-health-state="${escapeHtml(triage.bucket)}">${escapeHtml(healthLabel)}</span>` : ''}
+            ${visibleColumns.heartbeat ? `<span class="agents-age-chip" data-fleet-column="heartbeat" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}" title="Heartbeat age: ${escapeHtml(heartbeatAge)} (${escapeHtml(heatBucketLabel)})">${escapeHtml(heartbeatAge)}</span>` : ''}
+            ${visibleColumns.heartbeatDetail ? `<span class="agents-age-label" data-fleet-column="heartbeatDetail">${escapeHtml(heatBucketLabel)}</span>` : ''}${statusSnippetHtml}${modelHtml}${hostHtml}
+          </div>
+        </div>
+        ${rowActionsHtml}
       `;
 
       const pinBtn = row.querySelector('[data-agent-pin]');
@@ -3706,6 +3786,11 @@ function renderAgentsModalList() {
   const empty = ordered.length === 0;
   if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
   restoreFleetScrollAnchor(root, scrollAnchor);
+  if (focusedAgentId) {
+    try {
+      root.querySelector(`.agents-row[data-agent-id="${CSS.escape(focusedAgentId)}"]`)?.focus?.({ preventScroll: true });
+    } catch {}
+  }
 }
 
 function captureFleetScrollAnchor(root) {

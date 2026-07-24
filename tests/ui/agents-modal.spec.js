@@ -540,3 +540,51 @@ test('agents modal compact density tightens rows and persists', async ({ page, c
   await expect(page.locator('#agentsList')).toHaveClass(/compact/);
   await expect(page.getByRole('button', { name: 'Compact' })).toHaveAttribute('aria-pressed', 'true');
 });
+
+test('agents modal column picker hides optional metadata and preserves row selection', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha', model: 'gpt-alpha', host: 'mini-1' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta', model: 'gpt-beta', host: 'mini-2' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({ alpha: now, beta: now }));
+    localStorage.removeItem('clawnsole.admin.agents.columns');
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  const beta = page.locator('#agentsList .agents-row').filter({ hasText: 'Beta (beta)' });
+  await beta.click();
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+
+  await page.locator('#agentsColumnPicker summary').click();
+  await page.locator('#agentsColumn_model').check();
+  await page.locator('#agentsColumn_host').check();
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+  await expect(beta.locator('[data-fleet-column="model"]')).toHaveText('gpt-beta');
+  await expect(beta.locator('[data-fleet-column="host"]')).toHaveText('mini-2');
+
+  await page.locator('#agentsColumn_id').uncheck();
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+  await expect(beta.locator('[data-fleet-column="id"]')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Compact' }).click();
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#agentsList')).toHaveClass(/compact/);
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsColumn_model')).toBeChecked();
+  await expect(page.locator('#agentsColumn_host')).toBeChecked();
+  await expect(page.locator('#agentsColumn_id')).not.toBeChecked();
+  await expect(page.locator('#agentsList .agents-row').filter({ hasText: 'Beta' }).locator('[data-fleet-column="model"]')).toHaveText('gpt-beta');
+});
