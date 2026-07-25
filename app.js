@@ -506,6 +506,26 @@ function matchesKeybind(event, id) {
   }
   return lower === wanted.toLowerCase() || key === wanted;
 }
+
+function matchesKeybindWithOptionalAlt(event, id) {
+  if (matchesKeybind(event, id)) return true;
+  if (!event?.altKey) return false;
+  return matchesKeybind({
+    key: event.key,
+    metaKey: event.metaKey,
+    ctrlKey: event.ctrlKey,
+    shiftKey: event.shiftKey,
+    altKey: false
+  }, id);
+}
+
+function isGlobalKeybindEntry(entry) {
+  const binding = entry?.binding;
+  if (!binding || binding.chord) return false;
+  if (binding.accel || binding.ctrlOnly || binding.alt || binding.shift) return true;
+  const key = String(binding.key || '');
+  return key === 'Escape' || key === '?';
+}
 const WQ_RECENT_ENQUEUE_AGENTS_KEY = 'clawnsole.wq.recentEnqueueAgents';
 const WQ_RECENT_TARGETS_MAX = 6;
 
@@ -10167,7 +10187,7 @@ function isTypingShortcutExempt(event) {
 
 function isNonTrivialGlobalShortcut(event) {
   if (!event) return false;
-  if (KEYBIND_CATALOG.some((entry) => matchesKeybind(event, entry.id))) return true;
+  if (KEYBIND_CATALOG.some((entry) => isGlobalKeybindEntry(entry) && matchesKeybind(event, entry.id))) return true;
   const key = String(event.key || '');
   const lower = key.toLowerCase();
   const hasMetaCtrl = !!(event.metaKey || event.ctrlKey);
@@ -10483,7 +10503,7 @@ window.addEventListener('keydown', (event) => {
       ['pane.addCron', 'cron'],
       ['pane.addTimeline', 'timeline']
     ];
-    const match = addPaneShortcuts.find(([id]) => matchesKeybind(event, id));
+    const match = addPaneShortcuts.find(([id]) => matchesKeybindWithOptionalAlt(event, id));
     const kind = match?.[1] || '';
     if (kind) {
       // Don't hijack add-pane shortcuts while typing or while overlays are active.
