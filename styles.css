@@ -1937,6 +1937,10 @@ button.agents-section-title:hover {
   left: 40px;
 }
 
+.agents-list.compact .agents-table-header-pin {
+  width: 32px;
+}
+
 .agents-list.compact .agents-table-header {
   grid-template-columns: 32px minmax(0, 1fr) auto;
 }
