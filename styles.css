@@ -464,6 +464,39 @@ body::before {
   z-index: 2;
 }
 
+.pane-index-badge {
+  position: absolute;
+  top: -7px;
+  left: 8px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(14, 18, 26, 0.92);
+  color: #f8fafc;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.25);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  z-index: 3;
+}
+
+.pane-index-badge.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.pane-index-badge.is-excluded {
+  background: rgba(71, 85, 105, 0.92);
+  color: rgba(248, 250, 252, 0.72);
+}
+
 .pane-header-left {
   display: flex;
   align-items: center;

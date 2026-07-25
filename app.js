@@ -1858,6 +1858,7 @@ async function deleteRecurringPrompt(id) {
 }
 
 let shortcutsLastFocusedEl = null;
+let paneShortcutBadgesAltHeld = false;
 
 function getModalFocusableElements(modalEl) {
   if (!modalEl || !modalEl.querySelectorAll) return [];
@@ -1867,10 +1868,15 @@ function getModalFocusableElements(modalEl) {
 
 function openShortcuts() {
   const modal = globalElements.shortcutsModal;
-  if (!modal || modal.classList.contains('open')) return;
+  if (!modal) return;
+  if (modal.classList.contains('open')) {
+    updatePaneShortcutBadges();
+    return;
+  }
   shortcutsLastFocusedEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   modal.classList.add('open');
   modal.setAttribute('aria-hidden', 'false');
+  updatePaneShortcutBadges();
   window.setTimeout(() => {
     (globalElements.shortcutsDialog || globalElements.shortcutsCloseBtn || modal).focus?.();
   }, 0);
@@ -1881,6 +1887,7 @@ function closeShortcuts() {
   if (!modal || !modal.classList.contains('open')) return;
   modal.classList.remove('open');
   modal.setAttribute('aria-hidden', 'true');
+  updatePaneShortcutBadges();
   if (shortcutsLastFocusedEl && document.contains(shortcutsLastFocusedEl)) {
     shortcutsLastFocusedEl.focus?.();
   }
@@ -6958,6 +6965,28 @@ function paneHeaderLetter(pane) {
   }
 }
 
+function shouldShowPaneShortcutBadges() {
+  return paneShortcutBadgesAltHeld || isOverlayElementOpen(globalElements.shortcutsModal);
+}
+
+function updatePaneShortcutBadges() {
+  const visible = shouldShowPaneShortcutBadges();
+  (paneManager?.panes || []).forEach((pane, idx) => {
+    const badge = pane?.elements?.indexBadge;
+    if (!badge) return;
+    const shortcutIndex = idx + 1;
+    const supported = shortcutIndex >= 1 && shortcutIndex <= 9;
+    badge.hidden = !visible;
+    badge.classList.toggle('is-visible', visible);
+    badge.classList.toggle('is-excluded', visible && !supported);
+    badge.textContent = supported ? String(shortcutIndex) : '–';
+    badge.setAttribute('aria-hidden', 'true');
+    badge.title = supported
+      ? `Alt/Option+${shortcutIndex} focuses this pane`
+      : 'No direct number shortcut for this pane';
+  });
+}
+
 function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
   const letter = paneHeaderLetter(pane);
@@ -7278,6 +7307,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     name: root.querySelector('[data-pane-name]'),
     nameToken: root.querySelector('[data-pane-name-token]'),
     nameTarget: root.querySelector('[data-pane-name-target]'),
+    indexBadge: root.querySelector('[data-pane-index-badge]'),
     nicknameBtn: root.querySelector('[data-pane-nickname]'),
     typePill: root.querySelector('[data-pane-type-pill]'),
     typeIcon: root.querySelector('[data-pane-type-icon]'),
@@ -9544,6 +9574,7 @@ const paneManager = {
   },
   updatePaneLabels() {
     this.panes.forEach((pane) => renderPaneIdentity(pane));
+    updatePaneShortcutBadges();
     this.updatePaneGridLabel();
   },
   updatePaneGridLabel() {
@@ -10213,6 +10244,11 @@ function isBlockingOverlayOpenForPaneShortcuts() {
 }
 
 window.addEventListener('keydown', (event) => {
+  if (event.key === 'Alt' && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+    paneShortcutBadgesAltHeld = true;
+    updatePaneShortcutBadges();
+  }
+
   const isEditableTarget = (() => {
     const el = event.target;
     if (!el) return false;
@@ -10434,6 +10470,18 @@ window.addEventListener('keydown', (event) => {
       shortcutState.lastGAtMs = 0;
     }
   }
+});
+
+window.addEventListener('keyup', (event) => {
+  if (event.key !== 'Alt') return;
+  paneShortcutBadgesAltHeld = false;
+  updatePaneShortcutBadges();
+});
+
+window.addEventListener('blur', () => {
+  if (!paneShortcutBadgesAltHeld) return;
+  paneShortcutBadgesAltHeld = false;
+  updatePaneShortcutBadges();
 });
 
 globalElements.disconnectBtn?.addEventListener('click', () => {
