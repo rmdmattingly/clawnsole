@@ -315,6 +315,47 @@ test('fleet refresh keeps scroll anchor and keyboard triage selection', async ({
   )).toContain('agent-20');
 });
 
+test('agents modal keeps selected agent summary sticky with keyboard actions', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({ alpha: now, beta: now - 70 * 60 * 1000 }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+
+  const beta = page.locator('#agentsList .agents-row[data-agent-id="beta"]');
+  await beta.click();
+
+  const bar = page.locator('#agentsSelectionBar');
+  await expect(bar).toBeVisible();
+  await expect(bar).toContainText('Beta (beta)');
+  await expect(bar).toContainText('Stale');
+  await expect(bar).toContainText('1h ago');
+
+  const openTimeline = bar.getByRole('button', { name: 'Open Timeline' });
+  await openTimeline.focus();
+  await expect(openTimeline).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+
+  agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.locator('#agentsModalRefreshBtn').click();
+  await expect(bar).toBeVisible();
+  await expect(bar).toContainText('Alpha (alpha)');
+  await expect(bar).not.toContainText('Beta (beta)');
+});
+
 test('fleet attention mode sections healthy agents and keeps filters while expanding', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
