@@ -6218,13 +6218,8 @@ const paneManager = {
     this.panes = [];
   },
   loadAdminPanes() {
-    const activeChat = preserveActiveTarget
-      ? this.mruPaneKeys
-          .map((key) => this.findPaneByKey(key))
-          .find((pane) => pane && pane.kind === 'chat' && pane.agentId)
-      : null;
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
-    const defaultAgent = normalizeAgentId(activeChat?.agentId || storedDefault || 'main');
+    const defaultAgent = normalizeAgentId(storedDefault || 'main');
 
     const coerce = (item) => {
       // Legacy format: { key, agentId }
@@ -6316,7 +6311,15 @@ const paneManager = {
     }
 
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
-    const defaultAgent = normalizeAgentId(storedDefault || 'main');
+    const active = document.activeElement;
+    const activeChat = preserveActiveTarget
+      ? this.panes.find((pane) => (
+          pane && pane.kind === 'chat' && pane.agentId &&
+          pane.elements?.root &&
+          (pane.elements.root === active || pane.elements.root.contains(active))
+        )) || this.panes.find((pane) => pane && pane.kind === 'chat' && pane.agentId)
+      : null;
+    const defaultAgent = normalizeAgentId(activeChat?.agentId || storedDefault || 'main');
     const paneA = { key: `p${randomId().slice(0, 8)}`, kind: 'chat', agentId: defaultAgent };
     const paneB = {
       key: `p${randomId().slice(0, 8)}`,
@@ -6657,6 +6660,7 @@ const paneManager = {
     if (!globalElements.paneGrid) return;
     const cols = inferPaneCols(this.panes.length);
     this.applyLayout(cols);
+    updateLayoutModeChip();
   },
   connectAll() {
     this.panes.forEach((pane, index) => {
