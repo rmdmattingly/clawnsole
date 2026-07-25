@@ -1616,7 +1616,7 @@ button.send-btn .btn-icon {
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
-  z-index: 8;
+  z-index: 30;
   display: grid;
   grid-template-columns: repeat(2, minmax(130px, 1fr));
   gap: 6px;
@@ -1667,6 +1667,8 @@ button.send-btn .btn-icon {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow: auto;
+  scrollbar-gutter: stable both-edges;
 }
 
 .agents-list.compact {
@@ -1766,6 +1768,56 @@ button.agents-section-title:hover {
   color: var(--text);
 }
 
+.agents-section {
+  min-width: 780px;
+}
+
+.agents-table-header {
+  position: sticky;
+  top: 0;
+  z-index: 9;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 780px;
+  min-height: 28px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(13, 17, 23, 0.98);
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.agents-table-header-pin,
+.agents-table-header-identity {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 10;
+  background: rgba(13, 17, 23, 0.98);
+}
+
+.agents-table-header-pin {
+  left: 0;
+  width: 42px;
+}
+
+.agents-table-header-identity {
+  left: 52px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 250px;
+}
+
+.agents-table-header-actions {
+  justify-self: end;
+  padding-right: 8px;
+}
+
 .agents-rows {
   display: flex;
   flex-direction: column;
@@ -1785,6 +1837,7 @@ button.agents-section-title:hover {
   grid-template-columns: 42px 1fr auto;
   gap: 10px;
   align-items: center;
+  min-width: 780px;
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 14px;
   padding: 10px 12px;
@@ -1841,6 +1894,9 @@ button.agents-section-title:hover {
 }
 
 .agents-pin {
+  position: sticky;
+  left: 0;
+  z-index: 5;
   width: 36px;
   height: 36px;
   border-radius: 12px;
@@ -1861,6 +1917,28 @@ button.agents-section-title:hover {
 .agents-pin[aria-pressed="true"] {
   border-color: rgba(255, 179, 71, 0.55);
   background: rgba(255, 179, 71, 0.12);
+}
+
+.agents-row-main {
+  position: sticky;
+  left: 52px;
+  z-index: 4;
+  min-width: 250px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: rgba(13, 17, 23, 0.96);
+}
+
+.agents-list.compact .agents-row-main {
+  left: 40px;
+}
+
+.agents-list.compact .agents-table-header-identity {
+  left: 40px;
+}
+
+.agents-list.compact .agents-table-header {
+  grid-template-columns: 32px minmax(0, 1fr) auto;
 }
 
 .agents-row-title {
@@ -1999,7 +2077,7 @@ button.agents-section-title:hover {
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
-  z-index: 6;
+  z-index: 24;
   display: flex;
   flex-direction: column;
   gap: 6px;
