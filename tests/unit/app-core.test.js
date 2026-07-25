@@ -5,6 +5,7 @@ const {
   escapeHtml,
   fmtRemaining,
   formatWorkqueueIssueTitle,
+  summarizeExactWorkqueueDuplicateRows,
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
@@ -143,6 +144,81 @@ test('sortWorkqueueItems priority sort uses updatedAt desc tie-breaker', () => {
 
   const sorted = sortWorkqueueItems(items, { sortKey: 'priority', sortDir: 'desc' });
   assert.deepEqual(sorted.map((it) => it.id), ['c', 'b', 'a']);
+});
+
+test('summarizeExactWorkqueueDuplicateRows collapses same dedupe key title and status only', () => {
+  const items = [
+    {
+      id: 'a',
+      title: 'Open issue: Duplicate health',
+      status: 'ready',
+      updatedAt: '2026-01-01T00:00:00Z',
+      meta: { dedupeKey: 'rmdmattingly/clawnsole#348', repo: 'rmdmattingly/clawnsole', issueNumber: 348 }
+    },
+    {
+      id: 'b',
+      title: '[issue] rmdmattingly/clawnsole#348 Duplicate health',
+      status: 'ready',
+      updatedAt: '2026-01-02T00:00:00Z',
+      meta: { dedupeKey: 'rmdmattingly/clawnsole#348', repo: 'rmdmattingly/clawnsole', issueNumber: 348 }
+    },
+    {
+      id: 'c',
+      title: 'Open issue: Duplicate health',
+      status: 'claimed',
+      meta: { dedupeKey: 'rmdmattingly/clawnsole#348', repo: 'rmdmattingly/clawnsole', issueNumber: 348 }
+    },
+    {
+      id: 'd',
+      title: 'Open issue: Different title',
+      status: 'ready',
+      meta: { dedupeKey: 'rmdmattingly/clawnsole#348', repo: 'rmdmattingly/clawnsole', issueNumber: 348 }
+    },
+    {
+      id: 'e',
+      title: 'No dedupe key',
+      status: 'ready'
+    }
+  ];
+
+  const rows = summarizeExactWorkqueueDuplicateRows(items);
+  assert.deepEqual(rows.map((row) => row.kind), ['exact_duplicate', 'item', 'item', 'item']);
+  assert.deepEqual(rows[0].items.map((item) => item.id), ['b', 'a']);
+  assert.equal(rows[0].representative.id, 'b');
+  assert.equal(rows[0].count, 2);
+  assert.equal(rows[0].dedupeKey, 'rmdmattingly/clawnsole#348');
+  assert.deepEqual(rows.slice(1).map((row) => row.item.id), ['c', 'd', 'e']);
+});
+
+test('summarizeExactWorkqueueDuplicateRows falls back to normalized title and status', () => {
+  const items = [
+    {
+      id: 'a',
+      title: '  Repeat   title  ',
+      status: 'ready',
+      updatedAt: '2026-01-01T00:00:00Z'
+    },
+    {
+      id: 'b',
+      title: 'repeat title',
+      status: 'ready',
+      updatedAt: '2026-01-01T00:00:00Z'
+    },
+    {
+      id: 'c',
+      title: 'repeat title',
+      status: 'done',
+      updatedAt: '2026-01-03T00:00:00Z'
+    }
+  ];
+
+  const rows = summarizeExactWorkqueueDuplicateRows(items);
+  assert.deepEqual(rows.map((row) => row.kind), ['exact_duplicate', 'item']);
+  assert.deepEqual(rows[0].items.map((item) => item.id), ['a', 'b']);
+  assert.equal(rows[0].representative.id, 'a');
+  assert.equal(rows[0].count, 2);
+  assert.equal(rows[0].dedupeKey, '');
+  assert.equal(rows[1].item.id, 'c');
 });
 
 test('inferPaneCols maps pane counts to sensible layout widths', () => {

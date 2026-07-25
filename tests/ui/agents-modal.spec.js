@@ -74,6 +74,64 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText(/\d+[smhd]/);
 });
 
+test('agents modal defers auto-refresh while a fleet row is active, then catches up once', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const row = page.locator('#agentsList .agents-row').filter({ hasText: 'Alpha (alpha)' });
+  await expect(row).toBeVisible();
+  await row.locator('[data-agent-action="open-chat"]').first().focus();
+
+  agents = [{ id: 'beta', name: 'Beta', displayName: 'Beta' }];
+  await page.evaluate(() => window.__debug.refreshAgents({ reason: 'fleet_auto_refresh' }));
+
+  await expect(page.locator('#agentsRefreshPaused')).toContainText('Refresh paused');
+  await expect(row).toBeVisible();
+  await expect(page.locator('#agentsList')).not.toContainText('Beta (beta)');
+
+  await page.locator('#agentsSearch').focus();
+  await expect(page.locator('#agentsRefreshPaused')).toBeHidden();
+  await expect(page.locator('#agentsList')).toContainText('Beta (beta)');
+  await expect(page.locator('#agentsList')).not.toContainText('Alpha (alpha)');
+});
+
+test('agents modal keeps an open row menu stable during a paused refresh', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  await page.evaluate(() => {
+    const details = document.querySelector('#agentsList .agents-row-actions-overflow');
+    details.open = true;
+    details.dispatchEvent(new Event('toggle', { bubbles: true }));
+  });
+
+  agents = [{ id: 'beta', name: 'Beta', displayName: 'Beta' }];
+  await page.evaluate(() => window.__debug.refreshAgents({ reason: 'fleet_auto_refresh' }));
+
+  await expect(page.locator('#agentsRefreshPaused')).toContainText('Refresh paused');
+  await expect(page.locator('#agentsList .agents-row-actions-overflow').first()).toHaveAttribute('open', '');
+  await expect(page.locator('#agentsList')).toContainText('Alpha (alpha)');
+  await expect(page.locator('#agentsList')).not.toContainText('Beta (beta)');
+});
+
 test('agents modal shows fleet health summary counts and refreshes them', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
@@ -116,6 +174,47 @@ test('agents modal shows fleet health summary counts and refreshes them', async 
   await expect(summary.locator('.agents-health-chip.disconnected')).toContainText('0');
 });
 
+test('agents modal shows row health and heartbeat-age chips', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'healthy-agent', name: 'healthy-agent', displayName: 'healthy-agent' },
+    { id: 'stale-agent', name: 'stale-agent', displayName: 'stale-agent' },
+    { id: 'offline-agent', name: 'offline-agent', displayName: 'offline-agent' }
+  ];
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      'healthy-agent': now - 12_000,
+      'stale-agent': now - 70 * 60 * 1000
+    }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const healthyRow = page.locator('#agentsList .agents-row').filter({ hasText: 'healthy-agent' });
+  await expect(healthyRow.locator('.agents-health-state-chip')).toHaveText('Healthy');
+  await expect(healthyRow.locator('.agents-health-state-chip')).toHaveAttribute('data-health-state', 'active');
+  await expect(healthyRow.locator('.agents-age-chip')).toHaveText(/\d+s/);
+
+  const staleRow = page.locator('#agentsList .agents-row').filter({ hasText: 'stale-agent' });
+  await expect(staleRow.locator('.agents-health-state-chip')).toHaveText('Stale');
+  await expect(staleRow.locator('.agents-health-state-chip')).toHaveAttribute('data-health-state', 'stale');
+  await expect(staleRow.locator('.agents-age-chip')).toHaveText(/\d+h/);
+
+  const offlineRow = page.locator('#agentsList .agents-row').filter({ hasText: 'offline-agent' });
+  await expect(offlineRow.locator('.agents-health-state-chip')).toHaveText('Offline/Error');
+  await expect(offlineRow.locator('.agents-health-state-chip')).toHaveAttribute('data-health-state', 'offline_error');
+  await expect(offlineRow.locator('.agents-age-chip')).toHaveText('unknown');
+});
+
 test('agents modal quick filter narrows list and Esc clears it', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
@@ -136,6 +235,84 @@ test('agents modal quick filter narrows list and Esc clears it', async ({ page, 
   await expect(search).toBeFocused();
   await expect(search).toHaveValue('');
   await expect(rows).toHaveCount(initialCount);
+});
+
+test('fleet refresh preserves selected row and falls back when it disappears', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' },
+    { id: 'gamma', name: 'Gamma', displayName: 'Gamma' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+
+  const beta = page.locator('#agentsList .agents-row').filter({ hasText: 'Beta (beta)' });
+  await beta.click();
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+
+  await page.locator('#agentsModalRefreshBtn').click();
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#agentsSortIndicator')).toHaveText('');
+
+  agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'gamma', name: 'Gamma', displayName: 'Gamma' }
+  ];
+  await page.locator('#agentsModalRefreshBtn').click();
+  await expect(page.locator('#agentsList .agents-row').filter({ hasText: 'Gamma (gamma)' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#agentsSortIndicator')).toContainText('Selected agent no longer in current filter');
+});
+
+test('fleet refresh keeps scroll anchor and keyboard triage selection', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = Array.from({ length: 36 }, (_, index) => {
+    const id = `agent-${String(index + 1).padStart(2, '0')}`;
+    return { id, name: id, displayName: id };
+  });
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await page.evaluate(() => {
+    const list = document.querySelector('#agentsList');
+    if (!list) return;
+    list.style.maxHeight = '220px';
+    list.style.overflow = 'auto';
+    document.querySelector('.agents-row[data-agent-id="agent-20"]')?.scrollIntoView();
+  });
+  const before = await page.locator('#agentsList').evaluate((el) => el.scrollTop);
+  expect(before).toBeGreaterThan(0);
+
+  await page.locator('#agentsModalRefreshBtn').click();
+  const after = await page.locator('#agentsList').evaluate((el) => el.scrollTop);
+  expect(Math.abs(after - before)).toBeLessThan(24);
+
+  const row20 = page.locator('#agentsList .agents-row[data-agent-id="agent-20"]');
+  await row20.click();
+  await page.keyboard.press('j');
+  await expect(page.locator('#agentsList .agents-row[data-agent-id="agent-21"]')).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('k');
+  await expect(row20).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (
+    page.locator('[data-pane][data-pane-kind="chat"] [data-pane-agent-select]')
+      .evaluateAll((els) => els.map((el) => el.value))
+  )).toContain('agent-20');
+  await expect.poll(async () => (
+    page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')
+      .evaluateAll((els) => els.map((el) => el.value))
+  )).toContain('agent-20');
 });
 
 test('fleet attention mode sections healthy agents and keeps filters while expanding', async ({ page, clawnsole }) => {
@@ -362,4 +539,52 @@ test('agents modal compact density tightens rows and persists', async ({ page, c
   await page.getByRole('button', { name: 'Open agents' }).click();
   await expect(page.locator('#agentsList')).toHaveClass(/compact/);
   await expect(page.getByRole('button', { name: 'Compact' })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('agents modal column picker hides optional metadata and preserves row selection', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha', model: 'gpt-alpha', host: 'mini-1' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta', model: 'gpt-beta', host: 'mini-2' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({ alpha: now, beta: now }));
+    localStorage.removeItem('clawnsole.admin.agents.columns');
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  const beta = page.locator('#agentsList .agents-row').filter({ hasText: 'Beta (beta)' });
+  await beta.click();
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+
+  await page.locator('#agentsColumnPicker summary').click();
+  await page.locator('#agentsColumn_model').check();
+  await page.locator('#agentsColumn_host').check();
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+  await expect(beta.locator('[data-fleet-column="model"]')).toHaveText('gpt-beta');
+  await expect(beta.locator('[data-fleet-column="host"]')).toHaveText('mini-2');
+
+  await page.locator('#agentsColumn_id').uncheck();
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+  await expect(beta.locator('[data-fleet-column="id"]')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Compact' }).click();
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#agentsList')).toHaveClass(/compact/);
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsColumn_model')).toBeChecked();
+  await expect(page.locator('#agentsColumn_host')).toBeChecked();
+  await expect(page.locator('#agentsColumn_id')).not.toBeChecked();
+  await expect(page.locator('#agentsList .agents-row').filter({ hasText: 'Beta' }).locator('[data-fleet-column="model"]')).toHaveText('gpt-beta');
 });

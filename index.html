@@ -47,6 +47,7 @@
                 <span class="btn-label">Add Pane</span>
               </button>
             </div>
+            <button id="layoutLockBtn" class="icon-btn" type="button" aria-label="Lock pane layout" aria-pressed="false" data-testid="layout-lock-btn">🔓</button>
             <select id="layoutSelect" aria-label="Pane layout">
               <option value="1">1-up</option>
               <option value="2" selected>2-up</option>
@@ -95,7 +96,13 @@
                   <span class="pane-type-icon" data-pane-type-icon aria-hidden="true">💬</span>
                   <span class="pane-type-text" data-pane-type-text>CHAT</span>
                 </div>
-                <div class="pane-name" data-pane-name data-testid="pane-type-label">Pane</div>
+                <div class="pane-name" data-pane-name data-testid="pane-type-label">
+                  <span class="pane-name-token" data-pane-name-token data-testid="pane-name-token">A Chat</span>
+                  <span class="pane-name-target" data-pane-name-target data-testid="pane-name-target"> · main</span>
+                </div>
+                <button class="icon-btn pane-nickname-btn" data-pane-nickname type="button" aria-label="Set pane nickname" title="Set pane nickname" data-testid="pane-nickname">
+                  ✎
+                </button>
                 <div class="pane-agent" data-pane-agent-wrap>
                   <span class="agent-label" data-pane-target-label data-testid="pane-target-label">Agent</span>
                   <button class="agent-pill-btn" type="button" data-pane-agent-button aria-label="Change agent" data-testid="pane-agent-button">
@@ -254,6 +261,7 @@
             <div class="shortcut-row"><div class="shortcut-keys" id="shortcutKey-openPaneManager"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>P</kbd></div><div class="shortcut-desc">Open Pane Manager</div></div>
             <div class="shortcut-row"><div class="shortcut-keys" id="shortcutKey-focusNextPane"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys" id="shortcutKey-focusPrevPane"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>a</kbd>..<kbd>z</kbd></div><div class="shortcut-desc">Focus pane by visible letter</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next Chat pane only</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous Chat pane only</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>c</kbd></div><div class="shortcut-desc">Return to last active Chat pane</div></div>
@@ -276,6 +284,10 @@
           <div class="shortcut-group">
             <h3 class="shortcut-group-title">Workqueue actions</h3>
             <div class="shortcut-row"><div class="shortcut-keys" id="shortcutKey-openWorkqueue"><kbd>g</kbd> <kbd>w</kbd></div><div class="shortcut-desc">Open Workqueue modal</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>j</kbd>/<kbd>k</kbd></div><div class="shortcut-desc">Move selected row in Workqueue keyboard mode</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Enter</kbd></div><div class="shortcut-desc">Inspect selected Workqueue row in keyboard mode</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>e</kbd></div><div class="shortcut-desc">Edit selected Workqueue row in keyboard mode</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys"><kbd>1</kbd>..<kbd>4</kbd></div><div class="shortcut-desc">Set ready, in progress, blocked, or done in keyboard mode</div></div>
           </div>
         </div>
       </div>
@@ -293,7 +305,7 @@
           </div>
           <label class="pane-manager-search-wrap" for="paneManagerSearch">
             <span class="pane-manager-search-label">Quick find</span>
-            <input id="paneManagerSearch" class="pane-manager-search" type="search" placeholder="Filter by title, type, or target" autocomplete="off" data-testid="pane-manager-search" />
+            <input id="paneManagerSearch" class="pane-manager-search" type="search" placeholder="Find pane (A, Workqueue, dev-agent...)" autocomplete="off" data-testid="pane-manager-search" />
           </label>
           <label class="pane-manager-unread-only"><input id="paneManagerUnreadOnly" type="checkbox" data-testid="pane-manager-unread-only" /> Unread only</label>
           <div id="paneManagerList" class="pane-manager-list" role="listbox" aria-label="Open panes" data-testid="pane-manager-list"></div>
@@ -411,13 +423,21 @@
       <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="agentsTitle">
         <div class="modal-header">
           <h2 id="agentsTitle">Agents</h2>
-          <button id="agentsCloseBtn" class="icon-btn" type="button" aria-label="Close agents">
-            ✕
-          </button>
+          <div class="modal-header-actions">
+            <button id="agentsModalRefreshBtn" class="icon-btn" type="button" aria-label="Refresh agents modal">
+              ↻
+            </button>
+            <button id="agentsCloseBtn" class="icon-btn" type="button" aria-label="Close agents">
+              ✕
+            </button>
+          </div>
         </div>
         <div class="modal-body">
           <div class="agents-toolbar">
-            <div id="agentsLastRefreshed" class="agents-last-refreshed" aria-live="polite">Last refreshed: never</div>
+            <div class="agents-refresh-state">
+              <span id="agentsLastRefreshed" class="agents-last-refreshed" aria-live="polite">Last refreshed: never</span>
+              <span id="agentsRefreshPaused" class="agents-refresh-paused" aria-live="polite" hidden></span>
+            </div>
             <label class="agents-field">
               <span class="agents-label">Search</span>
               <input id="agentsSearch" type="text" placeholder="Filter agents…" />
@@ -461,6 +481,13 @@
                 <button type="button" class="agents-chip" data-agents-density="comfortable" aria-pressed="true">Comfortable</button>
                 <button type="button" class="agents-chip" data-agents-density="compact" aria-pressed="false">Compact</button>
               </div>
+            </div>
+            <div class="agents-field agents-columns">
+              <span class="agents-label">Columns</span>
+              <details id="agentsColumnPicker" class="agents-column-picker">
+                <summary class="agents-chip">Columns</summary>
+                <div id="agentsColumnOptions" class="agents-column-options" role="group" aria-label="Fleet columns"></div>
+              </details>
             </div>
           </div>
 

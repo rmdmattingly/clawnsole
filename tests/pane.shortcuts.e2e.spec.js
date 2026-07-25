@@ -288,6 +288,83 @@ test('alt+1..3 and cmd/ctrl+1..3 focus panes by visible order; shortcuts do not 
   await expect.poll(activePaneIndex).toBe(0);
 });
 
+test('g then pane letter focuses matching pane and exits cleanly on misses', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('g');
+  await page.keyboard.press('b');
+  await expect.poll(activePaneIndex).toBe(1);
+
+  await page.keyboard.press('g');
+  await page.keyboard.press('z');
+  await expect.poll(activePaneIndex).toBe(1);
+
+  await page.keyboard.press('b');
+  await expect.poll(activePaneIndex).toBe(1);
+});
+
+test('g then pane letter is suppressed while typing and while modals are active', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]')).filter((pane) => pane.getClientRects().length > 0);
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  const firstPaneInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
+  await page.evaluate(() => focusPaneIndex(0));
+  await firstPaneInput.focus();
+  await expect(firstPaneInput).toBeFocused();
+  await expect.poll(activePaneIndex).toBe(0);
+  await page.keyboard.press('g');
+  await page.keyboard.press('b');
+  await expect(firstPaneInput).toHaveValue('gb');
+  await expect.poll(activePaneIndex).toBe(0);
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'false');
+  await page.keyboard.press('g');
+  await page.keyboard.press('b');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'true');
+  await expect.poll(activePaneIndex).not.toBe(1);
+});
+
 test('pane-switch HUD appears for keyboard pane navigation and respects settings', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
