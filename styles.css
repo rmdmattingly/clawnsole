@@ -464,6 +464,39 @@ body::before {
   z-index: 2;
 }
 
+.pane-index-badge {
+  position: absolute;
+  top: -7px;
+  left: 8px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(14, 18, 26, 0.92);
+  color: #f8fafc;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.25);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  z-index: 3;
+}
+
+.pane-index-badge.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.pane-index-badge.is-excluded {
+  background: rgba(71, 85, 105, 0.92);
+  color: rgba(248, 250, 252, 0.72);
+}
+
 .pane-header-left {
   display: flex;
   align-items: center;
@@ -4157,6 +4190,51 @@ kbd {
 
 .keybind-action {
   white-space: nowrap;
+}
+
+.settings-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-section-head h3 {
+  margin-bottom: 0;
+}
+
+.shortcut-overrides-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.shortcut-override-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(150px, 190px) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.shortcut-override-label {
+  font-weight: 600;
+}
+
+.shortcut-override-default {
+  margin-top: 2px;
+  color: rgba(230, 238, 246, 0.62);
+  font-size: 0.8rem;
+}
+
+.shortcut-override-input {
+  cursor: pointer;
+  text-align: center;
+}
+
+.settings-error {
+  margin-top: 8px;
+  color: #ffb4b4;
+  font-size: 0.85rem;
 }
 
 .settings-rp-form {

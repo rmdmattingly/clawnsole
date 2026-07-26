@@ -83,6 +83,10 @@ const globalElements = {
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   paneSwitchHudEnabled: document.getElementById('paneSwitchHudEnabled'),
   keybindConflictList: document.getElementById('keybindConflictList'),
+  shortcutOverridesList: document.getElementById('shortcutOverridesList'),
+  shortcutOverridesSave: document.getElementById('shortcutOverridesSave'),
+  shortcutOverridesResetAll: document.getElementById('shortcutOverridesResetAll'),
+  shortcutOverridesError: document.getElementById('shortcutOverridesError'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
   loginPassword: document.getElementById('loginPassword'),
@@ -281,6 +285,7 @@ const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
 const PANE_SWITCH_HUD_ENABLED_KEY = 'clawnsole.admin.paneSwitchHud.enabled';
 const KEYBIND_OVERRIDES_KEY = 'clawnsole.admin.keybindOverrides.v1';
+const SHORTCUT_OVERRIDES_KEY = 'clawnsole.admin.shortcutOverrides.v1';
 const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
 
@@ -396,6 +401,11 @@ function resetKeybindOverride(id) {
 }
 
 function shortcutDisplay(id) {
+  const shortcutActionId = keybindIdToShortcutActionId(id);
+  if (shortcutActionId) {
+    const label = shortcutComboLabel(activeShortcutCombo(shortcutActionId));
+    if (label) return label;
+  }
   const binding = keybindFor(id);
   return String(binding?.display || keybindEntry(id)?.binding?.display || '');
 }
@@ -436,7 +446,7 @@ function renderShortcutsContent() {
       <h3 class="shortcut-group-title">${escapeHtml(group.name)}</h3>
       ${group.entries.map((entry) => `
         <div class="shortcut-row" data-shortcut-id="${escapeHtml(entry.id)}">
-          <div class="shortcut-keys">${renderShortcutKeys(shortcutDisplay(entry.id))}</div>
+          <div class="shortcut-keys"${keybindIdToShortcutActionId(entry.id) ? ` data-shortcut-help="${escapeHtml(keybindIdToShortcutActionId(entry.id))}"` : ''}>${renderShortcutKeys(shortcutDisplay(entry.id))}</div>
           <div class="shortcut-desc">${escapeHtml(entry.label)}${isKeybindCustomized(entry.id) ? ' <span class="shortcut-custom">custom</span>' : ''}</div>
         </div>
       `).join('')}
@@ -475,7 +485,7 @@ function renderKeyboardSettings() {
       const entry = keybindEntry(button.getAttribute('data-keybind-apply'));
       if (!entry?.risk?.alternative) return;
       setKeybindOverride(entry.id, entry.risk.alternative);
-      toast(`Updated ${entry.label} shortcut.`, 'ok');
+      showToast(`Updated ${entry.label} shortcut.`, { kind: 'info', timeoutMs: 2200 });
     });
   });
   root.querySelectorAll('[data-keybind-reset]').forEach((button) => {
@@ -483,7 +493,7 @@ function renderKeyboardSettings() {
       const id = button.getAttribute('data-keybind-reset');
       const entry = keybindEntry(id);
       resetKeybindOverride(id);
-      toast(`Reset ${entry?.label || 'shortcut'}.`, 'info');
+      showToast(`Reset ${entry?.label || 'shortcut'}.`, { kind: 'info', timeoutMs: 2200 });
     });
   });
 }
@@ -1797,6 +1807,8 @@ function openSettings() {
     globalElements.paneSwitchHudEnabled.checked = isPaneSwitchHudEnabled();
   }
   renderKeyboardSettings();
+  shortcutOverridesDraft = readShortcutOverrides();
+  renderShortcutOverrideSettings();
   globalElements.settingsModal.classList.add('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'false');
 
@@ -1809,6 +1821,262 @@ function openSettings() {
 function closeSettings() {
   globalElements.settingsModal.classList.remove('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'true');
+  shortcutOverridesDraft = null;
+}
+
+const SHORTCUT_OVERRIDE_ACTIONS = [
+  {
+    id: 'pane-next',
+    label: 'Focus next pane',
+    defaultCombo: { accel: true, shift: true, alt: false, key: 'k' },
+    run: () => cyclePaneFocus()
+  },
+  {
+    id: 'pane-previous',
+    label: 'Focus previous pane',
+    defaultCombo: { accel: true, shift: true, alt: false, key: 'j' },
+    run: () => cyclePaneFocusBackward()
+  },
+  {
+    id: 'pane-manager',
+    label: 'Open pane manager',
+    defaultCombo: { accel: true, shift: false, alt: false, key: 'p' },
+    run: () => openPaneManager(),
+    typingExempt: true
+  },
+  {
+    id: 'workqueue-open',
+    label: 'Open workqueue',
+    defaultCombo: { sequence: ['g', 'w'] },
+    run: () => openTopbarWorkqueueAction()
+  },
+  {
+    id: 'fleet-open',
+    label: 'Open fleet/agents',
+    defaultCombo: { accel: true, shift: true, alt: false, key: 'f' },
+    run: () => openFleetPane()
+  }
+];
+const SHORTCUT_OVERRIDE_ACTION_BY_ID = new Map(SHORTCUT_OVERRIDE_ACTIONS.map((action) => [action.id, action]));
+let shortcutOverridesDraft = null;
+
+function keybindIdToShortcutActionId(id) {
+  return ({
+    'pane.next': 'pane-next',
+    'pane.prev': 'pane-previous',
+    'pane.manager': 'pane-manager',
+    'workqueue.open': 'workqueue-open',
+    'fleet.open': 'fleet-open'
+  })[String(id || '')] || '';
+}
+
+function normalizeShortcutKey(key) {
+  const raw = String(key || '').trim();
+  if (!raw) return '';
+  const lower = raw.toLowerCase();
+  if (lower === ' ') return 'space';
+  if (lower === 'escape') return 'esc';
+  if (lower === 'arrowup') return 'up';
+  if (lower === 'arrowdown') return 'down';
+  if (lower === 'arrowleft') return 'left';
+  if (lower === 'arrowright') return 'right';
+  if (lower.length === 1) return lower;
+  return lower;
+}
+
+function normalizeShortcutCombo(combo) {
+  if (!combo || typeof combo !== 'object') return '';
+  if (Array.isArray(combo.sequence) && combo.sequence.length) {
+    return combo.sequence.map((part) => normalizeShortcutKey(part)).filter(Boolean).join(' ');
+  }
+  const key = normalizeShortcutKey(combo.key);
+  if (!key) return '';
+  const parts = [];
+  if (combo.accel) parts.push('accel');
+  if (combo.ctrl) parts.push('ctrl');
+  if (combo.meta) parts.push('meta');
+  if (combo.alt) parts.push('alt');
+  if (combo.shift) parts.push('shift');
+  parts.push(key);
+  return parts.join('+');
+}
+
+function shortcutComboEquals(a, b) {
+  return normalizeShortcutCombo(a) === normalizeShortcutCombo(b);
+}
+
+function shortcutComboFromEvent(event) {
+  const key = normalizeShortcutKey(event?.key);
+  if (!key || ['control', 'shift', 'alt', 'meta'].includes(key)) return null;
+  return {
+    accel: !!(event.metaKey || event.ctrlKey),
+    alt: !!event.altKey,
+    shift: !!event.shiftKey,
+    key
+  };
+}
+
+function shortcutComboLabel(combo) {
+  if (!combo || typeof combo !== 'object') return '';
+  if (Array.isArray(combo.sequence) && combo.sequence.length) {
+    return combo.sequence.map((part) => normalizeShortcutKey(part).toUpperCase()).join(' ');
+  }
+  const key = normalizeShortcutKey(combo.key);
+  if (!key) return '';
+  const parts = [];
+  if (combo.accel) parts.push('Cmd/Ctrl');
+  if (combo.ctrl) parts.push('Ctrl');
+  if (combo.meta) parts.push('Cmd');
+  if (combo.alt) parts.push('Alt/Option');
+  if (combo.shift) parts.push('Shift');
+  parts.push(key.length === 1 ? key.toUpperCase() : key.replace(/\b\w/g, (m) => m.toUpperCase()));
+  return parts.join('+');
+}
+
+function shortcutComboHtml(combo) {
+  const label = shortcutComboLabel(combo);
+  if (!label) return '';
+  if (Array.isArray(combo?.sequence)) {
+    return label.split(/\s+/).map((part) => `<kbd>${escapeHtml(part)}</kbd>`).join(' ');
+  }
+  return label.split('+').map((part) => `<kbd>${escapeHtml(part)}</kbd>`).join('+');
+}
+
+function cleanShortcutOverrides(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const cleaned = {};
+  for (const action of SHORTCUT_OVERRIDE_ACTIONS) {
+    const combo = source[action.id];
+    if (!combo || typeof combo !== 'object') continue;
+    if (shortcutComboEquals(combo, action.defaultCombo)) continue;
+    if (normalizeShortcutCombo(combo)) cleaned[action.id] = combo;
+  }
+  return cleaned;
+}
+
+function readShortcutOverrides() {
+  return cleanShortcutOverrides(readJsonFromStorage(SHORTCUT_OVERRIDES_KEY, {}));
+}
+
+function activeShortcutCombo(actionId, source = null) {
+  const action = SHORTCUT_OVERRIDE_ACTION_BY_ID.get(actionId);
+  if (!action) return null;
+  const overrides = source || readShortcutOverrides();
+  return overrides[actionId] || action.defaultCombo;
+}
+
+function validateShortcutOverrides(overrides) {
+  const seen = new Map();
+  for (const action of SHORTCUT_OVERRIDE_ACTIONS) {
+    const combo = activeShortcutCombo(action.id, overrides);
+    const normalized = normalizeShortcutCombo(combo);
+    if (!normalized) return { ok: false, message: `${action.label}: press a shortcut combo.` };
+    if (seen.has(normalized)) {
+      return { ok: false, message: `${action.label} conflicts with ${seen.get(normalized)}. Pick a different combo.` };
+    }
+    seen.set(normalized, action.label);
+    if (!Array.isArray(combo.sequence) && !combo.accel && !combo.alt && !combo.ctrl && !combo.meta) {
+      return { ok: false, message: `${action.label}: use Cmd/Ctrl, Alt/Option, or a g-chord style default to avoid normal typing keys.` };
+    }
+  }
+  const reserved = [
+    ['accel+q', 'Cmd/Ctrl+Q is usually reserved by the browser or OS. Try Cmd/Ctrl+Shift+K.'],
+    ['accel+w', 'Cmd/Ctrl+W closes tabs. Try Cmd/Ctrl+Shift+W with another action free.'],
+    ['accel+n', 'Cmd/Ctrl+N opens a new window. Try Cmd/Ctrl+Shift+N only if Add pane is not needed.'],
+    ['accel+t', 'Cmd/Ctrl+T opens a new tab. Try Cmd/Ctrl+Alt+T.']
+  ];
+  for (const action of SHORTCUT_OVERRIDE_ACTIONS) {
+    const normalized = normalizeShortcutCombo(activeShortcutCombo(action.id, overrides));
+    const hit = reserved.find(([combo]) => combo === normalized);
+    if (hit) return { ok: false, message: `${action.label}: ${hit[1]}` };
+  }
+  const fixedConflicts = new Map([
+    ['accel+k', 'Open command palette'],
+    ['accel+l', 'Focus Chat composer'],
+    ['accel+r', 'Refresh agent list'],
+    ['accel+shift+n', 'Add pane menu'],
+    ['accel+shift+c', 'New Chat pane'],
+    ['accel+shift+w', 'New Workqueue pane'],
+    ['accel+shift+r', 'New Cron pane'],
+    ['accel+shift+t', 'New Timeline pane']
+  ]);
+  for (const action of SHORTCUT_OVERRIDE_ACTIONS) {
+    const normalized = normalizeShortcutCombo(activeShortcutCombo(action.id, overrides));
+    if (shortcutComboEquals(activeShortcutCombo(action.id, overrides), action.defaultCombo)) continue;
+    if (fixedConflicts.has(normalized)) {
+      return { ok: false, message: `${action.label} conflicts with ${fixedConflicts.get(normalized)}. Try ${shortcutComboLabel(action.defaultCombo)} or another combo.` };
+    }
+  }
+  return { ok: true, message: '' };
+}
+
+function renderShortcutHelpLabels() {
+  for (const action of SHORTCUT_OVERRIDE_ACTIONS) {
+    document.querySelectorAll(`[data-shortcut-help="${action.id}"]`).forEach((el) => {
+      el.innerHTML = shortcutComboHtml(activeShortcutCombo(action.id));
+    });
+  }
+}
+
+function renderShortcutOverrideSettings() {
+  const list = globalElements.shortcutOverridesList;
+  if (!list) return;
+  const overrides = shortcutOverridesDraft || readShortcutOverrides();
+  list.innerHTML = '';
+  for (const action of SHORTCUT_OVERRIDE_ACTIONS) {
+    const combo = activeShortcutCombo(action.id, overrides);
+    const row = document.createElement('div');
+    row.className = 'shortcut-override-row';
+    row.innerHTML = `
+      <div>
+        <div class="shortcut-override-label">${escapeHtml(action.label)}</div>
+        <div class="shortcut-override-default">Default: ${escapeHtml(shortcutComboLabel(action.defaultCombo))}</div>
+      </div>
+      <input class="shortcut-override-input" data-shortcut-action="${escapeHtml(action.id)}" type="text" value="${escapeHtml(shortcutComboLabel(combo))}" readonly aria-label="${escapeHtml(`${action.label} shortcut`)}" />
+      <button class="secondary" type="button" data-shortcut-reset="${escapeHtml(action.id)}">Reset</button>
+    `;
+    list.appendChild(row);
+  }
+  const validation = validateShortcutOverrides(overrides);
+  setShortcutOverridesError(validation.ok ? '' : validation.message);
+}
+
+function setShortcutOverridesError(message) {
+  const el = globalElements.shortcutOverridesError;
+  if (!el) return;
+  const text = String(message || '').trim();
+  el.textContent = text;
+  el.hidden = !text;
+}
+
+function saveShortcutOverridesFromSettings() {
+  const overrides = cleanShortcutOverrides(shortcutOverridesDraft || readShortcutOverrides());
+  const validation = validateShortcutOverrides(overrides);
+  if (!validation.ok) {
+    setShortcutOverridesError(validation.message);
+    return false;
+  }
+  writeJsonToStorage(SHORTCUT_OVERRIDES_KEY, overrides);
+  shortcutOverridesDraft = null;
+  renderShortcutHelpLabels();
+  renderShortcutOverrideSettings();
+  showToast('Shortcut overrides saved.', { kind: 'info', timeoutMs: 2200 });
+  return true;
+}
+
+function resetShortcutOverride(actionId) {
+  const overrides = cleanShortcutOverrides(shortcutOverridesDraft || readShortcutOverrides());
+  delete overrides[actionId];
+  shortcutOverridesDraft = overrides;
+  renderShortcutOverrideSettings();
+}
+
+function resetAllShortcutOverrides() {
+  shortcutOverridesDraft = {};
+  storage.remove(SHORTCUT_OVERRIDES_KEY);
+  renderShortcutHelpLabels();
+  renderShortcutOverrideSettings();
+  showToast('Shortcut overrides reset.', { kind: 'info', timeoutMs: 2200 });
 }
 
 const recurringPromptState = {
@@ -2105,6 +2373,7 @@ async function deleteRecurringPrompt(id) {
 }
 
 let shortcutsLastFocusedEl = null;
+let paneShortcutBadgesAltHeld = false;
 
 function getModalFocusableElements(modalEl) {
   if (!modalEl || !modalEl.querySelectorAll) return [];
@@ -2114,11 +2383,17 @@ function getModalFocusableElements(modalEl) {
 
 function openShortcuts() {
   const modal = globalElements.shortcutsModal;
-  if (!modal || modal.classList.contains('open')) return;
+  if (!modal) return;
+  if (modal.classList.contains('open')) {
+    renderShortcutsContent();
+    updatePaneShortcutBadges();
+    return;
+  }
   renderShortcutsContent();
   shortcutsLastFocusedEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   modal.classList.add('open');
   modal.setAttribute('aria-hidden', 'false');
+  updatePaneShortcutBadges();
   window.setTimeout(() => {
     (globalElements.shortcutsDialog || globalElements.shortcutsCloseBtn || modal).focus?.();
   }, 0);
@@ -2129,6 +2404,7 @@ function closeShortcuts() {
   if (!modal || !modal.classList.contains('open')) return;
   modal.classList.remove('open');
   modal.setAttribute('aria-hidden', 'true');
+  updatePaneShortcutBadges();
   if (shortcutsLastFocusedEl && document.contains(shortcutsLastFocusedEl)) {
     shortcutsLastFocusedEl.focus?.();
   }
@@ -7206,6 +7482,28 @@ function paneHeaderLetter(pane) {
   }
 }
 
+function shouldShowPaneShortcutBadges() {
+  return paneShortcutBadgesAltHeld || isOverlayElementOpen(globalElements.shortcutsModal);
+}
+
+function updatePaneShortcutBadges() {
+  const visible = shouldShowPaneShortcutBadges();
+  (paneManager?.panes || []).forEach((pane, idx) => {
+    const badge = pane?.elements?.indexBadge;
+    if (!badge) return;
+    const shortcutIndex = idx + 1;
+    const supported = shortcutIndex >= 1 && shortcutIndex <= 9;
+    badge.hidden = !visible;
+    badge.classList.toggle('is-visible', visible);
+    badge.classList.toggle('is-excluded', visible && !supported);
+    badge.textContent = supported ? String(shortcutIndex) : '–';
+    badge.setAttribute('aria-hidden', 'true');
+    badge.title = supported
+      ? `Alt/Option+${shortcutIndex} focuses this pane`
+      : 'No direct number shortcut for this pane';
+  });
+}
+
 function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
   const letter = paneHeaderLetter(pane);
@@ -7526,6 +7824,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     name: root.querySelector('[data-pane-name]'),
     nameToken: root.querySelector('[data-pane-name-token]'),
     nameTarget: root.querySelector('[data-pane-name-target]'),
+    indexBadge: root.querySelector('[data-pane-index-badge]'),
     nicknameBtn: root.querySelector('[data-pane-nickname]'),
     typePill: root.querySelector('[data-pane-type-pill]'),
     typeIcon: root.querySelector('[data-pane-type-icon]'),
@@ -9174,7 +9473,7 @@ const paneManager = {
     if (persist) storage.set(ADMIN_LAYOUT_LOCK_KEY, this.layoutLocked ? '1' : '0');
     this.updateLayoutLockButton();
     if (paneManagerUiState.open) renderPaneManager();
-    if (notify) toast(this.layoutLocked ? 'Pane layout locked.' : 'Pane layout unlocked.', 'info');
+    if (notify) showToast(this.layoutLocked ? 'Pane layout locked.' : 'Pane layout unlocked.', { kind: 'info', timeoutMs: 1800 });
   },
   toggleLayoutLocked({ notify = true } = {}) {
     this.setLayoutLocked(!this.layoutLocked, { persist: true, notify });
@@ -9792,6 +10091,7 @@ const paneManager = {
   },
   updatePaneLabels() {
     this.panes.forEach((pane) => renderPaneIdentity(pane));
+    updatePaneShortcutBadges();
     this.updatePaneGridLabel();
   },
   updatePaneGridLabel() {
@@ -9850,6 +10150,7 @@ const paneManager = {
 };
 
 // Global event wiring
+renderShortcutHelpLabels();
 
 globalElements.settingsBtn?.addEventListener('click', () => openSettings());
 globalElements.settingsCloseBtn?.addEventListener('click', () => closeSettings());
@@ -9859,6 +10160,33 @@ globalElements.settingsModal?.addEventListener('click', (event) => {
 globalElements.paneSwitchHudEnabled?.addEventListener('change', () => {
   storage.set(PANE_SWITCH_HUD_ENABLED_KEY, globalElements.paneSwitchHudEnabled.checked ? '1' : '0');
 });
+function handleShortcutOverrideInputKeydown(event) {
+  const input = event.target?.closest?.('[data-shortcut-action]');
+  if (!input) return;
+  const combo = shortcutComboFromEvent(event);
+  if (!combo) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const actionId = String(input.dataset.shortcutAction || '');
+  const overrides = cleanShortcutOverrides(shortcutOverridesDraft || readShortcutOverrides());
+  const action = SHORTCUT_OVERRIDE_ACTION_BY_ID.get(actionId);
+  if (!action) return;
+  if (shortcutComboEquals(combo, action.defaultCombo)) delete overrides[actionId];
+  else overrides[actionId] = combo;
+  shortcutOverridesDraft = overrides;
+  renderShortcutOverrideSettings();
+  const nextInput = globalElements.shortcutOverridesList?.querySelector?.(`[data-shortcut-action="${CSS.escape(actionId)}"]`);
+  nextInput?.focus?.();
+  nextInput?.select?.();
+}
+window.addEventListener('keydown', handleShortcutOverrideInputKeydown, true);
+globalElements.shortcutOverridesList?.addEventListener('click', (event) => {
+  const resetBtn = event.target?.closest?.('[data-shortcut-reset]');
+  if (!resetBtn) return;
+  resetShortcutOverride(String(resetBtn.dataset.shortcutReset || ''));
+});
+globalElements.shortcutOverridesSave?.addEventListener('click', () => saveShortcutOverridesFromSettings());
+globalElements.shortcutOverridesResetAll?.addEventListener('click', () => resetAllShortcutOverrides());
 
 globalElements.shortcutsBtn?.addEventListener('click', () => openShortcuts());
 globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
@@ -10182,12 +10510,15 @@ function hasPaneNumberLayoutMismatch(event) {
 
 function isTypingShortcutExempt(event) {
   const key = String(event?.key || '').toLowerCase();
+  const override = matchingShortcutOverrideAction(event);
+  if (override?.typingExempt) return true;
   return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'p' || key === 'k' || key === 'l');
 }
 
 function isNonTrivialGlobalShortcut(event) {
   if (!event) return false;
   if (KEYBIND_CATALOG.some((entry) => isGlobalKeybindEntry(entry) && matchesKeybind(event, entry.id))) return true;
+  if (matchingShortcutOverrideAction(event)) return true;
   const key = String(event.key || '');
   const lower = key.toLowerCase();
   const hasMetaCtrl = !!(event.metaKey || event.ctrlKey);
@@ -10212,6 +10543,27 @@ function blockedGlobalShortcutReason(event) {
   if (isTypingContext(event.target) && !isTypingShortcutExempt(event)) return 'typing';
   if (hasPaneNumberLayoutMismatch(event)) return 'layout';
   return '';
+}
+
+function isShortcutOverrideEvent(event, combo) {
+  if (!combo || Array.isArray(combo.sequence)) return false;
+  if (normalizeShortcutKey(event?.key) !== normalizeShortcutKey(combo.key)) return false;
+  if (!!combo.accel !== !!(event.metaKey || event.ctrlKey)) return false;
+  if (!!combo.shift !== !!event.shiftKey) return false;
+  if (!!combo.alt !== !!event.altKey) return false;
+  if (combo.ctrl !== undefined && !!combo.ctrl !== !!event.ctrlKey) return false;
+  if (combo.meta !== undefined && !!combo.meta !== !!event.metaKey) return false;
+  return true;
+}
+
+function matchingShortcutOverrideAction(event) {
+  if (isAnyOverlayOpen()) return null;
+  for (const action of SHORTCUT_OVERRIDE_ACTIONS) {
+    const combo = activeShortcutCombo(action.id);
+    if (Array.isArray(combo?.sequence)) continue;
+    if (isShortcutOverrideEvent(event, combo)) return action;
+  }
+  return null;
 }
 
 function closeTopmostOverlay() {
@@ -10339,7 +10691,7 @@ function returnToLastActiveChatPane() {
     return true;
   }
 
-  toast('No previous chat pane.', 'info');
+  showToast('No previous chat pane.', { kind: 'info', timeoutMs: 1800 });
   return false;
 }
 
@@ -10433,7 +10785,7 @@ function cycleUnreadPaneFocus(direction = 1) {
     .filter(({ pane }) => paneUnreadCount(pane) > 0)
     .map(({ idx }) => idx);
   if (!unreadIndexes.length) {
-    toast('No unread panes.', 'info');
+    showToast('No unread panes.', { kind: 'info', timeoutMs: 1800 });
     return false;
   }
 
@@ -10462,6 +10814,11 @@ function isBlockingOverlayOpenForPaneShortcuts() {
 }
 
 window.addEventListener('keydown', (event) => {
+  if (event.key === 'Alt' && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+    paneShortcutBadgesAltHeld = true;
+    updatePaneShortcutBadges();
+  }
+
   const isEditableTarget = (() => {
     const el = event.target;
     if (!el) return false;
@@ -10487,6 +10844,13 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     event.stopPropagation();
     reportBlockedShortcut(blockedReason);
+    return;
+  }
+
+  const overrideAction = matchingShortcutOverrideAction(event);
+  if (overrideAction && (!isTypingContext(event.target) || overrideAction.typingExempt)) {
+    event.preventDefault();
+    overrideAction.run();
     return;
   }
 
@@ -10649,7 +11013,7 @@ window.addEventListener('keydown', (event) => {
     if (roleState.role === 'admin') {
       openAgentsModal();
       setFleetHeartbeatSort();
-      toast('Sorted fleet by heartbeat age.', 'info');
+      showToast('Sorted fleet by heartbeat age.', { kind: 'info', timeoutMs: 1800 });
     }
     return;
   }
@@ -10658,7 +11022,7 @@ window.addEventListener('keydown', (event) => {
   if (matchesKeybind(event, 'agents.refresh')) {
     event.preventDefault();
     globalElements.refreshAgentsBtn?.click?.();
-    toast('Refreshed agents.', 'info');
+    showToast('Refreshed agents.', { kind: 'info', timeoutMs: 1800 });
     return;
   }
 
@@ -10688,6 +11052,18 @@ window.addEventListener('keydown', (event) => {
       shortcutState.lastGAtMs = 0;
     }
   }
+});
+
+window.addEventListener('keyup', (event) => {
+  if (event.key !== 'Alt') return;
+  paneShortcutBadgesAltHeld = false;
+  updatePaneShortcutBadges();
+});
+
+window.addEventListener('blur', () => {
+  if (!paneShortcutBadgesAltHeld) return;
+  paneShortcutBadgesAltHeld = false;
+  updatePaneShortcutBadges();
 });
 
 globalElements.disconnectBtn?.addEventListener('click', () => {

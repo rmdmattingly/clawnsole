@@ -285,6 +285,28 @@ test('alt+1..3 and cmd/ctrl+1..3 focus panes by visible order; shortcuts do not 
   await page.getByTestId('pane-add-menu-cron').click();
   await expect(page.locator('[data-pane]')).toHaveCount(3);
 
+  const badges = page.getByTestId('pane-index-badge');
+  const hiddenBadgeCount = async () => badges.evaluateAll((els) => els.filter((el) => el.hidden).length);
+  await expect(badges).toHaveCount(3);
+  await expect.poll(hiddenBadgeCount).toBe(3);
+
+  const firstLabelXBefore = await page.getByTestId('pane-name-token').first().evaluate((el) => el.getBoundingClientRect().x);
+  await page.keyboard.down('Alt');
+  await expect(badges).toHaveText(['1', '2', '3']);
+  await expect(badges.first()).toBeVisible();
+  const firstLabelXDuring = await page.getByTestId('pane-name-token').first().evaluate((el) => el.getBoundingClientRect().x);
+  expect(firstLabelXDuring).toBe(firstLabelXBefore);
+  await page.keyboard.up('Alt');
+  await expect.poll(hiddenBadgeCount).toBe(3);
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'false');
+  await expect(badges.first()).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'true');
+  await expect.poll(hiddenBadgeCount).toBe(3);
+
   const activePaneIndex = async () => page.evaluate(() => {
     const panes = Array.from(document.querySelectorAll('[data-pane]'));
     const active = document.activeElement;
