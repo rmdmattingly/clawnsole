@@ -1934,6 +1934,7 @@ button.send-btn .btn-icon {
   min-width: 280px;
 }
 
+.agents-snooze-actions,
 .agents-heatmap-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2389,6 +2390,19 @@ button.agents-section-title:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.agents-snooze-chip {
+  display: inline-block;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fbd38d;
+  border: 1px solid rgba(251, 211, 141, 0.38);
+  background: rgba(251, 211, 141, 0.11);
+  border-radius: 999px;
+  padding: 2px 7px;
 }
 
 .agents-row-actions {
