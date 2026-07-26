@@ -3893,6 +3893,19 @@ function renderAgentsModalList() {
     }
     section.appendChild(header);
 
+    const columnHeader = document.createElement('div');
+    columnHeader.className = 'agents-table-header';
+    columnHeader.setAttribute('role', 'presentation');
+    columnHeader.innerHTML = `
+      <div class="agents-table-header-pin" aria-hidden="true"></div>
+      <div class="agents-table-header-identity" data-fleet-column-header="identity">
+        <span>Agent</span>
+        ${visibleColumns.health ? '<span>Health</span>' : ''}
+      </div>
+      ${visibleColumns.actions ? '<div class="agents-table-header-actions">Actions</div>' : ''}
+    `;
+    section.appendChild(columnHeader);
+
     const list = document.createElement('div');
     list.className = 'agents-rows';
     if (collapsible && collapsed) list.hidden = true;
