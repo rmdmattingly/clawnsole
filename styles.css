@@ -4090,6 +4090,51 @@ kbd {
   font-size: 0.95rem;
 }
 
+.settings-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-section-head h3 {
+  margin-bottom: 0;
+}
+
+.shortcut-overrides-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.shortcut-override-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(150px, 190px) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.shortcut-override-label {
+  font-weight: 600;
+}
+
+.shortcut-override-default {
+  margin-top: 2px;
+  color: rgba(230, 238, 246, 0.62);
+  font-size: 0.8rem;
+}
+
+.shortcut-override-input {
+  cursor: pointer;
+  text-align: center;
+}
+
+.settings-error {
+  margin-top: 8px;
+  color: #ffb4b4;
+  font-size: 0.85rem;
+}
+
 .settings-rp-form {
   display: grid;
   gap: 8px;
