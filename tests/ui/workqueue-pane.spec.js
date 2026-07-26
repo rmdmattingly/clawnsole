@@ -906,6 +906,36 @@ test('workqueue pane: large queues render an initial capped slice and load more 
   await pane.locator('[data-wq-refresh]').click();
   await refreshResP;
 
+  const guard = pane.locator('[data-wq-all-scope-guard]');
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.workqueue.allScopeGuardThreshold', '600'));
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeHidden();
+
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.workqueue.allScopeGuardThreshold', '200'));
+  await pane.locator('[data-wq-scope="assigned"]').click();
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeVisible();
+  await expect(guard).toContainText('Viewing all items (505). Narrow scope?');
+
+  await guard.locator('[data-wq-downscope="assigned"]').click();
+  await expect(pane.locator('[data-wq-scope="assigned"]')).toHaveClass(/active/);
+  await expect(guard).toBeHidden();
+  await expect(pane.locator('.wq-row')).toHaveCount(0);
+
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeVisible();
+  await guard.locator('[data-wq-downscope="unassigned"]').click();
+  await expect(pane.locator('[data-wq-scope="unassigned"]')).toHaveClass(/active/);
+  await expect(guard).toBeHidden();
+
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeVisible();
+  await guard.locator('[data-wq-guard-dismiss]').click();
+  await expect(guard).toBeHidden();
+  await pane.locator('[data-wq-scope="assigned"]').click();
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeHidden();
+
   await expect(pane.locator('.wq-row')).toHaveCount(100);
   await expect(pane.locator('[data-wq-load-more]')).toHaveText('Load more (100/505)');
 
