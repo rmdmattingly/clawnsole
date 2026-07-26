@@ -259,9 +259,9 @@
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Alt</kbd>/<kbd>Option</kbd>+<kbd>1</kbd>..<kbd>9</kbd></div><div class="shortcut-desc">Focus panes 1-9 by visible order</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>4</kbd></div><div class="shortcut-desc">Focus pane 1-4</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>a</kbd>..<kbd>z</kbd></div><div class="shortcut-desc">Focus pane by visible letter</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>P</kbd></div><div class="shortcut-desc">Open Pane Manager</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next pane</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys" data-shortcut-help="paneManager"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>P</kbd></div><div class="shortcut-desc">Open Pane Manager</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys" data-shortcut-help="focusNextPane"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys" data-shortcut-help="focusPreviousPane"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next Chat pane only</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous Chat pane only</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>c</kbd></div><div class="shortcut-desc">Return to last active Chat pane</div></div>
@@ -277,13 +277,13 @@
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Open command palette</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="shortcut-desc">Add pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C/W/R/T</kbd></div><div class="shortcut-desc">Add Chat/Workqueue/Cron/Timeline pane (workspace only)</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></div><div class="shortcut-desc">Open/focus Fleet pane</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys" data-shortcut-help="openAgents"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></div><div class="shortcut-desc">Open/focus Fleet pane</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>R</kbd></div><div class="shortcut-desc">Refresh agent list</div></div>
           </div>
 
           <div class="shortcut-group">
             <h3 class="shortcut-group-title">Workqueue actions</h3>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>w</kbd></div><div class="shortcut-desc">Open Workqueue modal</div></div>
+            <div class="shortcut-row"><div class="shortcut-keys" data-shortcut-help="openWorkqueue"><kbd>g</kbd> <kbd>w</kbd></div><div class="shortcut-desc">Open Workqueue modal</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>j</kbd>/<kbd>k</kbd></div><div class="shortcut-desc">Move selected row in Workqueue keyboard mode</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>Enter</kbd></div><div class="shortcut-desc">Inspect selected Workqueue row in keyboard mode</div></div>
             <div class="shortcut-row"><div class="shortcut-keys"><kbd>e</kbd></div><div class="shortcut-desc">Edit selected Workqueue row in keyboard mode</div></div>
@@ -532,6 +532,17 @@
               <input id="paneSwitchHudEnabled" type="checkbox" checked />
               Show pane-switch HUD
             </label>
+            <div class="settings-shortcuts" aria-label="Shortcut overrides">
+              <div class="settings-shortcuts-head">
+                <div>
+                  <div class="settings-shortcuts-title">Shortcut overrides</div>
+                  <div class="hint">Use tokens like <code>Ctrl/Cmd+Shift+K</code> or <code>g w</code>.</div>
+                </div>
+                <button id="shortcutOverridesResetAllBtn" type="button" class="secondary">Reset all</button>
+              </div>
+              <div id="shortcutOverridesRows" class="settings-shortcuts-rows"></div>
+              <div id="shortcutOverridesError" class="settings-shortcuts-error" role="alert" hidden></div>
+            </div>
           </section>
 
           <section class="settings-section" aria-label="Recurring admin prompts">

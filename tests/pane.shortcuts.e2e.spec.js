@@ -179,6 +179,62 @@ test('cmd/ctrl+shift+j focuses previous pane with wraparound from unfocused stat
   await expect.poll(activePaneIndex).toBe(2);
 });
 
+test('settings shortcut overrides persist, validate conflicts, and update help', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.locator('[data-shortcut-override="focusNextPane"]').fill('Ctrl/Cmd+Shift+Y');
+  await page.locator('[data-shortcut-override="focusNextPane"]').press('Enter');
+  await expect(page.locator('#shortcutOverridesError')).toBeHidden();
+
+  await page.locator('[data-shortcut-override="focusPreviousPane"]').fill('Ctrl/Cmd+Shift+Y');
+  await page.locator('[data-shortcut-override="focusPreviousPane"]').press('Enter');
+  await expect(page.locator('#shortcutOverridesError')).toContainText('conflicts with Focus next pane');
+  await page.locator('[data-shortcut-reset="focusPreviousPane"]').click();
+  await page.keyboard.press('Escape');
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+  const triggerShortcut = async (key) => page.evaluate((nextKey) => {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: nextKey,
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    }));
+  }, key);
+
+  await page.click('#connectionStatus');
+  await page.evaluate(() => focusPaneIndex(0));
+  await triggerShortcut('K');
+  await expect.poll(activePaneIndex).toBe(0);
+  await triggerShortcut('Y');
+  await expect.poll(activePaneIndex).toBe(1);
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  await expect(page.locator('[data-shortcut-help="focusNextPane"]')).toContainText('Y');
+});
+
 test('cmd/ctrl+alt+j/k cycles chat panes only and keeps typing guard', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);

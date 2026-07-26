@@ -4090,6 +4090,65 @@ kbd {
   font-size: 0.95rem;
 }
 
+.settings-shortcuts {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.settings-shortcuts-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.settings-shortcuts-title {
+  font-weight: 700;
+}
+
+.settings-shortcuts-rows {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(170px, 220px) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-shortcut-row label {
+  display: grid;
+  gap: 2px;
+}
+
+.settings-shortcut-default {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.settings-shortcut-row input[aria-invalid="true"] {
+  border-color: rgba(255, 116, 116, 0.85);
+  box-shadow: 0 0 0 2px rgba(255, 116, 116, 0.12);
+}
+
+.settings-shortcuts-error {
+  color: #ffb7b7;
+  font-size: 0.86rem;
+}
+
+@media (max-width: 720px) {
+  .settings-shortcuts-head {
+    flex-direction: column;
+  }
+
+  .settings-shortcut-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .settings-rp-form {
   display: grid;
   gap: 8px;

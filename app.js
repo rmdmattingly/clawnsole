@@ -81,6 +81,9 @@ const globalElements = {
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   paneSwitchHudEnabled: document.getElementById('paneSwitchHudEnabled'),
+  shortcutOverridesRows: document.getElementById('shortcutOverridesRows'),
+  shortcutOverridesError: document.getElementById('shortcutOverridesError'),
+  shortcutOverridesResetAllBtn: document.getElementById('shortcutOverridesResetAllBtn'),
   rolePill: document.getElementById('rolePill'),
   loginOverlay: document.getElementById('loginOverlay'),
   loginPassword: document.getElementById('loginPassword'),
@@ -278,6 +281,7 @@ const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
 const PANE_SWITCH_HUD_ENABLED_KEY = 'clawnsole.admin.paneSwitchHud.enabled';
+const SHORTCUT_OVERRIDES_KEY = 'clawnsole.admin.shortcutOverrides.v1';
 const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
 const WQ_RECENT_ENQUEUE_AGENTS_KEY = 'clawnsole.wq.recentEnqueueAgents';
@@ -291,6 +295,214 @@ function readJsonFromStorage(key, fallback) {
   } catch {
     return fallback;
   }
+}
+
+const SHORTCUT_OVERRIDE_ACTIONS = [
+  { id: 'focusNextPane', label: 'Focus next pane', default: 'Ctrl/Cmd+Shift+K', suggest: 'Ctrl/Cmd+Shift+Y' },
+  { id: 'focusPreviousPane', label: 'Focus previous pane', default: 'Ctrl/Cmd+Shift+J', suggest: 'Ctrl/Cmd+Shift+U' },
+  { id: 'paneManager', label: 'Open pane manager', default: 'Ctrl/Cmd+P', suggest: 'Ctrl/Cmd+Shift+P' },
+  { id: 'openWorkqueue', label: 'Open workqueue', default: 'g w', suggest: 'Ctrl/Cmd+Shift+O' },
+  { id: 'openAgents', label: 'Open fleet/agents', default: 'Ctrl/Cmd+Shift+F', suggest: 'Ctrl/Cmd+Shift+A' }
+];
+const SHORTCUT_OVERRIDE_BY_ID = new Map(SHORTCUT_OVERRIDE_ACTIONS.map((action) => [action.id, action]));
+const SHORTCUT_RESERVED_CANONICAL = new Set([
+  'accel+r',
+  'accel+shift+r',
+  'accel+w',
+  'accel+shift+w',
+  'accel+t',
+  'accel+shift+t',
+  'accel+n',
+  'accel+shift+n',
+  'accel+shift+c',
+  'accel+shift+h',
+  'accel+l',
+  'accel+q'
+]);
+
+function normalizeShortcutComboText(value) {
+  return String(value || '')
+    .trim()
+    .replace(/\s*\+\s*/g, '+')
+    .replace(/\s+/g, ' ');
+}
+
+function parseShortcutCombo(value) {
+  const raw = normalizeShortcutComboText(value);
+  if (!raw) return null;
+  const chordParts = raw.split(' ').filter(Boolean);
+  if (chordParts.length > 2) return null;
+  if (chordParts.length === 2) {
+    const first = chordParts[0].toLowerCase();
+    const second = chordParts[1].toLowerCase();
+    if (!/^[a-z]$/.test(first) || !/^[a-z]$/.test(second)) return null;
+    return { kind: 'chord', keys: [first, second], canonical: `${first} ${second}`, display: `${first} ${second}` };
+  }
+
+  const tokens = chordParts[0].split('+').filter(Boolean);
+  let accel = false;
+  let ctrl = false;
+  let meta = false;
+  let shift = false;
+  let alt = false;
+  let key = '';
+  for (const tokenRaw of tokens) {
+    const token = tokenRaw.toLowerCase();
+    if (token === 'ctrl/cmd' || token === 'cmd/ctrl' || token === 'accel') accel = true;
+    else if (token === 'ctrl' || token === 'control') ctrl = true;
+    else if (token === 'cmd' || token === 'command' || token === 'meta') meta = true;
+    else if (token === 'shift') shift = true;
+    else if (token === 'alt' || token === 'option') alt = true;
+    else if (!key) key = token.length === 1 ? token : token;
+    else return null;
+  }
+  if (!key) return null;
+  const modifiers = [accel ? 'accel' : '', ctrl ? 'ctrl' : '', meta ? 'meta' : '', shift ? 'shift' : '', alt ? 'alt' : ''].filter(Boolean);
+  if (!modifiers.length) return null;
+  const canonical = [...modifiers, key].join('+');
+  const displayParts = [
+    accel ? 'Ctrl/Cmd' : '',
+    ctrl ? 'Ctrl' : '',
+    meta ? 'Cmd' : '',
+    shift ? 'Shift' : '',
+    alt ? 'Alt/Option' : '',
+    key.length === 1 ? key.toUpperCase() : key
+  ].filter(Boolean);
+  return { kind: 'combo', accel, ctrl, meta, shift, alt, key, canonical, display: displayParts.join('+') };
+}
+
+function readShortcutOverrides() {
+  const raw = readJsonFromStorage(SHORTCUT_OVERRIDES_KEY, {});
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const next = {};
+  for (const action of SHORTCUT_OVERRIDE_ACTIONS) {
+    const value = normalizeShortcutComboText(raw[action.id] || '');
+    if (value) next[action.id] = value;
+  }
+  return next;
+}
+
+function activeShortcutText(actionId) {
+  const action = SHORTCUT_OVERRIDE_BY_ID.get(actionId);
+  if (!action) return '';
+  const overrides = readShortcutOverrides();
+  return normalizeShortcutComboText(overrides[actionId] || action.default);
+}
+
+function activeShortcut(actionId) {
+  return parseShortcutCombo(activeShortcutText(actionId));
+}
+
+function eventMatchesShortcut(event, actionId) {
+  const shortcut = activeShortcut(actionId);
+  if (!shortcut || shortcut.kind !== 'combo') return false;
+  const key = String(event?.key || '').toLowerCase();
+  const shortcutKey = String(shortcut.key || '').toLowerCase();
+  const accelOk = shortcut.accel ? !!(event.metaKey || event.ctrlKey) : true;
+  return accelOk &&
+    !!event.shiftKey === !!shortcut.shift &&
+    !!event.altKey === !!shortcut.alt &&
+    (!shortcut.ctrl || !!event.ctrlKey) &&
+    (!shortcut.meta || !!event.metaKey) &&
+    key === shortcutKey;
+}
+
+function activeChordSecondKey(actionId) {
+  const shortcut = activeShortcut(actionId);
+  if (!shortcut || shortcut.kind !== 'chord') return '';
+  return shortcut.keys[0] === 'g' ? shortcut.keys[1] : '';
+}
+
+function shortcutHelpHtml(actionId) {
+  const parsed = activeShortcut(actionId);
+  const display = parsed?.display || activeShortcutText(actionId);
+  return String(display || '').split(/(\+| )/).filter((part) => part && part !== '+').map((part) => {
+    if (part === ' ') return ' ';
+    return `<kbd>${escapeHtml(part)}</kbd>`;
+  }).join('');
+}
+
+function renderShortcutHelpOverrides() {
+  document.querySelectorAll('[data-shortcut-help]').forEach((el) => {
+    const actionId = el.getAttribute('data-shortcut-help');
+    el.innerHTML = shortcutHelpHtml(actionId);
+  });
+}
+
+function validateShortcutOverrides(values) {
+  const seen = new Map();
+  for (const action of SHORTCUT_OVERRIDE_ACTIONS) {
+    const text = normalizeShortcutComboText(values[action.id] || action.default);
+    const parsed = parseShortcutCombo(text);
+    if (!parsed) return { ok: false, actionId: action.id, message: `${action.label}: enter a shortcut such as ${action.suggest}.` };
+    const defaultCanonical = parseShortcutCombo(action.default)?.canonical || '';
+    if (parsed.canonical !== defaultCanonical && SHORTCUT_RESERVED_CANONICAL.has(parsed.canonical)) {
+      return { ok: false, actionId: action.id, message: `${action.label}: ${parsed.display} is browser-reserved. Try ${action.suggest}.` };
+    }
+    if (seen.has(parsed.canonical)) {
+      return { ok: false, actionId: action.id, message: `${action.label}: conflicts with ${seen.get(parsed.canonical)}. Try ${action.suggest}.` };
+    }
+    seen.set(parsed.canonical, action.label);
+  }
+  return { ok: true };
+}
+
+function renderShortcutOverrideSettings() {
+  const root = globalElements.shortcutOverridesRows;
+  if (!root) return;
+  const overrides = readShortcutOverrides();
+  root.innerHTML = '';
+  for (const action of SHORTCUT_OVERRIDE_ACTIONS) {
+    const row = document.createElement('div');
+    row.className = 'settings-shortcut-row';
+    row.innerHTML = `
+      <label for="shortcutOverride_${escapeHtml(action.id)}">
+        <span>${escapeHtml(action.label)}</span>
+        <span class="settings-shortcut-default">Default: ${escapeHtml(action.default)}</span>
+      </label>
+      <input id="shortcutOverride_${escapeHtml(action.id)}" data-shortcut-override="${escapeHtml(action.id)}" type="text" value="${escapeHtml(overrides[action.id] || action.default)}" autocomplete="off" spellcheck="false" />
+      <button type="button" class="secondary" data-shortcut-reset="${escapeHtml(action.id)}">Reset</button>
+    `;
+    root.appendChild(row);
+  }
+  const error = globalElements.shortcutOverridesError;
+  if (error) {
+    error.hidden = true;
+    error.textContent = '';
+  }
+}
+
+function persistShortcutOverrideSettings() {
+  const root = globalElements.shortcutOverridesRows;
+  if (!root) return false;
+  const values = {};
+  root.querySelectorAll('[data-shortcut-override]').forEach((input) => {
+    values[input.dataset.shortcutOverride] = normalizeShortcutComboText(input.value);
+    input.removeAttribute('aria-invalid');
+  });
+  const validation = validateShortcutOverrides(values);
+  const error = globalElements.shortcutOverridesError;
+  if (!validation.ok) {
+    const input = root.querySelector(`[data-shortcut-override="${CSS.escape(validation.actionId)}"]`);
+    input?.setAttribute('aria-invalid', 'true');
+    if (error) {
+      error.textContent = validation.message;
+      error.hidden = false;
+    }
+    return false;
+  }
+  const next = {};
+  for (const action of SHORTCUT_OVERRIDE_ACTIONS) {
+    const value = normalizeShortcutComboText(values[action.id]);
+    if (value && value !== action.default) next[action.id] = value;
+  }
+  storage.set(SHORTCUT_OVERRIDES_KEY, JSON.stringify(next));
+  if (error) {
+    error.hidden = true;
+    error.textContent = '';
+  }
+  renderShortcutHelpOverrides();
+  return true;
 }
 
 function writeJsonToStorage(key, value) {
@@ -1550,6 +1762,7 @@ function openSettings() {
   if (globalElements.paneSwitchHudEnabled) {
     globalElements.paneSwitchHudEnabled.checked = isPaneSwitchHudEnabled();
   }
+  renderShortcutOverrideSettings();
   globalElements.settingsModal.classList.add('open');
   globalElements.settingsModal.setAttribute('aria-hidden', 'false');
 
@@ -1868,6 +2081,7 @@ function getModalFocusableElements(modalEl) {
 function openShortcuts() {
   const modal = globalElements.shortcutsModal;
   if (!modal || modal.classList.contains('open')) return;
+  renderShortcutHelpOverrides();
   shortcutsLastFocusedEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   modal.classList.add('open');
   modal.setAttribute('aria-hidden', 'false');
@@ -9611,6 +9825,30 @@ globalElements.settingsModal?.addEventListener('click', (event) => {
 globalElements.paneSwitchHudEnabled?.addEventListener('change', () => {
   storage.set(PANE_SWITCH_HUD_ENABLED_KEY, globalElements.paneSwitchHudEnabled.checked ? '1' : '0');
 });
+globalElements.shortcutOverridesRows?.addEventListener('change', (event) => {
+  if (event.target?.matches?.('[data-shortcut-override]')) persistShortcutOverrideSettings();
+});
+globalElements.shortcutOverridesRows?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && event.target?.matches?.('[data-shortcut-override]')) {
+    event.preventDefault();
+    persistShortcutOverrideSettings();
+  }
+});
+globalElements.shortcutOverridesRows?.addEventListener('click', (event) => {
+  const actionId = event.target?.dataset?.shortcutReset;
+  if (!actionId) return;
+  const action = SHORTCUT_OVERRIDE_BY_ID.get(actionId);
+  const input = globalElements.shortcutOverridesRows?.querySelector(`[data-shortcut-override="${CSS.escape(actionId)}"]`);
+  if (action && input) {
+    input.value = action.default;
+    persistShortcutOverrideSettings();
+  }
+});
+globalElements.shortcutOverridesResetAllBtn?.addEventListener('click', () => {
+  storage.remove(SHORTCUT_OVERRIDES_KEY);
+  renderShortcutOverrideSettings();
+  renderShortcutHelpOverrides();
+});
 
 globalElements.shortcutsBtn?.addEventListener('click', () => openShortcuts());
 globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
@@ -9934,11 +10172,13 @@ function hasPaneNumberLayoutMismatch(event) {
 
 function isTypingShortcutExempt(event) {
   const key = String(event?.key || '').toLowerCase();
-  return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'p' || key === 'k' || key === 'l');
+  return eventMatchesShortcut(event, 'paneManager') ||
+    ((event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'k' || key === 'l'));
 }
 
 function isNonTrivialGlobalShortcut(event) {
   if (!event) return false;
+  if (SHORTCUT_OVERRIDE_ACTIONS.some((action) => eventMatchesShortcut(event, action.id))) return true;
   const key = String(event.key || '');
   const lower = key.toLowerCase();
   const hasMetaCtrl = !!(event.metaKey || event.ctrlKey);
@@ -10260,8 +10500,8 @@ window.addEventListener('keydown', (event) => {
     }
   }
 
-  // Cmd/Ctrl+P opens Pane Manager (even while typing).
-  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'p') {
+  // Pane Manager shortcut opens even while typing.
+  if (eventMatchesShortcut(event, 'paneManager')) {
     event.preventDefault();
     openPaneManager();
     return;
@@ -10285,6 +10525,12 @@ window.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'g' && roleState.role === 'admin') {
     event.preventDefault();
     openWorkqueueForActiveChatAgent();
+    return;
+  }
+
+  if (eventMatchesShortcut(event, 'openWorkqueue')) {
+    event.preventDefault();
+    openTopbarWorkqueueAction();
     return;
   }
 
@@ -10337,15 +10583,15 @@ window.addEventListener('keydown', (event) => {
     }
   }
 
-  // Cmd/Ctrl+Shift+K cycles focus across panes.
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'k') {
+  // Cycle focus across panes.
+  if (eventMatchesShortcut(event, 'focusNextPane')) {
     event.preventDefault();
     cyclePaneFocus();
     return;
   }
 
-  // Cmd/Ctrl+Shift+J cycles focus backward across panes.
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'j') {
+  // Cycle focus backward across panes.
+  if (eventMatchesShortcut(event, 'focusPreviousPane')) {
     event.preventDefault();
     cyclePaneFocusBackward();
     return;
@@ -10382,8 +10628,8 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Cmd/Ctrl+Shift+F opens/focuses Fleet pane.
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'f') {
+  // Open/focus Fleet pane.
+  if (eventMatchesShortcut(event, 'openAgents')) {
     event.preventDefault();
     openFleetPane();
     return;
@@ -10424,7 +10670,7 @@ window.addEventListener('keydown', (event) => {
         returnToLastActiveChatPane();
         return;
       }
-      if (key.toLowerCase() === 'w') {
+      if (key.toLowerCase() === activeChordSecondKey('openWorkqueue')) {
         openTopbarWorkqueueAction();
         return;
       }
