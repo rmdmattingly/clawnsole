@@ -359,8 +359,12 @@ test('fleet list keeps header and identity columns sticky while scanning', async
 
     const header = page.locator('#agentsList .agents-table-header').last();
     const identityHeader = header.locator('[data-fleet-column-header="identity"]');
+    await expect(page.locator('#agentsList .agents-row[data-agent-id="scan-agent-20"]')).toHaveCount(1);
+    await page.locator('#agentsList').evaluate((list) => {
+      const row = list.querySelector('.agents-row[data-agent-id="scan-agent-20"]');
+      row?.scrollIntoView({ block: 'center', inline: 'nearest' });
+    });
     const row20 = page.locator('#agentsList .agents-row[data-agent-id="scan-agent-20"]');
-    await row20.scrollIntoViewIfNeeded();
 
     await expect(header).toBeVisible();
     await expect(identityHeader).toBeVisible();
