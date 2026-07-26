@@ -1606,6 +1606,33 @@ const SHORTCUT_OVERRIDE_ACTIONS = [
   }
 ];
 const SHORTCUT_OVERRIDE_ACTION_BY_ID = new Map(SHORTCUT_OVERRIDE_ACTIONS.map((action) => [action.id, action]));
+const SHORTCUT_SAFE_ALTERNATIVES = {
+  'pane-next': [
+    { accel: true, alt: true, shift: false, key: 'y' },
+    { accel: true, alt: true, shift: false, key: 'u' },
+    { accel: true, alt: true, shift: false, key: 'k' }
+  ],
+  'pane-previous': [
+    { accel: true, alt: true, shift: false, key: 'u' },
+    { accel: true, alt: true, shift: false, key: 'y' },
+    { accel: true, alt: true, shift: false, key: 'j' }
+  ],
+  'pane-manager': [
+    { accel: true, alt: true, shift: false, key: 'p' },
+    { accel: true, alt: true, shift: false, key: 'm' },
+    { accel: true, shift: true, alt: false, key: 'p' }
+  ],
+  'workqueue-open': [
+    { sequence: ['g', 'w'] },
+    { accel: true, alt: true, shift: false, key: 'w' },
+    { accel: true, shift: true, alt: true, key: 'w' }
+  ],
+  'fleet-open': [
+    { accel: true, alt: true, shift: false, key: 'f' },
+    { accel: true, alt: true, shift: false, key: 'a' },
+    { accel: true, shift: true, alt: true, key: 'f' }
+  ]
+};
 let shortcutOverridesDraft = null;
 
 function normalizeShortcutKey(key) {
@@ -1680,6 +1707,62 @@ function shortcutComboHtml(combo) {
   return label.split('+').map((part) => `<kbd>${escapeHtml(part)}</kbd>`).join('+');
 }
 
+function isShortcutLayoutSensitive(combo) {
+  if (!combo || Array.isArray(combo.sequence)) return false;
+  const key = normalizeShortcutKey(combo.key);
+  if (!/^[0-9]$/.test(key)) return false;
+  return !!combo.alt;
+}
+
+function shortcutConflictRisk(combo) {
+  const normalized = normalizeShortcutCombo(combo);
+  if (!normalized) return null;
+  const knownRisks = new Map([
+    ['accel+p', 'Reserved by browser print'],
+    ['accel+r', 'Reloads the page in most browsers'],
+    ['accel+l', 'Reserved by browser address bar focus'],
+    ['accel+w', 'Closes the current browser tab'],
+    ['accel+q', 'Quits the app or browser on macOS'],
+    ['accel+n', 'Opens a new browser window'],
+    ['accel+t', 'Opens a new browser tab'],
+    ['accel+shift+t', 'Reopens the last closed browser tab'],
+    ['accel+shift+n', 'Reserved by browser private window'],
+    ['accel+shift+r', 'Hard reloads the page in browsers'],
+    ['accel+shift+f', 'Reserved by browser search tools'],
+    ['meta+space', 'Reserved by macOS Spotlight'],
+    ['meta+tab', 'Reserved by macOS app switching'],
+    ['meta+shift+3', 'Reserved by macOS screenshots'],
+    ['meta+shift+4', 'Reserved by macOS screenshots'],
+    ['alt+tab', 'Reserved by OS window switching'],
+    ['alt+f4', 'Reserved by Windows close-window command'],
+    ['ctrl+esc', 'Reserved by Windows Start menu'],
+    ['ctrl+shift+esc', 'Reserved by Windows Task Manager']
+  ]);
+  const reason = knownRisks.get(normalized);
+  if (reason) return { reason };
+  if (isShortcutLayoutSensitive(combo)) {
+    return { reason: 'Layout-sensitive on international keyboards' };
+  }
+  return null;
+}
+
+function shortcutComboHasDuplicate(actionId, combo, overrides) {
+  const normalized = normalizeShortcutCombo(combo);
+  if (!normalized) return true;
+  return SHORTCUT_OVERRIDE_ACTIONS.some((action) =>
+    action.id !== actionId && normalizeShortcutCombo(activeShortcutCombo(action.id, overrides)) === normalized
+  );
+}
+
+function suggestedShortcutAlternatives(actionId, overrides) {
+  const candidates = SHORTCUT_SAFE_ALTERNATIVES[actionId] || [];
+  return candidates.filter((combo) => {
+    if (!normalizeShortcutCombo(combo)) return false;
+    if (shortcutConflictRisk(combo)) return false;
+    return !shortcutComboHasDuplicate(actionId, combo, overrides);
+  });
+}
+
 function cleanShortcutOverrides(value) {
   const source = value && typeof value === 'object' ? value : {};
   const cleaned = {};
@@ -1748,6 +1831,17 @@ function validateShortcutOverrides(overrides) {
   return { ok: true, message: '' };
 }
 
+function shortcutRiskSummary(actionId, overrides) {
+  const combo = activeShortcutCombo(actionId, overrides);
+  const risk = shortcutConflictRisk(combo);
+  if (!risk) return null;
+  const alternatives = suggestedShortcutAlternatives(actionId, overrides);
+  return {
+    reason: risk.reason,
+    alternatives
+  };
+}
+
 function renderShortcutHelpLabels() {
   for (const action of SHORTCUT_OVERRIDE_ACTIONS) {
     document.querySelectorAll(`[data-shortcut-help="${action.id}"]`).forEach((el) => {
@@ -1763,12 +1857,21 @@ function renderShortcutOverrideSettings() {
   list.innerHTML = '';
   for (const action of SHORTCUT_OVERRIDE_ACTIONS) {
     const combo = activeShortcutCombo(action.id, overrides);
+    const risk = shortcutRiskSummary(action.id, overrides);
+    const firstAlternative = risk?.alternatives?.[0] || null;
     const row = document.createElement('div');
     row.className = 'shortcut-override-row';
+    if (risk) row.classList.add('shortcut-override-row-warning');
     row.innerHTML = `
       <div>
         <div class="shortcut-override-label">${escapeHtml(action.label)}</div>
         <div class="shortcut-override-default">Default: ${escapeHtml(shortcutComboLabel(action.defaultCombo))}</div>
+        ${risk ? `
+          <div class="shortcut-override-warning" role="status">
+            ${escapeHtml(risk.reason)}
+            ${firstAlternative ? `<button class="link-btn" type="button" data-shortcut-suggestion="${escapeHtml(action.id)}" data-shortcut-combo="${escapeHtml(normalizeShortcutCombo(firstAlternative))}">Use ${escapeHtml(shortcutComboLabel(firstAlternative))}</button>` : ''}
+          </div>
+        ` : ''}
       </div>
       <input class="shortcut-override-input" data-shortcut-action="${escapeHtml(action.id)}" type="text" value="${escapeHtml(shortcutComboLabel(combo))}" readonly aria-label="${escapeHtml(`${action.label} shortcut`)}" />
       <button class="secondary" type="button" data-shortcut-reset="${escapeHtml(action.id)}">Reset</button>
@@ -1815,6 +1918,46 @@ function resetAllShortcutOverrides() {
   renderShortcutHelpLabels();
   renderShortcutOverrideSettings();
   showToast('Shortcut overrides reset.', { kind: 'info', timeoutMs: 2200 });
+}
+
+function comboFromNormalizedShortcut(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (!raw.includes('+')) {
+    const parts = raw.split(/\s+/).map((part) => normalizeShortcutKey(part)).filter(Boolean);
+    return parts.length > 1 ? { sequence: parts } : null;
+  }
+  const parts = raw.split('+').map((part) => normalizeShortcutKey(part)).filter(Boolean);
+  const key = parts[parts.length - 1] || '';
+  if (!key) return null;
+  return {
+    accel: parts.includes('accel'),
+    ctrl: parts.includes('ctrl') || undefined,
+    meta: parts.includes('meta') || undefined,
+    alt: parts.includes('alt'),
+    shift: parts.includes('shift'),
+    key
+  };
+}
+
+function applyShortcutSuggestion(actionId, normalizedCombo) {
+  const action = SHORTCUT_OVERRIDE_ACTION_BY_ID.get(actionId);
+  const combo = comboFromNormalizedShortcut(normalizedCombo);
+  if (!action || !combo) return false;
+  const overrides = cleanShortcutOverrides(shortcutOverridesDraft || readShortcutOverrides());
+  if (shortcutComboEquals(combo, action.defaultCombo)) delete overrides[actionId];
+  else overrides[actionId] = combo;
+  const validation = validateShortcutOverrides(overrides);
+  if (!validation.ok) {
+    setShortcutOverridesError(validation.message);
+    return false;
+  }
+  writeJsonToStorage(SHORTCUT_OVERRIDES_KEY, overrides);
+  shortcutOverridesDraft = cleanShortcutOverrides(overrides);
+  renderShortcutHelpLabels();
+  renderShortcutOverrideSettings();
+  showToast(`Shortcut updated to ${shortcutComboLabel(combo)}.`, { kind: 'info', timeoutMs: 2200 });
+  return true;
 }
 
 const recurringPromptState = {
@@ -9917,6 +10060,14 @@ function handleShortcutOverrideInputKeydown(event) {
 }
 window.addEventListener('keydown', handleShortcutOverrideInputKeydown, true);
 globalElements.shortcutOverridesList?.addEventListener('click', (event) => {
+  const suggestionBtn = event.target?.closest?.('[data-shortcut-suggestion]');
+  if (suggestionBtn) {
+    applyShortcutSuggestion(
+      String(suggestionBtn.dataset.shortcutSuggestion || ''),
+      String(suggestionBtn.dataset.shortcutCombo || '')
+    );
+    return;
+  }
   const resetBtn = event.target?.closest?.('[data-shortcut-reset]');
   if (!resetBtn) return;
   resetShortcutOverride(String(resetBtn.dataset.shortcutReset || ''));
