@@ -10,6 +10,11 @@ test('settings: shortcut overrides validate, persist, and update help', async ({
 
   const nextShortcut = page.locator('[data-shortcut-action="pane-next"]');
   const prevShortcut = page.locator('[data-shortcut-action="pane-previous"]');
+  const managerShortcut = page.locator('[data-shortcut-action="pane-manager"]');
+
+  await expect(page.locator('[data-shortcut-suggestion="pane-manager"]')).toContainText('Use Cmd/Ctrl+Alt/Option+P');
+  await page.locator('[data-shortcut-suggestion="pane-manager"]').click();
+  await expect(managerShortcut).toHaveValue('Cmd/Ctrl+Alt/Option+P');
 
   await nextShortcut.click();
   await page.keyboard.press('Control+Alt+Y');
@@ -28,11 +33,13 @@ test('settings: shortcut overrides validate, persist, and update help', async ({
   await page.locator('#settingsCloseBtn').click();
   await page.getByRole('button', { name: 'Open keyboard shortcuts' }).click();
   await expect(page.locator('[data-shortcut-help="pane-next"]')).toContainText('Cmd/Ctrl+Alt/Option+Y');
+  await expect(page.locator('[data-shortcut-help="pane-manager"]')).toContainText('Cmd/Ctrl+Alt/Option+P');
 
   await page.reload();
   await clawnsole.waitForAdminUiReady(page);
   await page.getByRole('button', { name: 'Open keyboard shortcuts' }).click();
   await expect(page.locator('[data-shortcut-help="pane-next"]')).toContainText('Cmd/Ctrl+Alt/Option+Y');
+  await expect(page.locator('[data-shortcut-help="pane-manager"]')).toContainText('Cmd/Ctrl+Alt/Option+P');
 });
 
 test('settings: recurring admin/system prompts list + create + toggle + history filter', async ({ page, clawnsole }) => {

@@ -4147,6 +4147,10 @@ kbd {
   align-items: center;
 }
 
+.shortcut-override-row-warning {
+  align-items: start;
+}
+
 .shortcut-override-label {
   font-weight: 600;
 }
@@ -4160,6 +4164,32 @@ kbd {
 .shortcut-override-input {
   cursor: pointer;
   text-align: center;
+}
+
+.shortcut-override-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  color: #ffd38a;
+  font-size: 0.8rem;
+}
+
+.link-btn {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #8fd8ff;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-btn:hover {
+  color: #c6edff;
 }
 
 .settings-error {
