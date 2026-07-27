@@ -48,6 +48,35 @@ test('chat pane: send/receive + upload attachment', async ({ page }, testInfo) =
   await expect(pane.locator('[data-chat-role="user"]').last()).toContainText('with file');
 });
 
+test('chat pane: confirms before sending a draft whose origin target changed', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  const pane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+  await pane.locator('[data-pane-input]').fill('retarget guard');
+
+  await expect.poll(() => page.evaluate(() => {
+    return window.__debug?.setChatPaneDraftOrigin?.(0, {
+      targetSignature: 'admin:chat:dev',
+      targetLabel: 'A Chat · dev'
+    }) === true;
+  })).toBe(true);
+
+  await pane.locator('[data-pane-send]').click();
+  const confirm = page.getByRole('dialog', { name: 'Confirm draft target' });
+  await expect(confirm).toContainText('Draft started in A Chat');
+  await expect(pane.locator('[data-pane-input]')).toHaveValue('retarget guard');
+  await expect(pane.locator('[data-chat-role="user"]')).toHaveCount(0);
+
+  await confirm.getByTestId('toast-action').click();
+  await expect(pane.locator('[data-chat-role="user"]').last()).toContainText('retarget guard');
+});
+
 test('chat pane: stop button can cancel a running response', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);

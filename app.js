@@ -7798,6 +7798,17 @@ window.__debug.setAgentsLastRefreshedAtMs = (value) => {
 };
 window.__debug.getFleetRefreshMode = getFleetRefreshMode;
 window.__debug.setFleetRefreshMode = setFleetRefreshMode;
+window.__debug.setChatPaneDraftOrigin = (paneIndex = 0, origin = {}) => {
+  const chatPanes = (paneManager?.panes || []).filter((pane) => pane?.kind === 'chat');
+  const pane = chatPanes[Number(paneIndex) || 0];
+  if (!pane) return false;
+  paneSetDraftOrigin(pane, {
+    ...paneCurrentDraftOrigin(pane),
+    ...(origin && typeof origin === 'object' ? origin : {})
+  });
+  refreshPaneDraftState(pane);
+  return true;
+};
 
 function getWorkqueueItemRepo(item) {
   const repo = String(item?.meta?.repo || '').trim();
