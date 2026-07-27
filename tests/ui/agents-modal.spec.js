@@ -304,13 +304,16 @@ test('fleet refresh keeps scroll anchor and keyboard triage selection', async ({
   await expect(page.locator('#agentsList .agents-row[data-agent-id="agent-21"]')).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('k');
   await expect(row20).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Shift+Enter');
+  await expect.poll(async () => (
+    page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')
+      .evaluateAll((els) => els.map((el) => el.value))
+  )).toContain('agent-20');
+
+  await row20.click();
   await page.keyboard.press('Enter');
   await expect.poll(async () => (
     page.locator('[data-pane][data-pane-kind="chat"] [data-pane-agent-select]')
-      .evaluateAll((els) => els.map((el) => el.value))
-  )).toContain('agent-20');
-  await expect.poll(async () => (
-    page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')
       .evaluateAll((els) => els.map((el) => el.value))
   )).toContain('agent-20');
 });
