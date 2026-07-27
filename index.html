@@ -32,14 +32,25 @@
         <div class="topbar-actions">
           <div class="status compact">
             <div class="status-pill" id="connectionStatus" data-testid="connection-status">disconnected</div>
-            <button
-              class="status-meta status-meta-btn"
-              id="paneManagerBtn"
-              type="button"
-              aria-label="Open pane manager"
-              data-testid="panes-indicator"
-            ></button>
+            <div
+              class="status-meta pane-status-meta"
+              id="paneStatusMeta"
+              title="Pane connection status"
+              aria-label="Pane connection status"
+              data-testid="panes-status"
+            ></div>
           </div>
+          <button
+            class="icon-btn action-btn pane-manager-action"
+            id="paneManagerBtn"
+            type="button"
+            aria-label="Manage panes"
+            title="Manage panes (Ctrl/Cmd+P)"
+            data-testid="panes-indicator"
+          >
+            <span class="btn-icon" aria-hidden="true">▦</span>
+            <span class="btn-label">Manage panes</span>
+          </button>
           <div id="paneControls" class="pane-controls" hidden>
             <div class="pane-add-wrap">
               <button id="addPaneBtn" class="icon-btn action-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add pane" title="Add Pane (Ctrl/Cmd+Shift+N)" data-testid="add-pane-btn">

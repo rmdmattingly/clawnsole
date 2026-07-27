@@ -261,6 +261,21 @@ body::before {
   text-overflow: ellipsis;
 }
 
+.pane-status-meta {
+  cursor: default;
+}
+
+.pane-manager-action {
+  border-color: rgba(127, 209, 185, 0.28);
+  background: rgba(9, 12, 16, 0.72);
+}
+
+.pane-manager-action:focus,
+.pane-manager-action:focus-visible {
+  outline: 2px solid rgba(127, 209, 185, 0.9);
+  outline-offset: 2px;
+}
+
 .icon-btn {
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(9, 12, 16, 0.6);
