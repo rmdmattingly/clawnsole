@@ -81,6 +81,7 @@ const globalElements = {
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   paneSwitchHudEnabled: document.getElementById('paneSwitchHudEnabled'),
+  draftRetargetConfirmEnabled: document.getElementById('draftRetargetConfirmEnabled'),
   shortcutOverridesList: document.getElementById('shortcutOverridesList'),
   shortcutOverridesSave: document.getElementById('shortcutOverridesSave'),
   shortcutOverridesResetAll: document.getElementById('shortcutOverridesResetAll'),
@@ -282,6 +283,7 @@ const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
 const PANE_SWITCH_HUD_ENABLED_KEY = 'clawnsole.admin.paneSwitchHud.enabled';
+const DRAFT_RETARGET_CONFIRM_ENABLED_KEY = 'clawnsole.admin.draftRetargetConfirm.enabled';
 const SHORTCUT_OVERRIDES_KEY = 'clawnsole.admin.shortcutOverrides.v1';
 const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
@@ -1555,6 +1557,9 @@ function openSettings() {
   if (globalElements.paneSwitchHudEnabled) {
     globalElements.paneSwitchHudEnabled.checked = isPaneSwitchHudEnabled();
   }
+  if (globalElements.draftRetargetConfirmEnabled) {
+    globalElements.draftRetargetConfirmEnabled.checked = isDraftRetargetConfirmEnabled();
+  }
   shortcutOverridesDraft = readShortcutOverrides();
   renderShortcutOverrideSettings();
   globalElements.settingsModal.classList.add('open');
@@ -2397,6 +2402,64 @@ function paneSummaryLabel(pane) {
 
 function isPaneSwitchHudEnabled() {
   return String(storage.get(PANE_SWITCH_HUD_ENABLED_KEY, '1') || '1') !== '0';
+}
+
+function isDraftRetargetConfirmEnabled() {
+  return String(storage.get(DRAFT_RETARGET_CONFIRM_ENABLED_KEY, '1') || '1') !== '0';
+}
+
+function paneDraftOrigin(pane) {
+  if (!pane || pane.kind !== 'chat') return null;
+  return {
+    paneKey: String(pane.key || ''),
+    kind: String(pane.kind || 'chat'),
+    targetKey: normalizeAgentId(pane.agentId || 'main'),
+    label: paneSummaryLabel(pane)
+  };
+}
+
+function paneDraftOriginsMatch(a, b) {
+  if (!a || !b) return true;
+  return String(a.kind || '') === String(b.kind || '') &&
+    String(a.targetKey || '') === String(b.targetKey || '');
+}
+
+function paneRememberDraftOrigin(pane) {
+  if (!pane || pane.kind !== 'chat') return;
+  if (paneHasDraftChanges(pane)) {
+    if (!pane.draftOrigin) pane.draftOrigin = paneDraftOrigin(pane);
+  } else {
+    pane.draftOrigin = null;
+  }
+}
+
+function focusPaneByKey(key) {
+  const pane = (paneManager?.panes || []).find((entry) => String(entry?.key || '') === String(key || ''));
+  if (!pane) return false;
+  notePaneFocused(pane);
+  pane.elements?.input?.focus?.({ preventScroll: true });
+  pane.elements?.root?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  return true;
+}
+
+function confirmPaneDraftRetargetSend(pane) {
+  if (!isDraftRetargetConfirmEnabled()) return true;
+  paneRememberDraftOrigin(pane);
+  const origin = pane?.draftOrigin;
+  const current = paneDraftOrigin(pane);
+  if (!origin || paneDraftOriginsMatch(origin, current)) return true;
+
+  const ok = window.confirm(
+    `Send this draft to ${current?.label || 'the current target'}?\n\n` +
+    `It started in ${origin.label || 'another pane target'}.\n\n` +
+    'Press OK to send to the current target, or Cancel to return to the origin pane.'
+  );
+  if (ok) {
+    pane.draftOrigin = current;
+    return true;
+  }
+  focusPaneByKey(origin.paneKey);
+  return false;
 }
 
 let paneSwitchHudHideTimer = null;
@@ -4964,6 +5027,16 @@ async function renderWorkqueuePane(rootEl, { queue = '' } = {}) {
 window.__debug = window.__debug || {};
 window.__debug.renderWorkqueuePane = renderWorkqueuePane;
 window.__debug.refreshAgents = refreshAgents;
+window.__debug.setChatPaneDraftOrigin = (paneIndex = 0, origin = {}) => {
+  const chatPanes = (paneManager?.panes || []).filter((pane) => pane?.kind === 'chat');
+  const pane = chatPanes[Number(paneIndex) || 0];
+  if (!pane) return false;
+  pane.draftOrigin = {
+    ...paneDraftOrigin(pane),
+    ...(origin && typeof origin === 'object' ? origin : {})
+  };
+  return true;
+};
 
 function getWorkqueueItemRepo(item) {
   const repo = String(item?.meta?.repo || '').trim();
@@ -7149,6 +7222,8 @@ async function paneSendChat(pane) {
     return;
   }
 
+  if (!confirmPaneDraftRetargetSend(pane)) return;
+
   const message = raw;
 
   // Guest mode removed.
@@ -7246,6 +7321,7 @@ async function paneSendChat(pane) {
   panePumpOutbox(pane);
 
   pane.elements.input.value = '';
+  pane.draftOrigin = null;
   paneUpdateCommandHints(pane);
 }
 
@@ -7712,6 +7788,9 @@ function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true } = {}) {
 
   pane.attachments.files = [];
   paneRenderAttachments(pane);
+  if (pane.elements?.input) pane.elements.input.value = '';
+  pane.draftOrigin = null;
+  paneUpdateCommandHints(pane);
   paneStopThinking(pane);
   paneClearChatHistory(pane, { wipeStorage: false });
   paneRestoreChatHistory(pane);
@@ -9330,6 +9409,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   });
 
   elements.input.addEventListener('input', () => {
+    paneRememberDraftOrigin(pane);
     paneUpdateCommandHints(pane);
   });
 
@@ -9339,6 +9419,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
   elements.fileInput.addEventListener('change', (event) => {
     paneHandleFileSelection(pane, event);
+    paneRememberDraftOrigin(pane);
   });
 
   elements.thread.addEventListener('scroll', () => {
@@ -10106,6 +10187,9 @@ globalElements.settingsModal?.addEventListener('click', (event) => {
 });
 globalElements.paneSwitchHudEnabled?.addEventListener('change', () => {
   storage.set(PANE_SWITCH_HUD_ENABLED_KEY, globalElements.paneSwitchHudEnabled.checked ? '1' : '0');
+});
+globalElements.draftRetargetConfirmEnabled?.addEventListener('change', () => {
+  storage.set(DRAFT_RETARGET_CONFIRM_ENABLED_KEY, globalElements.draftRetargetConfirmEnabled.checked ? '1' : '0');
 });
 function handleShortcutOverrideInputKeydown(event) {
   const input = event.target?.closest?.('[data-shortcut-action]');
