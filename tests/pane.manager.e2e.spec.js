@@ -71,6 +71,34 @@ test('pane manager: lists panes + focuses via keyboard', async ({ page }) => {
   expect(focusedPaneIndex).toBe(1);
 });
 
+test('topbar panes controls: status summary and manage action stay distinct', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panesStatus = page.getByTestId('panes-indicator');
+  await expect(panesStatus).toHaveText(/\d+ connected · \d+ disconnected · \d+ attention/i);
+  await expect(panesStatus).toHaveAttribute('role', 'status');
+  await expect(panesStatus).toHaveAttribute('aria-label', /Pane summary: \d+ of \d+ panes connected/);
+  await expect(panesStatus).not.toHaveJSProperty('tagName', 'BUTTON');
+
+  const managePanes = page.getByTestId('pane-manager-button');
+  await expect(managePanes).toBeVisible();
+  await expect(managePanes).toHaveAttribute('aria-label', 'Manage panes');
+  await expect(managePanes).toHaveAttribute('title', /Manage panes/);
+
+  await managePanes.focus();
+  await expect(managePanes).toBeFocused();
+  await managePanes.press('Enter');
+  await expect(page.getByTestId('pane-manager-modal')).toHaveAttribute('aria-hidden', 'false');
+});
+
 test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane kinds', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
