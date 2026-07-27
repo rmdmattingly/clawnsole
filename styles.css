@@ -261,6 +261,14 @@ body::before {
   text-overflow: ellipsis;
 }
 
+.pane-summary-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 360px;
+}
+
 .icon-btn {
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(9, 12, 16, 0.6);
@@ -1326,15 +1334,14 @@ button.send-btn .btn-icon {
 
 /* Pane Manager */
 
-.status-meta-btn {
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: pointer;
+.pane-summary {
+  cursor: default;
 }
 
-.status-meta-btn:hover {
-  color: var(--text);
+.pane-manager-topbar-btn {
+  min-height: 28px;
+  padding: 5px 10px;
+  white-space: nowrap;
 }
 
 .pane-manager-search-wrap {

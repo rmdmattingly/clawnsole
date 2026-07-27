@@ -32,13 +32,22 @@
         <div class="topbar-actions">
           <div class="status compact">
             <div class="status-pill" id="connectionStatus" data-testid="connection-status">disconnected</div>
-            <button
-              class="status-meta status-meta-btn"
-              id="paneManagerBtn"
-              type="button"
-              aria-label="Open pane manager"
-              data-testid="panes-indicator"
-            ></button>
+            <div class="pane-summary-row">
+              <span
+                class="status-meta pane-summary"
+                id="paneConnectionSummary"
+                data-testid="pane-connection-summary"
+                title="Pane connection status"
+              ></span>
+              <button
+                class="secondary pane-manager-topbar-btn"
+                id="paneManagerBtn"
+                type="button"
+                aria-label="Manage panes"
+                title="Manage panes"
+                data-testid="panes-indicator"
+              >Manage panes</button>
+            </div>
           </div>
           <div id="paneControls" class="pane-controls" hidden>
             <div class="pane-add-wrap">
