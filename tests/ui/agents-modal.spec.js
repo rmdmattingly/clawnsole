@@ -315,6 +315,76 @@ test('fleet refresh keeps scroll anchor and keyboard triage selection', async ({
   )).toContain('agent-20');
 });
 
+test('fleet list keeps header and identity columns visible while scrolling', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = Array.from({ length: 40 }, (_, index) => {
+    const id = `agent-${String(index + 1).padStart(2, '0')}`;
+    return {
+      id,
+      name: id,
+      displayName: id,
+      model: `gpt-${String(index + 1).padStart(2, '0')}`,
+      host: `host-${String(index + 1).padStart(2, '0')}`
+    };
+  });
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await page.locator('#agentsColumnPicker summary').click();
+  await page.locator('#agentsColumn_model').check();
+  await page.locator('#agentsColumn_host').check();
+  await page.locator('#agentsColumnPicker').evaluate((el) => {
+    el.open = false;
+  });
+
+  const list = page.locator('#agentsList');
+  await list.evaluate((el) => {
+    el.style.maxHeight = '240px';
+  });
+  await expect(page.locator('#agentsList .agents-row[data-agent-id="agent-30"]')).toBeVisible();
+
+  const header = page.locator('#agentsList .agents-table-header');
+  await list.evaluate((el) => {
+    el.scrollTop = 260;
+  });
+  const stickyHeader = await header.evaluate((el) => {
+    const headerRect = el.getBoundingClientRect();
+    const listRect = el.closest('#agentsList').getBoundingClientRect();
+    return {
+      topDelta: Math.abs(headerRect.top - listRect.top),
+      position: getComputedStyle(el).position
+    };
+  });
+  expect(stickyHeader.position).toBe('sticky');
+  expect(stickyHeader.topDelta).toBeLessThan(2);
+
+  const row = page.locator('#agentsList .agents-row[data-agent-id="agent-30"]');
+  const before = await row.evaluate((el) => ({
+    identityLeft: el.querySelector('.agents-row-identity').getBoundingClientRect().left,
+    detailsLeft: el.querySelector('.agents-row-meta').getBoundingClientRect().left
+  }));
+  await list.evaluate((el) => {
+    el.scrollLeft = 260;
+  });
+  const after = await row.evaluate((el) => ({
+    identityLeft: el.querySelector('.agents-row-identity').getBoundingClientRect().left,
+    detailsLeft: el.querySelector('.agents-row-meta').getBoundingClientRect().left,
+    scrollLeft: el.closest('#agentsList').scrollLeft
+  }));
+  expect(after.scrollLeft).toBeGreaterThan(80);
+  expect(Math.abs(after.identityLeft - before.identityLeft)).toBeLessThan(2);
+  expect(after.detailsLeft).toBeLessThan(before.detailsLeft - 80);
+
+  await row.click();
+  await page.keyboard.press('j');
+  await expect(page.locator('#agentsList .agents-row[data-agent-id="agent-31"]')).toHaveAttribute('aria-selected', 'true');
+});
+
 test('fleet attention mode sections healthy agents and keeps filters while expanding', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
