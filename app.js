@@ -4015,6 +4015,20 @@ function renderAgentsModalList() {
     root.appendChild(summary);
   };
 
+  const renderFleetHeader = () => {
+    const header = document.createElement('div');
+    header.className = 'agents-table-header';
+    header.setAttribute('role', 'presentation');
+    header.innerHTML = `
+      <span class="agents-table-pin-label" aria-hidden="true">Pin</span>
+      <span class="agents-table-agent-label">Agent</span>
+      <span class="agents-table-health-label">Health</span>
+      <span class="agents-table-details-label">Details</span>
+      ${visibleColumns.actions ? '<span class="agents-table-actions-label">Actions</span>' : ''}
+    `;
+    root.appendChild(header);
+  };
+
   const renderSection = (title, agents, { collapsible = false, collapsed = false } = {}) => {
     const section = document.createElement('div');
     section.className = 'agents-section';
@@ -4098,14 +4112,16 @@ function renderAgentsModalList() {
 
       row.innerHTML = `
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
-        <div class="agents-row-main">
+        <div class="agents-row-identity">
           <div class="agents-row-title">${escapeHtml(label)}</div>
-          <div class="agents-row-meta">
-            ${visibleColumns.id ? `<span class="agents-row-id" data-fleet-column="id">${escapeHtml(id)}</span>` : ''}
-            ${visibleColumns.health ? `<span class="agents-health-state-chip" data-fleet-column="health" data-health-state="${escapeHtml(triage.bucket)}">${escapeHtml(healthLabel)}</span>` : ''}
+          ${visibleColumns.id ? `<div class="agents-row-id" data-fleet-column="id">${escapeHtml(id)}</div>` : ''}
+        </div>
+        <div class="agents-row-health">
+          ${visibleColumns.health ? `<span class="agents-health-state-chip" data-fleet-column="health" data-health-state="${escapeHtml(triage.bucket)}">${escapeHtml(healthLabel)}</span>` : ''}
+        </div>
+        <div class="agents-row-meta">
             ${visibleColumns.heartbeat ? `<span class="agents-age-chip" data-fleet-column="heartbeat" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}" title="Heartbeat age: ${escapeHtml(heartbeatAge)} (${escapeHtml(heatBucketLabel)})">${escapeHtml(heartbeatAge)}</span>` : ''}
             ${visibleColumns.heartbeatDetail ? `<span class="agents-age-label" data-fleet-column="heartbeatDetail">${escapeHtml(heatBucketLabel)}</span>` : ''}${statusSnippetHtml}${modelHtml}${hostHtml}
-          </div>
         </div>
         ${rowActionsHtml}
       `;
@@ -4166,6 +4182,7 @@ function renderAgentsModalList() {
   };
 
   renderSummary();
+  renderFleetHeader();
   if (pinned.length > 0) renderSection('Pinned', pinned);
   renderSection('Needs attention', needsAttention);
   renderSection('Healthy', healthy, { collapsible: true, collapsed: healthyCollapsed });
