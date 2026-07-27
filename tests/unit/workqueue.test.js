@@ -10,6 +10,7 @@ const {
   loadState,
   saveState,
   transitionItem,
+  bulkArchiveTerminalItems,
   collapseCanonicalIssueDuplicates,
   canonicalizeIssueDedupeKey
 } = require('../../lib/workqueue');
@@ -217,6 +218,42 @@ test('workqueue: progress/terminal transitions require an explicit claim', () =>
     () => transitionItem(root, { itemId: item.id, agentId: 'agent-1', status: 'failed', error: 'nope' }),
     (err) => err && err.code === 'NOT_CLAIMED'
   );
+});
+
+test('workqueue: bulk archive previews and archives only old done/failed items', () => {
+  withFakeNow(Date.parse('2026-07-27T00:00:00.000Z'), () => {
+    const root = tempRoot();
+    const oldDone = enqueueItem(root, { queue: 'dev', title: 'old done', instructions: '', priority: 0 });
+    const oldFailed = enqueueItem(root, { queue: 'dev', title: 'old failed', instructions: '', priority: 0 });
+    const recentDone = enqueueItem(root, { queue: 'dev', title: 'recent done', instructions: '', priority: 0 });
+    const oldReady = enqueueItem(root, { queue: 'dev', title: 'old ready', instructions: '', priority: 0 });
+    const otherQueue = enqueueItem(root, { queue: 'other', title: 'old other', instructions: '', priority: 0 });
+
+    let state = loadState(root);
+    const set = (id, fields) => Object.assign(state.items.find((it) => it.id === id), fields);
+    set(oldDone.id, { status: 'done', updatedAt: '2026-06-01T00:00:00.000Z' });
+    set(oldFailed.id, { status: 'failed', updatedAt: '2026-06-01T00:00:00.000Z' });
+    set(recentDone.id, { status: 'done', updatedAt: '2026-07-20T00:00:00.000Z' });
+    set(oldReady.id, { status: 'ready', updatedAt: '2026-06-01T00:00:00.000Z' });
+    set(otherQueue.id, { status: 'done', updatedAt: '2026-06-01T00:00:00.000Z' });
+    saveState(root, state);
+
+    const preview = bulkArchiveTerminalItems(root, { queue: 'dev', olderThanDays: 14, dryRun: true });
+    assert.equal(preview.count, 2);
+
+    state = loadState(root);
+    assert.equal(state.items.find((it) => it.id === oldDone.id).status, 'done');
+
+    const result = bulkArchiveTerminalItems(root, { queue: 'dev', olderThanDays: 14 });
+    assert.equal(result.count, 2);
+
+    state = loadState(root);
+    assert.equal(state.items.find((it) => it.id === oldDone.id).status, 'archived');
+    assert.equal(state.items.find((it) => it.id === oldFailed.id).status, 'archived');
+    assert.equal(state.items.find((it) => it.id === recentDone.id).status, 'done');
+    assert.equal(state.items.find((it) => it.id === oldReady.id).status, 'ready');
+    assert.equal(state.items.find((it) => it.id === otherQueue.id).status, 'done');
+  });
 });
 
 test('workqueue: claim-next treats pending as ready', () => {
