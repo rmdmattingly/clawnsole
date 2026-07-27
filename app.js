@@ -4293,6 +4293,8 @@ function runFleetSelectedAgent() {
 // Workqueue (admin-only)
 
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress', 'done', 'failed'];
+const WORKQUEUE_TRIAGE_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress'];
+const WORKQUEUE_TERMINAL_STATUSES = ['done', 'failed'];
 const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
 const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
 const WORKQUEUE_ALL_SCOPE_GUARD_THRESHOLD_KEY = 'clawnsole.admin.workqueue.allScopeGuardThreshold';
@@ -4353,7 +4355,7 @@ function getWorkqueueAllScopeGuardThreshold() {
 const workqueueState = {
   queues: [],
   selectedQueue: '',
-  statusFilter: new Set(['ready', 'pending', 'blocked', 'claimed', 'in_progress']),
+  statusFilter: new Set(WORKQUEUE_TRIAGE_STATUSES),
   statusCounts: Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0])),
   items: [],
   selectedItemId: null,
@@ -5108,6 +5110,10 @@ function formatWorkqueueVisibleSummary(shown, total, hiddenCounts = {}) {
   return hidden ? `${base} · ${hidden}` : base;
 }
 
+function workqueueStatusesIncludeArchived(statuses) {
+  return WORKQUEUE_TERMINAL_STATUSES.every((status) => statuses.includes(status));
+}
+
 function getWorkqueueQuickFilterBreakdown(items, quickFilters) {
   let current = Array.isArray(items) ? items.slice() : [];
   const hidden = { source: 0, repo: 0, search: 0 };
@@ -5153,6 +5159,7 @@ function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount, hid
   const queue = String(pane.workqueue?.queue || '').trim();
   const scope = pane.workqueue?.scopeFilter || 'all';
   const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter.map((s) => String(s || '').trim()).filter(Boolean) : [];
+  const archivedShown = workqueueStatusesIncludeArchived(statuses);
   const quick = pane.workqueue?.quickFilters || {};
   const sources = Array.isArray(quick.sources) ? quick.sources.map((s) => String(s || '').trim()).filter(Boolean) : [];
   const repos = Array.isArray(quick.repos) ? quick.repos.map((s) => String(s || '').trim()).filter(Boolean) : [];
@@ -5167,6 +5174,10 @@ function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount, hid
   count.className = 'wq-filter-count';
   count.textContent = formatWorkqueueVisibleSummary(shownCount, totalCount, hiddenCounts);
   root.appendChild(count);
+  const archived = document.createElement('span');
+  archived.className = archivedShown ? 'wq-archive-state shown' : 'wq-archive-state hidden';
+  archived.textContent = archivedShown ? 'Archived shown' : 'Archived hidden';
+  root.appendChild(archived);
 
   const addToken = ({ label, value, title, action, removable = true }) => {
     const btn = document.createElement('button');
@@ -7796,7 +7807,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
-      statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
+      statusFilter: Array.isArray(statusFilter) ? statusFilter : WORKQUEUE_TRIAGE_STATUSES.slice(),
       scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScope()),
       quickFilters: {
         sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
@@ -8024,6 +8035,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
               </details>
             </div>
           </div>
+          <button data-wq-archived-toggle class="secondary" type="button" aria-pressed="false">Show archived</button>
 
           <div class="wq-scope" role="group" aria-label="Workqueue scope">
             <span class="wq-scope-label">Scope</span>
@@ -8165,6 +8177,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const statusOptionsEl = elements.thread.querySelector('[data-wq-status-options]');
     const statusDetailsEl = elements.thread.querySelector('[data-wq-status-details]');
     const statusClearBtn = elements.thread.querySelector('[data-wq-status-clear]');
+    const archivedToggleBtn = elements.thread.querySelector('[data-wq-archived-toggle]');
     const sourceBtns = Array.from(elements.thread.querySelectorAll('[data-wq-source]'));
     const repoChipsEl = elements.thread.querySelector('[data-wq-repo-chips]');
     const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
@@ -8174,7 +8187,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const keyboardModeBtn = elements.thread.querySelector('[data-wq-keyboard-mode]');
     const keyboardHint = elements.thread.querySelector('[data-wq-keyboard-hint]');
 
-    const DEFAULT_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress'];
+    const DEFAULT_STATUSES = WORKQUEUE_TRIAGE_STATUSES;
 
     const statusSet = new Set(
       (Array.isArray(pane.workqueue?.statusFilter) && pane.workqueue.statusFilter.length ? pane.workqueue.statusFilter : DEFAULT_STATUSES)
@@ -8283,6 +8296,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       pane.workqueue.statusFilter = Array.from(statusSet);
       resetRenderLimit();
       renderStatusMultiSelect();
+      renderArchivedToggle();
       if (closeMenu) statusDetailsEl?.removeAttribute('open');
       await fetchAndRenderWorkqueueItemsForPane(pane);
       updateQuickFilterUi();
@@ -8309,6 +8323,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         for (const s of DEFAULT_STATUSES) statusSet.add(s);
         pane.workqueue.statusFilter = Array.from(statusSet);
         renderStatusMultiSelect();
+        renderArchivedToggle();
       }
       await fetchAndRenderWorkqueueItemsForPane(pane);
       updateQuickFilterUi();
@@ -8368,6 +8383,17 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         });
         statusOptionsEl.appendChild(label);
       }
+    };
+    const renderArchivedToggle = () => {
+      if (!archivedToggleBtn) return;
+      const statuses = Array.from(statusSet);
+      const showingArchived = workqueueStatusesIncludeArchived(statuses);
+      archivedToggleBtn.textContent = showingArchived ? 'Hide archived' : 'Show archived';
+      archivedToggleBtn.classList.toggle('active', showingArchived);
+      archivedToggleBtn.setAttribute('aria-pressed', showingArchived ? 'true' : 'false');
+      archivedToggleBtn.title = showingArchived
+        ? 'Hide done and failed workqueue items'
+        : 'Show done and failed workqueue items';
     };
     pane.workqueue.renderStatusMultiSelect = renderStatusMultiSelect;
     pane.workqueue.applyStatuses = applyStatuses;
@@ -8484,6 +8510,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     });
 
     renderStatusMultiSelect();
+    renderArchivedToggle();
     populateQueueSelect().then(() => doRefresh());
 
     refreshBtn?.addEventListener('click', () => doRefresh());
@@ -8505,6 +8532,16 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
       statusClearBtn?.addEventListener('click', () => applyStatuses([]));
     }
+
+    archivedToggleBtn?.addEventListener('click', () => {
+      const next = new Set(statusSet);
+      if (workqueueStatusesIncludeArchived(Array.from(next))) {
+        for (const status of WORKQUEUE_TERMINAL_STATUSES) next.delete(status);
+      } else {
+        for (const status of WORKQUEUE_TERMINAL_STATUSES) next.add(status);
+      }
+      applyStatuses(Array.from(next));
+    });
 
     // Scope controls (client-side): assignment triage quick filters.
     const scopeBtns = Array.from(elements.thread.querySelectorAll('[data-wq-scope]'));
@@ -9452,7 +9489,7 @@ const paneManager = {
           const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
-            : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'];
+            : WORKQUEUE_TRIAGE_STATUSES.slice();
           const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
           const quickFilters = {
             sources: Array.isArray(item?.quickFilters?.sources) ? item.quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
@@ -9591,7 +9628,7 @@ const paneManager = {
         queue: nextQueue,
         statusFilter: Array.isArray(options?.statusFilter) && options.statusFilter.length
           ? options.statusFilter
-          : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
+          : WORKQUEUE_TRIAGE_STATUSES.slice(),
         scopeFilter: nextScopeFilter,
         groupMode: normalizeWorkqueueGroupMode(options?.groupMode),
         nickname: options?.nickname,

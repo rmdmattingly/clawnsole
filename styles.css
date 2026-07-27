@@ -2355,6 +2355,22 @@ kbd {
   margin-right: 4px;
 }
 
+.wq-archive-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.wq-archive-state.shown {
+  border-color: rgba(127, 209, 185, 0.34);
+  color: var(--text);
+}
+
 .wq-filter-token {
   display: inline-flex;
   align-items: center;
