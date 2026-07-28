@@ -19,6 +19,7 @@ const globalElements = {
   recurringPromptHistoryRows: document.getElementById('recurringPromptHistoryRows'),
   recurringPromptHistoryEmpty: document.getElementById('recurringPromptHistoryEmpty'),
   status: document.getElementById('connectionStatus'),
+  panesStatusMeta: document.getElementById('panesStatusMeta'),
   paneManagerBtn: document.getElementById('paneManagerBtn'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
@@ -1395,7 +1396,10 @@ function setStatusPill(el, state, meta = '') {
 function updateGlobalStatus() {
   const status = deriveGlobalConnectionState({ authed: uiState.authed, panes: paneManager.panes });
   setStatusPill(globalElements.status, status.state, status.meta);
-  if (globalElements.paneManagerBtn) globalElements.paneManagerBtn.textContent = status.meta;
+  if (globalElements.panesStatusMeta) {
+    globalElements.panesStatusMeta.textContent = status.meta;
+    globalElements.panesStatusMeta.title = status.meta ? `Pane status: ${status.meta}` : 'Pane status';
+  }
 }
 
 function updateConnectionControls() {

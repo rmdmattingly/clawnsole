@@ -257,7 +257,17 @@ test('pane manager: unread-only filter toggle', async ({ page }) => {
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.getByTestId('panes-indicator').click();
+  const panesIndicator = page.getByTestId('panes-indicator');
+  await expect(panesIndicator).toHaveText(/panes: \d+\/\d+ connected/i);
+  await expect(panesIndicator).toHaveAttribute('role', 'status');
+  await expect(panesIndicator).toHaveAttribute('aria-label', 'Pane connection status');
+
+  const managerButton = page.getByTestId('pane-manager-button');
+  await expect(managerButton).toHaveText(/Manage panes/);
+  await expect(managerButton).toHaveAttribute('aria-label', 'Manage panes');
+  await expect(managerButton).toHaveAttribute('title', /Manage panes/);
+
+  await managerButton.click();
   await expect(page.getByTestId('pane-manager-modal')).toHaveAttribute('aria-hidden', 'false');
   await page.locator('.pane-manager-unread-only').click();
   await expect(page.locator('.pane-manager-row')).toHaveCount(0);
