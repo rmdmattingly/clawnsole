@@ -65,6 +65,27 @@ test('agent chooser: opens, shows agents, Esc closes', async ({ page }) => {
   await expect.poll(() => seenConfirm).toBe(true);
   await expect(btn).toContainText(/dev/i);
 
+  await btn.click();
+  await expect(chooser).toBeVisible();
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toMatch(/unsent draft\/attachment/i);
+    await dialog.accept();
+  });
+  await chooser.getByRole('button', { name: /main/i }).click();
+  await expect(btn).toContainText(/main/i);
+  await expect(pane.getByTestId('pane-input')).toHaveValue('draft that should block accidental switch');
+
+  await expect(pane.getByTestId('pane-send')).toBeEnabled({ timeout: 20000 });
+  await pane.getByTestId('pane-send').click();
+  const retargetDialog = page.getByRole('dialog', { name: 'Send carried draft?' });
+  await expect(retargetDialog).toBeVisible();
+  await expect(retargetDialog).toContainText(/Chat .* dev/i);
+  await expect(retargetDialog).toContainText(/Chat .* main/i);
+  await retargetDialog.getByRole('button', { name: 'Return to origin pane' }).click();
+  await expect(retargetDialog).toHaveCount(0);
+  await expect(btn).toContainText(/dev/i);
+  await expect(pane.getByTestId('pane-input')).toHaveValue('draft that should block accidental switch');
+
   // Re-open and Esc closes.
   await btn.click();
   await expect(chooser).toBeVisible();
