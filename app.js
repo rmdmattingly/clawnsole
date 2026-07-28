@@ -5621,11 +5621,20 @@ function renderWorkqueuePaneItems(pane) {
       const filtersHidingAll = totalCount > 0;
       const title = filtersHidingAll ? 'No items match current filters.' : 'No items in this queue.';
       const hiddenSummary = formatWorkqueueHiddenBreakdown(hiddenCounts);
+      const hiddenReason = hiddenSummary.replace(/^hidden:\s*/, '');
+      const recoveryActions = filtersHidingAll ? `
+          <div class="hint" style="margin-top:6px;">0 visible of <span class="mono">${escapeHtml(String(totalCount))}</span> total${hiddenReason ? `; hidden by ${escapeHtml(hiddenReason)}` : ''}.</div>
+          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;" aria-label="Workqueue filter recovery actions">
+            <button type="button" class="secondary" data-wq-empty-reset-scope>Reset scope</button>
+            <button type="button" class="secondary" data-wq-empty-clear-status>Clear status filters</button>
+            <button type="button" class="secondary" data-wq-empty-show-all>Show all rows</button>
+          </div>
+        ` : '';
       empty.innerHTML = `
         <div class="empty-state">
           <div style="font-weight:700; margin-bottom:6px;">${escapeHtml(title)}</div>
           <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
-          ${filtersHidingAll ? `<div class="hint" style="margin-top:6px;">Showing 0 of <span class="mono">${escapeHtml(String(totalCount))}</span> items${hiddenSummary ? ` · ${escapeHtml(hiddenSummary)}` : ''}.</div>` : ''}
+          ${recoveryActions}
           <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
             <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
             <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
@@ -5643,6 +5652,15 @@ function renderWorkqueuePaneItems(pane) {
           enqueueDetails?.scrollIntoView({ block: 'nearest' });
           pane.elements?.thread?.querySelector('[data-wq-enqueue-title]')?.focus();
         } catch {}
+      });
+      empty.querySelector('[data-wq-empty-reset-scope]')?.addEventListener('click', () => {
+        pane.workqueue?.recoverEmptyState?.('reset-scope');
+      });
+      empty.querySelector('[data-wq-empty-clear-status]')?.addEventListener('click', () => {
+        pane.workqueue?.recoverEmptyState?.('clear-status');
+      });
+      empty.querySelector('[data-wq-empty-show-all]')?.addEventListener('click', () => {
+        pane.workqueue?.recoverEmptyState?.('show-all');
       });
     }
   }
@@ -8587,6 +8605,33 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       await applyStatuses(DEFAULT_STATUSES);
     };
     pane.workqueue.clearAllFilters = clearAllFilters;
+
+    const recoverEmptyState = async (action) => {
+      addFeed('event', 'workqueue.emptyRecovery', `action=${action}`);
+      if (action === 'reset-scope') {
+        setScope('unassigned');
+      } else if (action === 'clear-status') {
+        await applyStatuses(Array.from(WORKQUEUE_STATUSES), { closeMenu: true });
+      } else if (action === 'show-all') {
+        sourceSet.clear();
+        repoSet.clear();
+        searchQuery = '';
+        if (searchEl) searchEl.value = '';
+        resetRenderLimit();
+        persistQuickFilters();
+        updateQuickFilterUi();
+        pane.workqueue.scopeFilter = 'all';
+        updateScopeUi();
+        pane.workqueue.statusFilter = Array.from(WORKQUEUE_STATUSES);
+        statusSet.clear();
+        for (const s of WORKQUEUE_STATUSES) statusSet.add(s);
+        renderStatusMultiSelect();
+        await fetchAndRenderWorkqueueItemsForPane(pane);
+      }
+      const firstRow = elements.thread.querySelector('[data-wq-list-body] [data-wq-item]');
+      firstRow?.focus?.({ preventScroll: true });
+    };
+    pane.workqueue.recoverEmptyState = recoverEmptyState;
 
     clearQuickBtn?.addEventListener('click', () => {
       sourceSet.clear();
