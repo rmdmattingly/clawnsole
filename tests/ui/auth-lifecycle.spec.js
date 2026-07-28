@@ -10,6 +10,71 @@ test('visiting /admin without auth shows login overlay', async ({ page, clawnsol
   await expect(page.getByTestId('role-pill')).toContainText('signed out');
 });
 
+test('admin login restores the intended in-app destination', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.goto(clawnsole.serverUrl);
+  await page.evaluate(() => {
+    localStorage.setItem(
+      'clawnsole.admin.authDestination.v1',
+      JSON.stringify({ href: '/admin?pane=workqueue#item-315', createdAt: Date.now() })
+    );
+  });
+  await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
+
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\?pane=workqueue#item-315$/, { timeout: 10000 });
+  await page.locator('#addPaneBtn').waitFor({ state: 'visible', timeout: 90000 });
+
+  await expect(page).toHaveURL(/\/admin\?pane=workqueue#item-315$/);
+});
+
+test('stale admin restore falls back to default layout with a notice', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.goto(clawnsole.serverUrl);
+  await page.evaluate(() => {
+    localStorage.setItem(
+      'clawnsole.admin.authDestination.v1',
+      JSON.stringify({ href: '/admin?pane=stale#old', createdAt: Date.now() - 700000 })
+    );
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([{ key: 'pstale', kind: 'cron' }])
+    );
+  });
+
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await clawnsole.waitForAdminUiReady(page);
+
+  await expect(page).toHaveURL(/\/admin\/?$/);
+  await expect(page.getByTestId('toast')).toContainText(/default admin layout/i);
+  await expect(page.locator('[data-pane]')).toHaveCount(2);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+});
+
+test('admin restore ignores external destinations', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.goto(clawnsole.serverUrl);
+  await page.evaluate(() => {
+    localStorage.setItem(
+      'clawnsole.admin.authDestination.v1',
+      JSON.stringify({ href: 'https://evil.test/admin', createdAt: Date.now() })
+    );
+  });
+
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await clawnsole.waitForAdminUiReady(page);
+
+  await expect(page).toHaveURL(/\/admin\/?$/);
+  await expect(page.getByTestId('toast')).toContainText(/default admin layout/i);
+});
+
 test('after successful login, reload stays authed; clearing cookies forces re-login', async ({ page, context, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 

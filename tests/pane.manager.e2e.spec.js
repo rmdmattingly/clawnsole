@@ -75,8 +75,14 @@ test('pane manager: paired action focuses existing counterpart and opens missing
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
   await expect(paneManagerModal).toHaveAttribute('aria-hidden', 'true');
 
-  // Missing counterpart path: close workqueue, then paired from chat should open one.
-  await page.locator('[data-pane][data-pane-kind="workqueue"] [data-pane-close]').first().click();
+  // Missing counterpart path: load a saved chat-only layout, then paired from chat should open a Workqueue pane.
+  await page.evaluate(() => {
+    window.localStorage.setItem('clawnsole.admin.panes.v1', JSON.stringify([
+      { key: 'ptestchat', kind: 'chat', agentId: 'main' }
+    ]));
+  });
+  await page.goto(`http://127.0.0.1:${app.serverPort}/admin`);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(0);
 
   await page.keyboard.press('Control+P');
@@ -121,7 +127,7 @@ test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane 
   await expect(page.locator('.pane-manager-row .pane-manager-pane-id').first()).toHaveText(/^[a-zA-Z0-9]+$/);
 });
 
-test('pane manager: quick-find filters and groups by kind', async ({ page }) => {
+test('pane manager: quick-find filters, highlights, and focuses first match', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
 
@@ -145,13 +151,100 @@ test('pane manager: quick-find filters and groups by kind', async ({ page }) => 
   await expect(page.locator('.pane-manager-group-header').nth(2)).toContainText('Cron (1)');
 
   const search = page.getByTestId('pane-manager-search');
+  await expect(search).toHaveAttribute('placeholder', 'Find pane (A, Workqueue, dev-agent...)');
   await search.fill('cron');
   await expect(page.locator('.pane-manager-row')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row').first()).toContainText('Cron');
+  await expect(page.locator('.pane-manager-match').first()).toHaveText(/cron/i);
+
+  await page.keyboard.press('Enter');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+  const focusedPaneKind = await page.evaluate(() => {
+    const active = document.activeElement;
+    const pane = Array.from(document.querySelectorAll('[data-pane]')).find((entry) => entry === active || (active && entry.contains(active)));
+    return pane?.getAttribute('data-pane-kind') || '';
+  });
+  expect(focusedPaneKind).toBe('cron');
+
+  await page.keyboard.press('Control+P');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await page.keyboard.press('/');
+  await expect(search).toBeFocused();
+  await search.fill('dev-team');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(1);
+  await expect(page.locator('.pane-manager-row').first()).toContainText('Workqueue');
 
   await search.fill('B');
   await expect(page.locator('.pane-manager-row')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row').first()).toContainText('Workqueue');
+
+  await page.keyboard.press('Control+F');
+  await expect(search).toBeFocused();
+  await search.fill('no-such-pane');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(0);
+  await expect(page.locator('#paneManagerEmpty')).toHaveText('No panes match "no-such-pane"');
+
+  await page.keyboard.press('Escape');
+  await expect(search).toHaveValue('');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+});
+
+test('pane nicknames: set from header and manager, persist, and feed search surfaces', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('Pane nickname');
+    await dialog.accept('Hotfix chat');
+  });
+  await chatPane.getByTestId('pane-nickname').click();
+  await expect(chatPane.getByTestId('pane-type-label')).toContainText('Chat ·');
+  await expect(chatPane.getByTestId('pane-type-label')).toContainText('Hotfix chat');
+
+  await page.keyboard.press('Control+P');
+  const manager = page.getByTestId('pane-manager-modal');
+  await expect(manager).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.getByTestId('pane-manager-nickname')).toHaveText('Hotfix chat');
+
+  const search = page.getByTestId('pane-manager-search');
+  await search.fill('hotfix');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(1);
+  await expect(page.locator('.pane-manager-row').first()).toContainText('Chat ·');
+
+  await search.evaluate((el) => {
+    el.value = '';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect(page.locator('.pane-manager-row')).toHaveCount(2);
+
+  page.once('dialog', async (dialog) => {
+    await dialog.accept('Queue triage');
+  });
+  await page.locator('.pane-manager-row').first().getByTestId('pane-manager-nickname-action').click();
+  await expect(page.getByTestId('pane-manager-nickname')).toHaveText('Queue triage');
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  const restoredChat = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  await expect(restoredChat.getByTestId('pane-type-label')).toContainText('Queue triage');
+
+  await page.keyboard.press('ControlOrMeta+K');
+  const paletteInput = page.locator('#commandPaletteInput');
+  await expect(paletteInput).toBeVisible();
+  await paletteInput.fill('queue triage');
+  const firstHit = page.locator('#commandPaletteList [role="option"]').first();
+  await expect(firstHit.locator('.command-palette-item-label')).toContainText('Queue triage');
+  await expect(firstHit.locator('.command-palette-pane-chip-nickname')).toHaveText('Queue triage');
 });
 
 test('pane manager: shows summary + duplicate badge and supports close others', async ({ page }) => {
@@ -175,8 +268,12 @@ test('pane manager: shows summary + duplicate badge and supports close others', 
   const rows = page.locator('.pane-manager-row');
   await expect(rows).toHaveCount(3);
 
-  const duplicateRows = page.locator('.pane-manager-row', { hasText: 'Chat · main' });
+  const duplicateRows = page.locator('.pane-manager-row', { hasText: /Chat · main \([12]\)/ });
   await expect(duplicateRows).toHaveCount(2);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]').nth(0).getByTestId('pane-type-label')).toHaveText(/^A Chat · main \(1\)$/);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]').nth(1).getByTestId('pane-type-label')).toHaveText(/^C Chat · main \(2\)$/);
+  await expect(duplicateRows.nth(0).locator('.pane-manager-kind-label')).toContainText('Chat · main (1)');
+  await expect(duplicateRows.nth(1).locator('.pane-manager-kind-label')).toContainText('Chat · main (2)');
   await expect(duplicateRows.first().getByTestId('pane-manager-duplicate-badge')).toHaveText('duplicate');
 
   const chatRowWithCloseOthers = page.locator('.pane-manager-row', { has: page.getByTestId('pane-manager-close-others') }).first();
@@ -188,6 +285,7 @@ test('pane manager: shows summary + duplicate badge and supports close others', 
   await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
   await expect(page.locator('.pane-manager-row')).toHaveCount(2);
   await expect(page.locator('[data-testid="pane-manager-duplicate-badge"]')).toHaveCount(0);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]').first().getByTestId('pane-type-label')).toHaveText(/^A Chat · main$/);
 });
 
 test('pane manager: unread-only filter toggle', async ({ page }) => {
@@ -201,8 +299,9 @@ test('pane manager: unread-only filter toggle', async ({ page }) => {
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.keyboard.press('Control+P');
-  await page.getByTestId('pane-manager-unread-only').check();
+  await page.getByTestId('panes-indicator').click();
+  await expect(page.getByTestId('pane-manager-modal')).toHaveAttribute('aria-hidden', 'false');
+  await page.locator('.pane-manager-unread-only').click();
   await expect(page.locator('.pane-manager-row')).toHaveCount(0);
 
   await page.keyboard.press('Escape');
@@ -225,9 +324,13 @@ test('pane manager: status stays in sync with pane header while modal is open', 
 
   const chatHeaderStatus = page.locator('[data-pane][data-pane-kind="chat"]').first().getByTestId('pane-connection-status');
   const chatManagerState = page.locator('.pane-manager-row', { hasText: 'Chat · main' }).first().locator('.pane-manager-state');
+  const workqueueHeaderStatus = page.locator('[data-pane][data-pane-kind="workqueue"]').first().getByTestId('pane-connection-status');
+  const workqueueManagerState = page.locator('.pane-manager-row', { hasText: 'Workqueue' }).first().locator('.pane-manager-state');
 
   await expect(chatHeaderStatus).toContainText(/connected|reconnecting/);
   await expect(chatManagerState).toContainText(/connected|reconnecting/);
+  await expect(workqueueHeaderStatus).toHaveText('connected');
+  await expect(workqueueManagerState).toHaveText('connected');
 
   await page.evaluate(() => {
     const btn = document.getElementById('disconnectBtn');
@@ -290,4 +393,26 @@ test('pane manager: supports reordering panes', async ({ page }) => {
 
   const persisted = await rowKeys();
   expect(persisted).toEqual(after);
+});
+
+test('pane layout lock disables pane reordering controls', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-chat').click();
+
+  await page.getByTestId('layout-lock-btn').click();
+  await expect(page.getByTestId('layout-lock-btn')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.keyboard.press('Control+P');
+  const movableRow = page.locator('.pane-manager-row', { hasText: 'Workqueue' }).first();
+  await expect(movableRow.getByTestId('pane-manager-move-down')).toBeDisabled();
 });
