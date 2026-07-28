@@ -356,6 +356,9 @@ const KEYBIND_CATALOG = [
     risk: { kind: 'browser', reason: 'Reserved by browser reload', alternative: { accel: true, shift: true, key: 'y', display: 'Cmd/Ctrl+Shift+Y' } }
   },
   { id: 'workqueue.open', group: 'Workqueue actions', label: 'Open Workqueue modal', binding: { chord: ['g', 'w'], display: 'g w' } },
+  { id: 'workqueue.focusQueueSearch', group: 'Workqueue actions', label: 'Focus Workqueue queue search', binding: { accel: true, alt: true, key: 'q', display: 'Cmd/Ctrl+Alt/Option+Q' } },
+  { id: 'workqueue.focusItemSearch', group: 'Workqueue actions', label: 'Focus Workqueue item search', binding: { accel: true, alt: true, key: 'i', display: 'Cmd/Ctrl+Alt/Option+I' } },
+  { id: 'workqueue.focusStatusFilter', group: 'Workqueue actions', label: 'Focus Workqueue status filter', binding: { accel: true, alt: true, key: 's', display: 'Cmd/Ctrl+Alt/Option+S' } },
   { id: 'workqueue.move', group: 'Workqueue actions', label: 'Move selected row in Workqueue keyboard mode', binding: { key: 'j/k', display: 'j/k' } },
   { id: 'workqueue.inspect', group: 'Workqueue actions', label: 'Inspect selected Workqueue row in keyboard mode', binding: { key: 'Enter', display: 'Enter' } },
   { id: 'workqueue.edit', group: 'Workqueue actions', label: 'Edit selected Workqueue row in keyboard mode', binding: { key: 'e', display: 'e' } },
@@ -1899,6 +1902,27 @@ const SHORTCUT_OVERRIDE_ACTIONS = [
     run: () => openTopbarWorkqueueAction()
   },
   {
+    id: 'workqueue-focus-queue-search',
+    label: 'Focus Workqueue queue search',
+    defaultCombo: { accel: true, shift: false, alt: true, key: 'q' },
+    run: () => focusWorkqueuePaneControl('queueSearch'),
+    typingExempt: true
+  },
+  {
+    id: 'workqueue-focus-item-search',
+    label: 'Focus Workqueue item search',
+    defaultCombo: { accel: true, shift: false, alt: true, key: 'i' },
+    run: () => focusWorkqueuePaneControl('itemSearch'),
+    typingExempt: true
+  },
+  {
+    id: 'workqueue-focus-status-filter',
+    label: 'Focus Workqueue status filter',
+    defaultCombo: { accel: true, shift: false, alt: true, key: 's' },
+    run: () => focusWorkqueuePaneControl('statusFilter'),
+    typingExempt: true
+  },
+  {
     id: 'fleet-open',
     label: 'Open fleet/agents',
     defaultCombo: { accel: true, shift: true, alt: false, key: 'f' },
@@ -1927,6 +1951,21 @@ const SHORTCUT_SAFE_ALTERNATIVES = {
     { accel: true, alt: true, shift: false, key: 'w' },
     { accel: true, shift: true, alt: true, key: 'w' }
   ],
+  'workqueue-focus-queue-search': [
+    { accel: true, alt: true, shift: false, key: 'q' },
+    { accel: true, alt: true, shift: false, key: 'u' },
+    { accel: true, shift: true, alt: true, key: 'q' }
+  ],
+  'workqueue-focus-item-search': [
+    { accel: true, alt: true, shift: false, key: 'i' },
+    { accel: true, alt: true, shift: false, key: 'e' },
+    { accel: true, shift: true, alt: true, key: 'i' }
+  ],
+  'workqueue-focus-status-filter': [
+    { accel: true, alt: true, shift: false, key: 's' },
+    { accel: true, alt: true, shift: false, key: 'f' },
+    { accel: true, shift: true, alt: true, key: 's' }
+  ],
   'fleet-open': [
     { accel: true, alt: true, shift: false, key: 'f' },
     { accel: true, alt: true, shift: false, key: 'a' },
@@ -1941,6 +1980,9 @@ function keybindIdToShortcutActionId(id) {
     'pane.prev': 'pane-previous',
     'pane.manager': 'pane-manager',
     'workqueue.open': 'workqueue-open',
+    'workqueue.focusQueueSearch': 'workqueue-focus-queue-search',
+    'workqueue.focusItemSearch': 'workqueue-focus-item-search',
+    'workqueue.focusStatusFilter': 'workqueue-focus-status-filter',
     'fleet.open': 'fleet-open'
   })[String(id || '')] || '';
 }
@@ -11066,7 +11108,12 @@ function blockedGlobalShortcutReason(event) {
 
 function isShortcutOverrideEvent(event, combo) {
   if (!combo || Array.isArray(combo.sequence)) return false;
-  if (normalizeShortcutKey(event?.key) !== normalizeShortcutKey(combo.key)) return false;
+  const comboKey = normalizeShortcutKey(combo.key);
+  const eventKey = normalizeShortcutKey(event?.key);
+  const physicalKey = /^Key[A-Z]$/.test(String(event?.code || ''))
+    ? String(event.code).slice(3).toLowerCase()
+    : '';
+  if (eventKey !== comboKey && physicalKey !== comboKey) return false;
   if (!!combo.accel !== !!(event.metaKey || event.ctrlKey)) return false;
   if (!!combo.shift !== !!event.shiftKey) return false;
   if (!!combo.alt !== !!event.altKey) return false;
@@ -11245,6 +11292,71 @@ function focusChatComposer() {
   const pane = paneManager.addPane('chat');
   const idx = panes.indexOf(pane);
   if (idx >= 0) focusPaneIndex(idx);
+  return true;
+}
+
+function isShortcutFocusTargetAvailable(el) {
+  if (!el || typeof el.focus !== 'function') return false;
+  try {
+    if (el.disabled || el.hidden) return false;
+    if (el.closest?.('[hidden], [aria-hidden="true"]')) return false;
+    if (el.getClientRects && el.getClientRects().length === 0) return false;
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+function activeWorkqueuePaneForShortcut() {
+  const panes = paneManager?.panes || [];
+  const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
+  const pane = panes.find((entry) => String(entry?.key || '') === activeKey && entry?.kind === 'workqueue');
+  return pane || null;
+}
+
+function focusWorkqueuePaneControl(target) {
+  const pane = activeWorkqueuePaneForShortcut();
+  if (!pane) {
+    showToast('Focus a Workqueue pane first.', { kind: 'info', timeoutMs: 2200, testId: 'shortcut-blocked-toast' });
+    return false;
+  }
+
+  const root = pane.elements?.thread;
+  const targets = {
+    queueSearch: {
+      selector: '[data-wq-queue-search]',
+      unavailable: 'Queue search is unavailable.'
+    },
+    itemSearch: {
+      selector: '[data-wq-search]',
+      unavailable: 'Item search is unavailable.'
+    },
+    statusFilter: {
+      selector: '[data-wq-status-details] > summary',
+      unavailable: 'Status filter is unavailable.',
+      beforeFocus: () => {
+        const details = root?.querySelector?.('[data-wq-status-details]');
+        if (details) details.open = true;
+      }
+    }
+  };
+  const spec = targets[target];
+  const el = spec && root?.querySelector?.(spec.selector);
+  if (!spec || !isShortcutFocusTargetAvailable(el)) {
+    showToast(spec?.unavailable || 'Workqueue control is unavailable.', { kind: 'info', timeoutMs: 2200, testId: 'shortcut-blocked-toast' });
+    return false;
+  }
+
+  notePaneFocused(pane);
+  try {
+    spec.beforeFocus?.();
+    el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    el.focus({ preventScroll: true });
+    if (typeof el.select === 'function') el.select();
+  } catch {
+    showToast(spec.unavailable, { kind: 'info', timeoutMs: 2200, testId: 'shortcut-blocked-toast' });
+    return false;
+  }
   return true;
 }
 
