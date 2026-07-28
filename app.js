@@ -2465,6 +2465,64 @@ function paneDisplayTargetLabel(pane) {
   return ordinal > 0 ? `${target} (${ordinal})` : target;
 }
 
+function paneManagerResolvePaired(pane) {
+  if (!pane || !paneManager) return null;
+  const targetAgent = normalizeAgentId(pane.agentId || 'main');
+  const panes = () => paneManager?.panes || [];
+
+  if (pane.kind === 'chat') {
+    const findWorkqueuePair = () => (
+      panes().find((candidate) => (
+        candidate && candidate.kind === 'workqueue' && normalizeAgentId(candidate.agentId || 'main') === targetAgent
+      )) ||
+      panes().find((candidate) => candidate && candidate.kind === 'workqueue') ||
+      null
+    );
+    const existing = findWorkqueuePair();
+    const existingQueue = existing ? formatWorkqueuePaneQueueLabel(existing) : 'dev-team';
+    return {
+      label: 'Paired WQ',
+      title: existing ? `Focus paired Workqueue (${existingQueue})` : `Open paired Workqueue (${existingQueue})`,
+      run: () => {
+        const live = findWorkqueuePair();
+        if (live) {
+          paneManager.focusPanePrimary(live);
+          return true;
+        }
+        const created = paneManager.addPane('workqueue', { agentId: targetAgent });
+        if (!created) return false;
+        paneManager.focusPanePrimary(created);
+        return true;
+      }
+    };
+  }
+
+  if (pane.kind === 'workqueue') {
+    const findChatPair = () => panes().find((candidate) => (
+      candidate && candidate.kind === 'chat' && normalizeAgentId(candidate.agentId || 'main') === targetAgent
+    )) || null;
+    const existing = findChatPair();
+    return {
+      label: 'Paired Chat',
+      title: existing ? `Focus paired Chat (${targetAgent})` : `Open paired Chat (${targetAgent})`,
+      run: () => {
+        const live = findChatPair();
+        if (live) {
+          paneManager.focusPanePrimary(live);
+          return true;
+        }
+        const created = paneManager.addPane('chat');
+        if (!created) return false;
+        paneSetAgent(created, targetAgent);
+        paneManager.focusPanePrimary(created);
+        return true;
+      }
+    };
+  }
+
+  return null;
+}
+
 function focusedPaneKey() {
   const active = document.activeElement;
   const panes = paneManager?.panes || [];
@@ -2816,6 +2874,7 @@ function renderPaneManager() {
         const unreadCount = paneUnreadCount(pane);
         const paneIdentity = paneSummaryLabel(pane);
         const nickname = paneNickname(pane);
+        const paired = paneManagerResolvePaired(pane);
 
         const lockDisabled = paneManager.isLayoutLocked();
 
@@ -2835,6 +2894,7 @@ function renderPaneManager() {
             <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="${lockDisabled ? 'Layout is locked' : 'Move pane up'}" aria-label="Move pane up" ${(visibleIdx === 0 || lockDisabled) ? 'disabled' : ''}>↑</button>
             <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="${lockDisabled ? 'Layout is locked' : 'Move pane down'}" aria-label="Move pane down" ${(visibleIdx === visibleKeys.length - 1 || lockDisabled) ? 'disabled' : ''}>↓</button>
             ${isDuplicate ? '<button class="secondary pane-manager-close-others" type="button" data-action="close-others" data-testid="pane-manager-close-others">Close others</button>' : ''}
+            ${paired ? `<button class="secondary pane-manager-paired" type="button" data-action="paired" data-testid="pane-manager-paired" title="${escapeHtml(paired.title)}">${escapeHtml(paired.label)}</button>` : ''}
             <button class="secondary pane-manager-nickname-action" type="button" data-action="nickname" data-testid="pane-manager-nickname-action">Nickname</button>
             <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
             <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
@@ -2902,6 +2962,16 @@ function renderPaneManager() {
           }
           if (action === 'nickname') {
             promptPaneNickname(pane);
+            return;
+          }
+          if (action === 'paired') {
+            const ok = paired?.run?.();
+            if (!ok) {
+              showToast('No valid Chat/Workqueue pair for this pane.', { kind: 'error', timeoutMs: 2200 });
+              renderPaneManager();
+              return;
+            }
+            closePaneManager({ restoreFocus: false });
             return;
           }
           closePaneManager();
