@@ -96,6 +96,7 @@ test('GET /meta returns gateway urls and port', async () => {
   assert.equal(data.wsUrl, 'ws://127.0.0.1:19999');
   assert.equal(data.adminWsUrl, '/admin-ws');
   assert.equal(data.port, 19999);
+  assert.equal(data.instance, 'local');
   assert.equal(data.guestWsUrl, undefined);
 });
 

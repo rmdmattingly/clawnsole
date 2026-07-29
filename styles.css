@@ -150,6 +150,7 @@ body::before {
 }
 
 .topbar-actions {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -220,12 +221,61 @@ body::before {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--accent);
+  cursor: pointer;
+  min-height: 32px;
+  white-space: nowrap;
 }
 
 .role-pill.admin {
   background: rgba(127, 209, 185, 0.18);
   border-color: rgba(127, 209, 185, 0.45);
   color: var(--accent-2);
+}
+
+.role-pill.locked,
+.role-pill.signed-out {
+  background: rgba(255, 114, 114, 0.14);
+  border-color: rgba(255, 114, 114, 0.42);
+  color: #ffb0b0;
+}
+
+.auth-session-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 80;
+  width: min(280px, calc(100vw - 24px));
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(12, 17, 24, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4);
+}
+
+.auth-session-popover__status {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.auth-session-popover__principal {
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.auth-session-popover__env {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.auth-session-popover__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
 }
 
 .channel-switch select {

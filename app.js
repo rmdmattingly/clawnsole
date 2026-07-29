@@ -86,6 +86,7 @@ const globalElements = {
   shortcutOverridesResetAll: document.getElementById('shortcutOverridesResetAll'),
   shortcutOverridesError: document.getElementById('shortcutOverridesError'),
   rolePill: document.getElementById('rolePill'),
+  authSessionPopover: document.getElementById('authSessionPopover'),
   loginOverlay: document.getElementById('loginOverlay'),
   loginPassword: document.getElementById('loginPassword'),
   loginBtn: document.getElementById('loginBtn'),
@@ -180,10 +181,20 @@ const normalizeAdminDestination = __appCore.normalizeAdminDestination || ((candi
 });
 const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => ({
   isAdmin: String(state?.role || '') === 'admin',
+  authState: !!state?.authed ? 'signed_in' : (String(state?.role || '') === 'admin' ? 'locked' : 'signed_out'),
   startAgentAutoRefresh: String(state?.role || '') === 'admin' && !!state?.authed,
   stopAgentAutoRefresh: String(state?.role || '') !== 'admin' || !state?.authed,
-  rolePillText: String(state?.role || '') === 'admin' ? 'signed in' : (state?.role || 'signed out'),
-  rolePillAdmin: String(state?.role || '') === 'admin',
+  rolePillText: !!state?.authed ? `Signed in - ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} - ${state?.environment || 'local'}` : 'Signed out',
+  rolePillAdmin: String(state?.role || '') === 'admin' && !!state?.authed,
+  rolePillLocked: !state?.authed && String(state?.role || '') === 'admin',
+  rolePillSignedOut: !state?.authed && String(state?.role || '') !== 'admin',
+  rolePillActionLabel: !!state?.authed ? 'Open session details' : 'Focus password input to unlock session',
+  rolePillTooltip: !!state?.authed
+    ? `Session context: signed in as ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} in ${state?.environment || 'local'}. Click for session details.`
+    : `Session context: signed out in ${state?.environment || 'local'}. Click to unlock this session.`,
+  authLabel: !!state?.authed ? 'Signed in' : 'Signed out',
+  principalLabel: !!state?.authed ? (String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')) : 'Not signed in',
+  environmentLabel: state?.environment || 'local',
   showAdminControls: String(state?.role || '') === 'admin',
   logoutEnabled: !!state?.authed,
   logoutOpacity: !!state?.authed ? '1' : '0.5'
@@ -1288,6 +1299,7 @@ async function fetchMeta() {
     if (data?.wsUrl) {
       globalElements.wsUrl.value = data.wsUrl;
       uiState.meta = data;
+      renderAuthSessionUi();
       return data;
     }
     return null;
@@ -1405,9 +1417,52 @@ function updateConnectionControls() {
   globalElements.disconnectBtn.textContent = control.text;
 }
 
+function currentAuthUi() {
+  return deriveAuthOverlayState({
+    authed: uiState.authed,
+    role: roleState.role,
+    environment: uiState.meta?.instance || 'local'
+  });
+}
+
+function closeAuthSessionPopover() {
+  if (!globalElements.authSessionPopover) return;
+  globalElements.authSessionPopover.hidden = true;
+  globalElements.rolePill?.setAttribute('aria-expanded', 'false');
+}
+
+function renderAuthSessionUi() {
+  const authUi = currentAuthUi();
+  const pill = globalElements.rolePill;
+  if (pill) {
+    pill.textContent = authUi.rolePillText;
+    pill.classList.toggle('admin', authUi.rolePillAdmin);
+    pill.classList.toggle('locked', authUi.rolePillLocked);
+    pill.classList.toggle('signed-out', authUi.rolePillSignedOut);
+    pill.dataset.authState = authUi.authState || 'signed_out';
+    pill.setAttribute('aria-label', authUi.rolePillActionLabel || 'Authentication status');
+    pill.title = authUi.rolePillTooltip || authUi.rolePillActionLabel || 'Authentication status';
+  }
+
+  const popover = globalElements.authSessionPopover;
+  if (popover) {
+    const statusEl = popover.querySelector('[data-auth-session-status]');
+    const principalEl = popover.querySelector('[data-auth-session-principal]');
+    const envEl = popover.querySelector('[data-auth-session-env]');
+    if (statusEl) statusEl.textContent = authUi.authLabel || 'Signed out';
+    if (principalEl) principalEl.textContent = authUi.principalLabel || 'Not signed in';
+    if (envEl) envEl.textContent = authUi.environmentLabel || 'local';
+    popover.querySelector('[data-auth-session-action="settings"]')?.toggleAttribute('hidden', !uiState.authed);
+    popover.querySelector('[data-auth-session-action="logout"]')?.toggleAttribute('hidden', !uiState.authed);
+    popover.querySelector('[data-auth-session-action="unlock"]')?.toggleAttribute('hidden', !!uiState.authed);
+  }
+
+  return authUi;
+}
+
 function setAuthState(authed) {
   uiState.authed = authed;
-  const authUi = deriveAuthOverlayState({ authed, role: roleState.role });
+  const authUi = renderAuthSessionUi();
   updateGlobalStatus();
   updateConnectionControls();
   paneManager.refreshChatEnabled();
@@ -1426,11 +1481,7 @@ function setAuthState(authed) {
 
 function setRole(role) {
   roleState.role = role;
-  const authUi = deriveAuthOverlayState({ authed: uiState.authed, role });
-  if (globalElements.rolePill) {
-    globalElements.rolePill.textContent = authUi.rolePillText;
-    globalElements.rolePill.classList.toggle('admin', authUi.rolePillAdmin);
-  }
+  const authUi = renderAuthSessionUi();
 
   const isAdmin = authUi.isAdmin;
   const visibleOpacity = isAdmin ? '1' : '0.5';
@@ -1491,10 +1542,7 @@ function showLogin(message = '') {
   // Guest role selection removed.
 
   setAuthState(false);
-  if (globalElements.rolePill) {
-    globalElements.rolePill.textContent = 'signed out';
-    globalElements.rolePill.classList.remove('admin');
-  }
+  closeAuthSessionPopover();
   globalElements.settingsBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
   globalElements.shortcutsBtn?.setAttribute('disabled', 'disabled');
@@ -2366,7 +2414,7 @@ function paneBrowserTitle(pane) {
     const target = paneDisplayTargetLabel(pane);
     if (target) parts.push(target);
   }
-  return parts.join(' · ');
+  return parts.join(' - ');
 }
 
 function updateBrowserTitle(pane = null) {
@@ -2385,14 +2433,14 @@ function paneIdentityLabel(pane, { includeUnread = false } = {}) {
   const target = paneDisplayTargetLabel(pane);
   const nickname = paneNickname(pane);
   const unread = paneUnreadCount(pane);
-  return `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
+  return `${letter} ${type} - ${target}${nickname ? ` - ${nickname}` : ''}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
 }
 
 function paneSummaryLabel(pane) {
   const letter = paneHeaderLetter(pane);
   const type = paneLabel(pane);
   const target = paneDisplayTargetLabel(pane);
-  return `${letter} ${type} · ${target}`;
+  return `${letter} ${type} - ${target}`;
 }
 
 function isPaneSwitchHudEnabled() {
@@ -3109,8 +3157,8 @@ function buildCommandPaletteItems() {
       withShortcut(
         {
           id: `cmd:focus-pane-${pane.key}`,
-          label: `Focus ${type}: ${target}${nickname ? ` · ${nickname}` : ''}`,
-          detail: `Pane ${letter} · focus existing`,
+          label: `Focus ${type}: ${target}${nickname ? ` - ${nickname}` : ''}`,
+          detail: `Pane ${letter} - focus existing`,
           paneMeta: [
             ...commandPalettePaneMeta({ type, target, mode: 'focus existing' }),
             ...(nickname ? [{ label: nickname, tone: 'nickname' }] : [])
@@ -3558,7 +3606,7 @@ function renderCommandPalette() {
         ${paneMetaMarkup}
         <div class="command-palette-item-detail">${escapeHtml(item.detail || '')}</div>
       </div>
-      <div class="command-palette-item-meta">${escapeHtml(item.shortcut || '')}${idx === selected ? (item.shortcut ? ' · ↵' : '↵') : ''}</div>
+      <div class="command-palette-item-meta">${escapeHtml(item.shortcut || '')}${idx === selected ? (item.shortcut ? ' - ↵' : '↵') : ''}</div>
     `;
 
     btn.addEventListener('mouseenter', () => {
@@ -5122,7 +5170,7 @@ function formatWorkqueueHiddenBreakdown(hiddenCounts = {}) {
 function formatWorkqueueVisibleSummary(shown, total, hiddenCounts = {}) {
   const base = formatWorkqueueCountText(shown, total);
   const hidden = formatWorkqueueHiddenBreakdown(hiddenCounts);
-  return hidden ? `${base} · ${hidden}` : base;
+  return hidden ? `${base} - ${hidden}` : base;
 }
 
 function getWorkqueueQuickFilterBreakdown(items, quickFilters) {
@@ -5261,7 +5309,7 @@ function formatWorkqueueStatusSummary(items) {
   return WORKQUEUE_STATUSES
     .filter((status) => Number(counts[status] || 0) > 0)
     .map((status) => `${formatWorkqueueStatusLabel(status)} ${counts[status]}`)
-    .join(' · ');
+    .join(' - ');
 }
 
 function newestWorkqueueUpdatedAt(items) {
@@ -5624,8 +5672,8 @@ function renderWorkqueuePaneItems(pane) {
       empty.innerHTML = `
         <div class="empty-state">
           <div style="font-weight:700; margin-bottom:6px;">${escapeHtml(title)}</div>
-          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
-          ${filtersHidingAll ? `<div class="hint" style="margin-top:6px;">Showing 0 of <span class="mono">${escapeHtml(String(totalCount))}</span> items${hiddenSummary ? ` · ${escapeHtml(hiddenSummary)}` : ''}.</div>` : ''}
+          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> - Status: <span class="mono">${escapeHtml(statusLabel)}</span> - Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
+          ${filtersHidingAll ? `<div class="hint" style="margin-top:6px;">Showing 0 of <span class="mono">${escapeHtml(String(totalCount))}</span> items${hiddenSummary ? ` - ${escapeHtml(hiddenSummary)}` : ''}.</div>` : ''}
           <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
             <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
             <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
@@ -6963,7 +7011,7 @@ function paneFinishCanceledRun(pane, { runId = null, resetSession = false, fallb
         text: fallbackText || '_Canceled._',
         persist: true,
         state: 'canceled',
-        metaLabel: `${paneAssistantLabel(pane)} · Canceled`
+        metaLabel: `${paneAssistantLabel(pane)} - Canceled`
       });
     }
     pane.abortState.canceledRunIds.add(String(rid));
@@ -6973,7 +7021,7 @@ function paneFinishCanceledRun(pane, { runId = null, resetSession = false, fallb
       text: fallbackText || '_Canceled._',
       persist: true,
       state: 'canceled',
-      metaLabel: `${paneAssistantLabel(pane)} · Canceled`
+      metaLabel: `${paneAssistantLabel(pane)} - Canceled`
     });
   }
 
@@ -7064,9 +7112,9 @@ function paneUpdateOutboundBubble(entry) {
 
   const meta = bubble.querySelector('.chat-meta');
   if (meta) {
-    if (entry.state === 'queued') meta.textContent = 'You · Queued (not sent)';
-    else if (entry.state === 'sending') meta.textContent = 'You · Sending…';
-    else if (entry.state === 'failed') meta.textContent = 'You · Failed to send';
+    if (entry.state === 'queued') meta.textContent = 'You - Queued (not sent)';
+    else if (entry.state === 'sending') meta.textContent = 'You - Sending…';
+    else if (entry.state === 'failed') meta.textContent = 'You - Failed to send';
     else meta.textContent = 'You';
   }
 }
@@ -7234,7 +7282,7 @@ async function paneSendChat(pane) {
     role: 'user',
     text: outbound,
     persist: false,
-    metaLabel: 'You · Queued (not sent)',
+    metaLabel: 'You - Queued (not sent)',
     state: 'queued',
     actions: makeActions()
   });
@@ -7457,12 +7505,12 @@ function renderPaneIdentity(pane) {
   const target = paneDisplayTargetLabel(pane);
   const nickname = paneNickname(pane);
   const unread = paneUnreadCount(pane);
-  const identity = `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}`;
+  const identity = `${letter} ${type} - ${target}${nickname ? ` - ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}`;
   pane.elements.name.title = paneIdentityLabel(pane, { includeUnread: false });
   pane.elements.name.setAttribute('aria-label', identity);
   if (pane.elements.nameToken && pane.elements.nameTarget) {
     pane.elements.nameToken.textContent = `${letter} ${type}`;
-    pane.elements.nameTarget.textContent = ` · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}`;
+    pane.elements.nameTarget.textContent = ` - ${target}${nickname ? ` - ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}`;
   } else {
     pane.elements.name.textContent = identity;
   }
@@ -9038,7 +9086,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             if (search) parts.push(`search:${search}`);
             paneSetHeaderTarget(pane, {
               label: 'Timeline',
-              value: parts.join(' · '),
+              value: parts.join(' - '),
               ariaLabel: 'Timeline filters',
               onClick: () => {
                 try {
@@ -9056,7 +9104,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             if (search) parts.push(`search:${search}`);
             paneSetHeaderTarget(pane, {
               label: 'Jobs',
-              value: parts.join(' · '),
+              value: parts.join(' - '),
               ariaLabel: 'Cron job filters',
               onClick: () => {
                 try {
@@ -9093,7 +9141,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         });
 
         const schedulerLabel = status?.enabled === false ? 'paused' : status?.enabled === true ? 'running' : 'unknown';
-        if (statusline) statusline.textContent = `scheduler: ${schedulerLabel} · jobs: ${filtered.length}/${jobs.length} · ${took}ms`;
+        if (statusline) statusline.textContent = `scheduler: ${schedulerLabel} - jobs: ${filtered.length}/${jobs.length} - ${took}ms`;
 
         if (!body) return;
 
@@ -9112,7 +9160,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             body.innerHTML = `
               <div class="hint" style="padding: 10px 8px;">
                 <div style="font-weight:700; margin-bottom:6px;">No scheduled jobs.</div>
-                <div class="hint">Agent: <span class="mono">${escapeHtml(agentFilterLabel)}</span>${searchLabel ? ` · Search: <span class="mono">${escapeHtml(searchLabel)}</span>` : ''}${flags.length ? ` · Filters: <span class="mono">${escapeHtml(flags.join(', '))}</span>` : ''}</div>
+                <div class="hint">Agent: <span class="mono">${escapeHtml(agentFilterLabel)}</span>${searchLabel ? ` - Search: <span class="mono">${escapeHtml(searchLabel)}</span>` : ''}${flags.length ? ` - Filters: <span class="mono">${escapeHtml(flags.join(', '))}</span>` : ''}</div>
                 <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
                   <button type="button" class="secondary" data-cron-empty-refresh>Refresh</button>
                 </div>
@@ -9145,7 +9193,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
                     <span class="pill ${enabled ? 'pill--ok' : 'pill--warn'}">${enabled ? 'enabled' : 'disabled'}</span>
                   </div>
                 </div>
-                <div class="hint">${escapeHtml(id)} · ${schedule ? escapeHtml(schedule) + ' · ' : ''}next: ${escapeHtml(nextRun || '—')} · last run: ${escapeHtml(lastRun || '—')} · last: ${escapeHtml(lastStatus || '—')}</div>
+                <div class="hint">${escapeHtml(id)} - ${schedule ? escapeHtml(schedule) + ' - ' : ''}next: ${escapeHtml(nextRun || '—')} - last run: ${escapeHtml(lastRun || '—')} - last: ${escapeHtml(lastStatus || '—')}</div>
                 <div class="cron-actions" role="group" aria-label="Cron job actions">
                   <button type="button" class="secondary" data-testid="cron-action-view" data-cron-action="view" data-job-id="${escapeHtml(id)}">View</button>
                   <button type="button" class="secondary" data-testid="cron-action-edit" data-cron-action="edit" data-job-id="${escapeHtml(id)}">Edit</button>
@@ -9217,7 +9265,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           body.innerHTML = `
             <div class="hint" style="padding: 10px 8px;">
               <div style="font-weight:700; margin-bottom:6px;">No activity in range.</div>
-              <div class="hint">Range: <span class="mono">${escapeHtml(rangeLabel || String(rangeMs))}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span>${searchLabel ? ` · Search: <span class="mono">${escapeHtml(searchLabel)}</span>` : ''}</div>
+              <div class="hint">Range: <span class="mono">${escapeHtml(rangeLabel || String(rangeMs))}</span> - Status: <span class="mono">${escapeHtml(statusLabel)}</span>${searchLabel ? ` - Search: <span class="mono">${escapeHtml(searchLabel)}</span>` : ''}</div>
               <div class="hint" style="margin-top:8px;">Tip: broaden the range or clear filters to find older runs.</div>
             </div>
           `;
@@ -9249,7 +9297,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
                     <span class="pill ${enabled ? 'pill--ok' : 'pill--warn'}">${enabled ? 'enabled' : 'disabled'}</span>
                   </div>
                 </div>
-                <div class="hint">${escapeHtml(fmtTime(ev.ts))} · ${escapeHtml(id)}${nextRun ? ` · next: ${escapeHtml(nextRun)}` : ''}</div>
+                <div class="hint">${escapeHtml(fmtTime(ev.ts))} - ${escapeHtml(id)}${nextRun ? ` - next: ${escapeHtml(nextRun)}` : ''}</div>
                 ${summaryHtml}
                 <div class="cron-actions" role="group" aria-label="Cron job actions">
                   <button type="button" class="secondary" data-testid="cron-action-view" data-cron-action="view" data-job-id="${escapeHtml(id)}">View</button>
@@ -11077,6 +11125,58 @@ globalElements.status?.addEventListener('click', () => {
     if (pane?.client?.manualDisconnect) pane.client.manualDisconnect = false;
   });
   paneManager.connectIfNeeded();
+});
+
+globalElements.rolePill?.addEventListener('click', () => {
+  if (!uiState.authed) {
+    closeAuthSessionPopover();
+    showLogin('Please sign in to continue.');
+    return;
+  }
+  renderAuthSessionUi();
+  const popover = globalElements.authSessionPopover;
+  if (!popover) return;
+  const nextOpen = popover.hidden;
+  popover.hidden = !nextOpen;
+  globalElements.rolePill.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+});
+
+globalElements.authSessionPopover?.addEventListener('click', async (event) => {
+  const btn = event.target instanceof HTMLElement ? event.target.closest('[data-auth-session-action]') : null;
+  if (!btn) return;
+  const action = btn.getAttribute('data-auth-session-action');
+  if (action === 'settings') {
+    closeAuthSessionPopover();
+    openSettings();
+    return;
+  }
+  if (action === 'unlock') {
+    closeAuthSessionPopover();
+    showLogin('Please sign in to continue.');
+    return;
+  }
+  if (action === 'logout') {
+    closeAuthSessionPopover();
+    try {
+      await fetch('/auth/logout', { method: 'POST' });
+    } catch {}
+    storage.set('clawnsole.auth.role', '');
+    paneManager.disconnectAll({ silent: true });
+    roleState.role = null;
+    window.location.replace('/');
+  }
+});
+
+document.addEventListener('click', (event) => {
+  const target = event.target instanceof Node ? event.target : null;
+  if (!target || !globalElements.authSessionPopover || globalElements.authSessionPopover.hidden) return;
+  if (globalElements.rolePill?.contains(target) || globalElements.authSessionPopover.contains(target)) return;
+  closeAuthSessionPopover();
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  closeAuthSessionPopover();
 });
 
 globalElements.loginBtn?.addEventListener('click', () => attemptLogin());

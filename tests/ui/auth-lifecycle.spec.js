@@ -7,7 +7,28 @@ test('visiting /admin without auth shows login overlay', async ({ page, clawnsol
 
   await page.goto(clawnsole.adminUrl);
   await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
-  await expect(page.getByTestId('role-pill')).toContainText('signed out');
+  await expect(page.getByTestId('role-pill')).toContainText('Signed out');
+  await expect(page.getByTestId('role-pill')).toHaveAttribute('data-auth-state', 'signed_out');
+});
+
+test('signed-in auth chip shows session details and actions', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  const chip = page.getByTestId('role-pill');
+  await expect(chip).toContainText('Signed in');
+  await expect(chip).toContainText('Admin');
+  await expect(chip).toHaveAttribute('data-auth-state', 'signed_in');
+  await expect(chip).toHaveAttribute('title', /signed in as Admin in local/i);
+
+  await chip.click();
+  const popover = page.getByTestId('auth-session-popover');
+  await expect(popover).toBeVisible();
+  await expect(popover).toContainText('Signed in');
+  await expect(popover).toContainText('Admin');
+  await expect(popover).toContainText('local');
+  await expect(popover.getByRole('button', { name: 'Settings' })).toBeVisible();
+  await expect(popover.getByRole('button', { name: 'Logout' })).toBeVisible();
 });
 
 test('admin login restores the intended in-app destination', async ({ page, clawnsole }) => {
