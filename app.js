@@ -2735,6 +2735,86 @@ function movePaneWithinVisible(paneKey, direction, visibleKeys) {
   return moved;
 }
 
+function getPairedPaneKind(pane) {
+  if (pane?.kind === 'chat') return 'workqueue';
+  if (pane?.kind === 'workqueue') return 'chat';
+  return '';
+}
+
+function getPanePairTarget(pane) {
+  if (!pane || (pane.kind !== 'chat' && pane.kind !== 'workqueue')) return '';
+  return normalizeAgentId(pane.agentId || 'main');
+}
+
+function findPairedPaneForPane(pane) {
+  const pairedKind = getPairedPaneKind(pane);
+  const target = getPanePairTarget(pane);
+  if (!pairedKind || !target) return null;
+  return (
+    (paneManager?.panes || []).find(
+      (candidate) =>
+        candidate &&
+        candidate !== pane &&
+        candidate.kind === pairedKind &&
+        getPanePairTarget(candidate) === target
+    ) || null
+  );
+}
+
+function getPanePairOpenOptions(pane) {
+  const pairedKind = getPairedPaneKind(pane);
+  const target = getPanePairTarget(pane);
+  if (!pairedKind || !target) return null;
+  if (pairedKind === 'workqueue') {
+    const preferredQueue =
+      String((paneManager?.panes || []).find((entry) => entry?.kind === 'workqueue')?.workqueue?.queue || '').trim() ||
+      'dev-team';
+    return {
+      agentId: target,
+      queue: preferredQueue,
+      scopeFilter: 'assigned'
+    };
+  }
+  return { agentId: target };
+}
+
+function getPaneManagerPairedAction(pane) {
+  const pairedKind = getPairedPaneKind(pane);
+  const target = getPanePairTarget(pane);
+  if (!pairedKind || !target) return null;
+
+  const existing = findPairedPaneForPane(pane);
+  const labelKind = pairedKind === 'workqueue' ? 'Workqueue' : 'Chat';
+  const disabled = !existing && (paneManager?.panes || []).length >= (paneManager?.maxPanes || 0);
+
+  return {
+    pairedKind,
+    labelKind,
+    target,
+    state: existing ? 'focus' : 'open',
+    text: existing ? `Paired ${labelKind}` : `Open paired ${labelKind}`,
+    title: existing
+      ? `Focus paired ${labelKind} for ${target}`
+      : disabled
+        ? `Pane limit reached; close a pane to open paired ${labelKind} for ${target}`
+        : `Open paired ${labelKind} for ${target}`,
+    disabled
+  };
+}
+
+function focusOrOpenPairedPaneForPane(pane) {
+  const existing = findPairedPaneForPane(pane);
+  if (existing) {
+    paneManager.focusPanePrimary(existing);
+    return existing;
+  }
+
+  const pairedKind = getPairedPaneKind(pane);
+  const options = getPanePairOpenOptions(pane);
+  if (!pairedKind || !options) return null;
+  return paneManager.addPane(pairedKind, options);
+}
+
 function renderPaneManager() {
   const panes = paneManager?.panes || [];
   const list = globalElements.paneManagerList;
@@ -2816,6 +2896,7 @@ function renderPaneManager() {
         const unreadCount = paneUnreadCount(pane);
         const paneIdentity = paneSummaryLabel(pane);
         const nickname = paneNickname(pane);
+        const pairedAction = getPaneManagerPairedAction(pane);
 
         const lockDisabled = paneManager.isLayoutLocked();
 
@@ -2835,6 +2916,7 @@ function renderPaneManager() {
             <button class="secondary pane-manager-up" type="button" data-action="move-up" data-testid="pane-manager-move-up" title="${lockDisabled ? 'Layout is locked' : 'Move pane up'}" aria-label="Move pane up" ${(visibleIdx === 0 || lockDisabled) ? 'disabled' : ''}>↑</button>
             <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="${lockDisabled ? 'Layout is locked' : 'Move pane down'}" aria-label="Move pane down" ${(visibleIdx === visibleKeys.length - 1 || lockDisabled) ? 'disabled' : ''}>↓</button>
             ${isDuplicate ? '<button class="secondary pane-manager-close-others" type="button" data-action="close-others" data-testid="pane-manager-close-others">Close others</button>' : ''}
+            ${pairedAction ? `<button class="secondary pane-manager-paired" type="button" data-action="paired" data-testid="pane-manager-paired-action" data-paired-kind="${escapeHtml(pairedAction.pairedKind)}" data-paired-state="${escapeHtml(pairedAction.state)}" data-paired-target="${escapeHtml(pairedAction.target)}" title="${escapeHtml(pairedAction.title)}" aria-label="${escapeHtml(pairedAction.title)}" ${pairedAction.disabled ? 'disabled' : ''}>${escapeHtml(pairedAction.text)}</button>` : ''}
             <button class="secondary pane-manager-nickname-action" type="button" data-action="nickname" data-testid="pane-manager-nickname-action">Nickname</button>
             <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
             <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
@@ -2902,6 +2984,15 @@ function renderPaneManager() {
           }
           if (action === 'nickname') {
             promptPaneNickname(pane);
+            return;
+          }
+          if (action === 'paired') {
+            const pairedPane = focusOrOpenPairedPaneForPane(pane);
+            if (pairedPane) {
+              closePaneManager();
+            } else {
+              renderPaneManager();
+            }
             return;
           }
           closePaneManager();
