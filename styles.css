@@ -83,6 +83,10 @@ body::before {
   z-index: 0;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 .app {
   position: relative;
   z-index: 1;
@@ -226,6 +230,12 @@ body::before {
   background: rgba(127, 209, 185, 0.18);
   border-color: rgba(127, 209, 185, 0.45);
   color: var(--accent-2);
+}
+
+.role-pill.locked {
+  background: rgba(229, 115, 115, 0.18);
+  border-color: rgba(229, 115, 115, 0.45);
+  color: #ffb3ad;
 }
 
 .channel-switch select {

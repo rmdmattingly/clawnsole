@@ -182,14 +182,17 @@ const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => (
   isAdmin: String(state?.role || '') === 'admin',
   startAgentAutoRefresh: String(state?.role || '') === 'admin' && !!state?.authed,
   stopAgentAutoRefresh: String(state?.role || '') !== 'admin' || !state?.authed,
-  rolePillText: String(state?.role || '') === 'admin' ? 'signed in' : (state?.role || 'signed out'),
-  rolePillAdmin: String(state?.role || '') === 'admin',
-  showAdminControls: String(state?.role || '') === 'admin',
+  rolePillText: state?.authed ? (String(state?.role || '') === 'admin' ? 'signed in' : (state?.role || 'signed in')) : 'Locked',
+  rolePillAdmin: String(state?.role || '') === 'admin' && !!state?.authed,
+  rolePillLocked: !state?.authed,
+  showAdminControls: String(state?.role || '') === 'admin' && !!state?.authed,
+  showUnlockedStatus: !!state?.authed,
+  showLogoutAction: !!state?.authed,
   logoutEnabled: !!state?.authed,
   logoutOpacity: !!state?.authed ? '1' : '0.5'
 }));
 const deriveGlobalConnectionState = __appCore.deriveGlobalConnectionState || ((state) => {
-  if (!state?.authed) return { state: 'disconnected', meta: 'sign in required' };
+  if (!state?.authed) return { state: 'locked', meta: '' };
   const panes = Array.isArray(state?.panes) ? state.panes : [];
   if (panes.length === 0) return { state: 'disconnected', meta: '' };
   const connectedCount = panes.filter((pane) => !!pane?.connected).length;
@@ -1419,8 +1422,20 @@ function setAuthState(authed) {
   }
 
   if (globalElements.logoutBtn) {
+    globalElements.logoutBtn.hidden = !authUi.showLogoutAction;
     globalElements.logoutBtn.disabled = !authUi.logoutEnabled;
     globalElements.logoutBtn.style.opacity = authUi.logoutOpacity;
+  }
+  if (globalElements.status) {
+    globalElements.status.hidden = !authUi.showUnlockedStatus;
+  }
+  if (globalElements.paneManagerBtn) {
+    globalElements.paneManagerBtn.hidden = !authUi.showUnlockedStatus;
+  }
+  if (globalElements.rolePill) {
+    globalElements.rolePill.textContent = authUi.rolePillText;
+    globalElements.rolePill.classList.toggle('admin', authUi.rolePillAdmin);
+    globalElements.rolePill.classList.toggle('locked', authUi.rolePillLocked);
   }
 }
 
@@ -1430,6 +1445,7 @@ function setRole(role) {
   if (globalElements.rolePill) {
     globalElements.rolePill.textContent = authUi.rolePillText;
     globalElements.rolePill.classList.toggle('admin', authUi.rolePillAdmin);
+    globalElements.rolePill.classList.toggle('locked', authUi.rolePillLocked);
   }
 
   const isAdmin = authUi.isAdmin;
@@ -1491,10 +1507,6 @@ function showLogin(message = '') {
   // Guest role selection removed.
 
   setAuthState(false);
-  if (globalElements.rolePill) {
-    globalElements.rolePill.textContent = 'signed out';
-    globalElements.rolePill.classList.remove('admin');
-  }
   globalElements.settingsBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
   globalElements.shortcutsBtn?.setAttribute('disabled', 'disabled');
