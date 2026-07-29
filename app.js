@@ -2414,7 +2414,7 @@ function paneBrowserTitle(pane) {
     const target = paneDisplayTargetLabel(pane);
     if (target) parts.push(target);
   }
-  return parts.join(' - ');
+  return parts.join(' · ');
 }
 
 function updateBrowserTitle(pane = null) {
@@ -2433,14 +2433,14 @@ function paneIdentityLabel(pane, { includeUnread = false } = {}) {
   const target = paneDisplayTargetLabel(pane);
   const nickname = paneNickname(pane);
   const unread = paneUnreadCount(pane);
-  return `${letter} ${type} - ${target}${nickname ? ` - ${nickname}` : ''}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
+  return `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
 }
 
 function paneSummaryLabel(pane) {
   const letter = paneHeaderLetter(pane);
   const type = paneLabel(pane);
   const target = paneDisplayTargetLabel(pane);
-  return `${letter} ${type} - ${target}`;
+  return `${letter} ${type} · ${target}`;
 }
 
 function isPaneSwitchHudEnabled() {
@@ -3157,8 +3157,8 @@ function buildCommandPaletteItems() {
       withShortcut(
         {
           id: `cmd:focus-pane-${pane.key}`,
-          label: `Focus ${type}: ${target}${nickname ? ` - ${nickname}` : ''}`,
-          detail: `Pane ${letter} - focus existing`,
+          label: `Focus ${type}: ${target}${nickname ? ` · ${nickname}` : ''}`,
+          detail: `Pane ${letter} · focus existing`,
           paneMeta: [
             ...commandPalettePaneMeta({ type, target, mode: 'focus existing' }),
             ...(nickname ? [{ label: nickname, tone: 'nickname' }] : [])
@@ -3606,7 +3606,7 @@ function renderCommandPalette() {
         ${paneMetaMarkup}
         <div class="command-palette-item-detail">${escapeHtml(item.detail || '')}</div>
       </div>
-      <div class="command-palette-item-meta">${escapeHtml(item.shortcut || '')}${idx === selected ? (item.shortcut ? ' - ↵' : '↵') : ''}</div>
+      <div class="command-palette-item-meta">${escapeHtml(item.shortcut || '')}${idx === selected ? (item.shortcut ? ' · ↵' : '↵') : ''}</div>
     `;
 
     btn.addEventListener('mouseenter', () => {
@@ -5170,7 +5170,7 @@ function formatWorkqueueHiddenBreakdown(hiddenCounts = {}) {
 function formatWorkqueueVisibleSummary(shown, total, hiddenCounts = {}) {
   const base = formatWorkqueueCountText(shown, total);
   const hidden = formatWorkqueueHiddenBreakdown(hiddenCounts);
-  return hidden ? `${base} - ${hidden}` : base;
+  return hidden ? `${base} · ${hidden}` : base;
 }
 
 function getWorkqueueQuickFilterBreakdown(items, quickFilters) {
@@ -5309,7 +5309,7 @@ function formatWorkqueueStatusSummary(items) {
   return WORKQUEUE_STATUSES
     .filter((status) => Number(counts[status] || 0) > 0)
     .map((status) => `${formatWorkqueueStatusLabel(status)} ${counts[status]}`)
-    .join(' - ');
+    .join(' · ');
 }
 
 function newestWorkqueueUpdatedAt(items) {
@@ -5672,8 +5672,8 @@ function renderWorkqueuePaneItems(pane) {
       empty.innerHTML = `
         <div class="empty-state">
           <div style="font-weight:700; margin-bottom:6px;">${escapeHtml(title)}</div>
-          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> - Status: <span class="mono">${escapeHtml(statusLabel)}</span> - Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
-          ${filtersHidingAll ? `<div class="hint" style="margin-top:6px;">Showing 0 of <span class="mono">${escapeHtml(String(totalCount))}</span> items${hiddenSummary ? ` - ${escapeHtml(hiddenSummary)}` : ''}.</div>` : ''}
+          <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
+          ${filtersHidingAll ? `<div class="hint" style="margin-top:6px;">Showing 0 of <span class="mono">${escapeHtml(String(totalCount))}</span> items${hiddenSummary ? ` · ${escapeHtml(hiddenSummary)}` : ''}.</div>` : ''}
           <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
             <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
             <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
@@ -7011,7 +7011,7 @@ function paneFinishCanceledRun(pane, { runId = null, resetSession = false, fallb
         text: fallbackText || '_Canceled._',
         persist: true,
         state: 'canceled',
-        metaLabel: `${paneAssistantLabel(pane)} - Canceled`
+        metaLabel: `${paneAssistantLabel(pane)} · Canceled`
       });
     }
     pane.abortState.canceledRunIds.add(String(rid));
@@ -7021,7 +7021,7 @@ function paneFinishCanceledRun(pane, { runId = null, resetSession = false, fallb
       text: fallbackText || '_Canceled._',
       persist: true,
       state: 'canceled',
-      metaLabel: `${paneAssistantLabel(pane)} - Canceled`
+      metaLabel: `${paneAssistantLabel(pane)} · Canceled`
     });
   }
 
@@ -7112,9 +7112,9 @@ function paneUpdateOutboundBubble(entry) {
 
   const meta = bubble.querySelector('.chat-meta');
   if (meta) {
-    if (entry.state === 'queued') meta.textContent = 'You - Queued (not sent)';
-    else if (entry.state === 'sending') meta.textContent = 'You - Sending…';
-    else if (entry.state === 'failed') meta.textContent = 'You - Failed to send';
+    if (entry.state === 'queued') meta.textContent = 'You · Queued (not sent)';
+    else if (entry.state === 'sending') meta.textContent = 'You · Sending…';
+    else if (entry.state === 'failed') meta.textContent = 'You · Failed to send';
     else meta.textContent = 'You';
   }
 }
@@ -7282,7 +7282,7 @@ async function paneSendChat(pane) {
     role: 'user',
     text: outbound,
     persist: false,
-    metaLabel: 'You - Queued (not sent)',
+    metaLabel: 'You · Queued (not sent)',
     state: 'queued',
     actions: makeActions()
   });
@@ -7505,12 +7505,12 @@ function renderPaneIdentity(pane) {
   const target = paneDisplayTargetLabel(pane);
   const nickname = paneNickname(pane);
   const unread = paneUnreadCount(pane);
-  const identity = `${letter} ${type} - ${target}${nickname ? ` - ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}`;
+  const identity = `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}`;
   pane.elements.name.title = paneIdentityLabel(pane, { includeUnread: false });
   pane.elements.name.setAttribute('aria-label', identity);
   if (pane.elements.nameToken && pane.elements.nameTarget) {
     pane.elements.nameToken.textContent = `${letter} ${type}`;
-    pane.elements.nameTarget.textContent = ` - ${target}${nickname ? ` - ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}`;
+    pane.elements.nameTarget.textContent = ` · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}`;
   } else {
     pane.elements.name.textContent = identity;
   }
@@ -9086,7 +9086,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             if (search) parts.push(`search:${search}`);
             paneSetHeaderTarget(pane, {
               label: 'Timeline',
-              value: parts.join(' - '),
+              value: parts.join(' · '),
               ariaLabel: 'Timeline filters',
               onClick: () => {
                 try {
@@ -9104,7 +9104,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             if (search) parts.push(`search:${search}`);
             paneSetHeaderTarget(pane, {
               label: 'Jobs',
-              value: parts.join(' - '),
+              value: parts.join(' · '),
               ariaLabel: 'Cron job filters',
               onClick: () => {
                 try {
@@ -9141,7 +9141,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         });
 
         const schedulerLabel = status?.enabled === false ? 'paused' : status?.enabled === true ? 'running' : 'unknown';
-        if (statusline) statusline.textContent = `scheduler: ${schedulerLabel} - jobs: ${filtered.length}/${jobs.length} - ${took}ms`;
+        if (statusline) statusline.textContent = `scheduler: ${schedulerLabel} · jobs: ${filtered.length}/${jobs.length} · ${took}ms`;
 
         if (!body) return;
 
@@ -9160,7 +9160,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             body.innerHTML = `
               <div class="hint" style="padding: 10px 8px;">
                 <div style="font-weight:700; margin-bottom:6px;">No scheduled jobs.</div>
-                <div class="hint">Agent: <span class="mono">${escapeHtml(agentFilterLabel)}</span>${searchLabel ? ` - Search: <span class="mono">${escapeHtml(searchLabel)}</span>` : ''}${flags.length ? ` - Filters: <span class="mono">${escapeHtml(flags.join(', '))}</span>` : ''}</div>
+                <div class="hint">Agent: <span class="mono">${escapeHtml(agentFilterLabel)}</span>${searchLabel ? ` · Search: <span class="mono">${escapeHtml(searchLabel)}</span>` : ''}${flags.length ? ` · Filters: <span class="mono">${escapeHtml(flags.join(', '))}</span>` : ''}</div>
                 <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
                   <button type="button" class="secondary" data-cron-empty-refresh>Refresh</button>
                 </div>
@@ -9193,7 +9193,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
                     <span class="pill ${enabled ? 'pill--ok' : 'pill--warn'}">${enabled ? 'enabled' : 'disabled'}</span>
                   </div>
                 </div>
-                <div class="hint">${escapeHtml(id)} - ${schedule ? escapeHtml(schedule) + ' - ' : ''}next: ${escapeHtml(nextRun || '—')} - last run: ${escapeHtml(lastRun || '—')} - last: ${escapeHtml(lastStatus || '—')}</div>
+                <div class="hint">${escapeHtml(id)} · ${schedule ? escapeHtml(schedule) + ' · ' : ''}next: ${escapeHtml(nextRun || '—')} · last run: ${escapeHtml(lastRun || '—')} · last: ${escapeHtml(lastStatus || '—')}</div>
                 <div class="cron-actions" role="group" aria-label="Cron job actions">
                   <button type="button" class="secondary" data-testid="cron-action-view" data-cron-action="view" data-job-id="${escapeHtml(id)}">View</button>
                   <button type="button" class="secondary" data-testid="cron-action-edit" data-cron-action="edit" data-job-id="${escapeHtml(id)}">Edit</button>
@@ -9265,7 +9265,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           body.innerHTML = `
             <div class="hint" style="padding: 10px 8px;">
               <div style="font-weight:700; margin-bottom:6px;">No activity in range.</div>
-              <div class="hint">Range: <span class="mono">${escapeHtml(rangeLabel || String(rangeMs))}</span> - Status: <span class="mono">${escapeHtml(statusLabel)}</span>${searchLabel ? ` - Search: <span class="mono">${escapeHtml(searchLabel)}</span>` : ''}</div>
+              <div class="hint">Range: <span class="mono">${escapeHtml(rangeLabel || String(rangeMs))}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span>${searchLabel ? ` · Search: <span class="mono">${escapeHtml(searchLabel)}</span>` : ''}</div>
               <div class="hint" style="margin-top:8px;">Tip: broaden the range or clear filters to find older runs.</div>
             </div>
           `;
@@ -9297,7 +9297,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
                     <span class="pill ${enabled ? 'pill--ok' : 'pill--warn'}">${enabled ? 'enabled' : 'disabled'}</span>
                   </div>
                 </div>
-                <div class="hint">${escapeHtml(fmtTime(ev.ts))} - ${escapeHtml(id)}${nextRun ? ` - next: ${escapeHtml(nextRun)}` : ''}</div>
+                <div class="hint">${escapeHtml(fmtTime(ev.ts))} · ${escapeHtml(id)}${nextRun ? ` · next: ${escapeHtml(nextRun)}` : ''}</div>
                 ${summaryHtml}
                 <div class="cron-actions" role="group" aria-label="Cron job actions">
                   <button type="button" class="secondary" data-testid="cron-action-view" data-cron-action="view" data-job-id="${escapeHtml(id)}">View</button>
