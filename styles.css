@@ -1262,6 +1262,25 @@ button.send-btn .btn-icon {
   width: min(1060px, 96vw);
 }
 
+.retarget-confirm-modal {
+  z-index: 30;
+}
+
+.retarget-confirm-card h2 {
+  margin: 0 0 8px;
+}
+
+.retarget-confirm-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.retarget-confirm-actions {
+  margin-top: 16px;
+  justify-content: flex-end;
+}
+
 /* Command palette */
 
 .command-palette-input {

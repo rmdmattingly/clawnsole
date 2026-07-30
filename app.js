@@ -81,6 +81,7 @@ const globalElements = {
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   paneSwitchHudEnabled: document.getElementById('paneSwitchHudEnabled'),
+  retargetConfirmEnabled: document.getElementById('retargetConfirmEnabled'),
   shortcutOverridesList: document.getElementById('shortcutOverridesList'),
   shortcutOverridesSave: document.getElementById('shortcutOverridesSave'),
   shortcutOverridesResetAll: document.getElementById('shortcutOverridesResetAll'),
@@ -293,6 +294,7 @@ const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
 const PANE_SWITCH_HUD_ENABLED_KEY = 'clawnsole.admin.paneSwitchHud.enabled';
+const RETARGET_CONFIRM_ENABLED_KEY = 'clawnsole.admin.retargetConfirm.enabled';
 const SHORTCUT_OVERRIDES_KEY = 'clawnsole.admin.shortcutOverrides.v1';
 const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
 const WQ_RECENT_TARGETS_KEY = 'clawnsole.wq.recentTargets';
@@ -1603,6 +1605,9 @@ function openSettings() {
   if (globalElements.paneSwitchHudEnabled) {
     globalElements.paneSwitchHudEnabled.checked = isPaneSwitchHudEnabled();
   }
+  if (globalElements.retargetConfirmEnabled) {
+    globalElements.retargetConfirmEnabled.checked = isRetargetConfirmEnabled();
+  }
   shortcutOverridesDraft = readShortcutOverrides();
   renderShortcutOverrideSettings();
   globalElements.settingsModal.classList.add('open');
@@ -2445,6 +2450,10 @@ function paneSummaryLabel(pane) {
 
 function isPaneSwitchHudEnabled() {
   return String(storage.get(PANE_SWITCH_HUD_ENABLED_KEY, '1') || '1') !== '0';
+}
+
+function isRetargetConfirmEnabled() {
+  return String(storage.get(RETARGET_CONFIRM_ENABLED_KEY, '1') || '1') !== '0';
 }
 
 let paneSwitchHudHideTimer = null;
@@ -7010,6 +7019,7 @@ function paneRenderAttachments(pane) {
     remove.addEventListener('click', () => {
       pane.attachments.files.splice(index, 1);
       paneRenderAttachments(pane);
+      paneUpdateDraftOrigin(pane);
     });
     pill.append(name, remove);
     list.appendChild(pill);
@@ -7058,6 +7068,7 @@ async function paneHandleFileSelection(pane, event) {
   }
   event.target.value = '';
   paneRenderAttachments(pane);
+  paneUpdateDraftOrigin(pane);
 }
 
 async function paneUploadAttachments(pane) {
@@ -7380,6 +7391,7 @@ async function paneSendChat(pane) {
   if (command === '/clear') {
     paneClearChatHistory(pane, { wipeStorage: true });
     pane.elements.input.value = '';
+    pane.draftOrigin = null;
     paneUpdateCommandHints(pane);
     addFeed('event', 'chat', `cleared local history (${pane.sessionKey()})`);
     return;
@@ -7388,11 +7400,14 @@ async function paneSendChat(pane) {
     const key = pane.sessionKey();
     paneClearChatHistory(pane, { wipeStorage: true });
     pane.elements.input.value = '';
+    pane.draftOrigin = null;
     paneUpdateCommandHints(pane);
     pane.client.request('sessions.reset', { key });
     addFeed('event', 'chat', `reset session (${key})`);
     return;
   }
+
+  if (!(await paneShouldSendRetargetedDraft(pane))) return;
 
   const sessionKey = pane.sessionKey();
   const idempotencyKey = randomId();
@@ -7469,6 +7484,7 @@ async function paneSendChat(pane) {
   panePumpOutbox(pane);
 
   pane.elements.input.value = '';
+  pane.draftOrigin = null;
   paneUpdateCommandHints(pane);
 }
 
@@ -7890,6 +7906,143 @@ function paneHasDraftChanges(pane) {
   const draftText = String(pane.elements.input?.value || '').trim();
   const hasAttachments = Array.isArray(pane.attachments?.files) && pane.attachments.files.length > 0;
   return Boolean(draftText || hasAttachments);
+}
+
+function paneDraftTargetIdentity(pane) {
+  if (!pane) return null;
+  const kind = String(pane.kind || 'chat');
+  let targetKey = '';
+  let targetLabel = '';
+  if (kind === 'chat') {
+    targetKey = pane.role === 'admin' ? normalizeAgentId(pane.agentId || 'main') : pane.sessionKey?.() || 'chat';
+    const agent = pane.role === 'admin' ? getAgentRecord(targetKey) : null;
+    targetLabel = pane.role === 'admin' ? formatAgentLabel(agent, { includeId: false }) || targetKey : paneDisplayTargetLabel(pane);
+  } else if (kind === 'workqueue') {
+    targetKey = String(pane.workqueue?.queue || '').trim() || 'dev-team';
+    targetLabel = targetKey;
+  } else {
+    targetKey = paneDisplayTargetLabel(pane);
+    targetLabel = targetKey;
+  }
+  return {
+    paneKey: pane.key,
+    kind,
+    targetKey,
+    targetLabel,
+    label: `${paneLabel(pane)} · ${targetLabel}`
+  };
+}
+
+function paneDraftTargetsEquivalent(a, b) {
+  if (!a || !b) return true;
+  return String(a.kind || '') === String(b.kind || '') && String(a.targetKey || '') === String(b.targetKey || '');
+}
+
+function paneUpdateDraftOrigin(pane) {
+  if (!pane || pane.kind !== 'chat') return;
+  if (!paneHasDraftChanges(pane)) {
+    pane.draftOrigin = null;
+    return;
+  }
+  if (!pane.draftOrigin) pane.draftOrigin = paneDraftTargetIdentity(pane);
+}
+
+function paneFindByKey(key) {
+  return paneManager.panes.find((p) => p && p.key === key) || null;
+}
+
+function paneReturnToDraftOrigin(origin) {
+  const pane = paneFindByKey(origin?.paneKey);
+  if (!pane) return false;
+  if (pane.kind === 'chat' && origin.kind === 'chat' && origin.targetKey) {
+    paneSetAgent(pane, origin.targetKey, { requireDraftConfirm: false });
+  }
+  paneManager.focusPanePrimary(pane);
+  return true;
+}
+
+function paneConfirmRetargetSend(pane, origin, current) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal open retarget-confirm-modal';
+    backdrop.setAttribute('aria-hidden', 'false');
+
+    const card = document.createElement('div');
+    card.className = 'modal-card retarget-confirm-card';
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-modal', 'true');
+    card.setAttribute('aria-labelledby', 'retargetConfirmTitle');
+
+    const title = document.createElement('h2');
+    title.id = 'retargetConfirmTitle';
+    title.textContent = 'Send carried draft?';
+
+    const body = document.createElement('p');
+    body.className = 'retarget-confirm-copy';
+    body.textContent = `This draft started in ${origin?.label || 'another target'} and is now pointed at ${current?.label || 'the current target'}.`;
+
+    const actions = document.createElement('div');
+    actions.className = 'button-row retarget-confirm-actions';
+
+    const sendBtn = document.createElement('button');
+    sendBtn.type = 'button';
+    sendBtn.className = 'primary';
+    sendBtn.textContent = 'Send to current target';
+
+    const returnBtn = document.createElement('button');
+    returnBtn.type = 'button';
+    returnBtn.className = 'secondary';
+    returnBtn.textContent = 'Return to origin pane';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'secondary';
+    cancelBtn.textContent = 'Cancel';
+
+    const cleanup = (value) => {
+      document.removeEventListener('keydown', onKeydown, true);
+      try {
+        backdrop.remove();
+      } catch {}
+      resolve(value);
+    };
+
+    const onKeydown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        cleanup('cancel');
+      }
+    };
+
+    sendBtn.addEventListener('click', () => cleanup('current'));
+    returnBtn.addEventListener('click', () => cleanup('origin'));
+    cancelBtn.addEventListener('click', () => cleanup('cancel'));
+    backdrop.addEventListener('click', (event) => {
+      if (event.target === backdrop) cleanup('cancel');
+    });
+    document.addEventListener('keydown', onKeydown, true);
+
+    actions.append(sendBtn, returnBtn, cancelBtn);
+    card.append(title, body, actions);
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+    sendBtn.focus();
+  });
+}
+
+async function paneShouldSendRetargetedDraft(pane) {
+  if (!isRetargetConfirmEnabled()) return true;
+  if (!pane?.draftOrigin) return true;
+  const current = paneDraftTargetIdentity(pane);
+  if (paneDraftTargetsEquivalent(pane.draftOrigin, current)) return true;
+
+  const choice = await paneConfirmRetargetSend(pane, pane.draftOrigin, current);
+  if (choice === 'current') {
+    pane.draftOrigin = current;
+    return true;
+  }
+  if (choice === 'origin') paneReturnToDraftOrigin(pane.draftOrigin);
+  return false;
 }
 
 function anyPaneHasDraftChanges(panes) {
@@ -9581,6 +9734,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   });
 
   elements.input.addEventListener('input', () => {
+    paneUpdateDraftOrigin(pane);
     paneUpdateCommandHints(pane);
   });
 
@@ -10360,6 +10514,9 @@ globalElements.settingsModal?.addEventListener('click', (event) => {
 });
 globalElements.paneSwitchHudEnabled?.addEventListener('change', () => {
   storage.set(PANE_SWITCH_HUD_ENABLED_KEY, globalElements.paneSwitchHudEnabled.checked ? '1' : '0');
+});
+globalElements.retargetConfirmEnabled?.addEventListener('change', () => {
+  storage.set(RETARGET_CONFIRM_ENABLED_KEY, globalElements.retargetConfirmEnabled.checked ? '1' : '0');
 });
 function handleShortcutOverrideInputKeydown(event) {
   const input = event.target?.closest?.('[data-shortcut-action]');
