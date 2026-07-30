@@ -141,7 +141,7 @@ test('shortcuts modal restores prior focus on close', async ({ page }) => {
   await expect(openBtn).toBeFocused();
 });
 
-test('cmd/ctrl+shift+j focuses previous pane with wraparound from unfocused state', async ({ page }) => {
+test('cmd/ctrl+shift+j focuses previous pane with wraparound from first pane', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
 
@@ -174,6 +174,9 @@ test('cmd/ctrl+shift+j focuses previous pane with wraparound from unfocused stat
     });
     window.dispatchEvent(event);
   });
+
+  await page.locator('[data-pane]').first().locator('[data-pane-input]').focus();
+  await expect.poll(activePaneIndex).toBe(0);
 
   await triggerPrevPaneShortcut();
   await expect.poll(activePaneIndex).toBe(2);
