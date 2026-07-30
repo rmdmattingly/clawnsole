@@ -347,7 +347,6 @@ const KEYBIND_CATALOG = [
   { id: 'pane.addWorkqueue', group: 'Pane actions', label: 'Add Workqueue pane (workspace only)', binding: { accel: true, shift: true, key: 'w', display: 'Cmd/Ctrl+Shift+W' } },
   { id: 'pane.addCron', group: 'Pane actions', label: 'Add Cron pane (workspace only)', binding: { accel: true, shift: true, key: 'r', display: 'Cmd/Ctrl+Shift+R' } },
   { id: 'pane.addTimeline', group: 'Pane actions', label: 'Add Timeline pane (workspace only)', binding: { accel: true, shift: true, key: 't', display: 'Cmd/Ctrl+Shift+T' } },
-  { id: 'fleet.open', group: 'Pane actions', label: 'Open/focus Fleet pane', binding: { accel: true, shift: true, key: 'f', display: 'Cmd/Ctrl+Shift+F' } },
   {
     id: 'agents.refresh',
     group: 'Pane actions',
@@ -356,10 +355,18 @@ const KEYBIND_CATALOG = [
     risk: { kind: 'browser', reason: 'Reserved by browser reload', alternative: { accel: true, shift: true, key: 'y', display: 'Cmd/Ctrl+Shift+Y' } }
   },
   { id: 'workqueue.open', group: 'Workqueue actions', label: 'Open Workqueue modal', binding: { chord: ['g', 'w'], display: 'g w' } },
+  { id: 'workqueue.openForActiveChat', group: 'Workqueue actions', label: 'Open/focus Workqueue for active Chat pane', binding: { accel: true, shift: true, key: 'g', display: 'Cmd/Ctrl+Shift+G' } },
+  { id: 'workqueue.togglePair', group: 'Workqueue actions', label: 'Toggle paired Chat and Workqueue panes', binding: { accel: true, shift: true, key: 'l', display: 'Cmd/Ctrl+Shift+L' } },
   { id: 'workqueue.move', group: 'Workqueue actions', label: 'Move selected row in Workqueue keyboard mode', binding: { key: 'j/k', display: 'j/k' } },
   { id: 'workqueue.inspect', group: 'Workqueue actions', label: 'Inspect selected Workqueue row in keyboard mode', binding: { key: 'Enter', display: 'Enter' } },
   { id: 'workqueue.edit', group: 'Workqueue actions', label: 'Edit selected Workqueue row in keyboard mode', binding: { key: 'e', display: 'e' } },
-  { id: 'workqueue.status', group: 'Workqueue actions', label: 'Set ready, in progress, blocked, or done in keyboard mode', binding: { key: '1..4', display: '1..4' } }
+  { id: 'workqueue.status', group: 'Workqueue actions', label: 'Set ready, in progress, blocked, or done in keyboard mode', binding: { key: '1..4', display: '1..4' } },
+  { id: 'fleet.open', group: 'Fleet actions', label: 'Open/focus Fleet pane', binding: { accel: true, shift: true, key: 'f', display: 'Cmd/Ctrl+Shift+F' } },
+  { id: 'fleet.sortHeartbeatGlobal', group: 'Fleet actions', label: 'Open Fleet sorted by heartbeat age', binding: { accel: true, shift: true, key: 'h', display: 'Cmd/Ctrl+Shift+H' } },
+  { id: 'fleet.next', group: 'Fleet actions', label: 'Move Fleet selection down', binding: { key: 'j', display: 'J / Down' } },
+  { id: 'fleet.prev', group: 'Fleet actions', label: 'Move Fleet selection up', binding: { key: 'k', display: 'K / Up' } },
+  { id: 'fleet.runSelected', group: 'Fleet actions', label: 'Run selected Fleet agent', binding: { key: 'Enter', display: 'Enter' } },
+  { id: 'fleet.toggleHeartbeatSort', group: 'Fleet actions', label: 'Toggle Fleet heartbeat age sort', binding: { key: 'h', display: 'H / Shift+H' } }
 ];
 
 function readKeybindOverrides() {
@@ -465,6 +472,18 @@ function renderShortcutsContent() {
   `).join('');
   root.innerHTML = hint + html;
 }
+
+function shortcutCatalogSnapshot() {
+  return KEYBIND_CATALOG.map((entry) => ({
+    id: entry.id,
+    group: entry.group,
+    label: entry.label,
+    display: shortcutDisplay(entry.id),
+    global: isGlobalKeybindEntry(entry)
+  }));
+}
+
+window.__clawnsoleShortcutCatalog = shortcutCatalogSnapshot;
 
 function renderKeyboardSettings() {
   const root = globalElements.keybindConflictList;
@@ -10985,6 +11004,7 @@ function isTypingShortcutExempt(event) {
   const key = String(event?.key || '').toLowerCase();
   const override = matchingShortcutOverrideAction(event);
   if (override?.typingExempt) return true;
+  if (matchesKeybind(event, 'workqueue.openForActiveChat')) return true;
   return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'p' || key === 'k' || key === 'l');
 }
 
@@ -11373,7 +11393,7 @@ window.addEventListener('keydown', (event) => {
   }
 
   // Cmd/Ctrl+Shift+G targets the focused chat pane, so allow it from the chat input.
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && String(event.key || '').toLowerCase() === 'g' && roleState.role === 'admin') {
+  if (matchesKeybind(event, 'workqueue.openForActiveChat') && roleState.role === 'admin') {
     event.preventDefault();
     openWorkqueueForActiveChatAgent();
     return;
@@ -11481,7 +11501,7 @@ window.addEventListener('keydown', (event) => {
   }
 
   // Cmd/Ctrl+Shift+L toggles paired target lock on focused Chat/Workqueue pane.
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'l') {
+  if (matchesKeybind(event, 'workqueue.togglePair')) {
     const focusedKey = focusedPaneKey();
     const pane = paneManager.panes.find((p) => p?.key === focusedKey) || paneManager.panes[0] || null;
     if (paneSupportsTargetLock(pane)) {
@@ -11492,7 +11512,7 @@ window.addEventListener('keydown', (event) => {
   }
 
   // Cmd/Ctrl+Shift+H opens Agents and sorts by heartbeat age (stale first).
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && key.toLowerCase() === 'h') {
+  if (matchesKeybind(event, 'fleet.sortHeartbeatGlobal')) {
     event.preventDefault();
     if (roleState.role === 'admin') {
       openAgentsModal();
