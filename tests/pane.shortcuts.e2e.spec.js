@@ -58,6 +58,43 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
 });
 
+test('shortcuts overlay documents every registered global shortcut once', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'false');
+
+  const coverage = await page.evaluate(() => {
+    const registered = Array.from(window.CL_REGISTERED_GLOBAL_SHORTCUT_ACTIONS || []);
+    const rendered = Array.from(document.querySelectorAll('#shortcutsModal [data-shortcut-action]'))
+      .map((row) => row.getAttribute('data-shortcut-action'))
+      .filter(Boolean);
+    const renderedSet = new Set(rendered);
+    const counts = rendered.reduce((acc, id) => {
+      acc[id] = (acc[id] || 0) + 1;
+      return acc;
+    }, {});
+    return {
+      missing: registered.filter((id) => !renderedSet.has(id)),
+      duplicateIds: Object.entries(counts).filter(([, count]) => count > 1).map(([id]) => id),
+      unknown: rendered.filter((id) => !registered.includes(id))
+    };
+  });
+
+  expect(coverage).toEqual({ missing: [], duplicateIds: [], unknown: [] });
+  await expect(page.locator('[data-shortcut-action="fleet.open"]')).toContainText('Fleet');
+  await expect(page.locator('[data-shortcut-action="fleet.sort.stale"]')).toContainText('stale-first');
+});
+
 test('pane-add shortcuts are scoped to workspace and blocked by overlays', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
