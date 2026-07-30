@@ -7,7 +7,33 @@ test('visiting /admin without auth shows login overlay', async ({ page, clawnsol
 
   await page.goto(clawnsole.adminUrl);
   await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
-  await expect(page.getByTestId('role-pill')).toContainText('signed out');
+  await expect(page.getByTestId('role-pill')).toContainText('Signed out');
+  await expect(page.getByTestId('role-pill')).toHaveAttribute('data-auth-state', 'signed_out');
+});
+
+test('session chip shows identity context and opens details', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.goto(clawnsole.adminUrl);
+  const chip = page.getByTestId('role-pill');
+  await expect(chip).toContainText('Signed out');
+  await expect(chip).toHaveAttribute('data-auth-state', 'signed_out');
+
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await clawnsole.waitForAdminUiReady(page);
+
+  await expect(chip).toContainText('Signed in');
+  await expect(chip).toContainText('admin');
+  await expect(chip).toContainText('local');
+  await expect(chip).toHaveAttribute('data-auth-state', 'signed_in');
+  await expect(chip).toHaveAttribute('title', /signed in as admin/i);
+
+  await chip.click();
+  await expect(page.locator('#authSessionPopover')).toBeVisible();
+  await expect(page.locator('#authSessionStatus')).toContainText('Signed in');
+  await expect(page.locator('#authSessionPrincipal')).toContainText('admin');
+  await expect(page.locator('#authSessionEnvironment')).toContainText('local');
 });
 
 test('admin login restores the intended in-app destination', async ({ page, clawnsole }) => {
@@ -113,6 +139,7 @@ test('gateway unauthorized triggers auth-expired UX and blocks sending until re-
 
   await expect(page.getByTestId('login-overlay')).toHaveClass(/open/, { timeout: 10000 });
   await expect(page.getByTestId('login-error')).toContainText(/session expired|sign in/i);
+  await expect(page.getByTestId('role-pill')).toHaveAttribute('data-auth-state', 'signed_out');
 
   // The current pane should be disabled while signed out.
   await expect(page.getByTestId('pane-input').first()).toBeDisabled();

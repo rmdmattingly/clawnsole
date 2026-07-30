@@ -54,7 +54,44 @@
               <option value="3">3-up</option>
             </select>
           </div>
-          <div class="role-pill" id="rolePill" data-testid="role-pill">signed out</div>
+          <div class="auth-session-wrap">
+            <button
+              class="role-pill"
+              id="rolePill"
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              aria-controls="authSessionPopover"
+              data-auth-state="signed_out"
+              data-testid="role-pill"
+              title="Session context: signed out. Click for session details."
+            >Signed out</button>
+            <div
+              class="auth-session-popover"
+              id="authSessionPopover"
+              role="dialog"
+              aria-label="Session details"
+              data-auth-state="signed_out"
+              hidden
+            >
+              <div class="auth-session-row">
+                <span>Status</span>
+                <strong id="authSessionStatus">Signed out</strong>
+              </div>
+              <div class="auth-session-row">
+                <span>Identity</span>
+                <strong id="authSessionPrincipal">unknown</strong>
+              </div>
+              <div class="auth-session-row">
+                <span>Environment</span>
+                <strong id="authSessionEnvironment">unknown</strong>
+              </div>
+              <div class="auth-session-actions">
+                <button id="authSessionSettingsBtn" class="text-btn" type="button">Settings</button>
+                <button id="authSessionLogoutBtn" class="text-btn danger" type="button" disabled>Log out</button>
+              </div>
+            </div>
+          </div>
           <button id="refreshAgentsBtn" class="icon-btn action-btn" type="button" aria-label="Refresh agent list" title="Refresh (Ctrl/Cmd+R)" hidden>
             <span class="btn-icon" aria-hidden="true">⟳</span>
             <span class="btn-label">Refresh</span>

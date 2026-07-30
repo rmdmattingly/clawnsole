@@ -211,6 +211,12 @@ body::before {
   padding: 0 12px;
 }
 
+.auth-session-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
 .role-pill {
   padding: 6px 12px;
   border-radius: 999px;
@@ -220,12 +226,68 @@ body::before {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--accent);
+  cursor: pointer;
 }
 
 .role-pill.admin {
   background: rgba(127, 209, 185, 0.18);
   border-color: rgba(127, 209, 185, 0.45);
   color: var(--accent-2);
+}
+
+.role-pill[data-auth-state="locked"] {
+  background: rgba(255, 179, 71, 0.2);
+  border-color: rgba(255, 179, 71, 0.55);
+  color: var(--accent);
+}
+
+.role-pill[data-auth-state="signed_out"] {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--muted);
+}
+
+.role-pill:focus-visible {
+  outline: 2px solid rgba(127, 209, 185, 0.75);
+  outline-offset: 2px;
+}
+
+.auth-session-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 45;
+  width: min(260px, calc(100vw - 24px));
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(15, 20, 27, 0.98);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.38);
+}
+
+.auth-session-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 7px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.auth-session-row strong {
+  max-width: 140px;
+  overflow: hidden;
+  color: var(--text);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-session-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
 }
 
 .channel-switch select {

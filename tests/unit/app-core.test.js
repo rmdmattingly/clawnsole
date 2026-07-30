@@ -245,17 +245,24 @@ test('normalizePaneKind handles aliases safely', () => {
 test('deriveAuthOverlayState captures auth/role transition flags', () => {
   assert.deepEqual(deriveAuthOverlayState({ authed: true, role: 'admin' }), {
     isAdmin: true,
+    authState: 'signed_in',
+    authStateLabel: 'Signed in',
+    principalLabel: 'admin',
+    environmentLabel: '',
     startAgentAutoRefresh: true,
     stopAgentAutoRefresh: false,
-    rolePillText: 'signed in',
+    rolePillText: 'Signed in · admin',
     rolePillAdmin: true,
+    rolePillStateClass: 'signed_in',
+    rolePillTooltip: 'Session context: signed in as admin. Click for session details.',
     showAdminControls: true,
     logoutEnabled: true,
     logoutOpacity: '1'
   });
 
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).startAgentAutoRefresh, false);
-  assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest' }).rolePillText, 'guest');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).rolePillText, 'Locked · admin');
+  assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest', environment: 'local' }).rolePillText, 'Signed in · guest · local');
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '0.5');
 });
 
