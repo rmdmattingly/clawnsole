@@ -8,6 +8,7 @@ test('visiting /admin without auth shows login overlay', async ({ page, clawnsol
   await page.goto(clawnsole.adminUrl);
   await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
   await expect(page.getByTestId('role-pill')).toContainText('signed out');
+  await expect(page.getByTestId('pane-grid')).toBeHidden();
 });
 
 test('admin login restores the intended in-app destination', async ({ page, clawnsole }) => {
