@@ -304,15 +304,37 @@ test('fleet refresh keeps scroll anchor and keyboard triage selection', async ({
   await expect(page.locator('#agentsList .agents-row[data-agent-id="agent-21"]')).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('k');
   await expect(row20).toHaveAttribute('aria-selected', 'true');
+  const workqueueCountBeforeEnter = await page.locator('[data-pane][data-pane-kind="workqueue"]').count();
   await page.keyboard.press('Enter');
   await expect.poll(async () => (
     page.locator('[data-pane][data-pane-kind="chat"] [data-pane-agent-select]')
       .evaluateAll((els) => els.map((el) => el.value))
   )).toContain('agent-20');
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(workqueueCountBeforeEnter);
+
+  await page.locator('#agentsCloseBtn').click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await page.locator('#agentsSearch').fill('agent-20');
+  const healthyShow = page.getByRole('button', { name: /Healthy \(\d+\) Show/ });
+  if (await healthyShow.count()) await healthyShow.click();
+  const reopenedRow20 = page.locator('#agentsList .agents-row[data-agent-id="agent-20"]');
+  await expect(reopenedRow20).toBeVisible();
+  await reopenedRow20.click();
+  await page.keyboard.press('Shift+Enter');
   await expect.poll(async () => (
     page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')
       .evaluateAll((els) => els.map((el) => el.value))
   )).toContain('agent-20');
+
+  const search = page.locator('#agentsSearch');
+  await search.fill('agent');
+  const selectedAfterFilter = page.locator('#agentsList .agents-row[aria-selected="true"]').first();
+  const selectedIdAfterFilter = await selectedAfterFilter.getAttribute('data-agent-id');
+  expect(selectedIdAfterFilter).toBeTruthy();
+  await search.focus();
+  await search.press('ArrowDown');
+  await expect(search).toHaveValue('agent');
+  await expect(page.locator(`#agentsList .agents-row[data-agent-id="${selectedIdAfterFilter}"]`)).toHaveAttribute('aria-selected', 'true');
 });
 
 test('fleet list keeps header and identity columns visible while scrolling', async ({ page, clawnsole }) => {
