@@ -40,6 +40,12 @@ test('pane manager: lists panes + focuses via keyboard', async ({ page }) => {
 
   const panes = page.locator('[data-pane]');
   await expect(panes).toHaveCount(2);
+  const chip = page.getByTestId('active-pane-chip');
+  await expect(chip).toContainText('Active: B Workqueue');
+  await expect(chip).toHaveAttribute('data-active-kind', 'workqueue');
+  await expect(panes.nth(1)).toHaveAttribute('data-pane-active', 'true');
+  await expect(panes.nth(0)).toHaveAttribute('data-pane-active', 'false');
+  await expect(page.locator('[data-pane][data-pane-active="true"]')).toHaveCount(1);
 
   // Active element should be inside the 2nd pane.
   const focusedPaneIndex = await page.evaluate(() => {
@@ -48,6 +54,46 @@ test('pane manager: lists panes + focuses via keyboard', async ({ page }) => {
     return panes.findIndex((p) => p === active || (active && p.contains(active)));
   });
   expect(focusedPaneIndex).toBe(1);
+
+  await panes.first().locator('[data-pane-input]').click();
+  await expect(chip).toContainText('Active: A Chat');
+  await expect(chip).toHaveAttribute('data-active-kind', 'chat');
+  await expect(panes.nth(0)).toHaveAttribute('data-pane-active', 'true');
+  await expect(panes.nth(1)).toHaveAttribute('data-pane-active', 'false');
+  await expect(page.locator('[data-pane][data-pane-active="true"]')).toHaveCount(1);
+});
+
+test('pane active context: keyboard navigation updates chip and survives reload', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  const chip = page.getByTestId('active-pane-chip');
+
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.press('Alt+2');
+  await expect(chip).toContainText('Active: B Workqueue');
+  await expect(panes.nth(1)).toHaveAttribute('data-pane-active', 'true');
+  await expect(page.locator('[data-pane][data-pane-active="true"]')).toHaveCount(1);
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await expect(chip).toContainText('Active: B Workqueue');
+  await expect(panes.nth(1)).toHaveAttribute('data-pane-active', 'true');
+  await expect(page.locator('[data-pane][data-pane-active="true"]')).toHaveCount(1);
+
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.press('Alt+1');
+  await expect(chip).toContainText('Active: A Chat');
+  await expect(panes.nth(0)).toHaveAttribute('data-pane-active', 'true');
+  await expect(page.locator('[data-pane][data-pane-active="true"]')).toHaveCount(1);
 });
 
 test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane kinds', async ({ page }) => {
