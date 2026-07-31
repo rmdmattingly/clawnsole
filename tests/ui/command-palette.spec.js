@@ -202,5 +202,5 @@ test('command palette: opens or focuses Workqueue for active chat agent', async 
 
   await wqPane.locator('[data-wq-queue-select]').focus();
   await runCommand('workqueue for active chat agent');
-  await expect(page.getByTestId('toast').last()).toContainText('No active chat agent selected');
+  await expect(page.getByTestId('toast').filter({ hasText: 'No active chat agent selected' })).toBeVisible();
 });
