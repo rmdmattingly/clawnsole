@@ -514,6 +514,12 @@ body::before {
   z-index: 2;
 }
 
+.pane.is-pair-revealed {
+  box-shadow:
+    0 0 0 2px rgba(var(--pane-pair-rgb, 125, 211, 252), 0.52),
+    var(--shadow);
+}
+
 .pane-index-badge {
   position: absolute;
   top: -7px;
@@ -552,6 +558,59 @@ body::before {
   align-items: center;
   gap: 12px;
   min-width: 0;
+}
+
+.pane-pair-cue {
+  --pane-pair-rgb: 125, 211, 252;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--pane-pair-rgb), 0.58);
+  background: rgba(var(--pane-pair-rgb), 0.14);
+  color: rgb(var(--pane-pair-rgb));
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pane-pair-cue[hidden] {
+  display: none !important;
+}
+
+.pane-pair-cue[data-pair-color="mint"] {
+  --pane-pair-rgb: 127, 209, 185;
+}
+
+.pane-pair-cue[data-pair-color="amber"] {
+  --pane-pair-rgb: 245, 158, 11;
+}
+
+.pane-pair-cue[data-pair-color="rose"] {
+  --pane-pair-rgb: 251, 113, 133;
+}
+
+.pane-pair-cue[data-pair-color="violet"] {
+  --pane-pair-rgb: 167, 139, 250;
+}
+
+.pane-pair-cue[data-pair-color="blue"] {
+  --pane-pair-rgb: 96, 165, 250;
+}
+
+.pane-pair-cue--inline {
+  min-width: 0;
+  height: 20px;
+  padding: 0 7px;
+}
+
+.pane[data-pair-reveal="true"] .pane-header {
+  border-color: rgba(var(--pane-pair-rgb, 125, 211, 252), 0.5);
 }
 
 .pane-name {

@@ -3024,6 +3024,81 @@ function findPairedPane(sourcePane, panes = [], { contextKey } = {}) {
   ) || null;
 }
 
+const PANE_PAIR_CUE_PALETTE = ['cyan', 'mint', 'amber', 'rose', 'violet', 'blue'];
+
+function panePairStableKey(pane) {
+  const target = panePairContextKey(pane);
+  return target ? `target:${target}` : '';
+}
+
+function panePairCueColor(pairKey) {
+  const text = String(pairKey || '');
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  return PANE_PAIR_CUE_PALETTE[hash % PANE_PAIR_CUE_PALETTE.length] || PANE_PAIR_CUE_PALETTE[0];
+}
+
+function panePairCueState(pane) {
+  const pairKey = panePairStableKey(pane);
+  if (!pairKey) return null;
+  const sibling = findPairedPane(pane, paneManager?.panes || []);
+  if (!sibling) return null;
+  return {
+    pairKey,
+    sibling,
+    color: panePairCueColor(pairKey),
+    siblingLetter: paneHeaderLetter(sibling),
+    target: panePairContextKey(pane)
+  };
+}
+
+function renderPanePairCue(pane) {
+  const cue = pane?.elements?.pairCue;
+  if (!cue) return;
+  const state = panePairCueState(pane);
+  if (!state) {
+    cue.hidden = true;
+    cue.textContent = '';
+    delete cue.dataset.pairKey;
+    delete cue.dataset.pairColor;
+    pane?.elements?.root?.style?.removeProperty('--pane-pair-rgb');
+    return;
+  }
+  cue.hidden = false;
+  cue.textContent = `Pair ${state.siblingLetter}`;
+  cue.dataset.pairKey = state.pairKey;
+  cue.dataset.pairColor = state.color;
+  cue.title = `Paired with pane ${state.siblingLetter} for ${state.target}`;
+  cue.setAttribute('aria-label', cue.title);
+  const pairRgb = {
+    cyan: '125, 211, 252',
+    mint: '127, 209, 185',
+    amber: '245, 158, 11',
+    rose: '251, 113, 133',
+    violet: '167, 139, 250',
+    blue: '96, 165, 250'
+  }[state.color] || '125, 211, 252';
+  pane?.elements?.root?.style?.setProperty('--pane-pair-rgb', pairRgb);
+}
+
+function panePairCueMarkup(pane, { testId = '' } = {}) {
+  const state = panePairCueState(pane);
+  if (!state) return '';
+  const testAttr = testId ? ` data-testid="${escapeHtml(testId)}"` : '';
+  return `<span class="pane-pair-cue pane-pair-cue--inline" data-pair-key="${escapeHtml(state.pairKey)}" data-pair-color="${escapeHtml(state.color)}"${testAttr} title="${escapeHtml(`Paired with pane ${state.siblingLetter} for ${state.target}`)}">Pair ${escapeHtml(state.siblingLetter)}</span>`;
+}
+
+function setPanePairReveal(pane, active) {
+  const state = panePairCueState(pane);
+  if (!state) return;
+  [pane, state.sibling].forEach((entry) => {
+    const root = entry?.elements?.root;
+    if (!root) return;
+    root.classList.toggle('is-pair-revealed', !!active);
+    root.dataset.pairReveal = active ? 'true' : 'false';
+  });
+}
+
 function paneSupportsTargetLock(pane) {
   if (!pane || pane.role !== 'admin') return false;
   return pane.kind === 'chat' || pane.kind === 'workqueue';
@@ -3288,6 +3363,7 @@ function renderPaneManager() {
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
               ${paneTypeBadgeMarkup(pane, { extraClass: 'pane-manager-type-badge', testId: 'pane-manager-type-badge' })}
+              ${panePairCueMarkup(pane, { testId: 'pane-manager-pair-cue' })}
               <span class="pane-manager-kind-label">${paneManagerHighlightHtml(paneIdentity, query)}</span>
               ${nickname ? `<span class="pane-manager-nickname" data-testid="pane-manager-nickname" title="${escapeHtml(`Pane nickname: ${nickname}`)}">${paneManagerHighlightHtml(nickname, query)}</span>` : ''}
               <span class="pane-manager-pane-id" title="Internal pane id">${paneManagerHighlightHtml(String(pane?.key || ''), query)}</span>
@@ -7954,6 +8030,7 @@ function renderPaneIdentity(pane) {
   } else {
     pane.elements.name.textContent = identity;
   }
+  renderPanePairCue(pane);
   if (pane.elements.nicknameBtn) {
     pane.elements.nicknameBtn.classList.toggle('has-nickname', !!nickname);
     pane.elements.nicknameBtn.title = nickname ? `Rename pane nickname: ${nickname}` : 'Set pane nickname';
@@ -8270,12 +8347,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   const root = template.content.firstElementChild.cloneNode(true);
   const elements = {
     root,
+    header: root.querySelector('.pane-header'),
     name: root.querySelector('[data-pane-name]'),
     nameToken: root.querySelector('[data-pane-name-token]'),
     nameTarget: root.querySelector('[data-pane-name-target]'),
     indexBadge: root.querySelector('[data-pane-index-badge]'),
     nicknameBtn: root.querySelector('[data-pane-nickname]'),
     typePill: root.querySelector('[data-pane-type-pill]'),
+    pairCue: root.querySelector('[data-pane-pair-cue]'),
     typeIcon: root.querySelector('[data-pane-type-icon]'),
     typeText: root.querySelector('[data-pane-type-text]'),
     agentSelect: root.querySelector('[data-pane-agent-select]'),
@@ -8364,12 +8443,17 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
   // Mark pane kind on root for CSS + debugging.
   try {
+    elements.root.dataset.paneKey = pane.key;
     elements.root.dataset.paneKind = pane.kind;
     elements.root.dataset.paneAccentKind = pane.kind;
     elements.root.classList.add(`pane-kind-${pane.kind}`);
   } catch {}
 
   elements.root.addEventListener('click', () => notePaneFocused(pane));
+  elements.header?.addEventListener('mouseenter', () => setPanePairReveal(pane, true));
+  elements.header?.addEventListener('mouseleave', () => setPanePairReveal(pane, false));
+  elements.header?.addEventListener('focusin', () => setPanePairReveal(pane, true));
+  elements.header?.addEventListener('focusout', () => setPanePairReveal(pane, false));
   elements.nicknameBtn?.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
