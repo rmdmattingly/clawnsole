@@ -4787,10 +4787,11 @@ function moveFleetSelection(delta) {
   return true;
 }
 
-function runFleetSelectedAgent() {
+function runFleetSelectedAgent(mode = 'chat') {
   const id = String(fleetSelectionState.selectedAgentId || '').trim();
   if (!id) return false;
-  openAgentTriageFromFleet(id);
+  if (mode === 'workqueue') openAgentWorkqueueFromFleet(id);
+  else openAgentChatFromFleet(id);
   return true;
 }
 
@@ -10808,7 +10809,7 @@ globalElements.agentsModal?.addEventListener('keydown', (event) => {
     }
     if (key === 'Enter') {
       event.preventDefault();
-      runFleetSelectedAgent();
+      runFleetSelectedAgent(event.shiftKey ? 'workqueue' : 'chat');
       return;
     }
   }
