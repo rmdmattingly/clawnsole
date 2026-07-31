@@ -178,6 +178,10 @@ node scripts/recurring-prompts-scheduler.js --loopSeconds 60
 # Python worker wrapper (retry/backoff; suitable for launchd/systemd/cron)
 python3 scripts/recurring-prompts-worker.py --once
 python3 scripts/recurring-prompts-worker.py --loopSeconds 60
+
+# Python API worker (polls Clawnsole API and triggers due prompts with idempotency)
+python3 scripts/recurring_prompts_worker.py --once --admin-password "$CLAWNSOLE_ADMIN_PASSWORD"
+python3 scripts/recurring_prompts_worker.py --loop-seconds 60 --device-label launchd-admin-prompts
 ```
 
 Prompts are stored in `~/.openclaw/clawnsole-recurring-prompts*.json` (instance-aware).
