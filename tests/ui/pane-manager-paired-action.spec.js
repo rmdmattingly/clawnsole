@@ -50,11 +50,34 @@ test('pane manager paired action focuses an existing counterpart', async ({ page
     }
   ]);
 
+  const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  const workqueuePane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await expect(chatPane.getByTestId('pane-pair-cue')).toHaveText('Pair B');
+  await expect(workqueuePane.getByTestId('pane-pair-cue')).toHaveText('Pair A');
+  const chatPairKey = await chatPane.getByTestId('pane-pair-cue').getAttribute('data-pair-key');
+  await expect(workqueuePane.getByTestId('pane-pair-cue')).toHaveAttribute('data-pair-key', chatPairKey || '');
+
+  await chatPane.locator('.pane-header').hover();
+  await expect(chatPane).toHaveAttribute('data-pair-reveal', 'true');
+  await expect(workqueuePane).toHaveAttribute('data-pair-reveal', 'true');
+
+  await page.mouse.move(1, 1);
+  await expect(chatPane).not.toHaveAttribute('data-pair-reveal', 'true');
+  await expect(workqueuePane).not.toHaveAttribute('data-pair-reveal', 'true');
+
+  await workqueuePane.getByTestId('pane-target-lock').focus();
+  await expect(chatPane).toHaveAttribute('data-pair-reveal', 'true');
+  await expect(workqueuePane).toHaveAttribute('data-pair-reveal', 'true');
+
   await page.locator('[data-pane-kind="chat"] [data-pane-input]').click();
   await page.locator('#paneManagerBtn').click();
 
   const manager = page.getByTestId('pane-manager-modal');
   const chatRow = manager.locator('.pane-manager-row[data-pane-kind="chat"]').first();
+  const workqueueRow = manager.locator('.pane-manager-row[data-pane-kind="workqueue"]').first();
+  await expect(chatRow.getByTestId('pane-manager-pair-cue')).toHaveText('Pair B');
+  await expect(workqueueRow.getByTestId('pane-manager-pair-cue')).toHaveText('Pair A');
+
   const pairedAction = chatRow.getByTestId('pane-manager-paired-action');
   await expect(pairedAction).toHaveText('Paired Workqueue');
   await expect(pairedAction).toHaveAttribute('data-paired-kind', 'workqueue');
