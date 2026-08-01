@@ -556,8 +556,10 @@ body::before {
 .pane-header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex: 1 1 0;
+  gap: 8px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .pane-pair-cue {
@@ -566,9 +568,9 @@ body::before {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 48px;
+  min-width: 42px;
   height: 22px;
-  padding: 0 8px;
+  padding: 0 6px;
   border-radius: 999px;
   border: 1px solid rgba(var(--pane-pair-rgb), 0.58);
   background: rgba(var(--pane-pair-rgb), 0.14);
@@ -628,6 +630,9 @@ body::before {
 
 .pane-name-token {
   flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pane-name-target {
@@ -730,8 +735,14 @@ body::before {
 .pane-agent {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  flex: 0 1 96px;
+  gap: 6px;
   min-width: 0;
+  overflow: hidden;
+}
+
+.pane-header-left .agent-label {
+  display: none;
 }
 
 .pane-agent select {
@@ -745,8 +756,9 @@ body::before {
   gap: 8px;
   padding: 6px 12px;
   border-radius: 999px;
+  min-width: 0;
   min-height: 32px;
-  max-width: 260px;
+  max-width: 96px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(11, 14, 19, 0.55);
   color: var(--text);
@@ -851,6 +863,7 @@ body::before {
 .pane-header-right {
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 10px;
 }
 
