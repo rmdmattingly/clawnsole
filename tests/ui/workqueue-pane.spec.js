@@ -195,6 +195,37 @@ function seedExactDuplicateWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedLargeRoutineWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const items = Array.from({ length: 22 }, (_, ix) => ({
+    id: `routine-sweep-${ix}`,
+    queue,
+    title: `[routine] PR review sweep ${ix + 1}`,
+    instructions: 'Recurring dev-team PR review sweep',
+    priority: ix === 7 ? 99 : 10 + ix,
+    status: ix % 3 === 0 ? 'pending' : 'ready',
+    claimedBy: ix === 5 ? 'dev-2' : '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: ix,
+    lastError: '',
+    createdAt: iso(-120000 + ix * 1000),
+    updatedAt: iso(-90000 + ix * 1000),
+    dedupeKey: 'pr-review:sweep'
+  }));
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-180000) } },
+    assignments: {},
+    items
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 test('workqueue pane: queue switch updates pane identity everywhere', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -473,7 +504,7 @@ test('workqueue pane: default rows collapse exact duplicates with expandable mem
   const rows = wqPane.locator('[data-wq-list-body] .wq-row');
   const duplicateRow = wqPane.locator('[data-wq-duplicate-row]').first();
 
-  await expect(wqPane.locator('[data-wq-group-mode="rows"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(wqPane.locator('[data-wq-group-mode="auto"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 4 items');
   await expect(rows).toHaveCount(3);
   await expect(duplicateRow).toContainText('x2');
@@ -484,6 +515,38 @@ test('workqueue pane: default rows collapse exact duplicates with expandable mem
   await duplicateRow.press('Enter');
   await expect(duplicateRow).toHaveAttribute('aria-expanded', 'true');
   await expect(wqPane.locator('[data-wq-list-body] .wq-row-child')).toHaveCount(2);
+});
+
+test('workqueue pane: auto view groups large repetitive routine queues', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `large-routine-${Date.now()}`;
+  seedLargeRoutineWorkqueueItems(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-scope="all"]').click();
+
+  const groupRow = pane.locator('[data-wq-group-row="pr-review:sweep"]');
+  await expect(pane.locator('[data-wq-group-mode="auto"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(groupRow).toBeVisible();
+  await expect(groupRow).toContainText('22 rows');
+  await expect(groupRow.locator('.wq-col.status')).toContainText('Ready');
+  await expect(groupRow.locator('.wq-col.status')).toContainText('Pending');
+  await expect(groupRow.locator('.wq-col.prio')).toHaveText('99');
+  await expect(pane.locator('.wq-row')).toHaveCount(1);
+
+  await groupRow.focus();
+  await page.keyboard.press('Enter');
+  await expect(groupRow).toHaveAttribute('aria-expanded', 'true');
+  await expect(pane.locator('.wq-row-child')).toHaveCount(22);
 });
 
 test('workqueue pane: queue target supports search + recent persistence', async ({ page }) => {
@@ -776,7 +839,7 @@ test('workqueue pane: default rows auto-collapse exact duplicates with count and
   await pane.locator('[data-wq-queue-custom]').press('Enter');
 
   const duplicateRow = pane.locator('[data-wq-duplicate-row]').first();
-  await expect(pane.locator('[data-wq-group-mode="rows"]')).toHaveClass(/active/);
+  await expect(pane.locator('[data-wq-group-mode="auto"]')).toHaveClass(/active/);
   await expect(duplicateRow).toBeVisible();
   await expect(duplicateRow).toContainText('x2');
   await expect(duplicateRow).toHaveAttribute('data-wq-item', 'exact-dup-latest');
