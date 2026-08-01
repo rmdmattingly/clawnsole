@@ -4800,6 +4800,7 @@ function runFleetSelectedAgent(mode = 'chat') {
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress', 'done', 'failed'];
 const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
 const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
+const WORKQUEUE_GROUPED_AUTO_THRESHOLD = 20;
 const WORKQUEUE_ALL_SCOPE_GUARD_THRESHOLD_KEY = 'clawnsole.admin.workqueue.allScopeGuardThreshold';
 const WORKQUEUE_ALL_SCOPE_GUARD_DEFAULT_THRESHOLD = 200;
 const WORKQUEUE_HEADER_META = {
@@ -5537,6 +5538,32 @@ function getWorkqueueIssueKey(item) {
   return parsed ? `${parsed.repo}#${parsed.issueNumber}` : '';
 }
 
+function normalizeWorkqueueGroupText(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function getWorkqueueDedupeIdentity(item) {
+  const meta = item?.meta && typeof item.meta === 'object' ? item.meta : {};
+  return normalizeWorkqueueGroupText(meta.dedupeKey || item?.dedupeKey);
+}
+
+function getWorkqueueTitleGroupPrefix(item) {
+  const title = normalizeWorkqueueGroupText(formatWorkqueueIssueTitle(item) || item?.title);
+  if (!title) return '';
+  return title.slice(0, 80);
+}
+
+function getWorkqueueGroupIdentity(item) {
+  const source = getWorkqueueItemSource(item);
+  const issueKey = getWorkqueueIssueKey(item);
+  const dedupeKey = getWorkqueueDedupeIdentity(item);
+  if ((source === 'routine' || source === 'coordination') && dedupeKey) return `dedupe:${dedupeKey}`;
+  if (issueKey) return `issue:${issueKey}`;
+  if (dedupeKey) return `dedupe:${dedupeKey}`;
+  const titlePrefix = getWorkqueueTitleGroupPrefix(item);
+  return titlePrefix ? `title:${titlePrefix}` : '';
+}
+
 function chooseWorkqueueDuplicateKeepItem(items) {
   const statusRank = { in_progress: 6, claimed: 5, ready: 4, pending: 3, blocked: 2, done: 1, failed: 0 };
   return (Array.isArray(items) ? items : [])
@@ -5844,10 +5871,15 @@ function sortWorkqueueRowEntries(entries, { sortKey, sortDir } = {}) {
     .filter(Boolean);
 }
 
-function summarizeWorkqueueIssueGroups(items) {
+function formatWorkqueueGroupDisplayKey(key) {
+  const text = String(key || '');
+  return text.replace(/^(?:issue|dedupe|title):/, '');
+}
+
+function summarizeWorkqueueGroups(items) {
   const map = new Map();
   for (const item of Array.isArray(items) ? items : []) {
-    const key = getWorkqueueIssueKey(item);
+    const key = getWorkqueueGroupIdentity(item);
     if (!key) continue;
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(item);
@@ -5863,6 +5895,7 @@ function summarizeWorkqueueIssueGroups(items) {
     groups.push({
       kind: 'group',
       key,
+      displayKey: formatWorkqueueGroupDisplayKey(key),
       items: groupItems,
       representative,
       title: formatWorkqueueIssueTitle(representative),
@@ -5875,7 +5908,7 @@ function summarizeWorkqueueIssueGroups(items) {
   const out = [];
   const emittedGroups = new Set();
   for (const item of Array.isArray(items) ? items : []) {
-    const key = getWorkqueueIssueKey(item);
+    const key = getWorkqueueGroupIdentity(item);
     if (key && groupedKeys.has(key)) {
       if (emittedGroups.has(key)) continue;
       const group = groups.find((entry) => entry.key === key);
@@ -5886,6 +5919,18 @@ function summarizeWorkqueueIssueGroups(items) {
     out.push({ kind: 'item', item });
   }
   return out;
+}
+
+function normalizeWorkqueueGroupMode(value) {
+  const s = String(value || '').trim().toLowerCase();
+  if (s === 'rows' || s === 'grouped') return s;
+  return 'auto';
+}
+
+function resolveWorkqueueGroupMode(value, itemCount) {
+  const mode = normalizeWorkqueueGroupMode(value);
+  if (mode === 'rows' || mode === 'grouped') return mode;
+  return Number(itemCount || 0) > WORKQUEUE_GROUPED_AUTO_THRESHOLD ? 'grouped' : 'rows';
 }
 
 function appendWorkqueuePaneItemRow(pane, body, item, { child = false } = {}) {
@@ -6078,9 +6123,9 @@ function renderWorkqueuePaneItems(pane) {
   const statusLine = pane.elements?.thread?.querySelector('[data-wq-statusline]');
   if (statusLine) statusLine.textContent = formatWorkqueueVisibleSummary(items.length, totalCount, hiddenCounts);
   renderWorkqueueFilterSummaryForPane(pane, { shownCount: items.length, totalCount, hiddenCounts });
-  const groupMode = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
+  const groupMode = resolveWorkqueueGroupMode(pane.workqueue?.groupMode, items.length);
   const rows = groupMode === 'grouped'
-    ? summarizeWorkqueueIssueGroups(items)
+    ? summarizeWorkqueueGroups(items)
     : sortWorkqueueRowEntries(summarizeWorkqueueExactDuplicateRows(items), { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
   const renderLimit = Math.max(
     WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
@@ -6147,7 +6192,7 @@ function renderWorkqueuePaneItems(pane) {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = isExactDuplicate ? 'wq-row wq-group-row wq-exact-duplicate-row' : 'wq-row wq-group-row';
-    row.setAttribute(isExactDuplicate ? 'data-wq-duplicate-row' : 'data-wq-group-row', entry.key);
+    row.setAttribute(isExactDuplicate ? 'data-wq-duplicate-row' : 'data-wq-group-row', entry.displayKey || entry.key);
     if (isExactDuplicate && representative?.id) {
       row.setAttribute('data-wq-item', representative.id);
       if (representative.id === pane.workqueue.selectedItemId) row.classList.add('selected');
@@ -8261,10 +8306,6 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function normalizeWorkqueueGroupMode(value) {
-  return String(value || '').trim().toLowerCase() === 'grouped' ? 'grouped' : 'rows';
-}
-
 function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, cronAgentId, nickname, pairedTargetLock = false, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
@@ -8592,6 +8633,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
           <div class="wq-sort" role="group" aria-label="Workqueue row grouping">
             <span class="wq-sort-label">View</span>
+            <button type="button" class="wq-sort-btn" data-wq-group-mode="auto">Auto</button>
             <button type="button" class="wq-sort-btn" data-wq-group-mode="rows">Rows</button>
             <button type="button" class="wq-sort-btn" data-wq-group-mode="grouped">Grouped</button>
           </div>
@@ -9159,6 +9201,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         const active = key === current;
         btn.classList.toggle('active', active);
         btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        if (key === 'auto') btn.title = `Auto groups related rows when more than ${WORKQUEUE_GROUPED_AUTO_THRESHOLD} items are visible.`;
+        else if (key === 'rows') btn.title = 'Show individual workqueue rows; exact duplicate rows still collapse.';
+        else btn.title = 'Group related issue, routine, or coordination rows.';
       });
     };
 
