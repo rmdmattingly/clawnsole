@@ -3449,7 +3449,8 @@ function renderPaneManager() {
           if (action === 'paired') {
             const pairedPane = focusOrOpenPairedPaneForPane(pane);
             if (pairedPane) {
-              closePaneManager();
+              closePaneManager({ restoreFocus: false });
+              paneManager.focusPanePrimary(pairedPane);
             } else {
               renderPaneManager();
             }
@@ -8386,6 +8387,7 @@ function renderAgentOptions(selectEl, agentId) {
 function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, cronAgentId, nickname, pairedTargetLock = false, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
+  root.tabIndex = -1;
   const elements = {
     root,
     header: root.querySelector('.pane-header'),
@@ -10312,8 +10314,13 @@ const paneManager = {
     if (!pane?.elements?.root) return;
     notePaneFocused(pane);
 
+    try {
+      pane.elements.root.focus?.({ preventScroll: true });
+    } catch {}
+
     // Defer until DOM has painted.
     setTimeout(() => {
+      if (paneFocusMruKeys[0] !== pane.key) return;
       try {
         if (pane.kind === 'chat') {
           pane.elements.input?.focus?.();

@@ -329,10 +329,28 @@ test('pane manager: paired action focuses existing counterpart and opens missing
   });
   expect(focusedKindAfterFocus).toBe('workqueue');
 
-  // Remove the chat pane so Workqueue has no open counterpart.
+  // Start the missing-counterpart path from a Workqueue-only stored layout.
+  await page.evaluate(() => {
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([
+        {
+          key: 'ptestwqonly',
+          kind: 'workqueue',
+          agentId: 'main',
+          queue: 'dev-team',
+          statusFilter: ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
+          scopeFilter: 'assigned',
+          sortKey: 'priority',
+          sortDir: 'desc'
+        }
+      ])
+    );
+  });
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
   await page.keyboard.press('Control+P');
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
-  await page.locator('.pane-manager-row', { hasText: 'Chat · main' }).first().locator('[data-action="close"]').click();
 
   // Trigger Paired from Workqueue row; should open Chat and focus it.
   const workqueueRow = page.locator('.pane-manager-row', { hasText: 'Workqueue' }).first();
