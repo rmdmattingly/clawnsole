@@ -514,6 +514,12 @@ body::before {
   z-index: 2;
 }
 
+.pane.is-pair-revealed {
+  box-shadow:
+    0 0 0 2px rgba(var(--pane-pair-rgb, 125, 211, 252), 0.52),
+    var(--shadow);
+}
+
 .pane-index-badge {
   position: absolute;
   top: -7px;
@@ -550,8 +556,63 @@ body::before {
 .pane-header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex: 1 1 0;
+  gap: 8px;
   min-width: 0;
+  overflow: hidden;
+}
+
+.pane-pair-cue {
+  --pane-pair-rgb: 125, 211, 252;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--pane-pair-rgb), 0.58);
+  background: rgba(var(--pane-pair-rgb), 0.14);
+  color: rgb(var(--pane-pair-rgb));
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pane-pair-cue[hidden] {
+  display: none !important;
+}
+
+.pane-pair-cue[data-pair-color="mint"] {
+  --pane-pair-rgb: 127, 209, 185;
+}
+
+.pane-pair-cue[data-pair-color="amber"] {
+  --pane-pair-rgb: 245, 158, 11;
+}
+
+.pane-pair-cue[data-pair-color="rose"] {
+  --pane-pair-rgb: 251, 113, 133;
+}
+
+.pane-pair-cue[data-pair-color="violet"] {
+  --pane-pair-rgb: 167, 139, 250;
+}
+
+.pane-pair-cue[data-pair-color="blue"] {
+  --pane-pair-rgb: 96, 165, 250;
+}
+
+.pane-pair-cue--inline {
+  min-width: 0;
+  height: 20px;
+  padding: 0 7px;
+}
+
+.pane[data-pair-reveal="true"] .pane-header {
+  border-color: rgba(var(--pane-pair-rgb, 125, 211, 252), 0.5);
 }
 
 .pane-name {
@@ -569,6 +630,9 @@ body::before {
 
 .pane-name-token {
   flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pane-name-target {
@@ -671,8 +735,14 @@ body::before {
 .pane-agent {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  flex: 0 1 96px;
+  gap: 6px;
   min-width: 0;
+  overflow: hidden;
+}
+
+.pane-header-left .agent-label {
+  display: none;
 }
 
 .pane-agent select {
@@ -686,8 +756,9 @@ body::before {
   gap: 8px;
   padding: 6px 12px;
   border-radius: 999px;
+  min-width: 0;
   min-height: 32px;
-  max-width: 260px;
+  max-width: 96px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(11, 14, 19, 0.55);
   color: var(--text);
@@ -792,6 +863,7 @@ body::before {
 .pane-header-right {
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 10px;
 }
 
