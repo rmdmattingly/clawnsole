@@ -4173,7 +4173,7 @@ function openCommandPalette() {
   if (!globalElements.commandPaletteModal) return;
 
   commandPaletteState.open = true;
-  commandPaletteState.originPaneKey = focusedPaneKey() || paneMruOrder()[0] || '';
+  commandPaletteState.originPaneKey = focusedPaneKey() || '';
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
   commandPaletteState.selectedIndex = 0;
@@ -4274,10 +4274,13 @@ function findExistingPane(kind, predicate = null) {
 }
 
 function getActiveChatAgentPane() {
-  const focusedKey = focusedPaneKey();
-  const fallbackKey = paneMruOrder()[0] || '';
   const originKey = commandPaletteState.open ? String(commandPaletteState.originPaneKey || '') : '';
-  const activeKey = originKey || focusedKey || fallbackKey;
+  if (commandPaletteState.open) {
+    return (paneManager?.panes || []).find((pane) => String(pane?.key || '') === originKey && pane.kind === 'chat') || null;
+  }
+
+  const focusedKey = focusedPaneKey();
+  const activeKey = focusedKey || paneMruOrder()[0] || '';
   return (paneManager?.panes || []).find((pane) => String(pane?.key || '') === activeKey && pane.kind === 'chat') || null;
 }
 
