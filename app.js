@@ -3449,7 +3449,8 @@ function renderPaneManager() {
           if (action === 'paired') {
             const pairedPane = focusOrOpenPairedPaneForPane(pane);
             if (pairedPane) {
-              closePaneManager();
+              closePaneManager({ restoreFocus: false });
+              paneManager.focusPanePrimary(pairedPane);
             } else {
               renderPaneManager();
             }
@@ -4172,7 +4173,7 @@ function openCommandPalette() {
   if (!globalElements.commandPaletteModal) return;
 
   commandPaletteState.open = true;
-  commandPaletteState.originPaneKey = focusedPaneKey() || paneMruOrder()[0] || '';
+  commandPaletteState.originPaneKey = focusedPaneKey() || '';
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
   commandPaletteState.selectedIndex = 0;
@@ -4273,10 +4274,13 @@ function findExistingPane(kind, predicate = null) {
 }
 
 function getActiveChatAgentPane() {
-  const focusedKey = focusedPaneKey();
-  const fallbackKey = paneMruOrder()[0] || '';
   const originKey = commandPaletteState.open ? String(commandPaletteState.originPaneKey || '') : '';
-  const activeKey = originKey || focusedKey || fallbackKey;
+  if (commandPaletteState.open) {
+    return (paneManager?.panes || []).find((pane) => String(pane?.key || '') === originKey && pane.kind === 'chat') || null;
+  }
+
+  const focusedKey = focusedPaneKey();
+  const activeKey = focusedKey || paneMruOrder()[0] || '';
   return (paneManager?.panes || []).find((pane) => String(pane?.key || '') === activeKey && pane.kind === 'chat') || null;
 }
 
@@ -8386,6 +8390,7 @@ function renderAgentOptions(selectEl, agentId) {
 function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, cronAgentId, nickname, pairedTargetLock = false, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
+  root.tabIndex = -1;
   const elements = {
     root,
     header: root.querySelector('.pane-header'),
@@ -10312,8 +10317,13 @@ const paneManager = {
     if (!pane?.elements?.root) return;
     notePaneFocused(pane);
 
+    try {
+      pane.elements.root.focus?.({ preventScroll: true });
+    } catch {}
+
     // Defer until DOM has painted.
     setTimeout(() => {
+      if (paneFocusMruKeys[0] !== pane.key) return;
       try {
         if (pane.kind === 'chat') {
           pane.elements.input?.focus?.();
