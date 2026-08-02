@@ -318,6 +318,7 @@ const KEYBIND_CATALOG = [
   { id: 'chat.next', group: 'Pane focus/navigation', label: 'Focus next Chat pane only', binding: { accel: true, alt: true, key: 'k', display: 'Cmd/Ctrl+Alt+K' } },
   { id: 'chat.prev', group: 'Pane focus/navigation', label: 'Focus previous Chat pane only', binding: { accel: true, alt: true, key: 'j', display: 'Cmd/Ctrl+Alt+J' } },
   { id: 'chat.return', group: 'Pane focus/navigation', label: 'Return to last active Chat pane', binding: { chord: ['g', 'c'], display: 'g c' } },
+  { id: 'triage.return', group: 'Pane focus/navigation', label: 'Return to previous triage context', binding: { accel: true, shift: true, key: 'b', display: 'Cmd/Ctrl+Shift+B' } },
   {
     id: 'chat.composer',
     group: 'Pane focus/navigation',
@@ -1052,6 +1053,8 @@ const fleetSelectionState = {
   notice: '',
   missingAgentId: ''
 };
+
+let triageReturnAnchor = null;
 
 function startAgentAutoRefresh() {
   if (roleState.role !== 'admin') return;
@@ -3893,6 +3896,10 @@ function buildCommandPaletteItems() {
       'g c'
     ),
     withShortcut(
+      { id: 'cmd:return-triage-source', label: 'Panes: Return to previous triage context', detail: 'Restore the Agents modal row and action that opened Chat or Workqueue', run: () => returnToTriageSource() },
+      'Cmd/Ctrl+Shift+B'
+    ),
+    withShortcut(
       { id: 'cmd:focus-chat-composer', label: 'Chat: Focus composer', detail: 'Jump to the active or most recent Chat composer', run: () => focusChatComposer() },
       '⌘/Ctrl+L'
     ),
@@ -3938,7 +3945,7 @@ function buildCommandPaletteItems() {
     const label = String(item.label || '');
     const enriched = { ...item, group: 'Advanced', subgroup: '', priority: 20, kind: 'action' };
 
-    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-return-last-chat' || id === 'cmd:pane-mru-next' || id === 'cmd:pane-mru-prev' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
+    if (id.startsWith('cmd:focus-pane-') || id === 'cmd:pane-cycle' || id === 'cmd:pane-cycle-backward' || id === 'cmd:pane-return-last-chat' || id === 'cmd:return-triage-source' || id === 'cmd:pane-mru-next' || id === 'cmd:pane-mru-prev' || id === 'cmd:pane-next-unread' || id === 'cmd:pane-prev-unread') {
       enriched.group = 'Panes';
       enriched.priority = id.startsWith('cmd:focus-pane-') ? 130 : 110;
       return enriched;
@@ -4239,6 +4246,61 @@ function openAgentsModal() {
   } catch {}
 }
 
+function captureTriageReturnAnchor(agentId, { action = '' } = {}) {
+  if (!isAgentsModalOpen()) return;
+  const id = String(agentId || fleetSelectionState.selectedAgentId || '').trim();
+  if (!id) return;
+  const activeAction = document.activeElement instanceof Element
+    ? String(document.activeElement.closest?.('[data-agent-action]')?.getAttribute('data-agent-action') || '')
+    : '';
+  triageReturnAnchor = {
+    source: 'agents-modal',
+    agentId: id,
+    selectedIndex: Number(fleetSelectionState.selectedIndex) || 0,
+    action: activeAction || action || '',
+    createdAt: Date.now()
+  };
+}
+
+function returnToTriageSource() {
+  const anchor = triageReturnAnchor;
+  if (!anchor || anchor.source !== 'agents-modal') {
+    showToast('No triage context to return to.', { kind: 'info', timeoutMs: 2200 });
+    return false;
+  }
+  if (!isAgentsModalOpen()) {
+    showToast('Previous triage context is no longer open.', { kind: 'error', timeoutMs: 2600 });
+    return false;
+  }
+
+  renderAgentsModalList();
+  const id = String(anchor.agentId || '').trim();
+  const selected = id ? selectFleetAgent(id, { focusRow: true }) : false;
+  const rows = getFleetSelectableRows();
+  const row = selected
+    ? rows.find((entry) => String(entry?.dataset?.agentId || '') === id)
+    : rows[Math.max(0, Math.min(Number(anchor.selectedIndex) || 0, rows.length - 1))];
+  if (!row) {
+    showToast('Previous triage row is no longer available.', { kind: 'error', timeoutMs: 2600 });
+    return false;
+  }
+
+  try {
+    row.scrollIntoView({ block: 'nearest' });
+    const action = String(anchor.action || '').trim();
+    const focusTarget = action
+      ? row.querySelector(`[data-agent-action="${cssEscape(action)}"]`)
+      : null;
+    (focusTarget || row).focus({ preventScroll: true });
+  } catch {
+    try {
+      row.focus({ preventScroll: true });
+    } catch {}
+  }
+  showToast('Returned to triage context.', { kind: 'info', timeoutMs: 1600 });
+  return true;
+}
+
 function setFleetHeartbeatSort() {
   const current = getFleetSort();
   if (current !== 'heartbeat_age_desc') storage.set(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY, current);
@@ -4334,6 +4396,7 @@ function openWorkqueueForActiveChatAgent() {
 
 function openAgentChatFromFleet(agentId) {
   const target = normalizeAgentId(agentId || 'main');
+  captureTriageReturnAnchor(target, { action: 'open-chat' });
   const pane =
     findExistingPane('chat', (p) => normalizeAgentId(p.agentId || 'main') === target) ||
     paneManager.addPane('chat');
@@ -4344,6 +4407,7 @@ function openAgentChatFromFleet(agentId) {
 
 function openAgentTimelineFromFleet(agentId) {
   const target = String(agentId || '').trim() || 'all';
+  captureTriageReturnAnchor(target, { action: 'open-timeline' });
   const pane =
     findExistingPane('timeline', (p) => String(p.cronAgentId || '').trim() === target) ||
     paneManager.addPane('timeline', { cronAgentId: target });
@@ -4382,6 +4446,7 @@ function openFleetPane({ forceNew = false } = {}) {
 
 function openAgentWorkqueueFromFleet(agentId) {
   const target = normalizeAgentId(agentId || 'main');
+  captureTriageReturnAnchor(target, { action: 'open-workqueue' });
   const preferredQueue =
     String(workqueueState?.selectedQueue || '').trim() ||
     String(findExistingPane('workqueue')?.workqueue?.queue || '').trim() ||
@@ -10935,6 +11000,11 @@ globalElements.agentsModal?.addEventListener('keydown', (event) => {
   if (isTypingContext(event.target)) return;
   const key = String(event.key || '');
   const lower = key.toLowerCase();
+  if (matchesKeybind(event, 'triage.return')) {
+    event.preventDefault();
+    returnToTriageSource();
+    return;
+  }
   if (!event.metaKey && !event.ctrlKey && !event.altKey) {
     if (key === 'ArrowDown' || lower === 'j') {
       event.preventDefault();
@@ -11451,12 +11521,25 @@ window.addEventListener('keydown', (event) => {
 
   // If Pane Manager is open, it gets first dibs on keys.
   if (paneManagerHandleKeydown(event)) return;
+  if (event.defaultPrevented) return;
+
+  if (matchesKeybind(event, 'triage.return') && roleState.role === 'admin' && isAgentsModalOpen()) {
+    event.preventDefault();
+    returnToTriageSource();
+    return;
+  }
 
   const blockedReason = blockedGlobalShortcutReason(event);
   if (blockedReason) {
     event.preventDefault();
     event.stopPropagation();
     reportBlockedShortcut(blockedReason);
+    return;
+  }
+
+  if (matchesKeybind(event, 'triage.return') && roleState.role === 'admin') {
+    event.preventDefault();
+    returnToTriageSource();
     return;
   }
 
@@ -11661,6 +11744,10 @@ window.addEventListener('keydown', (event) => {
     if (shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < GO_TO_PANE_TIMEOUT_MS && /^[a-z]$/i.test(key)) {
       shortcutState.lastGAtMs = 0;
       event.preventDefault();
+      if (key.toLowerCase() === 't') {
+        returnToTriageSource();
+        return;
+      }
       if (focusPaneByHeaderLetter(key, { showHud: true })) return;
       if (key.toLowerCase() === 'c') {
         returnToLastActiveChatPane();

@@ -521,6 +521,56 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue(agentId || 'main');
 });
 
+test('agents modal can return to previous triage context after opening workqueue', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const beta = page.locator('#agentsList .agents-row').filter({ hasText: 'Beta (beta)' });
+  await beta.click();
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+
+  await beta.locator('[data-agent-action="open-workqueue"]').first().click();
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-queue-select]')).toBeFocused();
+
+  await page.keyboard.press('Control+Shift+B');
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+  await expect(beta.locator('[data-agent-action="open-workqueue"]').first()).toBeFocused();
+  await expect(page.getByTestId('toast').last()).toContainText('Returned to triage context.');
+});
+
+test('agents modal return to triage context fails gracefully once source is closed', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+
+  const row = page.locator('#agentsList .agents-row').filter({ hasText: 'Alpha (alpha)' });
+  await row.locator('[data-agent-action="open-chat"]').first().click();
+  await page.getByRole('button', { name: 'Close agents' }).click();
+  await expect(page.locator('#agentsModal')).not.toHaveClass(/open/);
+
+  await page.keyboard.press('Control+Shift+B');
+  await expect(page.getByTestId('toast').last()).toContainText('Previous triage context is no longer open.');
+});
+
 test('agents modal triage action opens chat and workqueue from non-chat layout', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
