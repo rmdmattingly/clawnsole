@@ -23,6 +23,17 @@ test('pane manager: lists panes + focuses via keyboard', async ({ page }) => {
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
+  const panesStatus = page.getByTestId('panes-status');
+  await expect(panesStatus).toContainText(/panes: \d+\/\d+ connected/i);
+  await expect(panesStatus).toHaveAttribute('aria-label', 'Pane connection status');
+  await expect(panesStatus).not.toHaveJSProperty('tagName', 'BUTTON');
+
+  const managePanes = page.getByRole('button', { name: 'Manage panes' });
+  await expect(managePanes).toHaveAttribute('title', /Manage panes/);
+  await managePanes.focus();
+  await expect(managePanes).toBeFocused();
+  await expect(managePanes).toHaveCSS('outline-style', 'solid');
+
   const modal = page.locator('#paneManagerModal');
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
 
