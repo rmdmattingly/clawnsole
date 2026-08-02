@@ -301,12 +301,14 @@ test('normalizeHistoryEntries supports gateway payload variants', () => {
 test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard error transitions', () => {
   assert.deepEqual(deriveGlobalConnectionState({ authed: false, panes: [{ connected: true }] }), {
     state: 'disconnected',
-    meta: 'sign in required'
+    meta: 'sign in required',
+    ariaLabel: 'Pane status: sign in required'
   });
 
   assert.deepEqual(deriveGlobalConnectionState({ authed: true, panes: [] }), {
     state: 'disconnected',
-    meta: ''
+    meta: '',
+    ariaLabel: 'Pane status: no panes'
   });
 
   assert.deepEqual(
@@ -317,7 +319,15 @@ test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard err
         { connected: false, statusState: 'reconnecting' }
       ]
     }),
-    { state: 'reconnecting', meta: 'panes: 1/2 connected' }
+    {
+      state: 'reconnecting',
+      meta: 'panes: 1 connected, 1 disconnected, 1 attention',
+      connectedCount: 1,
+      disconnectedCount: 1,
+      attentionCount: 1,
+      total: 2,
+      ariaLabel: 'Pane status: 1 connected, 1 disconnected, 1 need attention'
+    }
   );
 
   assert.deepEqual(
@@ -328,7 +338,34 @@ test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard err
         { connected: false, statusState: 'error', statusMeta: 'gateway disconnected' }
       ]
     }),
-    { state: 'error', meta: 'auth expired' }
+    {
+      state: 'error',
+      meta: 'panes: 0 connected, 2 disconnected, 2 attention',
+      connectedCount: 0,
+      disconnectedCount: 2,
+      attentionCount: 2,
+      total: 2,
+      ariaLabel: 'Pane status: 0 connected, 2 disconnected, 2 need attention'
+    }
+  );
+
+  assert.deepEqual(
+    deriveGlobalConnectionState({
+      authed: true,
+      panes: [
+        { connected: true, statusState: 'connected', unreadCount: 3 },
+        { connected: true, statusState: 'connected', unreadCount: 0 }
+      ]
+    }),
+    {
+      state: 'connected',
+      meta: 'panes: 2 connected, 0 disconnected, 1 attention',
+      connectedCount: 2,
+      disconnectedCount: 0,
+      attentionCount: 1,
+      total: 2,
+      ariaLabel: 'Pane status: 2 connected, 0 disconnected, 1 need attention'
+    }
   );
 });
 

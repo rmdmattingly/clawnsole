@@ -257,6 +257,23 @@ test('pane manager: unread-only filter toggle', async ({ page }) => {
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
+  await expect(page.getByTestId('panes-indicator')).toContainText(/panes: \d+ connected, \d+ disconnected, \d+ attention/);
+  await expect(page.getByTestId('panes-indicator')).toHaveAttribute('aria-label', /Pane status: \d+ connected, \d+ disconnected, \d+ need attention/);
+
+  await page.getByTestId('panes-indicator').click();
+  await expect(page.getByTestId('pane-manager-modal')).toHaveAttribute('aria-hidden', 'false');
+  const attentionCount = await page.getByTestId('panes-indicator').evaluate((el) => {
+    const match = String(el.textContent || '').match(/(\d+) attention/);
+    return match ? Number(match[1]) : 0;
+  });
+  await expect(page.locator('.pane-manager-row')).toHaveCount(attentionCount);
+
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+P');
+  await expect(page.getByTestId('pane-manager-modal')).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(2);
+
+  await page.keyboard.press('Escape');
   await page.getByTestId('panes-indicator').click();
   await expect(page.getByTestId('pane-manager-modal')).toHaveAttribute('aria-hidden', 'false');
   await page.locator('.pane-manager-unread-only').click();
@@ -295,6 +312,7 @@ test('pane manager: status stays in sync with pane header while modal is open', 
     btn?.click();
   });
 
+  await expect(page.getByTestId('panes-indicator')).toContainText(/\d+ connected, 1 disconnected, 1 attention/);
   await expect(chatHeaderStatus).toHaveText('disconnected');
   await expect(chatManagerState).toHaveText('disconnected');
 });
