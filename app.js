@@ -11521,8 +11521,9 @@ window.addEventListener('keydown', (event) => {
 
   // If Pane Manager is open, it gets first dibs on keys.
   if (paneManagerHandleKeydown(event)) return;
+  if (event.defaultPrevented) return;
 
-  if (matchesKeybind(event, 'triage.return') && roleState.role === 'admin') {
+  if (matchesKeybind(event, 'triage.return') && roleState.role === 'admin' && isAgentsModalOpen()) {
     event.preventDefault();
     returnToTriageSource();
     return;
@@ -11533,6 +11534,12 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     event.stopPropagation();
     reportBlockedShortcut(blockedReason);
+    return;
+  }
+
+  if (matchesKeybind(event, 'triage.return') && roleState.role === 'admin') {
+    event.preventDefault();
+    returnToTriageSource();
     return;
   }
 
