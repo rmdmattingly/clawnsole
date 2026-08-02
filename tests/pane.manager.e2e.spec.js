@@ -50,6 +50,52 @@ test('pane manager: lists panes + focuses via keyboard', async ({ page }) => {
   expect(focusedPaneIndex).toBe(1);
 });
 
+test('active pane chip and visual state follow keyboard pane cycling', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  const chip = page.getByTestId('active-pane-chip');
+  const triggerNextPaneShortcut = async () => page.evaluate(() => {
+    const event = new KeyboardEvent('keydown', {
+      key: 'K',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    });
+    window.dispatchEvent(event);
+  });
+
+  await expect(panes).toHaveCount(2);
+  await expect(chip).toBeVisible();
+  await expect(chip).toHaveText(/^Active: A Chat · .+/);
+  await expect(chip).toHaveAttribute('data-active-kind', 'chat');
+  await expect(panes.nth(0)).toHaveAttribute('data-pane-active', 'true');
+  await expect(page.locator('[data-pane][data-pane-active="true"]')).toHaveCount(1);
+
+  await triggerNextPaneShortcut();
+  await expect(chip).toHaveText(/^Active: B Workqueue · .+/);
+  await expect(chip).toHaveAttribute('data-active-kind', 'workqueue');
+  await expect(panes.nth(1)).toHaveAttribute('data-pane-active', 'true');
+  await expect(panes.nth(0)).toHaveAttribute('data-pane-active', 'false');
+  await expect(page.locator('[data-pane][data-pane-active="true"]')).toHaveCount(1);
+
+  await triggerNextPaneShortcut();
+  await expect(chip).toHaveText(/^Active: A Chat · .+/);
+  await expect(chip).toHaveAttribute('data-active-kind', 'chat');
+  await expect(panes.nth(0)).toHaveAttribute('data-pane-active', 'true');
+  await expect(panes.nth(1)).toHaveAttribute('data-pane-active', 'false');
+  await expect(page.locator('[data-pane][data-pane-active="true"]')).toHaveCount(1);
+});
+
 test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane kinds', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);

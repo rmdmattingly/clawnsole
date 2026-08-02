@@ -19,6 +19,7 @@ const globalElements = {
   recurringPromptHistoryRows: document.getElementById('recurringPromptHistoryRows'),
   recurringPromptHistoryEmpty: document.getElementById('recurringPromptHistoryEmpty'),
   status: document.getElementById('connectionStatus'),
+  activePaneChip: document.getElementById('activePaneChip'),
   paneManagerBtn: document.getElementById('paneManagerBtn'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
@@ -2806,7 +2807,9 @@ function focusedPaneKey() {
     const root = entry?.elements?.root;
     return !!(root && active && (root === active || root.contains(active)));
   });
-  return pane?.key || '';
+  if (pane?.key) return pane.key;
+  const stored = String(storage.get(ADMIN_ACTIVE_PANE_KEY, '') || '');
+  return panes.some((entry) => String(entry?.key || '') === stored) ? stored : '';
 }
 
 let paneFocusMruKeys = [];
@@ -2830,20 +2833,57 @@ function notePaneFocused(pane) {
   if (!key) return;
   const panes = paneManager?.panes || [];
   if (!panes.some((entry) => String(entry?.key || '') === key)) return;
+  storage.set(ADMIN_ACTIVE_PANE_KEY, key);
   paneMruTraversal = null;
   paneMruOrder();
   paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
   updateBrowserTitle(pane);
+  syncActivePaneState();
 }
 
 function forgetFocusedPaneKey(paneKey) {
   const key = String(paneKey || '');
   if (!key) return;
   paneFocusMruKeys = paneFocusMruKeys.filter((entry) => entry !== key);
+  if (String(storage.get(ADMIN_ACTIVE_PANE_KEY, '') || '') === key) storage.remove(ADMIN_ACTIVE_PANE_KEY);
   if (paneMruTraversal?.order) {
     paneMruTraversal.order = paneMruTraversal.order.filter((entry) => entry !== key);
     if (paneMruTraversal.order.length < 2) paneMruTraversal = null;
   }
+  syncActivePaneState();
+}
+
+function activePaneFromStoredKey() {
+  const panes = paneManager?.panes || [];
+  const key = String(storage.get(ADMIN_ACTIVE_PANE_KEY, '') || '');
+  return panes.find((pane) => String(pane?.key || '') === key) || panes[0] || null;
+}
+
+function syncActivePaneState() {
+  const panes = paneManager?.panes || [];
+  const active = activePaneFromStoredKey();
+  const activeKey = String(active?.key || '');
+
+  panes.forEach((pane) => {
+    try {
+      pane.elements.root.dataset.paneActive = activeKey && String(pane.key || '') === activeKey ? 'true' : 'false';
+    } catch {}
+  });
+
+  const chip = globalElements.activePaneChip;
+  if (!chip) return;
+  if (!active) {
+    chip.hidden = true;
+    chip.textContent = 'Active: —';
+    chip.removeAttribute('data-active-kind');
+    return;
+  }
+
+  const label = paneIdentityLabel(active);
+  chip.hidden = roleState.role !== 'admin';
+  chip.textContent = `Active: ${label}`;
+  chip.dataset.activeKind = String(active.kind || 'chat');
+  chip.title = `Active pane: ${label}`;
 }
 
 function paneIndexByKey(key) {
@@ -2911,6 +2951,7 @@ function clearPaneUnread(pane) {
   pane.unreadKind = '';
   renderPaneIdentity(pane);
   renderPaneActivityBadge(pane);
+  syncActivePaneState();
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -2951,6 +2992,7 @@ function markPaneUnread(pane, increment = 1, kind = 'chat') {
   pane.unreadKind = String(kind || 'activity');
   renderPaneIdentity(pane);
   renderPaneActivityBadge(pane);
+  syncActivePaneState();
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -7032,6 +7074,7 @@ renderPulse();
 
 const ADMIN_PANES_KEY = 'clawnsole.admin.panes.v1';
 const ADMIN_LAYOUT_LOCK_KEY = 'clawnsole.admin.layout.lock.v1';
+const ADMIN_ACTIVE_PANE_KEY = 'clawnsole.admin.activePaneKey.v1';
 // Layout is inferred from pane count; no manual layout toggle.
 const ADMIN_LAYOUT_MODE_KEY = 'clawnsole.admin.layoutMode';
 const ADMIN_DEFAULT_AGENT_KEY = 'clawnsole.admin.agentId';
@@ -10145,7 +10188,10 @@ const paneManager = {
     this.updatePaneLabels();
     this.updateCloseButtons();
     this.applyInferredLayout();
-    updateBrowserTitle(this.panes[0] || null);
+    const active = activePaneFromStoredKey();
+    if (active?.key) storage.set(ADMIN_ACTIVE_PANE_KEY, active.key);
+    updateBrowserTitle(active || this.panes[0] || null);
+    syncActivePaneState();
   },
   isLayoutLocked() {
     return !!this.layoutLocked;
@@ -10181,6 +10227,7 @@ const paneManager = {
       } catch {}
     });
     this.panes = [];
+    syncActivePaneState();
   },
   loadAdminPanes() {
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
@@ -10775,6 +10822,7 @@ const paneManager = {
 
     this.updatePaneLabels();
     this.persistAdminPanes();
+    syncActivePaneState();
     updateGlobalStatus();
     return true;
   },
@@ -10782,6 +10830,7 @@ const paneManager = {
     this.panes.forEach((pane) => renderPaneIdentity(pane));
     updatePaneShortcutBadges();
     this.updatePaneGridLabel();
+    syncActivePaneState();
   },
   updatePaneGridLabel() {
     const grid = globalElements.paneGrid;
@@ -11306,7 +11355,11 @@ function focusPaneIndex(idx, { trackMru = true, showHud = false } = {}) {
   if (!pane) return;
   clearPaneUnread(pane);
   if (trackMru) notePaneFocused(pane);
-  else updateBrowserTitle(pane);
+  else {
+    storage.set(ADMIN_ACTIVE_PANE_KEY, pane.key);
+    updateBrowserTitle(pane);
+    syncActivePaneState();
+  }
   if (showHud) showPaneSwitchHud(pane);
 
   try {
@@ -11828,6 +11881,16 @@ globalElements.paneManagerBtn?.addEventListener('click', (event) => {
   openPaneManager();
 });
 
+globalElements.activePaneChip?.addEventListener('click', (event) => {
+  event?.preventDefault?.();
+  const active = activePaneFromStoredKey();
+  if (active) {
+    const idx = paneManager.panes.findIndex((pane) => pane.key === active.key);
+    paneManagerUiState.selectedIndex = Math.max(0, idx);
+  }
+  openPaneManager();
+});
+
 globalElements.paneManagerCloseBtn?.addEventListener('click', () => closePaneManager());
 
 globalElements.paneManagerSearch?.addEventListener('input', () => {
@@ -12013,8 +12076,8 @@ window.addEventListener('load', () => {
 
       const isTouch = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
       if (!isTouch) {
-        const firstPane = paneManager.panes[0];
-        firstPane?.elements.input?.focus();
+        const activePane = activePaneFromStoredKey();
+        if (activePane) paneManager.focusPanePrimary(activePane);
       }
     })
     .catch(() => {

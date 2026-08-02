@@ -156,6 +156,44 @@ body::before {
   gap: 10px;
 }
 
+.active-pane-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: min(34vw, 360px);
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--pane-accent-rgb, var(--pane-accent-chat-rgb)), 0.58);
+  background: rgba(var(--pane-accent-rgb, var(--pane-accent-chat-rgb)), 0.14);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.active-pane-chip[hidden] {
+  display: none;
+}
+
+.active-pane-chip[data-active-kind="chat"] {
+  --pane-accent-rgb: var(--pane-accent-chat-rgb);
+}
+
+.active-pane-chip[data-active-kind="workqueue"] {
+  --pane-accent-rgb: var(--pane-accent-workqueue-rgb);
+}
+
+.active-pane-chip[data-active-kind="cron"] {
+  --pane-accent-rgb: var(--pane-accent-cron-rgb);
+}
+
+.active-pane-chip[data-active-kind="timeline"] {
+  --pane-accent-rgb: var(--pane-accent-timeline-rgb);
+}
+
 .agent-switch {
   display: inline-flex;
   align-items: center;
@@ -685,6 +723,20 @@ body::before {
 
 .pane-type-pill {
   flex: 0 0 auto;
+}
+
+.chat-panel.pane[data-pane-active="true"] {
+  border-color: rgba(var(--pane-accent-rgb), 0.92);
+  box-shadow:
+    0 0 0 2px rgba(var(--pane-accent-rgb), 0.46),
+    0 0 0 6px rgba(var(--pane-accent-rgb), 0.12),
+    0 28px 80px rgba(0, 0, 0, 0.34);
+}
+
+.chat-panel.pane[data-pane-active="true"] .pane-header {
+  background: linear-gradient(90deg, rgba(var(--pane-accent-rgb), 0.24), rgba(9, 12, 16, 0.14));
+  border-color: rgba(var(--pane-accent-rgb), 0.7);
+  border-left-color: rgba(var(--pane-accent-rgb), 1);
 }
 
 /* Per-pane subtle treatment */
