@@ -6235,19 +6235,7 @@ function getWorkqueueQuickFilterBreakdown(items, quickFilters) {
     current = next;
   }
   if (search) {
-    const next = current.filter((it) => {
-      const haystack = [
-        it?.id,
-        it?.title,
-        it?.instructions,
-        it?.dedupeKey,
-        it?.status,
-        it?.claimedBy,
-        getWorkqueueItemRepo(it),
-        getWorkqueueItemSource(it)
-      ].map((v) => String(v || '').toLowerCase()).join('\n');
-      return haystack.includes(search);
-    });
+    const next = current.filter((it) => getWorkqueueItemSearchText(it).includes(search));
     hidden.search = current.length - next.length;
     current = next;
   }
@@ -6543,6 +6531,31 @@ function appendWorkqueuePaneItemRow(pane, body, item, { child = false } = {}) {
   return row;
 }
 
+function getWorkqueueItemSearchText(item) {
+  const meta = item?.meta && typeof item.meta === 'object' ? item.meta : {};
+  return [
+    item?.id,
+    item?.queue,
+    item?.title,
+    formatWorkqueueIssueTitle(item),
+    item?.instructions,
+    item?.status,
+    item?.claimedBy,
+    item?.dedupeKey,
+    getWorkqueueItemRepo(item),
+    getWorkqueueItemSource(item),
+    JSON.stringify(meta)
+  ]
+    .map((value) => String(value || '').toLowerCase())
+    .join('\n');
+}
+
+function applyWorkqueueItemSearch(items, query) {
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return Array.isArray(items) ? items : [];
+  return (Array.isArray(items) ? items : []).filter((item) => getWorkqueueItemSearchText(item).includes(needle));
+}
+
 async function fetchAndRenderWorkqueueItemsForPane(pane) {
   if (!pane || pane.kind !== 'workqueue') return;
   const body = pane.elements?.thread?.querySelector('[data-wq-list-body]');
@@ -6687,7 +6700,11 @@ function renderWorkqueuePaneItems(pane) {
   const fetchedItems = Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : [];
   const countItems = Array.isArray(pane.workqueue?.countItems) ? pane.workqueue.countItems : fetchedItems;
   const scopedItems = filterWorkqueuePaneItemsByScope(pane, fetchedItems);
-  const quickResult = getWorkqueueQuickFilterBreakdown(scopedItems, pane.workqueue?.quickFilters);
+  const itemSearchQuery = String(pane.workqueue?.quickFilters?.search || pane.workqueue?.itemSearch || '').trim();
+  const quickResult = getWorkqueueQuickFilterBreakdown(scopedItems, {
+    ...(pane.workqueue?.quickFilters || {}),
+    search: itemSearchQuery
+  });
   const filteredItems = quickResult.items;
   const items = sortWorkqueueItems(filteredItems, { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
   renderWorkqueueAllScopeGuard(pane, items.length);
@@ -6731,7 +6748,31 @@ function renderWorkqueuePaneItems(pane) {
       const filtersHidingAll = totalCount > 0;
       const title = filtersHidingAll ? 'No items match current filters.' : 'No items in this queue.';
       const hiddenSummary = formatWorkqueueHiddenBreakdown(hiddenCounts);
-      empty.innerHTML = `
+      if (itemSearchQuery) {
+        empty.innerHTML = `
+          <div class="empty-state">
+            <div style="font-weight:700; margin-bottom:6px;">No items match "${escapeHtml(itemSearchQuery)}".</div>
+            <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span>${hiddenSummary ? ` · ${escapeHtml(hiddenSummary)}` : ''}</div>
+            <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+              <button type="button" class="secondary" data-wq-clear-item-search>Clear search</button>
+              <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
+            </div>
+          </div>
+        `;
+
+        const refreshBtn = pane.elements?.thread?.querySelector('[data-wq-refresh]');
+        const itemSearchEl = pane.elements?.thread?.querySelector('[data-wq-item-search]');
+        empty.querySelector('[data-wq-empty-refresh]')?.addEventListener('click', () => refreshBtn?.click());
+        empty.querySelector('[data-wq-clear-item-search]')?.addEventListener('click', () => {
+          pane.workqueue.itemSearch = '';
+          pane.workqueue.quickFilters = { ...(pane.workqueue.quickFilters || {}), search: '' };
+          paneManager.persistAdminPanes();
+          if (itemSearchEl) itemSearchEl.value = '';
+          renderWorkqueuePaneItems(pane);
+          itemSearchEl?.focus?.();
+        });
+      } else {
+        empty.innerHTML = `
         <div class="empty-state">
           <div style="font-weight:700; margin-bottom:6px;">${escapeHtml(title)}</div>
           <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
@@ -6744,16 +6785,17 @@ function renderWorkqueuePaneItems(pane) {
         </div>
       `;
 
-      const refreshBtn = pane.elements?.thread?.querySelector('[data-wq-refresh]');
-      const enqueueDetails = pane.elements?.thread?.querySelector('details.wq-enqueue');
-      empty.querySelector('[data-wq-empty-refresh]')?.addEventListener('click', () => refreshBtn?.click());
-      empty.querySelector('[data-wq-empty-enqueue]')?.addEventListener('click', () => {
-        try {
-          enqueueDetails?.setAttribute('open', '');
-          enqueueDetails?.scrollIntoView({ block: 'nearest' });
-          pane.elements?.thread?.querySelector('[data-wq-enqueue-title]')?.focus();
-        } catch {}
-      });
+        const refreshBtn = pane.elements?.thread?.querySelector('[data-wq-refresh]');
+        const enqueueDetails = pane.elements?.thread?.querySelector('details.wq-enqueue');
+        empty.querySelector('[data-wq-empty-refresh]')?.addEventListener('click', () => refreshBtn?.click());
+        empty.querySelector('[data-wq-empty-enqueue]')?.addEventListener('click', () => {
+          try {
+            enqueueDetails?.setAttribute('open', '');
+            enqueueDetails?.scrollIntoView({ block: 'nearest' });
+            pane.elements?.thread?.querySelector('[data-wq-enqueue-title]')?.focus();
+          } catch {}
+        });
+      }
     }
   }
 
@@ -9179,9 +9221,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         <div class="wq-toolbar-row">
           <label class="wq-field">
             <span class="wq-label">Queue</span>
-            <input data-wq-queue-search type="search" placeholder="Search queues" aria-label="Search queues" autocomplete="off" />
+            <input data-wq-queue-search type="search" placeholder="Filter queue list..." aria-label="Filter queue list" autocomplete="off" />
             <select data-wq-queue-select aria-label="Select workqueue target"></select>
             <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
+          </label>
+
+          <label class="wq-field">
+            <span class="wq-label">Items</span>
+            <input data-wq-item-search type="search" placeholder="Search items..." aria-label="Search workqueue items" autocomplete="off" value="${escapeHtml(pane.workqueue?.quickFilters?.search || pane.workqueue.itemSearch || '')}" />
           </label>
 
           <div class="wq-field wq-status-field">
@@ -9226,11 +9273,6 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <span class="wq-label">Repo</span>
             <div class="wq-scope" data-wq-repo-chips></div>
           </div>
-
-          <label class="wq-field wq-search-field">
-            <span class="wq-label">Search</span>
-            <input data-wq-search type="search" placeholder="Filter tasks" autocomplete="off" />
-          </label>
 
           <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
           <button data-wq-clear-quick class="secondary" type="button">Clear filters</button>
@@ -9325,6 +9367,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     `;
 
     const queueSearchEl = elements.thread.querySelector('[data-wq-queue-search]');
+    const itemSearchEl = elements.thread.querySelector('[data-wq-item-search]');
     const queueSelectEl = elements.thread.querySelector('[data-wq-queue-select]');
     const queueCustomEl = elements.thread.querySelector('[data-wq-queue-custom]');
 
@@ -9358,7 +9401,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const repoChipsEl = elements.thread.querySelector('[data-wq-repo-chips]');
     const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
     const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
-    const searchEl = elements.thread.querySelector('[data-wq-search]');
+    const searchEl = itemSearchEl;
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
     const keyboardModeBtn = elements.thread.querySelector('[data-wq-keyboard-mode]');
     const keyboardHint = elements.thread.querySelector('[data-wq-keyboard-hint]');
@@ -9380,7 +9423,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const initQuick = pane.workqueue?.quickFilters || {};
     const sourceSet = new Set(Array.isArray(initQuick.sources) ? initQuick.sources.map((x) => String(x || '').trim()).filter(Boolean) : []);
     const repoSet = new Set(Array.isArray(initQuick.repos) ? initQuick.repos.map((x) => String(x || '').trim()).filter(Boolean) : []);
-    let searchQuery = String(initQuick.search || '').trim();
+    let searchQuery = String(initQuick.search || pane.workqueue.itemSearch || '').trim();
+    pane.workqueue.itemSearch = searchQuery;
     if (searchEl) searchEl.value = searchQuery;
 
     const persistQuickFilters = () => {
@@ -9450,6 +9494,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
     const setQuickSearch = (next) => {
       searchQuery = String(next || '').trim();
+      pane.workqueue.itemSearch = searchQuery;
       if (searchEl && searchEl.value !== searchQuery) searchEl.value = searchQuery;
       resetRenderLimit();
       persistQuickFilters();
@@ -9671,7 +9716,6 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         doRefresh();
       }
     });
-
     renderStatusMultiSelect();
     populateQueueSelect().then(() => doRefresh());
 
@@ -9751,6 +9795,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       sourceSet.clear();
       repoSet.clear();
       searchQuery = '';
+      pane.workqueue.itemSearch = '';
       if (searchEl) searchEl.value = '';
       resetRenderLimit();
       persistQuickFilters();
@@ -9764,6 +9809,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       sourceSet.clear();
       repoSet.clear();
       searchQuery = '';
+      pane.workqueue.itemSearch = '';
       if (searchEl) searchEl.value = '';
       resetRenderLimit();
       persistQuickFilters();
@@ -12029,6 +12075,20 @@ function focusChatComposer() {
   return true;
 }
 
+function focusActiveWorkqueueItemSearch() {
+  const panes = paneManager?.panes || [];
+  const activeKey = focusedPaneKey();
+  const activePane = panes.find((pane) => pane.key === activeKey && pane.kind === 'workqueue');
+  if (!activePane) return false;
+  const input = activePane.elements?.thread?.querySelector?.('[data-wq-item-search]');
+  if (!input || typeof input.focus !== 'function') return false;
+  input.focus();
+  try {
+    input.select?.();
+  } catch {}
+  return true;
+}
+
 function cyclePaneFocus() {
   const panes = paneManager.panes;
   if (!panes || panes.length === 0) return;
@@ -12265,6 +12325,13 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     openShortcuts();
     return;
+  }
+
+  if (key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+    if (focusActiveWorkqueueItemSearch()) {
+      event.preventDefault();
+      return;
+    }
   }
 
   // Alt/Option+1..9 focuses panes by visible order.
