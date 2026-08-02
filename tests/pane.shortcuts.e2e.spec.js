@@ -58,6 +58,58 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
 });
 
+test('shortcuts overlay stays in sync with registered shortcut catalog', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  const modal = page.locator('#shortcutsModal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  const result = await page.evaluate(() => {
+    const catalog = window.__clawnsoleShortcutCatalog?.() || [];
+    const rows = Array.from(document.querySelectorAll('#shortcutsModal [data-shortcut-id]'));
+    const renderedIds = rows.map((row) => row.getAttribute('data-shortcut-id')).filter(Boolean);
+    const renderedIdSet = new Set(renderedIds);
+    const renderedTextById = new Map(rows.map((row) => [
+      row.getAttribute('data-shortcut-id'),
+      String(row.textContent || '').replace(/\s+/g, ' ').trim()
+    ]));
+    const missing = catalog
+      .filter((entry) => !renderedIdSet.has(entry.id) || !renderedTextById.get(entry.id)?.includes(entry.label))
+      .map((entry) => entry.id);
+    const duplicateIds = renderedIds.filter((id, idx) => renderedIds.indexOf(id) !== idx);
+    const globalShortcuts = catalog.filter((entry) => entry.global);
+    const duplicateGlobalDisplays = globalShortcuts
+      .filter((entry, idx) => entry.display && globalShortcuts.findIndex((candidate) => candidate.display === entry.display) !== idx)
+      .map((entry) => `${entry.id}:${entry.display}`);
+    return {
+      catalogCount: catalog.length,
+      rowCount: renderedIds.length,
+      missing,
+      duplicateIds,
+      duplicateGlobalDisplays
+    };
+  });
+
+  expect(result.catalogCount).toBeGreaterThan(0);
+  expect(result.rowCount).toBe(result.catalogCount);
+  expect(result.missing).toEqual([]);
+  expect(result.duplicateIds).toEqual([]);
+  expect(result.duplicateGlobalDisplays).toEqual([]);
+  await expect(modal).toContainText('Fleet actions');
+  await expect(modal).toContainText('Open/focus Fleet pane');
+  await expect(modal).toContainText('Open Fleet sorted by heartbeat age');
+});
+
 test('pane-add shortcuts are scoped to workspace and blocked by overlays', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
