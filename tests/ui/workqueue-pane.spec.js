@@ -577,6 +577,61 @@ test('workqueue pane: queue target supports search + recent persistence', async 
   await expect(secondSelect.locator('option', { hasText: '★ qa-hotfix' })).toHaveCount(1);
 });
 
+test('workqueue pane: focus shortcuts target queue search, item search, and status filter', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  const queueSearch = pane.locator('[data-wq-queue-search]');
+  const itemSearch = pane.locator('[data-wq-search]');
+  const statusDetails = pane.locator('[data-wq-status-details]');
+  const statusSummary = statusDetails.locator('summary');
+
+  await itemSearch.focus();
+  await page.keyboard.press('Meta+Alt+Q');
+  await expect(queueSearch).toBeFocused();
+
+  await queueSearch.fill('dev');
+  await page.keyboard.press('Meta+Alt+I');
+  await expect(itemSearch).toBeFocused();
+
+  await page.keyboard.press('Meta+Alt+S');
+  await expect(statusSummary).toBeFocused();
+  await expect(statusDetails).toHaveAttribute('open', '');
+
+  await page.getByTestId('shortcuts-btn').click();
+  await expect(page.getByTestId('shortcuts-modal')).toBeVisible();
+  await expect(page.locator('[data-shortcut-help="workqueue-focus-queue-search"]')).toContainText('Cmd/Ctrl+Alt/Option+Q');
+  await expect(page.locator('[data-shortcut-help="workqueue-focus-item-search"]')).toContainText('Cmd/Ctrl+Alt/Option+I');
+  await expect(page.locator('[data-shortcut-help="workqueue-focus-status-filter"]')).toContainText('Cmd/Ctrl+Alt/Option+S');
+});
+
+test('workqueue pane: focus shortcut reports blocked reason when target is unavailable', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await pane.locator('[data-wq-refresh]').focus();
+  await pane.locator('[data-wq-search]').evaluate((el) => {
+    el.disabled = true;
+  });
+
+  await page.keyboard.press('Meta+Alt+I');
+  const toast = page.getByTestId('shortcut-blocked-toast').last();
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText('Item search is unavailable.');
+});
+
 test('workqueue pane: enqueue assignment target supports search, keyboard select, and recents', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
