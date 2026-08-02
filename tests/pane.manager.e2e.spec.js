@@ -50,6 +50,32 @@ test('pane manager: lists panes + focuses via keyboard', async ({ page }) => {
   expect(focusedPaneIndex).toBe(1);
 });
 
+test('topbar: pane status chip and manage action are distinct + labeled', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const statusChip = page.locator('#panesStatusChip');
+  const manageBtn = page.getByTestId('manage-panes-btn');
+
+  await expect(statusChip).toBeVisible();
+  await expect(statusChip).toHaveAttribute('aria-label', /Pane status:/);
+  await expect(statusChip).toHaveText(/panes: \d+\/\d+ connected|sign in required/i);
+
+  await expect(manageBtn).toBeVisible();
+  await expect(manageBtn).toHaveText('Manage panes');
+  await expect(manageBtn).toHaveAttribute('title', /Manage panes/);
+
+  await manageBtn.focus();
+  await expect(manageBtn).toBeFocused();
+});
+
 test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane kinds', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
