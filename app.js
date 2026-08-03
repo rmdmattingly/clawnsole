@@ -20,6 +20,8 @@ const globalElements = {
   recurringPromptHistoryEmpty: document.getElementById('recurringPromptHistoryEmpty'),
   status: document.getElementById('connectionStatus'),
   paneManagerBtn: document.getElementById('paneManagerBtn'),
+  activePaneChip: document.getElementById('activePaneChip'),
+  activePaneChipValue: document.querySelector('[data-active-pane-chip-value]'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
   fleetBtn: document.getElementById('fleetBtn'),
@@ -2944,7 +2946,46 @@ function notePaneFocused(pane) {
   paneMruTraversal = null;
   paneMruOrder();
   paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
+  storage.set(ADMIN_ACTIVE_PANE_KEY, key);
+  updateActivePaneUi(pane);
   updateBrowserTitle(pane);
+}
+
+function activePaneFromState() {
+  const panes = paneManager?.panes || [];
+  const activeKey = focusedPaneKey() || paneMruOrder()[0] || storage.get(ADMIN_ACTIVE_PANE_KEY, '');
+  return panes.find((pane) => String(pane?.key || '') === String(activeKey || '')) || panes[0] || null;
+}
+
+function updateActivePaneUi(activePane = null) {
+  const panes = paneManager?.panes || [];
+  const selected = activePane && panes.includes(activePane) ? activePane : activePaneFromState();
+  const selectedKey = String(selected?.key || '');
+
+  panes.forEach((pane) => {
+    const isActive = !!selectedKey && String(pane?.key || '') === selectedKey;
+    const root = pane?.elements?.root;
+    if (!root) return;
+    root.classList.toggle('is-active-pane', isActive);
+    root.dataset.activePane = isActive ? 'true' : 'false';
+    root.setAttribute('aria-current', isActive ? 'true' : 'false');
+  });
+
+  const chip = globalElements.activePaneChip;
+  const value = globalElements.activePaneChipValue;
+  if (!chip || !value) return;
+
+  if (!selected) {
+    chip.hidden = true;
+    value.textContent = '';
+    chip.removeAttribute('title');
+    return;
+  }
+
+  const label = paneSummaryLabel(selected);
+  chip.hidden = false;
+  value.textContent = label;
+  chip.title = `Active pane: ${label}`;
 }
 
 function paneMarkSwitchSendGuard(pane, fromPaneKey) {
@@ -7261,6 +7302,7 @@ renderPulse();
 // Panes
 
 const ADMIN_PANES_KEY = 'clawnsole.admin.panes.v1';
+const ADMIN_ACTIVE_PANE_KEY = 'clawnsole.admin.activePaneKey.v1';
 const ADMIN_LAYOUT_LOCK_KEY = 'clawnsole.admin.layout.lock.v1';
 // Layout is inferred from pane count; no manual layout toggle.
 const ADMIN_LAYOUT_MODE_KEY = 'clawnsole.admin.layoutMode';
@@ -8811,6 +8853,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   } catch {}
 
   elements.root.addEventListener('click', () => notePaneFocused(pane));
+  elements.root.addEventListener('focusin', () => notePaneFocused(pane));
   elements.header?.addEventListener('mouseenter', () => setPanePairReveal(pane, true));
   elements.header?.addEventListener('mouseleave', () => setPanePairReveal(pane, false));
   elements.header?.addEventListener('focusin', () => setPanePairReveal(pane, true));
@@ -10379,7 +10422,8 @@ const paneManager = {
     this.updatePaneLabels();
     this.updateCloseButtons();
     this.applyInferredLayout();
-    updateBrowserTitle(this.panes[0] || null);
+    this.restoreActivePaneState({ focus: false });
+    updateBrowserTitle(activePaneFromState());
   },
   isLayoutLocked() {
     return !!this.layoutLocked;
@@ -10616,6 +10660,22 @@ const paneManager = {
       const firstPane = this.panes[0];
       firstPane?.elements?.input?.focus?.();
     } catch {}
+  },
+  restoreActivePaneState({ focus = true } = {}) {
+    const storedKey = String(storage.get(ADMIN_ACTIVE_PANE_KEY, '') || '');
+    const pane = this.panes.find((entry) => String(entry?.key || '') === storedKey) || this.panes[0] || null;
+    if (!pane) {
+      updateActivePaneUi(null);
+      updateBrowserTitle(null);
+      return null;
+    }
+    paneMruOrder();
+    paneFocusMruKeys = [pane.key, ...paneFocusMruKeys.filter((key) => key !== pane.key)];
+    storage.set(ADMIN_ACTIVE_PANE_KEY, pane.key);
+    updateActivePaneUi(pane);
+    updateBrowserTitle(pane);
+    if (focus) this.focusPanePrimary(pane);
+    return pane;
   },
   addPane(kind = 'chat', options = {}) {
     if (roleState.role !== 'admin') return;
@@ -11110,6 +11170,7 @@ const paneManager = {
   },
   updatePaneLabels() {
     this.panes.forEach((pane) => renderPaneIdentity(pane));
+    updateActivePaneUi();
     updatePaneShortcutBadges();
     this.updatePaneGridLabel();
   },
@@ -12365,8 +12426,7 @@ window.addEventListener('load', () => {
 
       const isTouch = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
       if (!isTouch) {
-        const firstPane = paneManager.panes[0];
-        firstPane?.elements.input?.focus();
+        paneManager.restoreActivePaneState({ focus: true });
       }
     })
     .catch(() => {

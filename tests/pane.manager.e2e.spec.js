@@ -85,6 +85,46 @@ test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane 
   await expect(page.locator('.pane-manager-row .pane-manager-pane-id').first()).toHaveText(/^[a-zA-Z0-9]+$/);
 });
 
+test('pane focus: active visual state and topbar chip follow keyboard pane navigation', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  const chip = page.getByTestId('active-pane-chip');
+  await expect(panes).toHaveCount(2);
+  await expect(chip).toContainText(/Active\s+A Chat · /);
+  await expect(panes.first()).toHaveAttribute('data-active-pane', 'true');
+  await expect(panes.nth(1)).toHaveAttribute('data-active-pane', 'false');
+
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.press('Alt+2');
+  await expect(chip).toContainText(/Active\s+B Workqueue · /);
+  await expect(panes.first()).toHaveAttribute('data-active-pane', 'false');
+  await expect(panes.nth(1)).toHaveAttribute('data-active-pane', 'true');
+  await expect(page.locator('[data-pane][data-active-pane="true"]')).toHaveCount(1);
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await expect(chip).toContainText(/Active\s+B Workqueue · /);
+  await expect(panes.first()).toHaveAttribute('data-active-pane', 'false');
+  await expect(panes.nth(1)).toHaveAttribute('data-active-pane', 'true');
+  await expect(page.locator('[data-pane][data-active-pane="true"]')).toHaveCount(1);
+
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.press('Alt+1');
+  await expect(chip).toContainText(/Active\s+A Chat · /);
+  await expect(panes.first()).toHaveAttribute('data-active-pane', 'true');
+  await expect(panes.nth(1)).toHaveAttribute('data-active-pane', 'false');
+  await expect(page.locator('[data-pane][data-active-pane="true"]')).toHaveCount(1);
+});
+
 test('pane manager: quick-find filters, highlights, and focuses first match', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
