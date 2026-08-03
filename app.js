@@ -11166,15 +11166,25 @@ function reportBlockedShortcut(reason) {
 }
 
 function isTypingContext(target) {
-  const el = target || document.activeElement;
+  const el = target instanceof Element ? target : document.activeElement;
   if (!el) return false;
   try {
     if (el.hidden || el.disabled) return false;
     if (el.getClientRects && el.getClientRects().length === 0) return false;
   } catch {}
-  const tag = String(el.tagName || '').toUpperCase();
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
-  if (el.isContentEditable) return true;
+  const editable = el.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="textbox"]');
+  if (editable) return true;
+  if (el.isContentEditable || el.closest?.('[contenteditable="true"], [contenteditable=""]')) return true;
+  const editorSurface = el.closest?.([
+    '.monaco-editor',
+    '.cm-editor',
+    '.CodeMirror',
+    '.ace_editor',
+    '[data-gramm]',
+    '[data-slate-editor="true"]',
+    '[data-lexical-editor="true"]'
+  ].join(', '));
+  if (editorSurface) return true;
   return false;
 }
 
@@ -11522,13 +11532,7 @@ window.addEventListener('keydown', (event) => {
     updatePaneShortcutBadges();
   }
 
-  const isEditableTarget = (() => {
-    const el = event.target;
-    if (!el) return false;
-    if (el.isContentEditable) return true;
-    const tag = String(el.tagName || '').toUpperCase();
-    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
-  })();
+  const isEditableTarget = isTypingContext(event.target);
 
   if (event.key === 'Escape') {
     const closedOverlay = closeTopmostOverlay();
