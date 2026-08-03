@@ -171,6 +171,7 @@ test('pane reopen shortcut restores last closed pane slot and chat draft', async
   await firstChat.locator('[data-pane-input]').fill('restore this draft');
 
   await firstChat.getByTestId('pane-close').click();
+  await page.getByTestId('pane-close-loss-guard-toast').getByTestId('toast-action').click();
   await expect(panes).toHaveCount(1);
   await expect(panes.first()).toHaveAttribute('data-pane-kind', 'workqueue');
 

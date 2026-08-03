@@ -899,7 +899,18 @@ const uiState = {
 let toastSeq = 0;
 function showToast(
   message,
-  { kind = 'info', timeoutMs = 2600, actionLabel = '', onAction = null, secondaryActionLabel = '', onSecondaryAction = null, testId = 'toast' } = {}
+  {
+    kind = 'info',
+    timeoutMs = 2600,
+    actionLabel = '',
+    onAction = null,
+    secondaryActionLabel = '',
+    onSecondaryAction = null,
+    testId = 'toast',
+    role = '',
+    ariaLabel = '',
+    autoFocusAction = false
+  } = {}
 ) {
   if (!globalElements.toastHost) return;
   const text = typeof message === 'string' ? message.trim() : String(message || '').trim();
@@ -911,6 +922,8 @@ function showToast(
   el.dataset.toastId = String(id);
   el.setAttribute('data-testid', testId || 'toast');
   el.dataset.toastKind = kind;
+  if (role) el.setAttribute('role', String(role));
+  if (ariaLabel) el.setAttribute('aria-label', String(ariaLabel));
 
   const messageEl = document.createElement('span');
   messageEl.className = 'toast-message';
@@ -957,6 +970,38 @@ function showToast(
   };
 
   const timer = setTimeout(remove, Math.max(800, Number(timeoutMs) || 2600));
+  const actionButtons = [actionBtn, secondaryActionBtn].filter(Boolean);
+  if (actionButtons.length) {
+    el.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        clearTimeout(timer);
+        try {
+          if (hasSecondaryAction) onSecondaryAction?.();
+        } catch {}
+        remove();
+        return;
+      }
+      if (event.key !== 'Tab' || actionButtons.length < 2) return;
+      const first = actionButtons[0];
+      const last = actionButtons[actionButtons.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+  }
+  if (autoFocusAction && actionBtn) {
+    setTimeout(() => {
+      try {
+        actionBtn.focus();
+      } catch {}
+    }, 0);
+  }
   actionBtn?.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -7637,6 +7682,24 @@ function paneIsAbortable(pane) {
   return Boolean(pane.thinking?.active || (pane.chat?.runs && pane.chat.runs.size > 0));
 }
 
+function paneHasUnsentDraft(pane) {
+  if (!pane || pane.kind !== 'chat') return false;
+  return Boolean(String(pane.elements?.input?.value || '').trim());
+}
+
+function paneHasActiveRun(pane) {
+  if (!pane || pane.kind !== 'chat') return false;
+  return Boolean(
+    pane.thinking?.active ||
+      pane.activeRunId ||
+      (pane.chat?.runs && pane.chat.runs.size > 0) ||
+      pane.abortState?.active ||
+      pane.inFlight ||
+      pane.pendingSend ||
+      (Array.isArray(pane.outbox) && pane.outbox.length > 0)
+  );
+}
+
 function paneRenderStopControl(pane) {
   const btn = pane?.elements?.stopBtn;
   if (!btn) return;
@@ -10567,6 +10630,31 @@ const paneManager = {
     if (!isAnchorPaneKind(kind)) return false;
     return this.panes.filter((entry) => String(entry?.kind || 'chat') === kind).length === 1;
   },
+  maybeOfferCloseLossGuard(pane) {
+    if (pane?.kind !== 'chat') return false;
+    const hasDraft = paneHasUnsentDraft(pane);
+    const hasRun = paneHasActiveRun(pane);
+    if (!hasDraft && !hasRun) return false;
+
+    const message = hasRun
+      ? 'Closing this pane will stop an active run and discard any unsent text.'
+      : 'Closing this pane will discard unsent draft text.';
+
+    showToast(message, {
+      kind: 'error',
+      timeoutMs: 12000,
+      role: 'dialog',
+      ariaLabel: 'Close pane warning',
+      actionLabel: 'Close pane',
+      secondaryActionLabel: 'Cancel',
+      testId: 'pane-close-loss-guard-toast',
+      autoFocusAction: true,
+      onAction: () => this.removePane(pane.key, { skipCloseLossGuard: true }),
+      onSecondaryAction: () => {}
+    });
+
+    return true;
+  },
   maybeOfferAnchorReplace(pane) {
     if (!this.isLastAnchorPane(pane)) return false;
 
@@ -10846,12 +10934,19 @@ const paneManager = {
     if (!removed) return null;
     return this.addPane(targetKind, { ...options, forceNew: true });
   },
-  removePane(key, { skipAnchorGuard = false, focusFallback = true, source = 'unknown', recordClosed = true } = {}) {
+  removePane(key, {
+    skipAnchorGuard = false,
+    skipCloseLossGuard = false,
+    focusFallback = true,
+    source = 'unknown',
+    recordClosed = true
+  } = {}) {
     if (roleState.role !== 'admin') return;
     if (this.panes.length <= 1) return;
     const idx = this.panes.findIndex((pane) => pane.key === key);
     if (idx < 0) return;
     const candidate = this.panes[idx];
+    if (!skipCloseLossGuard && this.maybeOfferCloseLossGuard(candidate, { source })) return;
     if (!skipAnchorGuard && this.maybeOfferAnchorReplace(candidate, { source })) return;
     const [pane] = this.panes.splice(idx, 1);
     if (recordClosed) this.pushClosedPaneSnapshot(pane, idx);
