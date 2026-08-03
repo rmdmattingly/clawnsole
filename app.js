@@ -647,9 +647,10 @@ function buildDefaultAdminPanes(defaultAgent = 'main') {
     {
       key: `p${randomId().slice(0, 8)}`,
       kind: 'workqueue',
+      agentId,
       queue: 'dev-team',
       statusFilter: ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
-      scopeFilter: getDefaultWorkqueueScope(),
+      scopeFilter: getDefaultWorkqueueScopeForTarget(agentId),
       sortKey: 'priority',
       sortDir: 'desc'
     }
@@ -7046,6 +7047,10 @@ function getDefaultWorkqueueScope() {
   return normalizeWorkqueueScope(storage.get(WORKQUEUE_SCOPE_PREF_KEY, 'unassigned'));
 }
 
+function getDefaultWorkqueueScopeForTarget(agentId) {
+  return normalizeAgentId(agentId || '') ? 'assigned' : getDefaultWorkqueueScope();
+}
+
 function computeBaseDeviceLabel() {
   const base = globalElements.deviceId.value.trim() || 'device';
   return TAB_ID ? `${base}-${TAB_ID}` : base;
@@ -8515,6 +8520,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     stopBtn: root.querySelector('[data-pane-stop]')
   };
 
+  const normalizedPaneAgentId = role === 'admin' ? normalizeAgentId(agentId || 'main') : null;
   const pane = {
     key,
     role,
@@ -8523,11 +8529,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       const k = String(kind || 'chat').trim().toLowerCase();
       return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
     })(),
-    agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
+    agentId: normalizedPaneAgentId,
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
-      scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScope()),
+      scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScopeForTarget(normalizedPaneAgentId)),
       quickFilters: {
         sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
         repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : [],
@@ -10307,7 +10313,7 @@ const paneManager = {
     const nextQueue = String(options?.queue || 'dev-team').trim() || 'dev-team';
     const nextAgentId = normalizeAgentId(options?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
     const nextCronAgentId = String(options?.cronAgentId || '').trim();
-    const nextScopeFilter = normalizeWorkqueueScope(options?.scopeFilter ?? getDefaultWorkqueueScope());
+    const nextScopeFilter = normalizeWorkqueueScope(options?.scopeFilter ?? getDefaultWorkqueueScopeForTarget(nextAgentId));
     const forceNew = Boolean(options?.forceNew);
 
     const findMatchingPane = () => {
@@ -10595,7 +10601,7 @@ const paneManager = {
           opt.value = queue;
           datalist.appendChild(opt);
         });
-        wqScopeSelect.value = getDefaultWorkqueueScope();
+        wqScopeSelect.value = getDefaultWorkqueueScopeForTarget(chatAgentSelect.value || 'main');
         chatBtn.querySelector('[data-pane-add-summary]').textContent = `Chat -> Agent: ${chatAgentSelect.value || 'main'}`;
         wqBtn.querySelector('[data-pane-add-summary]').textContent = `Workqueue -> Queue: ${wqQueueInput.value || 'dev-team'} / ${wqScopeSelect.value}`;
       };
@@ -10629,7 +10635,7 @@ const paneManager = {
       wqBtn.addEventListener('click', onMenuAdd('workqueue', () => ({
         agentId: chatAgentSelect.value || 'main',
         queue: wqQueueInput.value || 'dev-team',
-        scopeFilter: wqScopeSelect.value || getDefaultWorkqueueScope()
+        scopeFilter: wqScopeSelect.value || getDefaultWorkqueueScopeForTarget(chatAgentSelect.value || 'main')
       })));
 
       cronBtn.addEventListener('click', onMenuAdd('cron'));
