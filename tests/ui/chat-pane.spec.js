@@ -31,6 +31,7 @@ test('chat pane: send/receive + upload attachment', async ({ page }, testInfo) =
 
   const pane = page.locator('[data-pane][data-pane-kind="chat"]').last();
   await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+  await expect(pane.getByTestId('pane-composer-context-label')).toHaveText(/Chat · main/);
 
   // Send/receive.
   await pane.locator('[data-pane-input]').fill('hello');
@@ -47,6 +48,60 @@ test('chat pane: send/receive + upload attachment', async ({ page }, testInfo) =
   await pane.locator('[data-pane-input]').fill('with file');
   await pane.locator('[data-pane-send]').click();
   await expect(pane.locator('[data-chat-role="user"]').last()).toContainText('with file');
+});
+
+test('chat pane: quick focus switch asks for one-tap send confirmation', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
+
+  const panes = page.locator('[data-pane][data-pane-kind="chat"]');
+  const firstPane = panes.first();
+  const secondPane = panes.last();
+  await expect(secondPane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+
+  await secondPane.locator('[data-pane-input]').fill('guarded send');
+  await firstPane.locator('[data-pane-input]').focus();
+  await secondPane.locator('[data-pane-input]').focus();
+  await expect(secondPane.locator('[data-pane-input]')).toBeFocused();
+  await secondPane.locator('[data-pane-input]').dispatchEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+
+  await expect(secondPane.getByTestId('pane-composer-confirm')).toBeVisible();
+  await expect(secondPane.getByTestId('pane-composer-confirm')).toHaveText(/Send to main/);
+  await expect(secondPane.locator('[data-chat-role="user"]')).toHaveCount(0);
+
+  await page.keyboard.press('Enter');
+  await expect(secondPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: guarded send', { timeout: 10000 });
+  await expect(secondPane.getByTestId('pane-composer-confirm')).toBeHidden();
+});
+
+test('chat pane: composer send guard setting can be disabled', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.composerSendGuard.enabled', '0'));
+  await addPane(page, 'Chat pane');
+
+  const panes = page.locator('[data-pane][data-pane-kind="chat"]');
+  const firstPane = panes.first();
+  const secondPane = panes.last();
+  await expect(secondPane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+
+  await secondPane.locator('[data-pane-input]').fill('unguarded send');
+  await firstPane.locator('[data-pane-input]').focus();
+  await secondPane.locator('[data-pane-input]').focus();
+  await expect(secondPane.locator('[data-pane-input]')).toBeFocused();
+  await secondPane.locator('[data-pane-input]').dispatchEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+
+  await expect(secondPane.getByTestId('pane-composer-confirm')).toBeHidden();
+  await expect(secondPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: unguarded send', { timeout: 10000 });
 });
 
 test('chat pane: stop button can cancel a running response', async ({ page }) => {

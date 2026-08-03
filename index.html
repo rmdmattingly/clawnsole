@@ -157,6 +157,13 @@
               ↓
             </button>
 
+            <div class="composer-context-banner" data-pane-composer-context data-testid="pane-composer-context" role="status" aria-live="polite">
+              <span data-pane-composer-context-label data-testid="pane-composer-context-label">Chat · main</span>
+              <button class="secondary composer-context-confirm" data-pane-composer-confirm type="button" data-testid="pane-composer-confirm" hidden>
+                Send to main
+              </button>
+            </div>
+
             <div class="chat-input-row">
               <div class="chat-input-stack">
                 <div class="destination-strip" data-pane-destination-strip data-testid="pane-destination-strip">
@@ -508,6 +515,10 @@
             <label class="inline-checkbox">
               <input id="paneSwitchHudEnabled" type="checkbox" checked />
               Show pane-switch HUD
+            </label>
+            <label class="inline-checkbox">
+              <input id="composerSendGuardEnabled" type="checkbox" checked />
+              Confirm sends after quick pane switches
             </label>
           </section>
 
