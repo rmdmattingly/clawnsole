@@ -10,6 +10,7 @@ const {
   inferPaneCols,
   normalizePaneKind,
   normalizeAdminDestination,
+  paneNeedsAttention,
   deriveAuthOverlayState,
   deriveGlobalConnectionState,
   deriveDisconnectButtonState,
@@ -317,7 +318,16 @@ test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard err
         { connected: false, statusState: 'reconnecting' }
       ]
     }),
-    { state: 'reconnecting', meta: 'panes: 1/2 connected' }
+    {
+      state: 'reconnecting',
+      meta: '1 connected · 1 disconnected · 1 attention',
+      connectedCount: 1,
+      disconnectedCount: 1,
+      unreadCount: 0,
+      attentionCount: 1,
+      total: 2,
+      ariaLabel: '1 of 2 panes connected; 1 disconnected; 0 unread items; 1 pane needs attention'
+    }
   );
 
   assert.deepEqual(
@@ -328,7 +338,41 @@ test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard err
         { connected: false, statusState: 'error', statusMeta: 'gateway disconnected' }
       ]
     }),
-    { state: 'error', meta: 'auth expired' }
+    {
+      state: 'error',
+      meta: '0 connected · 2 disconnected · 2 attention',
+      connectedCount: 0,
+      disconnectedCount: 2,
+      unreadCount: 0,
+      attentionCount: 2,
+      total: 2,
+      ariaLabel: '0 of 2 panes connected; 2 disconnected; 0 unread items; 2 panes need attention'
+    }
+  );
+});
+
+test('deriveGlobalConnectionState counts unread attention for screen readers', () => {
+  assert.equal(paneNeedsAttention({ connected: true, statusState: 'connected', unreadCount: 0 }), false);
+  assert.equal(paneNeedsAttention({ connected: true, statusState: 'connected', unreadCount: 2 }), true);
+
+  assert.deepEqual(
+    deriveGlobalConnectionState({
+      authed: true,
+      panes: [
+        { connected: true, statusState: 'connected', unreadCount: 2 },
+        { connected: true, statusState: 'connected', unreadCount: 0 }
+      ]
+    }),
+    {
+      state: 'connected',
+      meta: '2 connected · 0 disconnected · 1 attention',
+      connectedCount: 2,
+      disconnectedCount: 0,
+      unreadCount: 2,
+      attentionCount: 1,
+      total: 2,
+      ariaLabel: '2 of 2 panes connected; 0 disconnected; 2 unread items; 1 pane needs attention'
+    }
   );
 });
 

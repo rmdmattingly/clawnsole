@@ -201,23 +201,29 @@ const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => (
   logoutEnabled: !!state?.authed,
   logoutOpacity: !!state?.authed ? '1' : '0.5'
 }));
+const paneNeedsAttention = __appCore.paneNeedsAttention || ((pane) => {
+  if (!pane) return false;
+  const status = String(pane.statusState || '').trim();
+  return !pane.connected || status === 'error' || status === 'reconnecting' || Number(pane.unreadCount || 0) > 0;
+});
 const deriveGlobalConnectionState = __appCore.deriveGlobalConnectionState || ((state) => {
   if (!state?.authed) return { state: 'disconnected', meta: 'sign in required' };
   const panes = Array.isArray(state?.panes) ? state.panes : [];
   if (panes.length === 0) return { state: 'disconnected', meta: '' };
   const connectedCount = panes.filter((pane) => !!pane?.connected).length;
   const total = panes.length;
+  const disconnectedCount = Math.max(0, total - connectedCount);
+  const unreadCount = panes.reduce((sum, pane) => sum + Math.max(0, Number(pane?.unreadCount || 0)), 0);
+  const attentionCount = panes.filter((pane) => paneNeedsAttention(pane)).length;
   const anyConnecting = panes.some((pane) => pane?.statusState === 'connecting' || pane?.statusState === 'reconnecting');
   const anyError = panes.some((pane) => pane?.statusState === 'error');
-  const firstError = panes.find((pane) => pane?.statusState === 'error' && pane?.statusMeta);
   let nextState = 'disconnected';
   if (connectedCount === total) nextState = 'connected';
   else if (connectedCount > 0 || anyConnecting) nextState = 'reconnecting';
   else if (anyError) nextState = 'error';
-  const meta = connectedCount === 0 && anyError && firstError
-    ? String(firstError.statusMeta || '')
-    : `panes: ${connectedCount}/${total} connected`;
-  return { state: nextState, meta };
+  const meta = `${connectedCount} connected · ${disconnectedCount} disconnected · ${attentionCount} attention`;
+  const ariaLabel = `${connectedCount} of ${total} panes connected; ${disconnectedCount} disconnected; ${unreadCount} unread ${unreadCount === 1 ? 'item' : 'items'}; ${attentionCount} ${attentionCount === 1 ? 'pane needs' : 'panes need'} attention`;
+  return { state: nextState, meta, connectedCount, disconnectedCount, unreadCount, attentionCount, total, ariaLabel };
 });
 const deriveDisconnectButtonState = __appCore.deriveDisconnectButtonState || ((state) => {
   if (!state?.authed) return { disabled: true, text: 'Reconnect' };
@@ -1680,7 +1686,12 @@ function setStatusPill(el, state, meta = '') {
 function updateGlobalStatus() {
   const status = deriveGlobalConnectionState({ authed: uiState.authed, panes: paneManager.panes });
   setStatusPill(globalElements.status, status.state, status.meta);
-  if (globalElements.paneManagerBtn) globalElements.paneManagerBtn.textContent = status.meta;
+  if (globalElements.paneManagerBtn) {
+    globalElements.paneManagerBtn.textContent = status.meta;
+    const label = status.ariaLabel ? `Open pane manager. Shift-click to filter panes needing attention. ${status.ariaLabel}` : 'Open pane manager';
+    globalElements.paneManagerBtn.setAttribute('aria-label', label);
+    globalElements.paneManagerBtn.title = status.ariaLabel || status.meta || 'Open pane manager';
+  }
 }
 
 function updateConnectionControls() {
@@ -2631,6 +2642,7 @@ const paneManagerUiState = {
   selectedIndex: 0,
   query: '',
   unreadOnly: false,
+  attentionOnly: false,
   visiblePaneKeys: [],
   collapsedKinds: {
     chat: false,
@@ -2911,6 +2923,7 @@ function clearPaneUnread(pane) {
   pane.unreadKind = '';
   renderPaneIdentity(pane);
   renderPaneActivityBadge(pane);
+  updateGlobalStatus();
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -2951,6 +2964,7 @@ function markPaneUnread(pane, increment = 1, kind = 'chat') {
   pane.unreadKind = String(kind || 'activity');
   renderPaneIdentity(pane);
   renderPaneActivityBadge(pane);
+  updateGlobalStatus();
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -3304,6 +3318,7 @@ function renderPaneManager() {
 
   const query = String(paneManagerUiState.query || '').trim().toLowerCase();
   const filtered = panes.filter((pane) => {
+    if (paneManagerUiState.attentionOnly && !paneNeedsAttention(pane)) return false;
     if (paneManagerUiState.unreadOnly && paneUnreadCount(pane) <= 0) return false;
     return paneMatchesSearchQuery(pane, query);
   });
@@ -3491,7 +3506,7 @@ function renderPaneManager() {
   });
 }
 
-function openPaneManager() {
+function openPaneManager({ attentionOnly = false } = {}) {
   if (roleState.role !== 'admin') return;
   if (!uiState.authed) {
     showLogin('Please sign in to continue.');
@@ -3501,6 +3516,7 @@ function openPaneManager() {
 
   paneManagerUiState.open = true;
   paneManagerUiState.selectedIndex = 0;
+  paneManagerUiState.attentionOnly = !!attentionOnly;
   paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
   paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
 
@@ -11825,7 +11841,7 @@ globalElements.layoutLockBtn?.addEventListener('click', () => {
 
 globalElements.paneManagerBtn?.addEventListener('click', (event) => {
   event?.preventDefault?.();
-  openPaneManager();
+  openPaneManager({ attentionOnly: !!event?.shiftKey });
 });
 
 globalElements.paneManagerCloseBtn?.addEventListener('click', () => closePaneManager());
@@ -11833,6 +11849,7 @@ globalElements.paneManagerCloseBtn?.addEventListener('click', () => closePaneMan
 globalElements.paneManagerSearch?.addEventListener('input', () => {
   paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
   paneManagerUiState.selectedIndex = 0;
+  paneManagerUiState.attentionOnly = false;
   renderPaneManager();
 });
 
@@ -11843,6 +11860,7 @@ globalElements.paneManagerSearch?.addEventListener('keydown', (event) => {
 globalElements.paneManagerUnreadOnly?.addEventListener('change', () => {
   paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
   paneManagerUiState.selectedIndex = 0;
+  paneManagerUiState.attentionOnly = false;
   renderPaneManager();
 });
 
