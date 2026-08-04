@@ -86,6 +86,10 @@ If you’re building UI or integrations for the built-in workqueue modal/panes, 
 
 (Workqueue scheduling/idempotent enqueue is documented separately in `docs/WORKQUEUE_SCHEDULING.md`.)
 
+## Pane recovery shortcut
+
+Admin pane close actions push a short in-memory reopen stack. `Cmd/Ctrl+Shift+T` reopens the most recently closed pane in its previous slot when possible, including pane kind/target and recoverable local draft or filter state.
+
 ## CI expectations
 
 CI runs, in order:
