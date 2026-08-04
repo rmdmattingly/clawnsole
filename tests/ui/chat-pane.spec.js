@@ -116,6 +116,61 @@ test('chat pane: unread badge appears on inactive pane and clears on focus', asy
   await expect(firstBadge).toBeHidden();
 });
 
+test('chat pane: immediate Enter after pane switch is blocked once', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
+
+  const chatPanes = page.locator('[data-pane][data-pane-kind="chat"]');
+  const firstPane = chatPanes.first();
+  const secondPane = chatPanes.nth(1);
+  const secondInput = secondPane.locator('[data-pane-input]');
+  const guard = secondPane.getByTestId('pane-switch-send-guard');
+  const focusThirdVisiblePane = async () => {
+    await page.click('#connectionStatus');
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: '3',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+    });
+  };
+
+  await expect(secondPane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+  await secondInput.fill('guarded send');
+  await firstPane.locator('[data-pane-input]').focus();
+
+  await focusThirdVisiblePane();
+  await expect(secondInput).toBeFocused();
+  await page.keyboard.press('Enter');
+
+  await expect(secondInput).toHaveValue('guarded send');
+  await expect(guard).toBeVisible();
+  await expect(secondPane.locator('[data-chat-role="user"]')).toHaveCount(0);
+
+  await page.keyboard.press('Enter');
+  await expect(guard).toBeHidden();
+  await expect(secondInput).toHaveValue('');
+  await expect(secondPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: guarded send');
+
+  await secondInput.fill('override send');
+  await firstPane.locator('[data-pane-input]').focus();
+
+  await focusThirdVisiblePane();
+  await expect(secondInput).toBeFocused();
+  await page.keyboard.press('ControlOrMeta+Enter');
+
+  await expect(guard).toBeHidden();
+  await expect(secondInput).toHaveValue('');
+  await expect(secondPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: override send');
+});
+
 test('topbar workqueue action reuses paired pane for active chat target and falls back to modal', async ({ page }) => {
   test.setTimeout(120000);
   test.skip(!!env?.skipReason, env?.skipReason);

@@ -2830,9 +2830,13 @@ function notePaneFocused(pane) {
   if (!key) return;
   const panes = paneManager?.panes || [];
   if (!panes.some((entry) => String(entry?.key || '') === key)) return;
+  const previousKey = paneFocusMruKeys[0] || '';
   paneMruTraversal = null;
   paneMruOrder();
   paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
+  if (previousKey && previousKey !== key && pane.kind === 'chat') {
+    paneArmSwitchSendGuard(pane);
+  }
   updateBrowserTitle(pane);
 }
 
@@ -7786,6 +7790,47 @@ function paneRemoveOutboundById(pane, localId) {
   return null;
 }
 
+const PANE_SWITCH_SEND_GUARD_MS = 800;
+
+function paneArmSwitchSendGuard(pane) {
+  if (!pane || pane.kind !== 'chat') return;
+  pane.switchSendGuard = {
+    until: Date.now() + PANE_SWITCH_SEND_GUARD_MS,
+    blockedOnce: false
+  };
+  paneHideSwitchSendGuard(pane);
+}
+
+function paneHideSwitchSendGuard(pane) {
+  const row = pane?.elements?.switchSendGuard;
+  if (row) row.hidden = true;
+}
+
+function paneShowSwitchSendGuard(pane) {
+  const row = pane?.elements?.switchSendGuard;
+  if (!row) return;
+  const message = row.querySelector('[data-pane-switch-send-guard-msg]');
+  if (message) message.textContent = 'Pane changed: press Enter again to send.';
+  row.hidden = false;
+}
+
+function paneShouldBlockSwitchEnter(pane, event) {
+  if (!pane || pane.kind !== 'chat') return false;
+  if (event?.metaKey || event?.ctrlKey) return false;
+
+  const guard = pane.switchSendGuard;
+  if (!guard || Number(guard.until || 0) < Date.now()) {
+    pane.switchSendGuard = null;
+    paneHideSwitchSendGuard(pane);
+    return false;
+  }
+
+  if (guard.blockedOnce) return false;
+  guard.blockedOnce = true;
+  paneShowSwitchSendGuard(pane);
+  return true;
+}
+
 function panePumpOutbox(pane) {
   if (!pane.connected || !uiState.authed) return;
   if (pane.inFlight) return;
@@ -7839,6 +7884,8 @@ function panePumpOutbox(pane) {
 async function paneSendChat(pane) {
   const raw = pane.elements.input.value.trim();
   if (!raw) return;
+  pane.switchSendGuard = null;
+  paneHideSwitchSendGuard(pane);
 
   // During reconnect blips we allow drafting, but block sending.
   // (But we still allow enqueue once connected; for now keep behavior simple.)
@@ -8511,6 +8558,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     attachBtn: root.querySelector('[data-pane-attach]'),
     attachmentStatus: root.querySelector('[data-pane-attachment-status]'),
     attachmentList: root.querySelector('[data-pane-attachment-list]'),
+    switchSendGuard: root.querySelector('[data-pane-switch-send-guard]'),
     sendBtn: root.querySelector('[data-pane-send]'),
     stopBtn: root.querySelector('[data-pane-stop]')
   };
@@ -10059,11 +10107,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       if (elements.sendBtn.disabled) return;
+      if (paneShouldBlockSwitchEnter(pane, event)) return;
       paneSendChat(pane);
     }
   });
 
   elements.input.addEventListener('input', () => {
+    paneHideSwitchSendGuard(pane);
     paneUpdateCommandHints(pane);
   });
 

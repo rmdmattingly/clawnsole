@@ -3579,6 +3579,20 @@ kbd {
   gap: 8px;
 }
 
+.pane-switch-send-guard {
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(244, 184, 38, 0.4);
+  background: rgba(244, 184, 38, 0.1);
+  color: #f8e4a4;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.pane-switch-send-guard[hidden] {
+  display: none !important;
+}
+
 .command-hints {
   display: none;
   flex-direction: column;

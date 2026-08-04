@@ -166,6 +166,9 @@
                   </button>
                 </div>
                 <textarea data-pane-input placeholder="Message..." data-testid="pane-input"></textarea>
+                <div class="pane-switch-send-guard" data-pane-switch-send-guard data-testid="pane-switch-send-guard" aria-live="polite" hidden>
+                  <span data-pane-switch-send-guard-msg>Pane changed: press Enter again to send.</span>
+                </div>
                 <div data-pane-command-hints class="command-hints" aria-live="polite"></div>
                 <div class="attachment-row">
                   <input class="file-input" data-pane-file-input type="file" multiple data-testid="pane-attachment-input" />
