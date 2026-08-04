@@ -2824,6 +2824,8 @@ function focusedPaneKey() {
 let paneFocusMruKeys = [];
 let paneMruTraversal = null;
 let paneMruSuppressFocusEvents = false;
+const PANE_SWITCH_SEND_GUARD_MS = 800;
+const PANE_SWITCH_SEND_GUARD_MESSAGE = 'Pane changed: press Enter again to send';
 
 function paneMruOrder() {
   const panes = paneManager?.panes || [];
@@ -2846,6 +2848,30 @@ function notePaneFocused(pane) {
   paneMruOrder();
   paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
   updateBrowserTitle(pane);
+}
+
+function paneMarkSwitchSendGuard(pane, fromPaneKey) {
+  const fromKey = String(fromPaneKey || '');
+  if (!pane || pane.kind !== 'chat' || !fromKey || fromKey === pane.key) return;
+  pane.sendGuard = {
+    paneSwitchAt: Date.now(),
+    consumed: false,
+    fromPaneKey: fromKey
+  };
+}
+
+function paneConsumeSwitchSendGuard(pane) {
+  const guard = pane?.sendGuard;
+  if (!guard || guard.consumed) return false;
+  const elapsed = Date.now() - Number(guard.paneSwitchAt || 0);
+  if (elapsed < 0 || elapsed > PANE_SWITCH_SEND_GUARD_MS) return false;
+  guard.consumed = true;
+  showToast(PANE_SWITCH_SEND_GUARD_MESSAGE, {
+    kind: 'info',
+    timeoutMs: 1800,
+    testId: 'pane-switch-send-guard-toast'
+  });
+  return true;
 }
 
 function forgetFocusedPaneKey(paneKey) {
@@ -8580,6 +8606,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     catchUp: { active: false, attemptsLeft: 0, timer: null },
     outbox: [],
     inFlight: null,
+    sendGuard: null,
     chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
     legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
     sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
@@ -10075,6 +10102,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       if (elements.sendBtn.disabled) return;
+      if (!event.metaKey && !event.ctrlKey && paneConsumeSwitchSendGuard(pane)) return;
       paneSendChat(pane);
     }
   });
@@ -10415,7 +10443,9 @@ const paneManager = {
   },
   focusPanePrimary(pane) {
     if (!pane?.elements?.root) return;
+    const previousPaneKey = focusedPaneKey() || paneMruOrder()[0] || '';
     notePaneFocused(pane);
+    paneMarkSwitchSendGuard(pane, previousPaneKey);
 
     try {
       pane.elements.root.focus?.({ preventScroll: true });
@@ -11320,9 +11350,11 @@ function closeTopmostOverlay() {
 function focusPaneIndex(idx, { trackMru = true, showHud = false } = {}) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
+  const previousPaneKey = focusedPaneKey() || paneMruOrder()[0] || '';
   clearPaneUnread(pane);
   if (trackMru) notePaneFocused(pane);
   else updateBrowserTitle(pane);
+  paneMarkSwitchSendGuard(pane, previousPaneKey);
   if (showHud) showPaneSwitchHud(pane);
 
   try {
