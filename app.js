@@ -1688,7 +1688,7 @@ function updateGlobalStatus() {
   setStatusPill(globalElements.status, status.state, status.meta);
   if (globalElements.paneManagerBtn) {
     globalElements.paneManagerBtn.textContent = status.meta;
-    const label = status.ariaLabel ? `Open pane manager filtered to panes needing attention. ${status.ariaLabel}` : 'Open pane manager';
+    const label = status.ariaLabel ? `Open pane manager. Shift-click to filter panes needing attention. ${status.ariaLabel}` : 'Open pane manager';
     globalElements.paneManagerBtn.setAttribute('aria-label', label);
     globalElements.paneManagerBtn.title = status.ariaLabel || status.meta || 'Open pane manager';
   }
@@ -11841,7 +11841,7 @@ globalElements.layoutLockBtn?.addEventListener('click', () => {
 
 globalElements.paneManagerBtn?.addEventListener('click', (event) => {
   event?.preventDefault?.();
-  openPaneManager({ attentionOnly: true });
+  openPaneManager({ attentionOnly: !!event?.shiftKey });
 });
 
 globalElements.paneManagerCloseBtn?.addEventListener('click', () => closePaneManager());
