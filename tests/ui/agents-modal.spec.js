@@ -70,7 +70,13 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await page.getByRole('button', { name: 'Open agents' }).click();
   await expect(page.locator('#agentsModal')).toHaveClass(/open/);
 
-  await expect(page.locator('#agentsLastRefreshed')).toContainText('Last refreshed:');
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Last updated:');
+  await expect(page.locator('#agentsLastRefreshed')).toHaveAttribute('data-freshness-state', 'fresh');
+  await page.evaluate(() => {
+    window.__debug.agentsLastRefreshedAtMs = Date.now() - 70_000;
+  });
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Stale');
+  await expect(page.locator('#agentsLastRefreshed')).toHaveAttribute('data-freshness-state', 'stale');
   await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText(/\d+[smhd]/);
 });
 
@@ -268,6 +274,27 @@ test('fleet refresh preserves selected row and falls back when it disappears', a
   await page.locator('#agentsModalRefreshBtn').click();
   await expect(page.locator('#agentsList .agents-row').filter({ hasText: 'Gamma (gamma)' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#agentsSortIndicator')).toContainText('Selected agent no longer in current filter');
+});
+
+test('fleet focused r key refreshes agents like the header button', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsList')).toContainText('Alpha (alpha)');
+
+  agents = [{ id: 'beta', name: 'Beta', displayName: 'Beta' }];
+  await page.locator('#agentsList .agents-row').first().focus();
+  await page.keyboard.press('r');
+
+  await expect(page.locator('#agentsList')).toContainText('Beta (beta)');
+  await expect(page.locator('#agentsList')).not.toContainText('Alpha (alpha)');
 });
 
 test('fleet refresh keeps scroll anchor and keyboard triage selection', async ({ page, clawnsole }) => {

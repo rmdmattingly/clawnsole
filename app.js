@@ -286,7 +286,9 @@ const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
 const ADMIN_AGENT_COLUMNS_KEY = 'clawnsole.admin.agents.columns';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
+const ADMIN_AGENT_STALE_THRESHOLD_MS_KEY = 'clawnsole.admin.agents.staleThresholdMs';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
+const FLEET_DEFAULT_STALE_THRESHOLD_MS = 60_000;
 const FLEET_COLUMN_DEFS = [
   { key: 'id', label: 'Agent id', defaultVisible: true },
   { key: 'health', label: 'Health', defaultVisible: true },
@@ -988,6 +990,7 @@ let agentAutoRefreshInterval = null;
 let agentsModalAutoRefreshInterval = null;
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
+let agentsLastRefreshFailedAtMs = 0;
 const fleetRefreshLock = {
   lockedAtMs: 0,
   pointerInsideRow: false,
@@ -1072,6 +1075,13 @@ function clearFleetRefreshLock() {
   renderFleetRefreshPaused();
 }
 
+function refreshFleetManually() {
+  clearFleetRefreshLock();
+  refreshAgents({ reason: 'manual', showSuccessToast: true }).catch(() => {
+    showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
+  });
+}
+
 const fleetSelectionState = {
   selectedAgentId: '',
   selectedIndex: 0,
@@ -1105,13 +1115,24 @@ function formatRelativeAge(msAgo) {
   return `${Math.floor(ms / 3_600_000)}h ago`;
 }
 
+function getFleetStaleThresholdMs() {
+  const fromStorage = Number(storage.get(ADMIN_AGENT_STALE_THRESHOLD_MS_KEY, String(FLEET_DEFAULT_STALE_THRESHOLD_MS)));
+  return Number.isFinite(fromStorage) && fromStorage > 0 ? fromStorage : FLEET_DEFAULT_STALE_THRESHOLD_MS;
+}
+
 function renderAgentsLastRefreshed() {
   if (!globalElements.agentsLastRefreshed) return;
   if (!agentsLastRefreshedAtMs) {
-    globalElements.agentsLastRefreshed.textContent = 'Last refreshed: never';
+    globalElements.agentsLastRefreshed.textContent = 'Last updated: never';
+    globalElements.agentsLastRefreshed.dataset.freshnessState = 'stale';
     return;
   }
-  globalElements.agentsLastRefreshed.textContent = `Last refreshed: ${formatRelativeAge(Date.now() - agentsLastRefreshedAtMs)}`;
+  const ageMs = Date.now() - agentsLastRefreshedAtMs;
+  const isPaused = !!fleetRefreshLock.lockedAtMs;
+  const isStale = isPaused || agentsLastRefreshFailedAtMs > agentsLastRefreshedAtMs || ageMs > getFleetStaleThresholdMs();
+  const age = formatRelativeAge(ageMs);
+  globalElements.agentsLastRefreshed.dataset.freshnessState = isStale ? 'stale' : 'fresh';
+  globalElements.agentsLastRefreshed.textContent = isStale ? `Stale \u00b7 ${age}` : `Last updated: ${age}`;
 }
 
 function startAgentsModalAutoRefresh() {
@@ -1169,6 +1190,8 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
     }
 
     if (!Array.isArray(next) || next.length === 0) {
+      agentsLastRefreshFailedAtMs = Date.now();
+      renderAgentsLastRefreshed();
       if (prev.length > 0) {
         showToast('Agent refresh failed; showing last-known list.', { kind: 'error', timeoutMs: 3500 });
         return prev;
@@ -1179,6 +1202,7 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
 
     uiState.agents = next;
     agentsLastRefreshedAtMs = Date.now();
+    agentsLastRefreshFailedAtMs = 0;
     renderAgentsLastRefreshed();
 
     // Preserve UI state (selected agent per pane).
@@ -4567,6 +4591,7 @@ function renderAgentsModalList() {
   const search = String(globalElements.agentsSearch?.value || '').trim().toLowerCase();
   const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
   const activeWindowMs = withinMinutes * 60_000;
+  const staleThresholdMs = getFleetStaleThresholdMs();
   const filterMode = getFleetFilter();
   const sortMode = getFleetSort();
   const heatmapEnabled = getFleetHeatmapEnabled();
@@ -4587,7 +4612,7 @@ function renderAgentsModalList() {
     const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs, paneState });
     if (paneState === 'error' || paneState === 'offline') return { bucket: 'offline_error', ageBucket, ts, ageMs };
     if (!Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket, ts, ageMs };
-    if (ageMs <= activeWindowMs) return { bucket: 'active', ageBucket, ts, ageMs };
+    if (ageMs <= staleThresholdMs) return { bucket: 'active', ageBucket, ts, ageMs };
     return { bucket: 'stale', ageBucket, ts, ageMs };
   };
 
@@ -5633,6 +5658,17 @@ async function renderWorkqueuePane(rootEl, { queue = '' } = {}) {
 window.__debug = window.__debug || {};
 window.__debug.renderWorkqueuePane = renderWorkqueuePane;
 window.__debug.refreshAgents = refreshAgents;
+Object.defineProperty(window.__debug, 'agentsLastRefreshedAtMs', {
+  configurable: true,
+  get() {
+    return agentsLastRefreshedAtMs;
+  },
+  set(value) {
+    agentsLastRefreshedAtMs = Number(value) || 0;
+    renderAgentsLastRefreshed();
+    if (isAgentsModalOpen()) renderAgentsModalList();
+  }
+});
 
 function getWorkqueueItemRepo(item) {
   const repo = String(item?.meta?.repo || '').trim();
@@ -11009,15 +11045,10 @@ globalElements.recurringPromptRows?.addEventListener('click', (event) => {
 });
 
 globalElements.refreshAgentsBtn?.addEventListener('click', () => {
-  clearFleetRefreshLock();
-  refreshAgents({ reason: 'manual', showSuccessToast: true }).catch(() => {
-    showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
-  });
+  refreshFleetManually();
 });
 globalElements.agentsModalRefreshBtn?.addEventListener('click', () => {
-  refreshAgents({ reason: 'manual', showSuccessToast: true }).catch(() => {
-    showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
-  });
+  refreshFleetManually();
 });
 
 globalElements.agentsBtn?.addEventListener('click', () => openAgentsModal());
@@ -11041,6 +11072,11 @@ globalElements.agentsModal?.addEventListener('keydown', (event) => {
     return;
   }
   if (!event.metaKey && !event.ctrlKey && !event.altKey) {
+    if (lower === 'r') {
+      event.preventDefault();
+      refreshFleetManually();
+      return;
+    }
     if (key === 'ArrowDown' || lower === 'j') {
       event.preventDefault();
       moveFleetSelection(1);

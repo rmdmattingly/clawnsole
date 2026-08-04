@@ -1679,8 +1679,26 @@ button.send-btn .btn-icon {
 }
 
 .agents-last-refreshed {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 2px 8px;
   font-size: 12px;
   color: var(--muted);
+}
+
+.agents-last-refreshed[data-freshness-state="fresh"] {
+  border-color: rgba(86, 211, 100, 0.38);
+  background: rgba(86, 211, 100, 0.09);
+  color: var(--text);
+}
+
+.agents-last-refreshed[data-freshness-state="stale"] {
+  border-color: rgba(255, 138, 76, 0.55);
+  background: rgba(255, 138, 76, 0.13);
+  color: var(--text);
 }
 
 .agents-refresh-paused {
