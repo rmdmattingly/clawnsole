@@ -4255,7 +4255,6 @@ function openCommandPalette() {
 }
 
 // Agents (admin-only)
-
 function openAgentsModal() {
   if (roleState.role !== 'admin') return;
   globalElements.agentsModal?.classList.add('open');
@@ -11707,7 +11706,19 @@ window.addEventListener('keydown', (event) => {
   // Ctrl/Cmd+Shift+R → focus matching cron target (Alt/Option adds anyway)
   // Ctrl/Cmd+Shift+Y → focus matching timeline target (Alt/Option adds anyway)
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey;
-  if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target) && !isAnyOverlayOpen()) {
+  if (isAccel && roleState.role === 'admin' && !isAnyOverlayOpen()) {
+    if (matchesKeybind(event, 'workqueue.openForActiveChat')) {
+      event.preventDefault();
+      openWorkqueueForActiveChatAgent();
+      return;
+    }
+    if (matchesKeybindWithOptionalAlt(event, 'triage.return') && !event.altKey) {
+      event.preventDefault();
+      paneManager.closeAddPaneMenu();
+      returnToTriageSource();
+      return;
+    }
+    if (isTypingContext(event.target)) return;
     const addPaneShortcuts = [
       ['pane.addChat', 'chat'],
       ['pane.addWorkqueue', 'workqueue'],
@@ -11743,13 +11754,6 @@ window.addEventListener('keydown', (event) => {
   if (matchesKeybind(event, 'chat.composer')) {
     event.preventDefault();
     focusChatComposer();
-    return;
-  }
-
-  // Cmd/Ctrl+Shift+G targets the focused chat pane, so allow it from the chat input.
-  if (matchesKeybind(event, 'workqueue.openForActiveChat') && roleState.role === 'admin') {
-    event.preventDefault();
-    openWorkqueueForActiveChatAgent();
     return;
   }
 
