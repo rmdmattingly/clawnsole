@@ -883,7 +883,27 @@ body::before {
   line-height: 1;
 }
 
+.pane-draft-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.14);
+  color: #fcd34d;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .pane-activity-badge[hidden] {
+  display: none !important;
+}
+
+.pane-draft-badge[hidden] {
   display: none !important;
 }
 
@@ -1642,6 +1662,21 @@ button.send-btn .btn-icon {
   border: 1px solid rgba(239, 68, 68, 0.45);
   background: rgba(239, 68, 68, 0.14);
   color: #fecaca;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.pane-manager-draft-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
   font-size: 10px;
   font-weight: 700;
 }

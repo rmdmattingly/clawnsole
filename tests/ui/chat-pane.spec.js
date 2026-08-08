@@ -116,6 +116,45 @@ test('chat pane: unread badge appears on inactive pane and clears on focus', asy
   await expect(firstBadge).toBeHidden();
 });
 
+test('chat pane: draft badge appears, persists across pane switches, and clears on send', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
+
+  const chatPanes = page.locator('[data-pane][data-pane-kind="chat"]');
+  const firstPane = chatPanes.first();
+  const secondPane = chatPanes.last();
+  const firstPaneKey = await firstPane.getAttribute('data-pane-key');
+  const draftBadge = firstPane.getByTestId('pane-draft-badge');
+  const paneLabel = firstPane.getByTestId('pane-type-label');
+
+  await expect(draftBadge).toBeHidden();
+  await firstPane.locator('[data-pane-input]').fill('draft marker');
+  await expect(draftBadge).toBeVisible();
+  await expect(draftBadge).toHaveText('Draft');
+  await expect(paneLabel).toHaveAttribute('aria-label', /unsent draft/);
+
+  await secondPane.locator('[data-pane-input]').focus();
+  await expect(draftBadge).toBeVisible();
+
+  await page.keyboard.press('Control+P');
+  const managerRow = page.locator(`.pane-manager-row[data-pane-key="${firstPaneKey}"]`);
+  await expect(managerRow.getByTestId('pane-manager-draft-badge')).toBeVisible();
+  await expect(managerRow).toHaveAttribute('aria-label', /unsent draft/);
+  await page.keyboard.press('Escape');
+
+  await firstPane.locator('[data-pane-send]').click();
+  await expect(firstPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: draft marker');
+  await expect(draftBadge).toBeHidden();
+
+  await page.keyboard.press('Control+P');
+  await expect(page.locator(`.pane-manager-row[data-pane-key="${firstPaneKey}"]`).getByTestId('pane-manager-draft-badge')).toHaveCount(0);
+});
+
 test('chat pane: keyboard pane switch guards immediate Enter send once', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
