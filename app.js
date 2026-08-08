@@ -11288,7 +11288,17 @@ function reportBlockedShortcut(reason) {
 }
 
 function isTypingContext(target) {
-  const el = target || document.activeElement;
+  const start = target || document.activeElement;
+  if (!start) return false;
+  const path = typeof start.composedPath === 'function' ? start.composedPath() : [];
+  const candidates = (path.length ? path : [start]).filter((el) => el && el !== window && el !== document);
+  for (const el of candidates) {
+    if (isEditableShortcutSurface(el)) return true;
+  }
+  return false;
+}
+
+function isEditableShortcutSurface(el) {
   if (!el) return false;
   try {
     if (el.hidden || el.disabled) return false;
@@ -11297,6 +11307,13 @@ function isTypingContext(target) {
   const tag = String(el.tagName || '').toUpperCase();
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
   if (el.isContentEditable) return true;
+  if (typeof el.closest === 'function') {
+    const editable = el.closest('[contenteditable], [role="textbox"], .monaco-editor, .cm-editor, .CodeMirror, .ace_editor');
+    if (editable) {
+      const contentEditable = String(editable.getAttribute?.('contenteditable') || '').toLowerCase();
+      if (contentEditable !== 'false') return true;
+    }
+  }
   return false;
 }
 
@@ -11334,9 +11351,6 @@ function hasPaneNumberLayoutMismatch(event) {
 
 function isTypingShortcutExempt(event) {
   const key = String(event?.key || '').toLowerCase();
-  const override = matchingShortcutOverrideAction(event);
-  if (override?.typingExempt) return true;
-  if (matchesKeybind(event, 'workqueue.openForActiveChat')) return true;
   return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'p' || key === 'k' || key === 'l');
 }
 
