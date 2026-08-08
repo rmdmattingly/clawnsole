@@ -388,6 +388,81 @@ test('alt+1..3 and cmd/ctrl+1..3 focus panes by visible order; shortcuts do not 
   await expect.poll(activePaneIndex).toBe(0);
 });
 
+test('global pane navigation shortcuts are blocked from editable and modal text fields', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]')).filter((pane) => pane.getClientRects().length > 0);
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  const triggerNextPaneShortcut = async () => page.evaluate(() => {
+    const target = document.activeElement || window;
+    const event = new KeyboardEvent('keydown', {
+      key: 'K',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    });
+    target.dispatchEvent(event);
+  });
+
+  const firstPaneInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
+  await page.evaluate(() => focusPaneIndex(0));
+  await firstPaneInput.focus();
+  await expect(firstPaneInput).toBeFocused();
+  await triggerNextPaneShortcut();
+  await expect.poll(activePaneIndex).toBe(0);
+  await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Shortcut paused while typing');
+
+  const workqueueSearch = page.locator('[data-pane][data-pane-kind="workqueue"]').first().locator('[data-wq-search]');
+  await workqueueSearch.focus();
+  await expect(workqueueSearch).toBeFocused();
+  await expect.poll(activePaneIndex).toBe(1);
+  await triggerNextPaneShortcut();
+  await expect.poll(activePaneIndex).toBe(1);
+
+  await page.evaluate(() => {
+    const editor = document.createElement('div');
+    editor.setAttribute('role', 'textbox');
+    editor.setAttribute('contenteditable', 'true');
+    editor.setAttribute('data-testid', 'synthetic-editor');
+    document.querySelector('[data-pane][data-pane-kind="workqueue"]')?.appendChild(editor);
+    editor.focus();
+  });
+  await expect(page.getByTestId('synthetic-editor')).toBeFocused();
+  await expect.poll(activePaneIndex).toBe(1);
+  await triggerNextPaneShortcut();
+  await expect.poll(activePaneIndex).toBe(1);
+
+  await page.evaluate(() => {
+    document.querySelector('[data-testid="synthetic-editor"]')?.remove();
+    openCommandPalette();
+  });
+  await expect(page.locator('#commandPaletteModal')).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('#commandPaletteInput')).toBeFocused();
+  await triggerNextPaneShortcut();
+  await expect(page.locator('#commandPaletteModal')).toHaveAttribute('aria-hidden', 'false');
+
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#commandPaletteModal')).toHaveAttribute('aria-hidden', 'true');
+});
+
 test('g then pane letter focuses matching pane and exits cleanly on misses', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
@@ -653,7 +728,7 @@ test('add-pane shortcuts are scoped away from overlays and menus', async ({ page
   await expect(panes).toHaveCount(4);
 });
 
-test('ctrl/cmd+shift+g opens or focuses workqueue for active chat agent', async ({ page }) => {
+test('ctrl/cmd+shift+g opens or focuses workqueue for active chat agent outside typing contexts', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
 
@@ -666,13 +741,18 @@ test('ctrl/cmd+shift+g opens or focuses workqueue for active chat agent', async 
 
   await chatInput.focus();
   await page.keyboard.press('ControlOrMeta+Shift+G');
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(0);
+  await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Shortcut paused while typing');
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('ControlOrMeta+Shift+G');
 
   const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]');
   await expect(wqPane).toHaveCount(1);
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
   await expect(wqPane.locator('[data-wq-scope="assigned"]')).toHaveClass(/active/);
 
-  await chatInput.focus();
+  await page.click('#connectionStatus');
   await page.keyboard.press('ControlOrMeta+Shift+G');
   await expect(wqPane).toHaveCount(1);
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
