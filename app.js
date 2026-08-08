@@ -353,7 +353,8 @@ const KEYBIND_CATALOG = [
   { id: 'pane.addChat', group: 'Pane actions', label: 'Add Chat pane (workspace only)', binding: { accel: true, shift: true, key: 'c', display: 'Cmd/Ctrl+Shift+C' } },
   { id: 'pane.addWorkqueue', group: 'Pane actions', label: 'Add Workqueue pane (workspace only)', binding: { accel: true, shift: true, key: 'w', display: 'Cmd/Ctrl+Shift+W' } },
   { id: 'pane.addCron', group: 'Pane actions', label: 'Add Cron pane (workspace only)', binding: { accel: true, shift: true, key: 'r', display: 'Cmd/Ctrl+Shift+R' } },
-  { id: 'pane.addTimeline', group: 'Pane actions', label: 'Add Timeline pane (workspace only)', binding: { accel: true, shift: true, key: 't', display: 'Cmd/Ctrl+Shift+T' } },
+  { id: 'pane.reopenClosed', group: 'Pane actions', label: 'Reopen last closed pane', binding: { accel: true, shift: true, key: 't', display: 'Cmd/Ctrl+Shift+T' } },
+  { id: 'pane.addTimeline', group: 'Pane actions', label: 'Add Timeline pane (workspace only)', binding: { accel: true, shift: true, key: 'y', display: 'Cmd/Ctrl+Shift+Y' } },
   {
     id: 'agents.refresh',
     group: 'Pane actions',
@@ -3739,6 +3740,16 @@ function buildCommandPaletteItems() {
     ),
     withShortcut(
       {
+        id: 'cmd:reopen-closed-pane',
+        label: 'Panes: Reopen last closed pane',
+        detail: 'Restore the most recently closed pane and recoverable draft state',
+        paneMeta: commandPalettePaneMeta({ type: 'Pane', target: 'last closed', mode: 'restore' }),
+        run: () => paneManager.reopenLastClosedPane()
+      },
+      '⌘/Ctrl+Shift+T'
+    ),
+    withShortcut(
+      {
         id: 'cmd:add-workqueue',
         label: 'Open Workqueue: dev-team',
         detail: 'Focus matching queue target or create one',
@@ -3785,7 +3796,7 @@ function buildCommandPaletteItems() {
         paneMeta: commandPalettePaneMeta({ type: 'Timeline', target: 'gateway', mode: 'create or focus' }),
         run: () => paneManager.addPane('timeline')
       },
-      '⌘/Ctrl+Shift+T'
+      '⌘/Ctrl+Shift+Y'
     ),
     withShortcut(
       {
@@ -10122,6 +10133,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 const paneManager = {
   panes: [],
   maxPanes: 6,
+  closedPaneStack: [],
+  closedPaneStackLimit: 5,
   layoutLocked: false,
   lastFocusedPaneKey: '',
   init() {
@@ -10197,6 +10210,7 @@ const paneManager = {
       } catch {}
     });
     this.panes = [];
+    this.closedPaneStack = [];
   },
   loadAdminPanes() {
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
@@ -10295,6 +10309,88 @@ const paneManager = {
   hasUnsentDrafts() {
     return anyPaneHasDraftChanges(this.panes);
   },
+  snapshotClosedPane(pane, index = -1) {
+    if (!pane) return null;
+    const kind = normalizePaneKind(pane.kind || 'chat');
+    const snapshot = {
+      kind,
+      index: Number.isInteger(index) ? index : -1,
+      agentId: normalizeAgentId(pane.agentId || 'main'),
+      cronAgentId: String(pane.cronAgentId || '').trim(),
+      nickname: paneNickname(pane),
+      pairedTargetLock: !!pane.pairedTargetLock,
+      draftText: kind === 'chat' ? String(pane.elements?.input?.value || '') : ''
+    };
+
+    if (kind === 'workqueue') {
+      snapshot.queue = String(pane.workqueue?.queue || 'dev-team').trim() || 'dev-team';
+      snapshot.statusFilter = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter.slice() : [];
+      snapshot.scopeFilter = normalizeWorkqueueScope(pane.workqueue?.scopeFilter);
+      snapshot.quickFilters = {
+        sources: Array.isArray(pane.workqueue?.quickFilters?.sources) ? pane.workqueue.quickFilters.sources.slice() : [],
+        repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos.slice() : [],
+        search: String(pane.workqueue?.quickFilters?.search || '').trim()
+      };
+      snapshot.groupMode = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
+      snapshot.sortKey = pane.workqueue?.sortKey || 'priority';
+      snapshot.sortDir = pane.workqueue?.sortDir === 'asc' ? 'asc' : 'desc';
+    }
+
+    return snapshot;
+  },
+  pushClosedPaneSnapshot(pane, index = -1) {
+    const snapshot = this.snapshotClosedPane(pane, index);
+    if (!snapshot) return;
+    this.closedPaneStack.unshift(snapshot);
+    this.closedPaneStack = this.closedPaneStack.slice(0, this.closedPaneStackLimit);
+  },
+  reopenLastClosedPane() {
+    if (roleState.role !== 'admin') return null;
+    if (!this.closedPaneStack.length) {
+      showToast('No recently closed pane.', { kind: 'info', timeoutMs: 1800, testId: 'reopen-pane-empty-toast' });
+      return null;
+    }
+    if (this.panes.length >= this.maxPanes) {
+      showToast('Maximum panes are already open.', { kind: 'info', timeoutMs: 1800, testId: 'reopen-pane-full-toast' });
+      return null;
+    }
+
+    const snapshot = this.closedPaneStack.shift();
+    const pane = this.restoreClosedPaneSnapshot(snapshot);
+    if (!pane) {
+      showToast('Could not reopen pane.', { kind: 'info', timeoutMs: 1800, testId: 'reopen-pane-failed-toast' });
+      return null;
+    }
+    showToast(`Reopened ${paneLabel(pane)} pane.`, { kind: 'success', timeoutMs: 1600, testId: 'reopen-pane-toast' });
+    return pane;
+  },
+  restoreClosedPaneSnapshot(snapshot) {
+    if (!snapshot) return null;
+    const kind = normalizePaneKind(snapshot.kind || 'chat');
+    const options = {
+      forceNew: true,
+      insertIndex: Number.isInteger(snapshot.index) ? snapshot.index : undefined,
+      agentId: snapshot.agentId,
+      cronAgentId: snapshot.cronAgentId,
+      nickname: snapshot.nickname,
+      pairedTargetLock: !!snapshot.pairedTargetLock,
+      restoreDraftText: kind === 'chat' ? String(snapshot.draftText || '') : ''
+    };
+
+    if (kind === 'workqueue') {
+      Object.assign(options, {
+        queue: snapshot.queue,
+        statusFilter: snapshot.statusFilter,
+        scopeFilter: snapshot.scopeFilter,
+        quickFilters: snapshot.quickFilters,
+        groupMode: snapshot.groupMode,
+        sortKey: snapshot.sortKey,
+        sortDir: snapshot.sortDir
+      });
+    }
+
+    return this.addPane(kind, options);
+  },
   resetAdminLayoutToDefault({ confirm = true } = {}) {
     if (roleState.role !== 'admin') return;
     if (confirm && this.hasUnsentDrafts()) {
@@ -10325,6 +10421,24 @@ const paneManager = {
     const nextCronAgentId = String(options?.cronAgentId || '').trim();
     const nextScopeFilter = normalizeWorkqueueScope(options?.scopeFilter ?? getDefaultWorkqueueScope());
     const forceNew = Boolean(options?.forceNew);
+    const insertCreatedPane = (pane) => {
+      const rawIndex = Number(options?.insertIndex);
+      const idx = Number.isInteger(rawIndex) ? Math.max(0, Math.min(rawIndex, this.panes.length)) : this.panes.length;
+      const beforeRoot = this.panes[idx]?.elements?.root || null;
+      this.panes.splice(idx, 0, pane);
+      globalElements.paneGrid.insertBefore(pane.elements.root, beforeRoot);
+    };
+    const finishCreatedPane = (pane, { connect = false } = {}) => {
+      this.updatePaneLabels();
+      this.updateCloseButtons();
+      this.applyInferredLayout();
+      this.persistAdminPanes();
+      if (connect && uiState.authed) {
+        pane.client.connect();
+      }
+      this.focusPanePrimary(pane);
+      return pane;
+    };
 
     const findMatchingPane = () => {
       if (normalizedKind === 'workqueue') {
@@ -10363,18 +10477,16 @@ const paneManager = {
           ? options.statusFilter
           : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
         scopeFilter: nextScopeFilter,
+        quickFilters: options?.quickFilters,
         groupMode: normalizeWorkqueueGroupMode(options?.groupMode),
+        sortKey: options?.sortKey,
+        sortDir: options?.sortDir,
         nickname: options?.nickname,
+        pairedTargetLock: !!options?.pairedTargetLock,
         closable: true
       });
-      this.panes.push(pane);
-      globalElements.paneGrid.appendChild(pane.elements.root);
-      this.updatePaneLabels();
-      this.updateCloseButtons();
-      this.applyInferredLayout();
-      this.persistAdminPanes();
-      this.focusPanePrimary(pane);
-      return pane;
+      insertCreatedPane(pane);
+      return finishCreatedPane(pane);
     }
 
     if (normalizedKind === 'cron' || normalizedKind === 'timeline') {
@@ -10386,32 +10498,26 @@ const paneManager = {
         nickname: options?.nickname,
         closable: true
       });
-      this.panes.push(pane);
-      globalElements.paneGrid.appendChild(pane.elements.root);
-      this.updatePaneLabels();
-      this.updateCloseButtons();
-      this.applyInferredLayout();
-      this.persistAdminPanes();
-      if (uiState.authed) {
-        pane.client.connect();
-      }
-      this.focusPanePrimary(pane);
-      return pane;
+      insertCreatedPane(pane);
+      return finishCreatedPane(pane, { connect: true });
     }
 
     const agentId = normalizeAgentId(options?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
-    const pane = createPane({ key: `p${randomId().slice(0, 8)}`, role: 'admin', kind: 'chat', agentId, nickname: options?.nickname, closable: true });
-    this.panes.push(pane);
-    globalElements.paneGrid.appendChild(pane.elements.root);
-    this.updatePaneLabels();
-    this.updateCloseButtons();
-    this.applyInferredLayout();
-    this.persistAdminPanes();
-    if (uiState.authed) {
-      pane.client.connect();
+    const pane = createPane({
+      key: `p${randomId().slice(0, 8)}`,
+      role: 'admin',
+      kind: 'chat',
+      agentId,
+      nickname: options?.nickname,
+      pairedTargetLock: !!options?.pairedTargetLock,
+      closable: true
+    });
+    if (typeof options?.restoreDraftText === 'string' && pane.elements?.input) {
+      pane.elements.input.value = options.restoreDraftText;
+      paneUpdateCommandHints(pane);
     }
-    this.focusPanePrimary(pane);
-    return pane;
+    insertCreatedPane(pane);
+    return finishCreatedPane(pane, { connect: true });
   },
   focusPanePrimary(pane) {
     if (!pane?.elements?.root) return;
@@ -10567,7 +10673,7 @@ const paneManager = {
         testId: 'pane-add-menu-timeline',
         title: 'New Timeline pane',
         subtitle: 'Timeline -> gateway',
-        shortcut: 'Shortcut: Ctrl/Cmd+Shift+T (Alt/Option+click = Open anyway)'
+        shortcut: 'Shortcut: Ctrl/Cmd+Shift+Y (Alt/Option+click = Open anyway)'
       });
 
       menu.appendChild(chatBtn);
@@ -10737,11 +10843,11 @@ const paneManager = {
     const idx = this.panes.findIndex((pane) => pane.key === key);
     if (idx < 0) return null;
     const targetKind = isAnchorPaneKind(kind) ? kind : 'chat';
-    const removed = this.removePane(key, { skipAnchorGuard: true, focusFallback: false });
+    const removed = this.removePane(key, { skipAnchorGuard: true, focusFallback: false, recordClosed: false });
     if (!removed) return null;
     return this.addPane(targetKind, { ...options, forceNew: true });
   },
-  removePane(key, { skipAnchorGuard = false, focusFallback = true, source = 'unknown' } = {}) {
+  removePane(key, { skipAnchorGuard = false, focusFallback = true, source = 'unknown', recordClosed = true } = {}) {
     if (roleState.role !== 'admin') return;
     if (this.panes.length <= 1) return;
     const idx = this.panes.findIndex((pane) => pane.key === key);
@@ -10749,6 +10855,7 @@ const paneManager = {
     const candidate = this.panes[idx];
     if (!skipAnchorGuard && this.maybeOfferAnchorReplace(candidate, { source })) return;
     const [pane] = this.panes.splice(idx, 1);
+    if (recordClosed) this.pushClosedPaneSnapshot(pane, idx);
     forgetFocusedPaneKey(pane?.key || key);
     try {
       pane.client?.disconnect(true);
@@ -11586,11 +11693,19 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
+  // Reopen closed pane (admin-only)
+  if (matchesKeybind(event, 'pane.reopenClosed') && roleState.role === 'admin' && !isTypingContext(event.target) && !isAnyOverlayOpen()) {
+    event.preventDefault();
+    paneManager.closeAddPaneMenu();
+    paneManager.reopenLastClosedPane();
+    return;
+  }
+
   // Add-pane shortcuts (admin-only)
   // Ctrl/Cmd+Shift+C → new chat
   // Ctrl/Cmd+Shift+W → focus matching workqueue target (Alt/Option adds anyway)
   // Ctrl/Cmd+Shift+R → focus matching cron target (Alt/Option adds anyway)
-  // Ctrl/Cmd+Shift+T → focus matching timeline target (Alt/Option adds anyway)
+  // Ctrl/Cmd+Shift+Y → focus matching timeline target (Alt/Option adds anyway)
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey;
   if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target) && !isAnyOverlayOpen()) {
     const addPaneShortcuts = [
