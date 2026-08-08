@@ -132,6 +132,46 @@ test('agents modal keeps an open row menu stable during a paused refresh', async
   await expect(page.locator('#agentsList')).not.toContainText('Beta (beta)');
 });
 
+test('fleet copy selected agent id works from row menu and keyboard', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({
+      json: {
+        agents: [
+          { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+          { id: 'beta', name: 'Beta', displayName: 'Beta' }
+        ]
+      }
+    });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const alpha = page.locator('#agentsList .agents-row[data-agent-id="alpha"]');
+  const beta = page.locator('#agentsList .agents-row[data-agent-id="beta"]');
+  await expect(alpha).toBeVisible();
+  await expect(beta).toBeVisible();
+
+  await alpha.locator('[data-agent-action="copy-id"]').first().click();
+  await expect(page.getByTestId('toast').last()).toContainText('Copied alpha');
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('alpha');
+
+  await beta.focus();
+  await page.keyboard.press('y');
+  await expect(page.getByTestId('toast').last()).toContainText('Copied beta');
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('beta');
+  await expect(beta).toBeFocused();
+
+  await page.locator('#agentsSearch').fill('no matching agent');
+  await expect(page.locator('#agentsCopySelectedBtn')).toBeDisabled();
+  await expect(page.locator('#agentsCopySelectedBtn')).toHaveAttribute('title', 'Select an agent row first');
+});
+
 test('agents modal shows fleet health summary counts and refreshes them', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
