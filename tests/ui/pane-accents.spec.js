@@ -33,7 +33,7 @@ test('pane accents: each pane kind exposes deterministic accent selectors', asyn
     await expect(page.locator(`[data-pane][data-pane-kind="${kind}"] [data-pane-type-pill][data-pane-accent="${kind}"]`)).toHaveCount(1);
   }
 
-  await page.locator('#paneManagerBtn').click();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+P' : 'Control+P');
   await expect(page.locator('#paneManagerModal')).toHaveClass(/open/);
 
   for (const kind of ['chat', 'workqueue', 'cron', 'timeline']) {
