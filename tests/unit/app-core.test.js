@@ -5,10 +5,12 @@ const {
   escapeHtml,
   fmtRemaining,
   formatWorkqueueIssueTitle,
+  summarizeExactWorkqueueDuplicateRows,
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
   normalizeAdminDestination,
+  paneNeedsAttention,
   deriveAuthOverlayState,
   deriveGlobalConnectionState,
   deriveDisconnectButtonState,
@@ -145,6 +147,81 @@ test('sortWorkqueueItems priority sort uses updatedAt desc tie-breaker', () => {
   assert.deepEqual(sorted.map((it) => it.id), ['c', 'b', 'a']);
 });
 
+test('summarizeExactWorkqueueDuplicateRows collapses same dedupe key title and status only', () => {
+  const items = [
+    {
+      id: 'a',
+      title: 'Open issue: Duplicate health',
+      status: 'ready',
+      updatedAt: '2026-01-01T00:00:00Z',
+      meta: { dedupeKey: 'rmdmattingly/clawnsole#348', repo: 'rmdmattingly/clawnsole', issueNumber: 348 }
+    },
+    {
+      id: 'b',
+      title: '[issue] rmdmattingly/clawnsole#348 Duplicate health',
+      status: 'ready',
+      updatedAt: '2026-01-02T00:00:00Z',
+      meta: { dedupeKey: 'rmdmattingly/clawnsole#348', repo: 'rmdmattingly/clawnsole', issueNumber: 348 }
+    },
+    {
+      id: 'c',
+      title: 'Open issue: Duplicate health',
+      status: 'claimed',
+      meta: { dedupeKey: 'rmdmattingly/clawnsole#348', repo: 'rmdmattingly/clawnsole', issueNumber: 348 }
+    },
+    {
+      id: 'd',
+      title: 'Open issue: Different title',
+      status: 'ready',
+      meta: { dedupeKey: 'rmdmattingly/clawnsole#348', repo: 'rmdmattingly/clawnsole', issueNumber: 348 }
+    },
+    {
+      id: 'e',
+      title: 'No dedupe key',
+      status: 'ready'
+    }
+  ];
+
+  const rows = summarizeExactWorkqueueDuplicateRows(items);
+  assert.deepEqual(rows.map((row) => row.kind), ['exact_duplicate', 'item', 'item', 'item']);
+  assert.deepEqual(rows[0].items.map((item) => item.id), ['b', 'a']);
+  assert.equal(rows[0].representative.id, 'b');
+  assert.equal(rows[0].count, 2);
+  assert.equal(rows[0].dedupeKey, 'rmdmattingly/clawnsole#348');
+  assert.deepEqual(rows.slice(1).map((row) => row.item.id), ['c', 'd', 'e']);
+});
+
+test('summarizeExactWorkqueueDuplicateRows falls back to normalized title and status', () => {
+  const items = [
+    {
+      id: 'a',
+      title: '  Repeat   title  ',
+      status: 'ready',
+      updatedAt: '2026-01-01T00:00:00Z'
+    },
+    {
+      id: 'b',
+      title: 'repeat title',
+      status: 'ready',
+      updatedAt: '2026-01-01T00:00:00Z'
+    },
+    {
+      id: 'c',
+      title: 'repeat title',
+      status: 'done',
+      updatedAt: '2026-01-03T00:00:00Z'
+    }
+  ];
+
+  const rows = summarizeExactWorkqueueDuplicateRows(items);
+  assert.deepEqual(rows.map((row) => row.kind), ['exact_duplicate', 'item']);
+  assert.deepEqual(rows[0].items.map((item) => item.id), ['a', 'b']);
+  assert.equal(rows[0].representative.id, 'a');
+  assert.equal(rows[0].count, 2);
+  assert.equal(rows[0].dedupeKey, '');
+  assert.equal(rows[1].item.id, 'c');
+});
+
 test('inferPaneCols maps pane counts to sensible layout widths', () => {
   assert.equal(inferPaneCols(0), 1);
   assert.equal(inferPaneCols(1), 1);
@@ -169,12 +246,18 @@ test('normalizePaneKind handles aliases safely', () => {
 test('deriveAuthOverlayState captures auth/role transition flags', () => {
   assert.deepEqual(deriveAuthOverlayState({ authed: true, role: 'admin' }), {
     isAdmin: true,
-    isLocked: false,
+    authState: 'signed_in',
     startAgentAutoRefresh: true,
     stopAgentAutoRefresh: false,
-    rolePillText: 'signed in',
+    rolePillText: 'Signed in - Admin - local',
     rolePillAdmin: true,
     rolePillLocked: false,
+    rolePillSignedOut: false,
+    rolePillActionLabel: 'Open session details',
+    rolePillTooltip: 'Session context: signed in as Admin in local. Click for session details.',
+    authLabel: 'Signed in',
+    principalLabel: 'Admin',
+    environmentLabel: 'local',
     showAdminControls: true,
     authActionText: 'Logout',
     authActionLabel: 'Log out',
@@ -186,7 +269,7 @@ test('deriveAuthOverlayState captures auth/role transition flags', () => {
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).rolePillText, 'Locked');
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).showAdminControls, false);
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).authActionText, 'Unlock');
-  assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest' }).rolePillText, 'guest');
+  assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest', environment: 'qa' }).rolePillText, 'Signed in - Guest - qa');
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '1');
 });
 
@@ -240,7 +323,16 @@ test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard err
         { connected: false, statusState: 'reconnecting' }
       ]
     }),
-    { state: 'reconnecting', meta: 'panes: 1/2 connected' }
+    {
+      state: 'reconnecting',
+      meta: '1 connected · 1 disconnected · 1 attention',
+      connectedCount: 1,
+      disconnectedCount: 1,
+      unreadCount: 0,
+      attentionCount: 1,
+      total: 2,
+      ariaLabel: '1 of 2 panes connected; 1 disconnected; 0 unread items; 1 pane needs attention'
+    }
   );
 
   assert.deepEqual(
@@ -251,7 +343,41 @@ test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard err
         { connected: false, statusState: 'error', statusMeta: 'gateway disconnected' }
       ]
     }),
-    { state: 'error', meta: 'auth expired' }
+    {
+      state: 'error',
+      meta: '0 connected · 2 disconnected · 2 attention',
+      connectedCount: 0,
+      disconnectedCount: 2,
+      unreadCount: 0,
+      attentionCount: 2,
+      total: 2,
+      ariaLabel: '0 of 2 panes connected; 2 disconnected; 0 unread items; 2 panes need attention'
+    }
+  );
+});
+
+test('deriveGlobalConnectionState counts unread attention for screen readers', () => {
+  assert.equal(paneNeedsAttention({ connected: true, statusState: 'connected', unreadCount: 0 }), false);
+  assert.equal(paneNeedsAttention({ connected: true, statusState: 'connected', unreadCount: 2 }), true);
+
+  assert.deepEqual(
+    deriveGlobalConnectionState({
+      authed: true,
+      panes: [
+        { connected: true, statusState: 'connected', unreadCount: 2 },
+        { connected: true, statusState: 'connected', unreadCount: 0 }
+      ]
+    }),
+    {
+      state: 'connected',
+      meta: '2 connected · 0 disconnected · 1 attention',
+      connectedCount: 2,
+      disconnectedCount: 0,
+      unreadCount: 2,
+      attentionCount: 1,
+      total: 2,
+      ariaLabel: '2 of 2 panes connected; 0 disconnected; 2 unread items; 1 pane needs attention'
+    }
   );
 });
 
