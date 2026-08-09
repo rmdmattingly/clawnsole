@@ -161,6 +161,7 @@ test('pane-add shortcuts are scoped to workspace and blocked by overlays', async
     }));
   });
 
+  await expect(panes).toHaveCount(2);
   const initialCount = await paneCount();
   await page.click('#connectionStatus');
 
