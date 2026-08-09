@@ -162,6 +162,44 @@ test('chat pane: keyboard pane switch guards immediate Enter send once', async (
   await expect(secondPane.locator('[data-chat-role="user"]').last()).toContainText('override send');
 });
 
+test('chat pane: draft badge appears, persists across pane switches, and clears on send', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
+
+  const panes = page.locator('[data-pane][data-pane-kind="chat"]');
+  const firstPane = panes.first();
+  const secondPane = panes.nth(1);
+  const firstDraftBadge = firstPane.getByTestId('pane-draft-badge');
+
+  await firstPane.locator('[data-pane-input]').fill('draft badge check');
+  await expect(firstDraftBadge).toBeVisible();
+  await expect(firstDraftBadge).toHaveText('Draft');
+  await expect(firstDraftBadge).toHaveAttribute('aria-label', /Unsent draft/);
+  await expect(firstPane.getByTestId('pane-type-label')).toHaveAttribute('aria-label', /unsent draft/);
+
+  await secondPane.locator('[data-pane-input]').focus();
+  await expect(firstDraftBadge).toBeVisible();
+
+  await page.locator('#paneManagerBtn').click();
+  const managerRow = page.locator('.pane-manager-row', { has: page.getByTestId('pane-manager-draft-badge') }).first();
+  await expect(managerRow.getByTestId('pane-manager-draft-badge')).toHaveText('Draft');
+  await expect(managerRow).toHaveAttribute('aria-label', /unsent draft/);
+
+  await page.locator('#paneManagerCloseBtn').click();
+  await firstPane.locator('[data-pane-input]').focus();
+  await firstPane.locator('[data-pane-send]').click();
+  await expect(firstDraftBadge).toBeHidden();
+  await expect(firstPane.getByTestId('pane-type-label')).not.toHaveAttribute('aria-label', /unsent draft/);
+
+  await page.locator('#paneManagerBtn').click();
+  await expect(page.getByTestId('pane-manager-draft-badge')).toHaveCount(0);
+});
+
 test('topbar workqueue action reuses paired pane for active chat target and falls back to modal', async ({ page }) => {
   test.setTimeout(120000);
   test.skip(!!env?.skipReason, env?.skipReason);

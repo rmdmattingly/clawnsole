@@ -898,6 +898,29 @@ body::before {
   display: none !important;
 }
 
+.pane-draft-badge,
+.pane-manager-draft-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(125, 211, 252, 0.42);
+  background: rgba(125, 211, 252, 0.13);
+  color: #bae6fd;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pane-draft-badge[hidden] {
+  display: none !important;
+}
+
 .pane-help {
   position: relative;
 }
@@ -1656,6 +1679,11 @@ button.send-btn .btn-icon {
   color: #fecaca;
   font-size: 10px;
   font-weight: 700;
+}
+
+.pane-manager-draft-badge {
+  height: 18px;
+  padding: 0 7px;
 }
 
 .pane-manager-state {
