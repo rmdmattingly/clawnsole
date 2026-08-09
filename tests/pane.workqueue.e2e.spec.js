@@ -86,15 +86,17 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   expect(Math.abs(toolbarTop - threadTop)).toBeLessThan(20);
   expect(Math.abs(layoutBottom - threadBottom)).toBeLessThan(20);
 
+  const list = wqPane.locator('.wq-pane .wq-list').first();
   const listBody = wqPane.locator('.wq-pane [data-wq-list-body]').first();
   // List body exists even when empty; after refresh it should be scrollable.
+  await expect(list).toBeVisible();
   await expect(listBody).toHaveCount(1);
 
   const itemsResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
   await wqPane.locator('[data-wq-refresh]').click();
   await itemsResP;
 
-  const listOverflowY = await listBody.evaluate((el) => getComputedStyle(el).overflowY);
+  const listOverflowY = await list.evaluate((el) => getComputedStyle(el).overflowY);
   expect(listOverflowY).toBe('auto');
 
   // Workqueue pane should not show chat composer controls.
