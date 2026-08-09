@@ -88,6 +88,38 @@ test('chat pane: stop button can cancel a running response', async ({ page }) =>
   await expect(pane.locator('.chat-bubble.assistant')).not.toContainText('mock-reply: please stream this', { timeout: 3000 });
 });
 
+test('chat pane: composer context requires confirm after quick pane switch', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
+
+  const panes = page.locator('[data-pane][data-pane-kind="chat"]');
+  const firstPane = panes.first();
+  const secondPane = panes.nth(1);
+
+  await expect(firstPane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+  await expect(secondPane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+  await expect(firstPane.getByTestId('pane-destination-value')).toHaveText(/Chat · main/);
+
+  await firstPane.locator('[data-pane-input]').focus();
+  await secondPane.locator('[data-pane-input]').focus();
+  await firstPane.locator('[data-pane-input]').focus();
+  await firstPane.locator('[data-pane-input]').evaluate((node) => {
+    node.value = 'guarded send';
+  });
+  await firstPane.locator('[data-pane-input]').press('Enter');
+
+  await expect(firstPane.locator('[data-pane-destination-confirm]')).toContainText(/Press send again for main/);
+  await expect(firstPane.locator('[data-chat-role="user"]')).toHaveCount(0);
+
+  await firstPane.locator('[data-pane-input]').press('Enter');
+  await expect(firstPane.locator('[data-chat-role="user"]').last()).toContainText('guarded send');
+});
+
 test('chat pane: unread badge appears on inactive pane and clears on focus', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);

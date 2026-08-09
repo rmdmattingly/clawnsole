@@ -309,8 +309,10 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
   await page.getByLabel('Refresh agent list').click();
   await expect(wqPane.locator('[data-pane-target-label]')).toHaveText('Queue');
 
-  // Workqueue pane should not render the chat composer UI.
-  await expect(wqPane.locator('.chat-input-row')).toBeHidden();
+  // Workqueue panes keep the context banner visible, but do not render chat input controls.
+  await expect(wqPane.locator('.chat-input-row')).toBeVisible();
+  await expect(wqPane.getByTestId('pane-destination-strip')).toBeVisible();
+  await expect(wqPane.getByTestId('pane-destination-value')).toHaveText(/Workqueue/);
   await expect(wqPane.locator('[data-pane-input]')).toBeHidden();
 });
 

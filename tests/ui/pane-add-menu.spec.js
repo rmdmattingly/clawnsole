@@ -76,7 +76,7 @@ test('pane add menu: workqueue override is applied before pane opens', async ({ 
 
   const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
   await expect(wqPane).toBeVisible();
-  await expect(wqPane.getByTestId('pane-destination-value')).toHaveText('ci-team');
+  await expect(wqPane.getByTestId('pane-destination-value')).toHaveText('Workqueue · ci-team · all');
   await expect(wqPane.locator('[data-wq-scope="all"]')).toHaveAttribute('aria-pressed', 'true');
 });
 

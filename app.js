@@ -83,6 +83,7 @@ const globalElements = {
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   paneSwitchHudEnabled: document.getElementById('paneSwitchHudEnabled'),
+  composerConfirmGuardEnabled: document.getElementById('composerConfirmGuardEnabled'),
   keybindConflictList: document.getElementById('keybindConflictList'),
   shortcutOverridesList: document.getElementById('shortcutOverridesList'),
   shortcutOverridesSave: document.getElementById('shortcutOverridesSave'),
@@ -304,6 +305,8 @@ const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
 const PANE_SWITCH_HUD_ENABLED_KEY = 'clawnsole.admin.paneSwitchHud.enabled';
+const COMPOSER_CONFIRM_GUARD_ENABLED_KEY = 'clawnsole.admin.composerConfirmGuard.enabled';
+const COMPOSER_CONFIRM_GUARD_MS = 5000;
 const KEYBIND_OVERRIDES_KEY = 'clawnsole.admin.keybindOverrides.v1';
 const SHORTCUT_OVERRIDES_KEY = 'clawnsole.admin.shortcutOverrides.v1';
 const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
@@ -1913,6 +1916,9 @@ function openSettings() {
   if (globalElements.paneSwitchHudEnabled) {
     globalElements.paneSwitchHudEnabled.checked = isPaneSwitchHudEnabled();
   }
+  if (globalElements.composerConfirmGuardEnabled) {
+    globalElements.composerConfirmGuardEnabled.checked = isComposerConfirmGuardEnabled();
+  }
   renderKeyboardSettings();
   shortcutOverridesDraft = readShortcutOverrides();
   renderShortcutOverrideSettings();
@@ -2842,6 +2848,10 @@ function isPaneSwitchHudEnabled() {
   return String(storage.get(PANE_SWITCH_HUD_ENABLED_KEY, '1') || '1') !== '0';
 }
 
+function isComposerConfirmGuardEnabled() {
+  return String(storage.get(COMPOSER_CONFIRM_GUARD_ENABLED_KEY, '1') || '1') !== '0';
+}
+
 let paneSwitchHudHideTimer = null;
 
 function ensurePaneSwitchHud() {
@@ -2941,9 +2951,21 @@ function notePaneFocused(pane) {
   if (!key) return;
   const panes = paneManager?.panes || [];
   if (!panes.some((entry) => String(entry?.key || '') === key)) return;
+  const previousKey = paneFocusMruKeys[0] || '';
   paneMruTraversal = null;
   paneMruOrder();
   paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
+  if (pane.kind === 'chat' && previousKey && previousKey !== key) {
+    pane.composerGuard = {
+      ...(pane.composerGuard || {}),
+      focusedAt: Date.now(),
+      typedSinceFocus: false,
+      typedInDraft: Boolean(pane.elements?.input?.value?.trim?.()),
+      confirmPending: false,
+      confirmFor: ''
+    };
+    paneSetDestinationStrip(pane);
+  }
   updateBrowserTitle(pane);
 }
 
@@ -8066,6 +8088,55 @@ function panePumpOutbox(pane) {
 }
 
 
+function paneComposerTargetLabel(pane) {
+  if (!pane) return '';
+  if (pane.kind === 'chat') return paneDisplayTargetLabel(pane);
+  if (pane.kind === 'workqueue') {
+    const scope = String(pane.workqueue?.scopeFilter || 'mine') === 'all' ? 'all' : 'mine';
+    return `${pane.workqueue?.queue || 'dev-team'} · ${scope}`;
+  }
+  if (pane.kind === 'cron') return pane.cronAgentId ? `Agent: ${pane.cronAgentId}` : 'All agents';
+  if (pane.kind === 'timeline') return 'Activity timeline';
+  return paneDisplayTargetLabel(pane);
+}
+
+function paneComposerContextLabel(pane) {
+  return `${paneLabel(pane)} · ${paneComposerTargetLabel(pane) || paneDisplayTargetLabel(pane)}`;
+}
+
+function paneResetComposerConfirm(pane) {
+  if (!pane?.composerGuard) return;
+  pane.composerGuard.confirmPending = false;
+  pane.composerGuard.confirmFor = '';
+  paneSetDestinationStrip(pane);
+}
+
+function paneNeedsComposerConfirm(pane) {
+  if (!pane || pane.kind !== 'chat') return false;
+  if (!isComposerConfirmGuardEnabled()) return false;
+  const guard = pane.composerGuard || {};
+  if (guard.typedInDraft) return false;
+  if (guard.typedSinceFocus) return false;
+  const focusedAt = Number(guard.focusedAt || 0);
+  return focusedAt > 0 && Date.now() - focusedAt <= COMPOSER_CONFIRM_GUARD_MS;
+}
+
+function paneConfirmComposerSend(pane) {
+  const guard = pane.composerGuard || {};
+  const target = paneComposerTargetLabel(pane);
+  if (!paneNeedsComposerConfirm(pane)) {
+    paneResetComposerConfirm(pane);
+    return true;
+  }
+  if (guard.confirmPending && guard.confirmFor === target) {
+    paneResetComposerConfirm(pane);
+    return true;
+  }
+  pane.composerGuard = { ...guard, confirmPending: true, confirmFor: target };
+  paneSetDestinationStrip(pane);
+  return false;
+}
+
 async function paneSendChat(pane) {
   const raw = pane.elements.input.value.trim();
   if (!raw) return;
@@ -8097,6 +8168,8 @@ async function paneSendChat(pane) {
     addFeed('event', 'chat', `reset session (${key})`);
     return;
   }
+
+  if (!paneConfirmComposerSend(pane)) return;
 
   const sessionKey = pane.sessionKey();
   const idempotencyKey = randomId();
@@ -8173,6 +8246,13 @@ async function paneSendChat(pane) {
   panePumpOutbox(pane);
 
   pane.elements.input.value = '';
+  if (pane.composerGuard) {
+    pane.composerGuard.typedSinceFocus = false;
+    pane.composerGuard.typedInDraft = false;
+    pane.composerGuard.confirmPending = false;
+    pane.composerGuard.confirmFor = '';
+    paneSetDestinationStrip(pane);
+  }
   paneUpdateCommandHints(pane);
 }
 
@@ -8405,11 +8485,10 @@ function renderPaneIdentity(pane) {
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
   if (!pane?.elements) return;
-  const { targetLabel, agentButton, agentLabel, agentSelect, agentWarning, destinationValue } = pane.elements;
+  const { targetLabel, agentButton, agentLabel, agentSelect, agentWarning } = pane.elements;
 
   if (targetLabel && typeof label === 'string') targetLabel.textContent = label;
   if (agentLabel && typeof value === 'string') agentLabel.textContent = value;
-  if (destinationValue && typeof value === 'string') destinationValue.textContent = value;
 
   // Non-chat panes use the pill button as a "focus/chooser" affordance.
   if (agentSelect) agentSelect.hidden = true;
@@ -8438,6 +8517,7 @@ function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
 
   if (paneManager?.panes?.includes?.(pane)) paneManager.updatePaneLabels();
   else renderPaneIdentity(pane);
+  paneSetDestinationStrip(pane);
 }
 
 function renderPaneAgentIdentity(pane) {
@@ -8604,18 +8684,25 @@ function anyPaneHasDraftChanges(panes) {
 function paneSetDestinationStrip(pane) {
   const strip = pane?.elements?.destinationStrip;
   const valueEl = pane?.elements?.destinationValue;
+  const labelEl = pane?.elements?.destinationLabel;
+  const confirmEl = pane?.elements?.destinationConfirm;
+  const buttonEl = pane?.elements?.destinationButton;
   if (!strip || !valueEl) return;
-  if (pane.kind !== 'chat' || pane.role !== 'admin') {
-    strip.hidden = true;
-    return;
-  }
   strip.hidden = false;
-  const raw = typeof pane.agentId === 'string' ? pane.agentId.trim() : '';
-  const hasSelection = Boolean(raw);
-  const agentId = hasSelection ? normalizeAgentId(raw) : '';
-  const agent = hasSelection ? getAgentRecord(agentId) : null;
-  const displayText = hasSelection ? formatAgentLabel(agent, { includeId: false }) : 'Pick agent…';
-  valueEl.textContent = displayText;
+  const isChatAdmin = pane.kind === 'chat' && pane.role === 'admin';
+  const context = paneComposerContextLabel(pane);
+  const confirmPending = Boolean(isChatAdmin && pane.composerGuard?.confirmPending);
+  strip.classList.toggle('destination-strip-disabled', !isChatAdmin);
+  strip.classList.toggle('destination-strip-confirming', confirmPending);
+  if (labelEl) labelEl.textContent = isChatAdmin ? 'Sending to' : 'Not a chat target';
+  valueEl.textContent = context;
+  if (confirmEl) {
+    confirmEl.textContent = confirmPending ? `Press send again for ${paneComposerTargetLabel(pane)}` : '';
+  }
+  if (buttonEl) {
+    buttonEl.disabled = !isChatAdmin;
+    buttonEl.setAttribute('aria-label', isChatAdmin ? `Change destination (current: ${paneComposerTargetLabel(pane)})` : context);
+  }
 }
 
 function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true, syncFromPaneKey = '' } = {}) {
@@ -8733,8 +8820,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     scrollDownBtn: root.querySelector('[data-pane-scroll-down]'),
     inputRow: root.querySelector('.chat-input-row'),
     destinationStrip: root.querySelector('[data-pane-destination-strip]'),
+    destinationLabel: root.querySelector('[data-pane-destination-label]'),
     destinationButton: root.querySelector('[data-pane-destination-button]'),
     destinationValue: root.querySelector('[data-pane-destination-value]'),
+    destinationConfirm: root.querySelector('[data-pane-destination-confirm]'),
     input: root.querySelector('[data-pane-input]'),
     commandHints: root.querySelector('[data-pane-command-hints]'),
     fileInput: root.querySelector('[data-pane-file-input]'),
@@ -8791,6 +8880,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     abortState: { active: false, requestedAt: 0, targetRunId: null, timer: null, finished: false, canceledRunIds: new Set() },
     attachments: { files: [] },
     pendingSend: null,
+    composerGuard: { focusedAt: 0, typedSinceFocus: false, typedInDraft: false, confirmPending: false, confirmFor: '' },
     catchUp: { active: false, attemptsLeft: 0, timer: null },
     outbox: [],
     inFlight: null,
@@ -8944,7 +9034,6 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     clearPaneUnread(pane);
   });
   elements.root?.addEventListener('pointerdown', () => {
-    notePaneFocused(pane);
     clearPaneUnread(pane);
   });
   renderPaneActivityBadge(pane);
@@ -8952,7 +9041,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   // WORKQUEUE PANE
   if (pane.role === 'admin' && pane.kind === 'workqueue') {
     if (elements.agentWrap) elements.agentWrap.hidden = false;
-    if (elements.inputRow) elements.inputRow.hidden = true;
+    if (elements.inputRow) elements.inputRow.hidden = false;
+    if (elements.input) elements.input.disabled = true;
+    if (elements.sendBtn) elements.sendBtn.disabled = true;
+    if (elements.attachBtn) elements.attachBtn.disabled = true;
     if (elements.scrollDownBtn) elements.scrollDownBtn.hidden = true;
 
     // Header should describe the pane's primary target (queue), not an agent.
@@ -9707,13 +9799,17 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     pane.statusState = 'connected';
     pane.statusMeta = '';
     if (pane.elements?.root) pane.elements.root.dataset.connected = 'true';
+    paneSetDestinationStrip(pane);
     return pane;
   }
 
   // CRON + TIMELINE PANES (admin-only)
   if (pane.role === 'admin' && (pane.kind === 'cron' || pane.kind === 'timeline')) {
     if (elements.agentWrap) elements.agentWrap.hidden = false;
-    if (elements.inputRow) elements.inputRow.hidden = true;
+    if (elements.inputRow) elements.inputRow.hidden = false;
+    if (elements.input) elements.input.disabled = true;
+    if (elements.sendBtn) elements.sendBtn.disabled = true;
+    if (elements.attachBtn) elements.attachBtn.disabled = true;
     if (elements.scrollDownBtn) elements.scrollDownBtn.hidden = true;
 
     const isTimeline = pane.kind === 'timeline';
@@ -10255,6 +10351,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
     pane.client = buildClientForPane(pane);
     setStatusPill(elements.status, 'disconnected', '');
+    paneSetDestinationStrip(pane);
     renderPaneIdentity(pane);
     return pane;
   }
@@ -10296,6 +10393,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   });
 
   elements.input.addEventListener('input', () => {
+    if (pane.composerGuard) {
+      pane.composerGuard.typedSinceFocus = true;
+      pane.composerGuard.typedInDraft = Boolean(elements.input.value.trim());
+      pane.composerGuard.confirmPending = false;
+      pane.composerGuard.confirmFor = '';
+      paneSetDestinationStrip(pane);
+    }
     paneUpdateCommandHints(pane);
   });
 
@@ -11179,6 +11283,11 @@ globalElements.settingsModal?.addEventListener('click', (event) => {
 globalElements.paneSwitchHudEnabled?.addEventListener('change', () => {
   storage.set(PANE_SWITCH_HUD_ENABLED_KEY, globalElements.paneSwitchHudEnabled.checked ? '1' : '0');
 });
+globalElements.composerConfirmGuardEnabled?.addEventListener('change', () => {
+  storage.set(COMPOSER_CONFIRM_GUARD_ENABLED_KEY, globalElements.composerConfirmGuardEnabled.checked ? '1' : '0');
+  paneManager?.panes?.forEach?.((pane) => paneResetComposerConfirm(pane));
+});
+
 function handleShortcutOverrideInputKeydown(event) {
   const input = event.target?.closest?.('[data-shortcut-action]');
   if (!input) return;
