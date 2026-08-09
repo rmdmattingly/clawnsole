@@ -174,6 +174,101 @@ function createClawnsoleServer(options = {}) {
     }
   }
 
+  function computeRecurringPromptSessionKey(agentId, deviceLabel = 'scheduler') {
+    const resolved = String(agentId || 'main').trim() || 'main';
+    const device = String(deviceLabel || 'scheduler').trim() || 'scheduler';
+    return `agent:${resolved}:admin:${device}`;
+  }
+
+  async function defaultDeliverRecurringPrompt({ prompt, idempotencyKey, deviceLabel = 'scheduler' }) {
+    const socket = new WebSocketImpl(gatewayWsUrl());
+    const pending = new Map();
+
+    const sendReq = (method, params) => {
+      const id = randomId();
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pending.delete(id);
+          reject(new Error('gateway request timeout'));
+        }, 15_000);
+        pending.set(id, (msg) => {
+          clearTimeout(timer);
+          resolve(msg);
+        });
+        socket.send(JSON.stringify({ type: 'req', id, method, params: params || {} }));
+      });
+    };
+
+    socket.on('message', (raw) => {
+      let msg = null;
+      try {
+        msg = JSON.parse(String(raw || ''));
+      } catch {
+        return;
+      }
+      if (!msg || msg.type !== 'res' || !msg.id) return;
+      const resolver = pending.get(msg.id);
+      if (!resolver) return;
+      pending.delete(msg.id);
+      resolver(msg);
+    });
+
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('gateway socket open timeout')), 10_000);
+      socket.on('open', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      socket.on('error', (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+
+    const { token } = readToken();
+    try {
+      const connectRes = await sendReq('connect', {
+        minProtocol: 3,
+        maxProtocol: 3,
+        client: {
+          id: 'recurring-prompt-trigger',
+          version: '0.1.0',
+          platform: 'node',
+          mode: 'scheduler',
+          instanceId: 'recurring-prompt-trigger'
+        },
+        role: 'operator',
+        scopes: ['operator.read', 'operator.write', 'operator.admin'],
+        caps: [],
+        commands: [],
+        permissions: {},
+        auth: token ? { token } : undefined,
+        locale: 'en-US',
+        userAgent: 'clawnsole-recurring-trigger/0.1.0'
+      });
+
+      if (!connectRes?.ok) {
+        throw new Error(connectRes?.error?.message || 'gateway connect failed');
+      }
+
+      const sendRes = await sendReq('chat.send', {
+        sessionKey: computeRecurringPromptSessionKey(prompt.agentId, deviceLabel),
+        message: prompt.message || '',
+        deliver: true,
+        idempotencyKey
+      });
+      if (!sendRes?.ok) {
+        throw new Error(sendRes?.error?.message || 'chat.send failed');
+      }
+    } finally {
+      try {
+        socket.close();
+      } catch {}
+    }
+  }
+
+  const deliverRecurringPrompt = options.deliverRecurringPrompt || defaultDeliverRecurringPrompt;
+
   function sanitizeRecurringPrompt(input = {}, now) {
     const title = typeof input.title === 'string' ? input.title.trim() : '';
     const agentId = typeof input.agentId === 'string' ? input.agentId.trim() : 'main';
@@ -196,7 +291,19 @@ function createClawnsoleServer(options = {}) {
         if (!ts) return null;
         const status = String(row.status || row.lastStatus || 'unknown').trim() || 'unknown';
         const error = String(row.error || row.lastError || '').trim();
-        return { ts, status, error };
+        const scheduledAtRaw = Number(row.scheduledAt ?? row.scheduled_at ?? 0);
+        const scheduledAt = Number.isFinite(scheduledAtRaw) && scheduledAtRaw > 0 ? scheduledAtRaw : undefined;
+        const deliveredAtRaw = Number(row.deliveredAt ?? row.delivered_at ?? 0);
+        const deliveredAt = Number.isFinite(deliveredAtRaw) && deliveredAtRaw > 0 ? deliveredAtRaw : undefined;
+        const idempotencyKey = String(row.idempotencyKey || row.idempotency_key || '').trim();
+        return {
+          ts,
+          status,
+          error,
+          ...(scheduledAt ? { scheduledAt } : {}),
+          ...(deliveredAt ? { deliveredAt } : {}),
+          ...(idempotencyKey ? { idempotencyKey } : {})
+        };
       })
       .filter(Boolean)
       .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
@@ -361,7 +468,8 @@ function createClawnsoleServer(options = {}) {
       sendJson(res, 200, {
         wsUrl,
         adminWsUrl: '/admin-ws',
-        port: gatewayPort
+        port: gatewayPort,
+        instance: instance || 'local'
       });
       return;
     }
@@ -490,6 +598,102 @@ function createClawnsoleServer(options = {}) {
         } catch (err) {
           sendJson(res, 400, { ok: false, error: 'invalid_request' });
         }
+      });
+      return;
+    }
+
+    if (req.url.startsWith('/api/recurring-prompts/') && req.url.includes('/trigger')) {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      const parsed = new URL(req.url, 'http://127.0.0.1');
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      const id = parts[2] || '';
+      if (!id || parts[3] !== 'trigger') {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+
+      readJsonBody(req, res, { maxBytes: 100_000 }).then(async (payload) => {
+        if (!payload) return;
+        const now = Date.now();
+        const state = readRecurringPrompts();
+        const idx = state.prompts.findIndex((p) => p && p.id === id);
+        if (idx < 0) {
+          sendJson(res, 404, { ok: false, error: 'not_found' });
+          return;
+        }
+
+        const prompt = state.prompts[idx];
+        const scheduledAtRaw = Number(payload.scheduledAt ?? payload.scheduled_at ?? prompt.nextRunAt ?? now);
+        const scheduledAt = Number.isFinite(scheduledAtRaw) && scheduledAtRaw > 0 ? Math.floor(scheduledAtRaw) : now;
+        const idempotencyKey = String(
+          payload.idempotencyKey ||
+            payload.idempotency_key ||
+            req.headers['idempotency-key'] ||
+            `${id}:${scheduledAt}`
+        ).trim();
+        const runs = normalizeRecurringRuns(prompt.runHistory);
+        const existingOk = runs.find(
+          (row) =>
+            idempotencyKey &&
+            row.idempotencyKey === idempotencyKey &&
+            (row.status === 'ok' || row.status === 'dry_run')
+        );
+        if (existingOk) {
+          sendJson(res, 200, { ok: true, duplicate: true, prompt: serializeRecurringPrompt(prompt), run: existingOk });
+          return;
+        }
+
+        const dryRun = payload.dryRun === true || payload.dry_run === true;
+        const deviceLabel = typeof payload.deviceLabel === 'string' ? payload.deviceLabel.trim() : 'scheduler';
+        let status = dryRun ? 'dry_run' : 'ok';
+        let error = '';
+
+        try {
+          if (!dryRun) {
+            await deliverRecurringPrompt({ prompt, idempotencyKey, scheduledAt, deviceLabel });
+          }
+        } catch (err) {
+          status = 'error';
+          error = String(err?.message || err || 'delivery failed');
+        }
+
+        const intervalMinutes = Math.max(1, Number(prompt.intervalMinutes) || 60);
+        const baseForNext = Math.max(now, scheduledAt);
+        const updatedRun = {
+          ts: now,
+          scheduledAt,
+          deliveredAt: status === 'ok' || status === 'dry_run' ? now : undefined,
+          status,
+          error,
+          idempotencyKey
+        };
+        const nextRuns = [updatedRun, ...runs.filter((row) => row.idempotencyKey !== idempotencyKey)].slice(0, 200);
+        const updated = {
+          ...prompt,
+          lastRunAt: now,
+          lastStatus: status,
+          lastError: error,
+          nextRunAt: baseForNext + intervalMinutes * 60 * 1000,
+          runHistory: nextRuns,
+          updatedAt: now
+        };
+        state.prompts[idx] = updated;
+        writeRecurringPrompts(state);
+        sendJson(res, status === 'error' ? 502 : 200, {
+          ok: status !== 'error',
+          prompt: serializeRecurringPrompt(updated),
+          run: updatedRun,
+          ...(error ? { error } : {})
+        });
       });
       return;
     }
@@ -782,6 +986,9 @@ function createClawnsoleServer(options = {}) {
           const instructions = String(payload.instructions || '').trim();
           const priority = Number.isFinite(Number(payload.priority)) ? Number(payload.priority) : 0;
           const dedupeKey = String(payload.dedupeKey || '').trim();
+          const meta = payload.meta && typeof payload.meta === 'object' && !Array.isArray(payload.meta) ? payload.meta : {};
+          const repo = String(payload.repo ?? meta.repo ?? '').trim();
+          const issueNumber = payload.issueNumber ?? meta.issueNumber ?? meta.issue;
 
           if (!queue) {
             sendJson(res, 400, { ok: false, error: 'queue_required' });
@@ -789,8 +996,9 @@ function createClawnsoleServer(options = {}) {
           }
 
           const { enqueueItem } = require('./lib/workqueue');
-          const item = enqueueItem(null, { queue, title, instructions, priority, dedupeKey });
-          sendJson(res, 200, { ok: true, item });
+          const item = enqueueItem(null, { queue, title, instructions, priority, dedupeKey, repo, issueNumber, meta });
+          const enqueueResult = item && item._enqueueAction === 'updated_existing' ? 'updated_existing' : 'created';
+          sendJson(res, 200, { ok: true, result: enqueueResult, item });
         } catch (err) {
           sendJson(res, 400, { ok: false, error: 'invalid_request' });
         }
@@ -1324,10 +1532,14 @@ function createClawnsoleServer(options = {}) {
     }
 
 
+    let requestPath = req.url;
+    try {
+      requestPath = new URL(req.url, 'http://127.0.0.1').pathname;
+    } catch {}
     const urlPath =
-      req.url === '/' || req.url === '/admin' || req.url === '/admin/'
+      requestPath === '/' || requestPath === '/admin' || requestPath.startsWith('/admin/')
         ? '/index.html'
-        : req.url;
+        : requestPath;
     const filePath = path.join(root, decodeURIComponent(urlPath));
     if (!filePath.startsWith(root)) {
       res.writeHead(403);

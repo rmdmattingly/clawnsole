@@ -96,6 +96,7 @@ test('GET /meta returns gateway urls and port', async () => {
   assert.equal(data.wsUrl, 'ws://127.0.0.1:19999');
   assert.equal(data.adminWsUrl, '/admin-ws');
   assert.equal(data.port, 19999);
+  assert.equal(data.instance, 'local');
   assert.equal(data.guestWsUrl, undefined);
 });
 
@@ -529,4 +530,81 @@ test('recurring prompt runs endpoint returns bounded recent rows', async () => {
     headers: { cookie: adminCookie }
   });
   assert.equal(missing.statusCode, 404);
+});
+
+test('recurring prompt trigger records run and dedupes by idempotency key', async () => {
+  const { homeDir, openclawDir } = makeTempHome();
+  writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
+
+  const now = Date.now();
+  writeJson(path.join(openclawDir, 'clawnsole-recurring-prompts.json'), {
+    prompts: [
+      {
+        id: 'p-trigger',
+        title: 'Trigger me',
+        agentId: 'dev',
+        message: 'admin prompt body',
+        intervalMinutes: 15,
+        enabled: true,
+        createdAt: now - 10_000,
+        updatedAt: now - 10_000,
+        nextRunAt: now - 1_000,
+        lastRunAt: null,
+        lastStatus: 'never',
+        lastError: '',
+        runHistory: []
+      }
+    ]
+  });
+
+  const deliveries = [];
+  const { handleRequest } = createClawnsoleServer({
+    homeDir,
+    deliverRecurringPrompt: async (payload) => deliveries.push(payload)
+  });
+  const login = await invoke(handleRequest, {
+    url: '/auth/login',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: 'admin' })
+  });
+  const adminCookie = parseCookiesFromSetCookie(login.headers['set-cookie']);
+  const triggerBody = JSON.stringify({ scheduledAt: now - 1_000, idempotencyKey: 'p-trigger:slot-1' });
+
+  const first = await invoke(handleRequest, {
+    url: '/api/recurring-prompts/p-trigger/trigger',
+    method: 'POST',
+    headers: { cookie: adminCookie, 'content-type': 'application/json' },
+    body: triggerBody
+  });
+  assert.equal(first.statusCode, 200);
+  const firstPayload = JSON.parse(first.body.toString('utf8'));
+  assert.equal(firstPayload.ok, true);
+  assert.equal(firstPayload.run.status, 'ok');
+  assert.equal(firstPayload.run.idempotencyKey, 'p-trigger:slot-1');
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].prompt.agentId, 'dev');
+  assert.equal(deliveries[0].idempotencyKey, 'p-trigger:slot-1');
+  assert.ok(firstPayload.prompt.nextRunAt > now);
+
+  const second = await invoke(handleRequest, {
+    url: '/api/recurring-prompts/p-trigger/trigger',
+    method: 'POST',
+    headers: { cookie: adminCookie, 'content-type': 'application/json' },
+    body: triggerBody
+  });
+  assert.equal(second.statusCode, 200);
+  const secondPayload = JSON.parse(second.body.toString('utf8'));
+  assert.equal(secondPayload.ok, true);
+  assert.equal(secondPayload.duplicate, true);
+  assert.equal(deliveries.length, 1);
+
+  const runs = await invoke(handleRequest, {
+    url: '/api/recurring-prompts/p-trigger/runs',
+    headers: { cookie: adminCookie }
+  });
+  const runsPayload = JSON.parse(runs.body.toString('utf8'));
+  assert.equal(runsPayload.runs.length, 1);
+  assert.equal(runsPayload.runs[0].idempotencyKey, 'p-trigger:slot-1');
 });
