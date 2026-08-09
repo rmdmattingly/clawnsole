@@ -2961,6 +2961,7 @@ kbd {
 .cron-pane .wq-list-body {
   flex: 1;
   max-height: none;
+  overflow: visible;
 }
 
 .wq-pane .wq-inspect,
@@ -2992,11 +2993,12 @@ kbd {
 .wq-list {
   border: 1px solid var(--panel-border);
   border-radius: 14px;
-  overflow: hidden;
+  overflow: auto;
   background: rgba(255, 255, 255, 0.02);
   display: flex;
   flex-direction: column;
   min-height: 0;
+  scrollbar-gutter: stable both-edges;
 }
 
 .wq-list-header,
@@ -3008,20 +3010,22 @@ kbd {
 }
 
 .wq-list-header {
+  position: sticky;
+  top: 0;
+  z-index: 6;
   padding: 10px 12px;
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--panel);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .wq-list-body {
   min-height: 0;
   flex: 1;
-  overflow: auto;
-  scrollbar-gutter: stable both-edges;
+  overflow: visible;
 }
 
 /* Kanban-style board for Workqueue (Issue #89) */

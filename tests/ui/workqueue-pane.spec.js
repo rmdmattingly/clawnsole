@@ -893,18 +893,36 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
   await loginAdmin(page, env.serverPort);
+  const queue = `ui-sticky-header-${Date.now()}`;
+  const baseUrl = `http://127.0.0.1:${env.serverPort}`;
+  for (let i = 0; i < 36; i += 1) {
+    const res = await page.request.post(`${baseUrl}/api/workqueue/enqueue`, {
+      data: {
+        queue,
+        title: `sticky header item ${String(i).padStart(2, '0')}`,
+        instructions: `seed sticky header item ${i}`,
+        priority: i
+      }
+    });
+    expect(res.ok()).toBeTruthy();
+  }
+
   await addPane(page, 'Workqueue pane');
 
   const wqPane = page.locator('[data-pane]').last();
   const toolbar = wqPane.locator('.wq-pane .wq-toolbar');
+  const list = wqPane.locator('.wq-pane .wq-list').first();
+  const header = wqPane.locator('.wq-pane .wq-list-header').first();
   const listBody = wqPane.locator('.wq-pane [data-wq-list-body]').first();
 
   await expect(toolbar).toBeVisible();
+  await expect(header).toBeVisible();
   await expect(listBody).toHaveCount(1);
 
-  const itemsResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
-  await wqPane.locator('[data-wq-refresh]').click();
-  await itemsResP;
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await expect(listBody.locator('.wq-row')).toHaveCount(36);
 
   const styles = await toolbar.evaluate((el) => {
     const cs = window.getComputedStyle(el);
@@ -921,11 +939,37 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
   expect(Number(styles.zIndex)).toBeGreaterThanOrEqual(5);
   expect(styles.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
 
-  const listStyles = await listBody.evaluate((el) => {
+  const listStyles = await list.evaluate((el) => {
     const cs = window.getComputedStyle(el);
-    return { overflowY: cs.overflowY };
+    return { overflowY: cs.overflowY, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
   });
   expect(['auto', 'scroll']).toContain(listStyles.overflowY);
+  expect(listStyles.scrollHeight).toBeGreaterThan(listStyles.clientHeight);
+
+  const headerStyles = await header.evaluate((el) => {
+    const cs = window.getComputedStyle(el);
+    return {
+      position: cs.position,
+      top: cs.top,
+      zIndex: cs.zIndex,
+      backgroundColor: cs.backgroundColor
+    };
+  });
+  expect(headerStyles.position).toBe('sticky');
+  expect(headerStyles.top).toBe('0px');
+  expect(Number(headerStyles.zIndex)).toBeGreaterThanOrEqual(6);
+  expect(headerStyles.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+
+  const before = await header.boundingBox();
+  expect(before).toBeTruthy();
+  await list.evaluate((el) => { el.scrollTop = 240; });
+  await page.waitForTimeout(50);
+  const after = await header.boundingBox();
+  expect(after).toBeTruthy();
+  expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1);
+
+  await header.locator('[data-wq-sort="priority"]').click();
+  await expect(header.locator('[data-wq-sort="priority"]')).toHaveClass(/active/);
 });
 
 test('workqueue pane: large queues render an initial capped slice and load more incrementally', async ({ page }) => {
