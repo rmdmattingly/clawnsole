@@ -187,7 +187,7 @@ const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => (
   authState: !!state?.authed ? 'signed_in' : (String(state?.role || '') === 'admin' ? 'locked' : 'signed_out'),
   startAgentAutoRefresh: String(state?.role || '') === 'admin' && !!state?.authed,
   stopAgentAutoRefresh: String(state?.role || '') !== 'admin' || !state?.authed,
-  rolePillText: !!state?.authed ? `Signed in - ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} - ${state?.environment || 'local'}` : 'Signed out',
+  rolePillText: !!state?.authed ? `Signed in - ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} - ${state?.environment || 'local'}` : (String(state?.role || '') === 'admin' ? 'Locked' : 'Signed out'),
   rolePillAdmin: String(state?.role || '') === 'admin' && !!state?.authed,
   rolePillLocked: !state?.authed && String(state?.role || '') === 'admin',
   rolePillSignedOut: !state?.authed && String(state?.role || '') !== 'admin',
@@ -195,12 +195,14 @@ const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => (
   rolePillTooltip: !!state?.authed
     ? `Session context: signed in as ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} in ${state?.environment || 'local'}. Click for session details.`
     : `Session context: signed out in ${state?.environment || 'local'}. Click to unlock this session.`,
-  authLabel: !!state?.authed ? 'Signed in' : 'Signed out',
+  authLabel: !!state?.authed ? 'Signed in' : (String(state?.role || '') === 'admin' ? 'Locked' : 'Signed out'),
   principalLabel: !!state?.authed ? (String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')) : 'Not signed in',
   environmentLabel: state?.environment || 'local',
-  showAdminControls: String(state?.role || '') === 'admin',
-  logoutEnabled: !!state?.authed,
-  logoutOpacity: !!state?.authed ? '1' : '0.5'
+  showAdminControls: String(state?.role || '') === 'admin' && !!state?.authed,
+  authActionText: !!state?.authed ? 'Logout' : 'Unlock',
+  authActionLabel: !!state?.authed ? 'Log out' : 'Unlock admin',
+  logoutEnabled: true,
+  logoutOpacity: '1'
 }));
 const paneNeedsAttention = __appCore.paneNeedsAttention || ((pane) => {
   if (!pane) return false;
@@ -1686,9 +1688,10 @@ async function prepareGateway(kind) {
 function setStatusPill(el, state, meta = '') {
   if (!el) return;
   el.textContent = state;
-  el.classList.remove('connected', 'error', 'working');
+  el.classList.remove('connected', 'error', 'working', 'locked');
   if (state === 'connected') el.classList.add('connected');
   if (state === 'error') el.classList.add('error');
+  if (state === 'locked') el.classList.add('locked');
   if (state === 'connecting' || state === 'reconnecting' || state === 'offline') {
     el.classList.add('working');
   }
@@ -1698,8 +1701,10 @@ function setStatusPill(el, state, meta = '') {
 function updateGlobalStatus() {
   const status = deriveGlobalConnectionState({ authed: uiState.authed, panes: paneManager.panes });
   setStatusPill(globalElements.status, status.state, status.meta);
+  if (globalElements.status) globalElements.status.hidden = !uiState.authed;
   if (globalElements.paneManagerBtn) {
-    globalElements.paneManagerBtn.textContent = status.meta;
+    globalElements.paneManagerBtn.hidden = !uiState.authed || !status.meta;
+    globalElements.paneManagerBtn.textContent = uiState.authed ? status.meta : '';
     const label = status.ariaLabel ? `Open pane manager. Shift-click to filter panes needing attention. ${status.ariaLabel}` : 'Open pane manager';
     globalElements.paneManagerBtn.setAttribute('aria-label', label);
     globalElements.paneManagerBtn.title = status.ariaLabel || status.meta || 'Open pane manager';
@@ -1711,6 +1716,16 @@ function updateConnectionControls() {
   const control = deriveDisconnectButtonState({ authed: uiState.authed, panes: paneManager.panes });
   globalElements.disconnectBtn.disabled = !!control.disabled;
   globalElements.disconnectBtn.textContent = control.text;
+}
+
+function updateAuthAction(authUi) {
+  if (!globalElements.logoutBtn) return;
+  globalElements.logoutBtn.disabled = !authUi.logoutEnabled;
+  globalElements.logoutBtn.style.opacity = authUi.logoutOpacity;
+  globalElements.logoutBtn.setAttribute('aria-label', authUi.authActionLabel);
+  globalElements.logoutBtn.setAttribute('title', authUi.authActionText);
+  const label = globalElements.logoutBtn.querySelector('.btn-label');
+  if (label) label.textContent = authUi.authActionText;
 }
 
 function currentAuthUi() {
@@ -1769,22 +1784,21 @@ function setAuthState(authed) {
     stopAgentAutoRefresh();
   }
 
-  if (globalElements.logoutBtn) {
-    globalElements.logoutBtn.disabled = !authUi.logoutEnabled;
-    globalElements.logoutBtn.style.opacity = authUi.logoutOpacity;
-  }
+  updateAuthAction(authUi);
 }
 
 function setRole(role) {
   roleState.role = role;
   const authUi = renderAuthSessionUi();
 
-  const isAdmin = authUi.isAdmin;
-  const visibleOpacity = isAdmin ? '1' : '0.5';
+  updateAuthAction(authUi);
+
+  const showAdminControls = authUi.showAdminControls;
+  const visibleOpacity = showAdminControls ? '1' : '0.5';
 
   if (globalElements.refreshAgentsBtn) {
-    globalElements.refreshAgentsBtn.hidden = !isAdmin;
-    globalElements.refreshAgentsBtn.disabled = !isAdmin || !uiState.authed;
+    globalElements.refreshAgentsBtn.hidden = !showAdminControls;
+    globalElements.refreshAgentsBtn.disabled = !showAdminControls;
     globalElements.refreshAgentsBtn.style.opacity = visibleOpacity;
   }
 
@@ -1795,35 +1809,35 @@ function setRole(role) {
   }
 
   if (globalElements.settingsBtn) {
-    if (isAdmin) globalElements.settingsBtn.removeAttribute('disabled');
+    if (showAdminControls) globalElements.settingsBtn.removeAttribute('disabled');
     else globalElements.settingsBtn.setAttribute('disabled', 'disabled');
     globalElements.settingsBtn.style.opacity = visibleOpacity;
   }
 
   if (globalElements.paneControls) {
-    globalElements.paneControls.hidden = !isAdmin;
+    globalElements.paneControls.hidden = !showAdminControls;
   }
   if (globalElements.agentsBtn) {
-    globalElements.agentsBtn.hidden = !isAdmin;
-    globalElements.agentsBtn.disabled = !isAdmin;
+    globalElements.agentsBtn.hidden = !showAdminControls;
+    globalElements.agentsBtn.disabled = !showAdminControls;
     globalElements.agentsBtn.style.opacity = visibleOpacity;
   }
 
   if (globalElements.workqueueBtn) {
-    globalElements.workqueueBtn.hidden = !isAdmin;
-    globalElements.workqueueBtn.disabled = !isAdmin;
+    globalElements.workqueueBtn.hidden = !showAdminControls;
+    globalElements.workqueueBtn.disabled = !showAdminControls;
     globalElements.workqueueBtn.style.opacity = visibleOpacity;
   }
 
   if (globalElements.fleetBtn) {
-    globalElements.fleetBtn.hidden = !isAdmin;
-    globalElements.fleetBtn.disabled = !isAdmin;
+    globalElements.fleetBtn.hidden = !showAdminControls;
+    globalElements.fleetBtn.disabled = !showAdminControls;
     globalElements.fleetBtn.style.opacity = visibleOpacity;
   }
 
   if (globalElements.shortcutsBtn) {
-    globalElements.shortcutsBtn.hidden = !isAdmin;
-    globalElements.shortcutsBtn.disabled = !isAdmin;
+    globalElements.shortcutsBtn.hidden = !showAdminControls;
+    globalElements.shortcutsBtn.disabled = !showAdminControls;
     globalElements.shortcutsBtn.style.opacity = visibleOpacity;
   }
 }
@@ -12256,6 +12270,10 @@ globalElements.loginPassword?.addEventListener('keydown', (event) => {
 });
 
 globalElements.logoutBtn?.addEventListener('click', async () => {
+  if (!uiState.authed) {
+    showLogin();
+    return;
+  }
   try {
     await fetch('/auth/logout', { method: 'POST' });
   } catch {}
