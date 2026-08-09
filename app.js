@@ -105,6 +105,14 @@ const globalElements = {
   paneTemplate: document.getElementById('paneTemplate')
 };
 
+function setOverlayOpen(el, open) {
+  if (!el) return;
+  el.classList.toggle('open', !!open);
+  el.setAttribute('aria-hidden', open ? 'false' : 'true');
+  if (open) el.removeAttribute('inert');
+  else el.setAttribute('inert', '');
+}
+
 // Pure helpers live in lib/app-core.js so we can unit-test them under Node.
 const __appCore = (typeof window !== 'undefined' && window.AppCore) ? window.AppCore : {};
 const escapeHtml = __appCore.escapeHtml || ((value) => {
@@ -1820,8 +1828,7 @@ function setRole(role) {
 
 function showLogin(message = '') {
   captureAdminAuthDestination();
-  globalElements.loginOverlay.classList.add('open');
-  globalElements.loginOverlay.setAttribute('aria-hidden', 'false');
+  setOverlayOpen(globalElements.loginOverlay, true);
   globalElements.loginError.textContent = message;
   globalElements.loginPassword.value = '';
 
@@ -1843,8 +1850,7 @@ function showLogin(message = '') {
 }
 
 function hideLogin() {
-  globalElements.loginOverlay.classList.remove('open');
-  globalElements.loginOverlay.setAttribute('aria-hidden', 'true');
+  setOverlayOpen(globalElements.loginOverlay, false);
   globalElements.loginError.textContent = '';
   setAuthState(true);
 }
@@ -1892,8 +1898,7 @@ function openSettings() {
   renderKeyboardSettings();
   shortcutOverridesDraft = readShortcutOverrides();
   renderShortcutOverrideSettings();
-  globalElements.settingsModal.classList.add('open');
-  globalElements.settingsModal.setAttribute('aria-hidden', 'false');
+  setOverlayOpen(globalElements.settingsModal, true);
 
   // Guest mode removed.
 
@@ -1902,8 +1907,7 @@ function openSettings() {
 }
 
 function closeSettings() {
-  globalElements.settingsModal.classList.remove('open');
-  globalElements.settingsModal.setAttribute('aria-hidden', 'true');
+  setOverlayOpen(globalElements.settingsModal, false);
   shortcutOverridesDraft = null;
 }
 
@@ -2617,8 +2621,7 @@ function openShortcuts() {
   }
   renderShortcutsContent();
   shortcutsLastFocusedEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
+  setOverlayOpen(modal, true);
   updatePaneShortcutBadges();
   window.setTimeout(() => {
     (globalElements.shortcutsDialog || globalElements.shortcutsCloseBtn || modal).focus?.();
@@ -2628,8 +2631,7 @@ function openShortcuts() {
 function closeShortcuts() {
   const modal = globalElements.shortcutsModal;
   if (!modal || !modal.classList.contains('open')) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
+  setOverlayOpen(modal, false);
   updatePaneShortcutBadges();
   if (shortcutsLastFocusedEl && document.contains(shortcutsLastFocusedEl)) {
     shortcutsLastFocusedEl.focus?.();
@@ -3548,8 +3550,7 @@ function openPaneManager({ attentionOnly = false } = {}) {
   paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
   paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
 
-  globalElements.paneManagerModal.classList.add('open');
-  globalElements.paneManagerModal.setAttribute('aria-hidden', 'false');
+  setOverlayOpen(globalElements.paneManagerModal, true);
   renderPaneManager();
 
   // Focus quick-find for immediate filtering.
@@ -3562,8 +3563,7 @@ function openPaneManager({ attentionOnly = false } = {}) {
 function closePaneManager({ restoreFocus = true } = {}) {
   if (!globalElements.paneManagerModal) return;
   paneManagerUiState.open = false;
-  globalElements.paneManagerModal.classList.remove('open');
-  globalElements.paneManagerModal.setAttribute('aria-hidden', 'true');
+  setOverlayOpen(globalElements.paneManagerModal, false);
   if (restoreFocus) {
     try {
       const pane = paneManager?.panes?.[0];
@@ -3677,8 +3677,7 @@ function closeCommandPalette({ restoreFocus = true } = {}) {
   if (!globalElements.commandPaletteModal) return;
   commandPaletteState.open = false;
   commandPaletteState.originPaneKey = '';
-  globalElements.commandPaletteModal.classList.remove('open');
-  globalElements.commandPaletteModal.setAttribute('aria-hidden', 'true');
+  setOverlayOpen(globalElements.commandPaletteModal, false);
   if (restoreFocus) {
     try {
       const pane = paneManager?.panes?.[0];
@@ -4259,8 +4258,7 @@ function openCommandPalette() {
   commandPaletteState.selectedIndex = 0;
   commandPaletteState.expandedSubgroups = new Set();
 
-  globalElements.commandPaletteModal.classList.add('open');
-  globalElements.commandPaletteModal.setAttribute('aria-hidden', 'false');
+  setOverlayOpen(globalElements.commandPaletteModal, true);
 
   if (globalElements.commandPaletteInput) {
     globalElements.commandPaletteInput.value = '';
@@ -4284,8 +4282,7 @@ function openCommandPalette() {
 // Agents (admin-only)
 function openAgentsModal() {
   if (roleState.role !== 'admin') return;
-  globalElements.agentsModal?.classList.add('open');
-  globalElements.agentsModal?.setAttribute('aria-hidden', 'false');
+  setOverlayOpen(globalElements.agentsModal, true);
 
   // Bootstrap persisted controls.
   const filter = getFleetFilter();
@@ -4392,8 +4389,7 @@ function resetFleetSort() {
 
 function closeAgentsModal() {
   clearFleetRefreshLock();
-  globalElements.agentsModal?.classList.remove('open');
-  globalElements.agentsModal?.setAttribute('aria-hidden', 'true');
+  setOverlayOpen(globalElements.agentsModal, false);
   stopAgentsModalAutoRefresh();
   stopAgentsModalFreshnessTicker();
 }
@@ -5174,8 +5170,7 @@ const workqueueState = {
 
 function openWorkqueue() {
   if (roleState.role !== 'admin') return;
-  globalElements.workqueueModal?.classList.add('open');
-  globalElements.workqueueModal?.setAttribute('aria-hidden', 'false');
+  setOverlayOpen(globalElements.workqueueModal, true);
   // Sorting wiring is synchronous; bootstrap it immediately so UI tests can click sort buttons deterministically.
   ensureWorkqueueModalSorting();
   ensureWorkqueueBootstrapped();
@@ -5184,8 +5179,7 @@ function openWorkqueue() {
 
 function closeWorkqueue() {
   stopWorkqueueAutoRefresh();
-  globalElements.workqueueModal?.classList.remove('open');
-  globalElements.workqueueModal?.setAttribute('aria-hidden', 'true');
+  setOverlayOpen(globalElements.workqueueModal, false);
 }
 
 function renderWorkqueueStatusFilters() {
