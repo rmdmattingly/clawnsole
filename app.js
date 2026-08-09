@@ -5196,6 +5196,7 @@ function renderWorkqueueStatusFilters() {
     const id = `wq-status-${s}`;
     const label = document.createElement('label');
     label.className = 'wq-status-chip';
+    label.setAttribute('data-testid', `wq-modal-status-filter-${s}`);
     const count = Number(workqueueState.statusCounts?.[s] || 0);
     const display = `${formatWorkqueueStatusLabel(s)} (${count})`;
     label.innerHTML = `<input type="checkbox" id="${id}" ${workqueueState.statusFilter.has(s) ? 'checked' : ''} /> <span>${escapeHtml(display)}</span>`;
@@ -5431,6 +5432,7 @@ function renderWorkqueueItems() {
     const col = document.createElement('section');
     col.className = 'wq-board-col';
     col.setAttribute('data-wq-col', colDef.status);
+    col.setAttribute('data-testid', `wq-modal-lane-${colDef.status}`);
 
     const colItems = Array.isArray(itemsByStatus[colDef.status]) ? itemsByStatus[colDef.status] : [];
 
@@ -5467,6 +5469,7 @@ function renderWorkqueueItems() {
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'wq-card';
+      card.setAttribute('data-testid', 'wq-modal-card');
       if (it.id && it.id === workqueueState.selectedItemId) card.classList.add('selected');
       if (it.id) card.setAttribute('data-wq-item', it.id);
 
@@ -5547,8 +5550,8 @@ function renderWorkqueueInspect(item) {
   const actions = document.createElement('div');
   actions.className = 'wq-inspect-actions';
   actions.innerHTML = `
-    <button type="button" class="btn" data-wq-action="edit">Edit</button>
-    <button type="button" class="btn danger" data-wq-action="delete">Delete</button>
+    <button type="button" class="btn" data-wq-action="edit" data-testid="wq-modal-edit">Edit</button>
+    <button type="button" class="btn danger" data-wq-action="delete" data-testid="wq-modal-delete">Delete</button>
   `;
 
   const meta = root.querySelector('.wq-inspect-meta');
