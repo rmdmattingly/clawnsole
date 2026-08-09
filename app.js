@@ -451,6 +451,16 @@ function renderShortcutKeys(display) {
     .join('');
 }
 
+function shortcutStatusRule(entry) {
+  const id = String(entry?.id || '');
+  if (id === 'global.escape') return 'always';
+  if (id === 'pane.next' || id === 'pane.prev' || id === 'pane.mruNext' || id === 'pane.mruPrev') return 'multi-pane';
+  if (id === 'chat.next' || id === 'chat.prev') return 'multi-chat-pane';
+  if (id === 'pane.unreadNext' || id === 'pane.unreadPrev') return 'unread-pane';
+  if (id === 'pane.manager' || id === 'chat.composer' || id === 'command.palette') return 'modal-only';
+  return 'typing-modal';
+}
+
 function renderShortcutsContent() {
   const root = globalElements.shortcutsContent;
   if (!root) return;
@@ -472,7 +482,7 @@ function renderShortcutsContent() {
     <div class="shortcut-group">
       <h3 class="shortcut-group-title">${escapeHtml(group.name)}</h3>
       ${group.entries.map((entry) => `
-        <div class="shortcut-row" data-shortcut-id="${escapeHtml(entry.id)}">
+        <div class="shortcut-row" data-shortcut-id="${escapeHtml(entry.id)}" data-shortcut-rule="${escapeHtml(shortcutStatusRule(entry))}">
           <div class="shortcut-keys"${keybindIdToShortcutActionId(entry.id) ? ` data-shortcut-help="${escapeHtml(keybindIdToShortcutActionId(entry.id))}"` : ''}>${renderShortcutKeys(shortcutDisplay(entry.id))}</div>
           <div class="shortcut-desc">${escapeHtml(entry.label)}${isKeybindCustomized(entry.id) ? ' <span class="shortcut-custom">custom</span>' : ''}</div>
         </div>
@@ -2599,12 +2609,80 @@ async function deleteRecurringPrompt(id) {
 }
 
 let shortcutsLastFocusedEl = null;
+let shortcutsStatusTimer = null;
 let paneShortcutBadgesAltHeld = false;
+
+const SHORTCUT_STATUS_LABELS = {
+  available: 'Available',
+  'typing-focus': 'Blocked: typing-focus',
+  'modal-open': 'Blocked: modal-open',
+  'layout-state': 'Blocked: layout-state'
+};
 
 function getModalFocusableElements(modalEl) {
   if (!modalEl || !modalEl.querySelectorAll) return [];
   return Array.from(modalEl.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
     .filter((el) => !el.disabled && !el.hidden && el.getAttribute('aria-hidden') !== 'true');
+}
+
+function ensureShortcutStatusChip(row) {
+  if (!row) return null;
+  let chip = row.querySelector('[data-shortcut-status]');
+  if (!chip) {
+    chip = document.createElement('div');
+    chip.className = 'shortcut-status';
+    chip.setAttribute('data-shortcut-status', '');
+    row.appendChild(chip);
+  }
+  return chip;
+}
+
+function shortcutsModalIsOpen() {
+  return !!globalElements.shortcutsModal?.classList?.contains('open');
+}
+
+function getShortcutRowBlockReason(row) {
+  const rule = String(row?.getAttribute?.('data-shortcut-rule') || 'typing-modal');
+  if (rule === 'always') return '';
+
+  const typingReference = shortcutsModalIsOpen() ? shortcutsLastFocusedEl : document.activeElement;
+  if (rule !== 'modal-only' && isTypingContext(typingReference)) return 'typing-focus';
+
+  const panes = paneManager?.panes || [];
+  const paneCount = panes.length;
+  const chatPaneCount = panes.filter((pane) => pane.kind === 'chat').length;
+  const hasUnreadPane = panes.some((pane) => paneUnreadCount(pane) > 0);
+  if (rule === 'multi-pane' && paneCount < 2) return 'layout-state';
+  if (rule === 'multi-chat-pane' && chatPaneCount < 2) return 'layout-state';
+  if (rule === 'unread-pane' && !hasUnreadPane) return 'layout-state';
+
+  if (shortcutsModalIsOpen() && rule !== 'always') return 'modal-open';
+
+  return '';
+}
+
+function updateShortcutsStatus() {
+  const modal = globalElements.shortcutsModal;
+  if (!modal) return;
+  modal.querySelectorAll('.shortcut-row').forEach((row) => {
+    const chip = ensureShortcutStatusChip(row);
+    if (!chip) return;
+    const reason = getShortcutRowBlockReason(row);
+    const state = reason || 'available';
+    chip.textContent = SHORTCUT_STATUS_LABELS[state] || SHORTCUT_STATUS_LABELS.available;
+    chip.dataset.state = state;
+  });
+}
+
+function startShortcutsStatusUpdates() {
+  window.clearInterval(shortcutsStatusTimer);
+  updateShortcutsStatus();
+  shortcutsStatusTimer = window.setInterval(updateShortcutsStatus, 500);
+}
+
+function stopShortcutsStatusUpdates() {
+  window.clearInterval(shortcutsStatusTimer);
+  shortcutsStatusTimer = null;
 }
 
 function openShortcuts() {
@@ -2613,12 +2691,14 @@ function openShortcuts() {
   if (modal.classList.contains('open')) {
     renderShortcutsContent();
     updatePaneShortcutBadges();
+    updateShortcutsStatus();
     return;
   }
   renderShortcutsContent();
   shortcutsLastFocusedEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   modal.classList.add('open');
   modal.setAttribute('aria-hidden', 'false');
+  startShortcutsStatusUpdates();
   updatePaneShortcutBadges();
   window.setTimeout(() => {
     (globalElements.shortcutsDialog || globalElements.shortcutsCloseBtn || modal).focus?.();
@@ -2630,6 +2710,7 @@ function closeShortcuts() {
   if (!modal || !modal.classList.contains('open')) return;
   modal.classList.remove('open');
   modal.setAttribute('aria-hidden', 'true');
+  stopShortcutsStatusUpdates();
   updatePaneShortcutBadges();
   if (shortcutsLastFocusedEl && document.contains(shortcutsLastFocusedEl)) {
     shortcutsLastFocusedEl.focus?.();

@@ -2365,7 +2365,7 @@ button.agents-section-title:hover {
 
 .shortcut-row {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) max-content;
   gap: 12px;
   align-items: center;
   padding: 6px 0;
@@ -2379,6 +2379,34 @@ button.agents-section-title:hover {
 
 .shortcut-desc {
   opacity: 0.9;
+}
+
+.shortcut-status {
+  justify-self: end;
+  min-width: 92px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.shortcut-status[data-state="available"] {
+  border-color: rgba(86, 211, 100, 0.26);
+  background: rgba(86, 211, 100, 0.12);
+  color: rgba(202, 255, 207, 0.95);
+}
+
+.shortcut-status[data-state^="typing"],
+.shortcut-status[data-state^="modal"],
+.shortcut-status[data-state^="layout"] {
+  border-color: rgba(255, 189, 89, 0.28);
+  background: rgba(255, 189, 89, 0.11);
+  color: rgba(255, 235, 201, 0.96);
 }
 
 .shortcut-sep {
@@ -2409,6 +2437,10 @@ kbd {
 @media (max-width: 640px) {
   .shortcut-row {
     grid-template-columns: 1fr;
+  }
+
+  .shortcut-status {
+    justify-self: start;
   }
 }
 
