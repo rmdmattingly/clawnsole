@@ -236,7 +236,12 @@ body::before {
   color: var(--accent-2);
 }
 
-.role-pill.locked,
+.role-pill.locked {
+  background: rgba(255, 179, 71, 0.18);
+  border-color: rgba(255, 179, 71, 0.55);
+  color: var(--accent);
+}
+
 .role-pill.signed-out {
   background: rgba(255, 114, 114, 0.14);
   border-color: rgba(255, 114, 114, 0.42);
@@ -412,6 +417,12 @@ body::before {
   background: rgba(255, 107, 107, 0.25);
   border-color: rgba(255, 107, 107, 0.8);
   color: var(--warning);
+}
+
+.status-pill.locked {
+  background: rgba(255, 179, 71, 0.12);
+  border-color: rgba(255, 179, 71, 0.45);
+  color: var(--accent);
 }
 
 @keyframes status-sweep {
@@ -3040,12 +3051,15 @@ kbd {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable both-edges;
 }
 
 .wq-pane .wq-list-body,
 .cron-pane .wq-list-body {
-  flex: 1;
+  flex: 0 0 auto;
   max-height: none;
+  overflow: visible;
 }
 
 .wq-pane .wq-inspect,
@@ -3093,12 +3107,15 @@ kbd {
 }
 
 .wq-list-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   padding: 10px 12px;
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(12, 15, 20, 0.98);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
