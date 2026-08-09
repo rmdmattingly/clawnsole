@@ -897,9 +897,12 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
 
   const wqPane = page.locator('[data-pane]').last();
   const toolbar = wqPane.locator('.wq-pane .wq-toolbar');
+  const list = wqPane.locator('.wq-pane .wq-list').first();
+  const listHeader = list.locator('.wq-list-header');
   const listBody = wqPane.locator('.wq-pane [data-wq-list-body]').first();
 
   await expect(toolbar).toBeVisible();
+  await expect(listHeader).toBeVisible();
   await expect(listBody).toHaveCount(1);
 
   const itemsResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
@@ -920,6 +923,33 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
   expect(styles.top).toBe('0px');
   expect(Number(styles.zIndex)).toBeGreaterThanOrEqual(5);
   expect(styles.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+
+  await listBody.evaluate((el) => {
+    el.scrollTop = 160;
+  });
+
+  const headerStyles = await listHeader.evaluate((el) => {
+    const cs = window.getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    const listRect = el.parentElement.getBoundingClientRect();
+    return {
+      position: cs.position,
+      top: cs.top,
+      zIndex: cs.zIndex,
+      backgroundColor: cs.backgroundColor,
+      headerTop: Math.round(rect.top),
+      listTop: Math.round(listRect.top)
+    };
+  });
+
+  expect(headerStyles.position).toBe('sticky');
+  expect(headerStyles.top).toBe('0px');
+  expect(Number(headerStyles.zIndex)).toBeGreaterThanOrEqual(4);
+  expect(headerStyles.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+  expect(headerStyles.headerTop).toBeGreaterThanOrEqual(headerStyles.listTop);
+
+  await listHeader.locator('[data-wq-sort="title"]').click();
+  await expect(listHeader.locator('[data-wq-sort="title"]')).toHaveClass(/active/);
 
   const listStyles = await listBody.evaluate((el) => {
     const cs = window.getComputedStyle(el);
