@@ -43,6 +43,7 @@ const globalElements = {
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
+  agentsSelectionBar: document.getElementById('agentsSelectionBar'),
   toastHost: document.getElementById('toastHost'),
   commandPaletteModal: document.getElementById('commandPaletteModal'),
   commandPaletteCloseBtn: document.getElementById('commandPaletteCloseBtn'),
@@ -4549,6 +4550,85 @@ function openAgentTriageFromFleet(agentId) {
   openAgentWorkqueueFromFleet(target);
 }
 
+function renderFleetSelectionBar({ classify = null, lastSeenMap = null } = {}) {
+  const bar = globalElements.agentsSelectionBar;
+  if (!bar) return;
+
+  const id = String(fleetSelectionState.selectedAgentId || '').trim();
+  const visibleRows = getFleetSelectableRows();
+  const selectedVisible = id && visibleRows.some((row) => String(row.dataset.agentId || '') === id);
+  if (!id || !selectedVisible) {
+    bar.hidden = true;
+    bar.dataset.agentId = '';
+    bar.innerHTML = '';
+    return;
+  }
+
+  const agent = getAgentRecord(id);
+  const label = formatAgentLabel(agent, { includeId: true });
+  const map = lastSeenMap || getAgentLastSeenMap();
+  const heartbeatTs = Number(map[id]) || 0;
+  const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
+  const triage = typeof classify === 'function'
+    ? classify(id)
+    : (() => {
+        const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
+        const paneState = getAgentPaneStateMap()[id] || 'unknown';
+        const ageMs = heartbeatTs > 0 ? Math.max(0, Date.now() - heartbeatTs) : Number.POSITIVE_INFINITY;
+        const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs: withinMinutes * 60_000, paneState });
+        if (paneState === 'error' || paneState === 'offline' || !Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket };
+        return { bucket: ageMs <= withinMinutes * 60_000 ? 'active' : 'stale', ageBucket };
+      })();
+  const healthLabel = triage.bucket === 'offline_error'
+    ? 'Offline/Error'
+    : triage.bucket === 'stale'
+      ? 'Stale'
+      : 'Healthy';
+
+  bar.hidden = false;
+  if (String(bar.dataset.agentId || '') !== id) {
+    bar.dataset.agentId = id;
+    bar.innerHTML = `
+      <div class="agents-selection-main">
+        <div class="agents-selection-title" data-agents-selection-title></div>
+        <div class="agents-selection-meta">
+          <span class="agents-health-state-chip" data-agents-selection-health></span>
+          <span class="agents-age-chip" data-agents-selection-age></span>
+        </div>
+      </div>
+      <div class="agents-selection-actions" role="group" aria-label="Selected agent actions">
+        <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}">Open Chat</button>
+        <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}">Open Workqueue</button>
+        <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}">Open Timeline</button>
+      </div>
+    `;
+
+    bar.querySelectorAll('[data-agent-action]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const action = String(btn.getAttribute('data-agent-action') || '').trim();
+        const target = String(btn.getAttribute('data-agent-id') || '').trim();
+        if (action === 'open-chat') openAgentChatFromFleet(target);
+        else if (action === 'open-timeline') openAgentTimelineFromFleet(target);
+        else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(target);
+      });
+    });
+  }
+
+  const titleEl = bar.querySelector('[data-agents-selection-title]');
+  const healthEl = bar.querySelector('[data-agents-selection-health]');
+  const ageEl = bar.querySelector('[data-agents-selection-age]');
+  if (titleEl) titleEl.textContent = label;
+  if (healthEl) {
+    healthEl.textContent = healthLabel;
+    healthEl.dataset.healthState = triage.bucket;
+  }
+  if (ageEl) {
+    ageEl.textContent = heartbeatAge;
+    ageEl.dataset.heartbeatBucket = triage.ageBucket || '';
+  }
+}
+
 function findActivePaneFromFocus() {
   const active = document.activeElement;
   if (!active) return null;
@@ -4909,6 +4989,7 @@ function renderAgentsModalList() {
   const empty = ordered.length === 0;
   if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
   restoreFleetScrollAnchor(root, scrollAnchor);
+  renderFleetSelectionBar({ classify, lastSeenMap });
   if (focusedAgentId) {
     try {
       root.querySelector(`.agents-row[data-agent-id="${CSS.escape(focusedAgentId)}"]`)?.focus?.({ preventScroll: true });
@@ -4951,6 +5032,7 @@ function reconcileFleetSelection(visibleAgents) {
     fleetSelectionState.selectedIndex = 0;
     fleetSelectionState.notice = '';
     fleetSelectionState.missingAgentId = '';
+    renderFleetSelectionBar();
     return;
   }
   const previousId = String(fleetSelectionState.selectedAgentId || '').trim();
@@ -4983,6 +5065,7 @@ function selectFleetAgent(agentId, { focusRow = false } = {}) {
   fleetSelectionState.notice = '';
   fleetSelectionState.missingAgentId = '';
   rows.forEach((row, index) => row.setAttribute('aria-selected', index === ix ? 'true' : 'false'));
+  renderFleetSelectionBar();
   if (focusRow) {
     try {
       rows[ix].focus({ preventScroll: true });
@@ -11169,6 +11252,7 @@ globalElements.agentsModal?.addEventListener('click', (event) => {
 });
 globalElements.agentsModal?.addEventListener('keydown', (event) => {
   if (isTypingContext(event.target)) return;
+  if (event.target instanceof Element && event.target.closest('button, a, input, select, textarea, summary')) return;
   const key = String(event.key || '');
   const lower = key.toLowerCase();
   if (matchesKeybind(event, 'triage.return')) {
