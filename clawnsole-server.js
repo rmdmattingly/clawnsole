@@ -1138,6 +1138,44 @@ function createClawnsoleServer(options = {}) {
       return;
     }
 
+    if (req.url === '/api/workqueue/archive-terminal') {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      (async () => {
+        const payload = await readJsonBody(req, res);
+        if (!payload) return;
+        const queue = String(payload.queue || '').trim();
+        const olderThanDays = Number(payload.olderThanDays);
+        const dryRun = Boolean(payload.dryRun);
+
+        try {
+          const { bulkArchiveTerminalItems } = require('./lib/workqueue');
+          const result = bulkArchiveTerminalItems(null, { queue, olderThanDays, dryRun });
+          sendJson(res, 200, { ok: true, result });
+        } catch (err) {
+          const code = err && err.code;
+          if (code === 'QUEUE_REQUIRED') {
+            sendJson(res, 400, { error: 'queue_required' });
+            return;
+          }
+          if (code === 'INVALID_THRESHOLD') {
+            sendJson(res, 400, { error: 'invalid_threshold' });
+            return;
+          }
+          sendJson(res, 500, { error: 'workqueue_error' });
+        }
+      })();
+      return;
+    }
+
     if (req.url === '/api/workqueue/assignments') {
       if (!requireAuth(req, res)) return;
       if (req.clawnsoleRole !== 'admin') {

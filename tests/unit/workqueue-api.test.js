@@ -6,7 +6,7 @@ const path = require('node:path');
 const http = require('node:http');
 
 const { createClawnsoleServer } = require('../../clawnsole-server');
-const { enqueueItem } = require('../../lib/workqueue');
+const { enqueueItem, loadState, saveState } = require('../../lib/workqueue');
 
 function mkTempEnv() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawnsole-wq-api-'));
@@ -306,6 +306,43 @@ test('workqueue API: update edits item fields', async () => {
     assert.equal(res.json?.item?.title, 'new');
     assert.equal(res.json?.item?.priority, 5);
     assert.equal(res.json?.item?.status, 'pending');
+  } finally {
+    server.close();
+  }
+});
+
+test('workqueue API: archive-terminal dry-runs then archives only terminal rows', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  const oldDone = enqueueItem(null, { queue: 'dev-team', title: 'old done', instructions: '', priority: 1 });
+  const oldReady = enqueueItem(null, { queue: 'dev-team', title: 'old ready', instructions: '', priority: 1 });
+  const state = loadState(null);
+  Object.assign(state.items.find((it) => it.id === oldDone.id), { status: 'done', updatedAt: '2026-06-01T00:00:00.000Z' });
+  Object.assign(state.items.find((it) => it.id === oldReady.id), { status: 'ready', updatedAt: '2026-06-01T00:00:00.000Z' });
+  saveState(null, state);
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+    const headers = { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' };
+    const url = 'http://127.0.0.1:' + port + '/api/workqueue/archive-terminal';
+
+    const preview = await httpPostJson(url, { queue: 'dev-team', olderThanDays: 14, dryRun: true }, headers);
+    assert.equal(preview.status, 200);
+    assert.equal(preview.json?.ok, true);
+    assert.equal(preview.json?.result?.count, 1);
+    assert.equal(loadState(null).items.find((it) => it.id === oldDone.id).status, 'done');
+
+    const apply = await httpPostJson(url, { queue: 'dev-team', olderThanDays: 14 }, headers);
+    assert.equal(apply.status, 200);
+    assert.equal(apply.json?.ok, true);
+    assert.equal(apply.json?.result?.count, 1);
+
+    const next = loadState(null);
+    assert.equal(next.items.find((it) => it.id === oldDone.id).status, 'archived');
+    assert.equal(next.items.find((it) => it.id === oldReady.id).status, 'ready');
   } finally {
     server.close();
   }

@@ -3265,6 +3265,7 @@ kbd {
 .wq-badge-in_progress { background: rgba(104, 201, 255, 0.12); border-color: rgba(104, 201, 255, 0.25); }
 .wq-badge-done { background: rgba(120, 255, 170, 0.10); border-color: rgba(120, 255, 170, 0.22); }
 .wq-badge-failed { background: rgba(255, 104, 104, 0.10); border-color: rgba(255, 104, 104, 0.22); }
+.wq-badge-archived { background: rgba(180, 190, 205, 0.10); border-color: rgba(180, 190, 205, 0.22); }
 
 .wq-col.prio,
 .wq-col.attempts {

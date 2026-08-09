@@ -5096,7 +5096,7 @@ function runFleetSelectedAgent(mode = 'chat') {
 
 // Workqueue (admin-only)
 
-const WORKQUEUE_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress', 'done', 'failed'];
+const WORKQUEUE_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress', 'done', 'failed', 'archived'];
 const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
 const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
 const WORKQUEUE_GROUPED_AUTO_THRESHOLD = 20;
@@ -6397,6 +6397,61 @@ async function cleanWorkqueueDuplicatesForPane(pane) {
   if (audit) audit.textContent = message;
   addFeed('ok', 'workqueue', message);
   await fetchAndRenderWorkqueueItemsForPane(pane);
+}
+
+async function bulkArchiveTerminalItemsForPane(pane) {
+  const statusEl = pane?.elements?.thread?.querySelector?.('[data-wq-bulk-archive-status]');
+  const setStatus = (text) => {
+    if (statusEl) statusEl.textContent = String(text || '');
+  };
+  const queue = String(pane?.workqueue?.queue || '').trim() || 'dev-team';
+  const raw = prompt('Archive done/failed items older than how many days?', '30');
+  if (raw === null) return;
+
+  const olderThanDays = Number.parseInt(String(raw || '').trim(), 10);
+  if (!Number.isFinite(olderThanDays) || olderThanDays <= 0) {
+    setStatus('Enter a positive day threshold.');
+    return;
+  }
+
+  const requestArchive = async (dryRun) => {
+    const res = await fetch('/api/workqueue/archive-terminal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ queue, olderThanDays, dryRun })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) throw new Error(String(data?.error || res.status));
+    return data.result || {};
+  };
+
+  try {
+    setStatus('Previewing bulk archive...');
+    const preview = await requestArchive(true);
+    const count = Number(preview.count || 0);
+    if (!count) {
+      setStatus(`No done/failed items older than ${olderThanDays} days.`);
+      return;
+    }
+
+    const ok = confirm(
+      `Archive ${count} done/failed workqueue item${count === 1 ? '' : 's'} in ${queue} older than ${olderThanDays} days?\n\n` +
+        'Ready, pending, blocked, claimed, and in-progress items will not be touched.'
+    );
+    if (!ok) {
+      setStatus('Bulk archive canceled.');
+      return;
+    }
+
+    const result = await requestArchive(false);
+    const archived = Number(result.count || 0);
+    setStatus(`Archived ${archived} terminal item${archived === 1 ? '' : 's'}.`);
+    addFeed('ok', 'workqueue', `Archived ${archived} terminal item${archived === 1 ? '' : 's'} from ${queue}`);
+    await fetchAndRenderWorkqueueItemsForPane(pane);
+  } catch (err) {
+    setStatus(`Bulk archive failed: ${String(err)}`);
+  }
 }
 
 function renderWorkqueuePaneItems(pane) {
@@ -8930,6 +8985,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
           <button data-wq-clear-quick class="secondary" type="button">Clear filters</button>
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
+          <button data-wq-bulk-archive class="secondary danger" type="button">Bulk archive</button>
           <button data-wq-keyboard-mode class="secondary wq-keyboard-toggle" type="button" aria-pressed="false">Keyboard mode</button>
 
           <div class="wq-sort" role="group" aria-label="Sort workqueue items">
@@ -8993,6 +9049,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         </details>
 
         <div class="hint" data-wq-statusline></div>
+        <div class="hint" data-wq-bulk-archive-status aria-live="polite"></div>
         <div class="hint wq-keyboard-hint" data-wq-keyboard-hint hidden>j/k move, Enter inspect, e edit, 1 ready, 2 in progress, 3 blocked, 4 done</div>
         <div class="wq-filter-summary" data-wq-filter-summary aria-live="polite" hidden></div>
         <div class="wq-duplicate-health" data-wq-duplicate-health aria-live="polite" hidden></div>
@@ -9055,6 +9112,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
     const searchEl = elements.thread.querySelector('[data-wq-search]');
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
+    const bulkArchiveBtn = elements.thread.querySelector('[data-wq-bulk-archive]');
     const keyboardModeBtn = elements.thread.querySelector('[data-wq-keyboard-mode]');
     const keyboardHint = elements.thread.querySelector('[data-wq-keyboard-hint]');
 
@@ -9371,6 +9429,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     populateQueueSelect().then(() => doRefresh());
 
     refreshBtn?.addEventListener('click', () => doRefresh());
+    bulkArchiveBtn?.addEventListener('click', () => bulkArchiveTerminalItemsForPane(pane));
     queueCustomEl?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doRefresh();
     });
