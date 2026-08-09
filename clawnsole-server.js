@@ -468,7 +468,8 @@ function createClawnsoleServer(options = {}) {
       sendJson(res, 200, {
         wsUrl,
         adminWsUrl: '/admin-ws',
-        port: gatewayPort
+        port: gatewayPort,
+        instance: instance || 'local'
       });
       return;
     }
