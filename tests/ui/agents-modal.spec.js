@@ -325,6 +325,12 @@ test('fleet refresh keeps scroll anchor and keyboard triage selection', async ({
     page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')
       .evaluateAll((els) => els.map((el) => el.value))
   )).toContain('agent-20');
+  await reopenedRow20.click();
+  await page.keyboard.press('.');
+  await expect.poll(async () => (
+    page.locator('[data-pane][data-pane-kind="timeline"] [data-cron-agent]')
+      .evaluateAll((els) => els.map((el) => el.value))
+  )).toContain('agent-20');
 
   const search = page.locator('#agentsSearch');
   await search.fill('agent');

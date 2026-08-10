@@ -136,6 +136,9 @@ test('shortcuts overlay stays in sync with registered shortcut catalog', async (
   await expect(modal).toContainText('Fleet actions');
   await expect(modal).toContainText('Open/focus Fleet pane');
   await expect(modal).toContainText('Open Fleet sorted by heartbeat age');
+  await expect(modal).toContainText('Open Chat for selected Fleet agent');
+  await expect(modal).toContainText('Open Workqueue for selected Fleet agent');
+  await expect(modal).toContainText('Open Timeline for selected Fleet agent');
 });
 
 test('pane-add shortcuts are scoped to workspace and blocked by overlays', async ({ page }) => {
