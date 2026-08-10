@@ -154,6 +154,47 @@ function seedFilterSummaryWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedQueueAndItemSearchWorkqueueItems({ queue, otherQueue }) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, title, instructions, patch = {}) => ({
+    id,
+    queue,
+    title,
+    instructions,
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-60000),
+    updatedAt: iso(-60000),
+    dedupeKey: `search-split-${id}`,
+    meta: { repo: 'rmdmattingly/clawnsole', source: 'playwright-search-split' },
+    ...patch
+  });
+
+  const data = {
+    version: 1,
+    queues: {
+      [queue]: { name: queue, createdAt: iso(-120000) },
+      [otherQueue]: { name: otherQueue, createdAt: iso(-120000) }
+    },
+    assignments: {},
+    items: [
+      mkItem('search-alpha', 'alpha release checklist', 'Title hit row'),
+      mkItem('search-beta', 'beta diagnostics', 'Contains instructions needle'),
+      mkItem('search-meta', 'metadata-only row', 'No visible query text', { meta: { repo: 'rmdmattingly/clawnsole', ticket: 'meta-only-needle' } }),
+      mkItem('other-queue-row', 'other queue item', 'Should not render in selected queue', { queue: otherQueue })
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 function seedExactDuplicateWorkqueueItems(queue) {
   const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
   fs.mkdirSync(dir, { recursive: true });
@@ -481,6 +522,55 @@ test('workqueue pane: filter summary chips show counts and remove filters', asyn
   await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 3 items');
   await expect(summary).not.toContainText('Search alternate repo');
   await expect(wqPane.locator('[data-wq-queue-custom]')).toHaveValue(queue);
+});
+
+test('workqueue pane: separates queue filtering from item search', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const stamp = Date.now();
+  const queue = `queue-item-search-${stamp}`;
+  const otherQueue = `queue-picker-target-${stamp}`;
+  seedQueueAndItemSearchWorkqueueItems({ queue, otherQueue });
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  const queueSearch = wqPane.locator('[data-wq-queue-search]');
+  const itemSearch = wqPane.locator('[data-wq-item-search]');
+
+  await expect(queueSearch).toHaveAttribute('placeholder', 'Filter queue list...');
+  await expect(itemSearch).toHaveAttribute('placeholder', 'Search items...');
+
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await expect(wqPane.locator('.wq-row')).toHaveCount(3);
+
+  await queueSearch.fill('picker-target');
+  await expect(wqPane.locator('[data-wq-queue-select] option:not([hidden])', { hasText: otherQueue })).toHaveCount(1);
+  await expect(wqPane.locator('.wq-row')).toHaveCount(3);
+
+  await itemSearch.fill('instructions needle');
+  await expect(wqPane.locator('.wq-row')).toHaveCount(1);
+  await expect(wqPane.locator('.wq-row')).toContainText('beta diagnostics');
+
+  await itemSearch.fill('meta-only-needle');
+  await expect(wqPane.locator('.wq-row')).toHaveCount(1);
+  await expect(wqPane.locator('.wq-row')).toContainText('metadata-only row');
+
+  await itemSearch.fill('missing-query');
+  await expect(wqPane.locator('[data-wq-empty]')).toContainText('No items match "missing-query".');
+  await wqPane.locator('[data-wq-empty-clear-search]').click();
+  await expect(itemSearch).toHaveValue('');
+  await expect(wqPane.locator('.wq-row')).toHaveCount(3);
+
+  await wqPane.click();
+  await page.keyboard.press('/');
+  await expect(itemSearch).toBeFocused();
 });
 
 test('workqueue pane: default rows collapse exact duplicates with expandable members', async ({ page }) => {

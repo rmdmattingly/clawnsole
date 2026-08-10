@@ -3119,6 +3119,15 @@ kbd {
   scrollbar-gutter: stable both-edges;
 }
 
+.wq-list:has([data-wq-empty]:not([hidden])) .wq-list-body {
+  flex: 0 0 auto;
+}
+
+.wq-list [data-wq-empty] {
+  position: relative;
+  z-index: 4;
+}
+
 /* Kanban-style board for Workqueue (Issue #89) */
 .wq-list-kanban {
   overflow: hidden;
