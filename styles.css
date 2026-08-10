@@ -242,8 +242,12 @@ body::before {
 }
 
 .pane-controls .action-btn {
-  width: auto;
   min-width: 36px;
+  padding: 0;
+}
+
+body.labeled-header-controls .pane-controls .action-btn {
+  width: auto;
   padding: 0 12px;
 }
 
@@ -372,13 +376,18 @@ body::before {
 }
 
 .action-btn {
-  width: auto;
   min-width: 40px;
   height: 40px;
-  gap: 8px;
-  padding: 0 12px;
+  gap: 0;
+  padding: 0;
   font-size: 13px;
   font-weight: 600;
+}
+
+body.labeled-header-controls .topbar .action-btn {
+  width: auto;
+  gap: 8px;
+  padding: 0 12px;
 }
 
 .action-btn .btn-icon {
@@ -387,10 +396,20 @@ body::before {
 }
 
 .action-btn .btn-label {
+  display: none;
+  min-width: 0;
+  max-width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+body.labeled-header-controls .topbar .action-btn .btn-label {
+  display: inline;
+}
+
 @media (max-width: 920px) {
+  body.labeled-header-controls .topbar .action-btn,
   .action-btn {
     width: 36px;
     min-width: 36px;
@@ -398,6 +417,7 @@ body::before {
     gap: 0;
   }
 
+  body.labeled-header-controls .topbar .action-btn .btn-label,
   .action-btn .btn-label {
     display: none;
   }

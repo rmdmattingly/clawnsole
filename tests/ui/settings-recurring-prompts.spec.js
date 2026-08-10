@@ -1,5 +1,34 @@
 const { test, expect } = require('./fixtures');
 
+test('settings: labeled header controls toggle persists and collapses on narrow screens', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  const settingsLabel = page.locator('#settingsBtn .btn-label');
+  await expect(page.locator('body')).not.toHaveClass(/labeled-header-controls/);
+  await expect(settingsLabel).toBeHidden();
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const toggle = page.locator('#labeledHeaderControlsEnabled');
+  await expect(toggle).not.toBeChecked();
+  await toggle.check();
+  await expect(page.locator('body')).toHaveClass(/labeled-header-controls/);
+  await expect(settingsLabel).toBeVisible();
+  await expect(settingsLabel).toHaveText('Settings');
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await expect(page.locator('body')).toHaveClass(/labeled-header-controls/);
+  await expect(page.locator('#settingsBtn .btn-label')).toBeVisible();
+
+  await page.setViewportSize({ width: 700, height: 800 });
+  await expect(page.locator('#settingsBtn .btn-label')).toBeHidden();
+  await expect(page.locator('#settingsBtn')).toHaveAttribute('aria-label', 'Open settings');
+  await expect(page.locator('#settingsBtn')).toHaveAttribute('title', 'Settings');
+});
+
 test('settings: shortcut overrides validate, persist, and update help', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
