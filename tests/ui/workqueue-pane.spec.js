@@ -448,7 +448,7 @@ test('workqueue pane: filter summary chips show counts and remove filters', asyn
   seedFilterSummaryWorkqueueItems(queue);
 
   await loginAdmin(page, env.serverPort);
-  await addPane(page, 'Workqueue pane');
+  await addPane(page, 'Workqueue pane', { workqueueScope: 'unassigned' });
 
   const wqPane = page.locator('[data-pane]').last();
   await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');

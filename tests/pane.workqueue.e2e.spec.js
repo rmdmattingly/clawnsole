@@ -35,6 +35,7 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   await expect(paneGrid).toHaveAttribute('aria-label', 'Chat panes');
 
   await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue-scope').selectOption('all');
   await page.getByTestId('pane-add-menu-workqueue').click();
   await expect(paneGrid).toHaveAttribute('aria-label', 'Panes');
 
@@ -113,6 +114,7 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue-scope').selectOption('all');
   await page.getByTestId('pane-add-menu-workqueue').click();
 
   const wqPane = page.locator('[data-pane]').last();
