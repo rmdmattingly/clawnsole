@@ -114,6 +114,93 @@ const globalElements = {
   paneTemplate: document.getElementById('paneTemplate')
 };
 
+const ADMIN_MODAL_KEYS = [
+  'settingsModal',
+  'shortcutsModal',
+  'commandPaletteModal',
+  'paneManagerModal',
+  'workqueueModal',
+  'agentsModal'
+];
+
+const adminModalFocusReturn = new WeakMap();
+
+function getAdminModalElements() {
+  return ADMIN_MODAL_KEYS.map((key) => globalElements[key]).filter(Boolean);
+}
+
+function isAdminModalOpen(modal) {
+  return !!modal?.classList?.contains('open') || modal?.getAttribute?.('aria-hidden') === 'false';
+}
+
+function setAdminModalInactive(modal) {
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+  modal.setAttribute('inert', '');
+}
+
+function setAdminModalActive(modal) {
+  if (!modal) return;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  modal.removeAttribute('inert');
+}
+
+function closeOpenAdminModalsExcept(exceptModal) {
+  const entries = [
+    { modal: globalElements.settingsModal, close: () => closeSettings({ restoreFocus: false }) },
+    { modal: globalElements.shortcutsModal, close: () => closeShortcuts({ restoreFocus: false }) },
+    { modal: globalElements.commandPaletteModal, close: () => closeCommandPalette({ restoreFocus: false }) },
+    { modal: globalElements.paneManagerModal, close: () => closePaneManager({ restoreFocus: false }) },
+    { modal: globalElements.workqueueModal, close: () => closeWorkqueue({ restoreFocus: false }) },
+    { modal: globalElements.agentsModal, close: () => closeAgentsModal({ restoreFocus: false }) }
+  ];
+
+  entries.forEach(({ modal, close }) => {
+    if (!modal || modal === exceptModal || !isAdminModalOpen(modal)) return;
+    close();
+  });
+}
+
+function openAdminModal(modal, { focusReturn = document.activeElement } = {}) {
+  if (!modal) return false;
+  closeOpenAdminModalsExcept(modal);
+  if (focusReturn instanceof HTMLElement && !modal.contains(focusReturn)) {
+    adminModalFocusReturn.set(modal, focusReturn);
+  }
+  setAdminModalActive(modal);
+  return true;
+}
+
+function closeAdminModal(modal, { restoreFocus = true, fallbackFocus = null } = {}) {
+  if (!modal || !isAdminModalOpen(modal)) return false;
+  setAdminModalInactive(modal);
+  if (restoreFocus) {
+    const previous = adminModalFocusReturn.get(modal);
+    adminModalFocusReturn.delete(modal);
+    const target = previous && document.contains(previous) ? previous : fallbackFocus;
+    try { target?.focus?.(); } catch {}
+  } else {
+    adminModalFocusReturn.delete(modal);
+  }
+  return true;
+}
+
+function syncAdminModalInertStates() {
+  let activeFound = false;
+  getAdminModalElements().forEach((modal) => {
+    if (!activeFound && isAdminModalOpen(modal)) {
+      setAdminModalActive(modal);
+      activeFound = true;
+    } else {
+      setAdminModalInactive(modal);
+    }
+  });
+}
+
+syncAdminModalInertStates();
+
 // Pure helpers live in lib/app-core.js so we can unit-test them under Node.
 const __appCore = (typeof window !== 'undefined' && window.AppCore) ? window.AppCore : {};
 const escapeHtml = __appCore.escapeHtml || ((value) => {
@@ -2001,8 +2088,7 @@ function openSettings() {
   renderKeyboardSettings();
   shortcutOverridesDraft = readShortcutOverrides();
   renderShortcutOverrideSettings();
-  globalElements.settingsModal.classList.add('open');
-  globalElements.settingsModal.setAttribute('aria-hidden', 'false');
+  openAdminModal(globalElements.settingsModal);
 
   // Guest mode removed.
 
@@ -2010,9 +2096,8 @@ function openSettings() {
   loadRecurringPrompts();
 }
 
-function closeSettings() {
-  globalElements.settingsModal.classList.remove('open');
-  globalElements.settingsModal.setAttribute('aria-hidden', 'true');
+function closeSettings({ restoreFocus = true } = {}) {
+  closeAdminModal(globalElements.settingsModal, { restoreFocus });
   shortcutOverridesDraft = null;
 }
 
@@ -2810,8 +2895,7 @@ function openShortcuts() {
   renderShortcutsContent();
   syncShortcutsLockedState();
   shortcutsLastFocusedEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
+  openAdminModal(modal, { focusReturn: shortcutsLastFocusedEl });
   startShortcutsStatusUpdates();
   updatePaneShortcutBadges();
   window.setTimeout(() => {
@@ -2819,14 +2903,13 @@ function openShortcuts() {
   }, 0);
 }
 
-function closeShortcuts() {
+function closeShortcuts({ restoreFocus = true } = {}) {
   const modal = globalElements.shortcutsModal;
   if (!modal || !modal.classList.contains('open')) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
+  closeAdminModal(modal, { restoreFocus });
   stopShortcutsStatusUpdates();
   updatePaneShortcutBadges();
-  if (shortcutsLastFocusedEl && document.contains(shortcutsLastFocusedEl)) {
+  if (restoreFocus && shortcutsLastFocusedEl && document.contains(shortcutsLastFocusedEl)) {
     shortcutsLastFocusedEl.focus?.();
   }
   shortcutsLastFocusedEl = null;
@@ -3826,8 +3909,7 @@ function openPaneManager({ attentionOnly = false } = {}) {
   paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
   paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
 
-  globalElements.paneManagerModal.classList.add('open');
-  globalElements.paneManagerModal.setAttribute('aria-hidden', 'false');
+  openAdminModal(globalElements.paneManagerModal);
   renderPaneManager();
 
   // Focus quick-find for immediate filtering.
@@ -3840,14 +3922,8 @@ function openPaneManager({ attentionOnly = false } = {}) {
 function closePaneManager({ restoreFocus = true } = {}) {
   if (!globalElements.paneManagerModal) return;
   paneManagerUiState.open = false;
-  globalElements.paneManagerModal.classList.remove('open');
-  globalElements.paneManagerModal.setAttribute('aria-hidden', 'true');
-  if (restoreFocus) {
-    try {
-      const pane = paneManager?.panes?.[0];
-      pane?.elements?.input?.focus?.();
-    } catch {}
-  }
+  const pane = paneManager?.panes?.[0];
+  closeAdminModal(globalElements.paneManagerModal, { restoreFocus, fallbackFocus: pane?.elements?.input || null });
 }
 
 function paneManagerHandleKeydown(event) {
@@ -3955,14 +4031,8 @@ function closeCommandPalette({ restoreFocus = true } = {}) {
   if (!globalElements.commandPaletteModal) return;
   commandPaletteState.open = false;
   commandPaletteState.originPaneKey = '';
-  globalElements.commandPaletteModal.classList.remove('open');
-  globalElements.commandPaletteModal.setAttribute('aria-hidden', 'true');
-  if (restoreFocus) {
-    try {
-      const pane = paneManager?.panes?.[0];
-      pane?.elements?.input?.focus?.();
-    } catch {}
-  }
+  const pane = paneManager?.panes?.[0];
+  closeAdminModal(globalElements.commandPaletteModal, { restoreFocus, fallbackFocus: pane?.elements?.input || null });
 }
 
 function scoreFuzzy(hay, needle) {
@@ -4537,8 +4607,7 @@ function openCommandPalette() {
   commandPaletteState.selectedIndex = 0;
   commandPaletteState.expandedSubgroups = new Set();
 
-  globalElements.commandPaletteModal.classList.add('open');
-  globalElements.commandPaletteModal.setAttribute('aria-hidden', 'false');
+  openAdminModal(globalElements.commandPaletteModal);
 
   if (globalElements.commandPaletteInput) {
     globalElements.commandPaletteInput.value = '';
@@ -4562,8 +4631,7 @@ function openCommandPalette() {
 // Agents (admin-only)
 function openAgentsModal() {
   if (roleState.role !== 'admin') return;
-  globalElements.agentsModal?.classList.add('open');
-  globalElements.agentsModal?.setAttribute('aria-hidden', 'false');
+  openAdminModal(globalElements.agentsModal);
 
   // Bootstrap persisted controls.
   const filter = getFleetFilter();
@@ -4668,10 +4736,9 @@ function resetFleetSort() {
   renderAgentsModalList();
 }
 
-function closeAgentsModal() {
+function closeAgentsModal({ restoreFocus = true } = {}) {
   clearFleetRefreshLock();
-  globalElements.agentsModal?.classList.remove('open');
-  globalElements.agentsModal?.setAttribute('aria-hidden', 'true');
+  closeAdminModal(globalElements.agentsModal, { restoreFocus });
   stopAgentsModalAutoRefresh();
   stopAgentsModalFreshnessTicker();
 }
@@ -5452,18 +5519,16 @@ const workqueueState = {
 
 function openWorkqueue() {
   if (roleState.role !== 'admin') return;
-  globalElements.workqueueModal?.classList.add('open');
-  globalElements.workqueueModal?.setAttribute('aria-hidden', 'false');
+  openAdminModal(globalElements.workqueueModal);
   // Sorting wiring is synchronous; bootstrap it immediately so UI tests can click sort buttons deterministically.
   ensureWorkqueueModalSorting();
   ensureWorkqueueBootstrapped();
   startWorkqueueAutoRefresh();
 }
 
-function closeWorkqueue() {
+function closeWorkqueue({ restoreFocus = true } = {}) {
   stopWorkqueueAutoRefresh();
-  globalElements.workqueueModal?.classList.remove('open');
-  globalElements.workqueueModal?.setAttribute('aria-hidden', 'true');
+  closeAdminModal(globalElements.workqueueModal, { restoreFocus });
 }
 
 function renderWorkqueueStatusFilters() {
