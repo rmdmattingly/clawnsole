@@ -944,6 +944,16 @@ function showToast(
   const text = typeof message === 'string' ? message.trim() : String(message || '').trim();
   if (!text) return;
 
+  const existing = Array.from(globalElements.toastHost.querySelectorAll('[data-testid]')).find((node) => {
+    return (
+      node instanceof HTMLElement &&
+      node.classList.contains('open') &&
+      node.dataset.toastKind === kind &&
+      node.querySelector('.toast-message')?.textContent === text
+    );
+  });
+  if (existing) return existing;
+
   const el = document.createElement('div');
   el.className = `toast ${kind === 'error' ? 'toast-error' : 'toast-info'}`;
   const id = ++toastSeq;
@@ -2967,6 +2977,7 @@ function focusedPaneKey() {
 let paneFocusMruKeys = [];
 let paneMruTraversal = null;
 let paneMruSuppressFocusEvents = false;
+let paneActiveRestoreGuardUntil = 0;
 const PANE_SWITCH_SEND_GUARD_MS = 800;
 const PANE_SWITCH_SEND_GUARD_MESSAGE = 'Pane changed: press Enter again to send';
 
@@ -2987,6 +2998,8 @@ function notePaneFocused(pane) {
   if (!key) return;
   const panes = paneManager?.panes || [];
   if (!panes.some((entry) => String(entry?.key || '') === key)) return;
+  const rememberedKey = rememberedActivePaneKey();
+  if (rememberedKey && key !== rememberedKey && Date.now() < paneActiveRestoreGuardUntil) return;
   paneMruTraversal = null;
   paneMruOrder();
   paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
@@ -3034,8 +3047,8 @@ function activePaneFromState() {
   const panes = paneManager?.panes || [];
   if (!panes.length) return null;
   const candidates = [
-    focusedPaneKey(),
     paneFocusMruKeys[0],
+    focusedPaneKey(),
     rememberedActivePaneKey()
   ].filter(Boolean);
   for (const key of candidates) {
@@ -10518,6 +10531,7 @@ const paneManager = {
     this.applyInferredLayout();
     const storedActivePaneKey = rememberedActivePaneKey();
     const restoredActivePane = this.panes.find((pane) => pane.key === storedActivePaneKey) || this.panes[0] || null;
+    paneActiveRestoreGuardUntil = storedActivePaneKey ? Date.now() + 1000 : 0;
     if (restoredActivePane) {
       paneFocusMruKeys = [
         restoredActivePane.key,
@@ -10526,11 +10540,6 @@ const paneManager = {
     }
     renderActivePaneState(restoredActivePane);
     updateBrowserTitle(restoredActivePane);
-    if (storedActivePaneKey && restoredActivePane?.key === storedActivePaneKey) {
-      setTimeout(() => {
-        if (this.panes.includes(restoredActivePane)) this.focusPanePrimary(restoredActivePane);
-      }, 0);
-    }
   },
   isLayoutLocked() {
     return !!this.layoutLocked;
