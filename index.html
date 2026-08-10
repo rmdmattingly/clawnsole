@@ -40,6 +40,18 @@
               data-testid="panes-indicator"
             ></button>
           </div>
+          <button
+            id="activePaneChip"
+            class="active-pane-chip"
+            type="button"
+            aria-label="Focus active pane"
+            title="Focus active pane"
+            data-testid="active-pane-chip"
+            hidden
+          >
+            <span class="active-pane-chip__label">Active</span>
+            <span class="active-pane-chip__value" data-active-pane-chip-value></span>
+          </button>
           <div id="paneControls" class="pane-controls" hidden>
             <div class="pane-add-wrap">
               <button id="addPaneBtn" class="icon-btn action-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add pane" title="Add Pane (Ctrl/Cmd+Shift+N)" data-testid="add-pane-btn">
