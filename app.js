@@ -20,6 +20,8 @@ const globalElements = {
   recurringPromptHistoryEmpty: document.getElementById('recurringPromptHistoryEmpty'),
   status: document.getElementById('connectionStatus'),
   paneManagerBtn: document.getElementById('paneManagerBtn'),
+  activePaneChip: document.getElementById('activePaneChip'),
+  activePaneChipValue: document.querySelector('[data-active-pane-chip-value]'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
   fleetBtn: document.getElementById('fleetBtn'),
@@ -602,6 +604,7 @@ function isGlobalKeybindEntry(entry) {
 }
 const WQ_RECENT_ENQUEUE_AGENTS_KEY = 'clawnsole.wq.recentEnqueueAgents';
 const WQ_RECENT_TARGETS_MAX = 6;
+const ADMIN_ACTIVE_PANE_KEY = 'clawnsole.admin.activePaneKey';
 
 function readJsonFromStorage(key, fallback) {
   try {
@@ -629,6 +632,16 @@ function getActiveAdminPaneKey() {
   } catch {
     return '';
   }
+}
+
+function rememberedActivePaneKey() {
+  return String(storage.get(ADMIN_ACTIVE_PANE_KEY, '') || '');
+}
+
+function rememberActivePaneKey(key) {
+  const next = String(key || '');
+  if (!next) return;
+  storage.set(ADMIN_ACTIVE_PANE_KEY, next);
 }
 
 function readStoredAdminDestination(key = ADMIN_AUTH_DESTINATION_KEY) {
@@ -941,6 +954,16 @@ function showToast(
   if (!globalElements.toastHost) return;
   const text = typeof message === 'string' ? message.trim() : String(message || '').trim();
   if (!text) return;
+
+  const existing = Array.from(globalElements.toastHost.querySelectorAll('[data-testid]')).find((node) => {
+    return (
+      node instanceof HTMLElement &&
+      node.classList.contains('open') &&
+      node.dataset.toastKind === kind &&
+      node.querySelector('.toast-message')?.textContent === text
+    );
+  });
+  if (existing) return existing;
 
   const el = document.createElement('div');
   el.className = `toast ${kind === 'error' ? 'toast-error' : 'toast-info'}`;
@@ -1760,6 +1783,7 @@ function updateGlobalStatus() {
   const status = deriveGlobalConnectionState({ authed: uiState.authed, panes: paneManager.panes });
   setStatusPill(globalElements.status, status.state, status.meta);
   if (globalElements.status) globalElements.status.hidden = !uiState.authed;
+  renderActivePaneState();
   if (globalElements.paneManagerBtn) {
     globalElements.paneManagerBtn.hidden = !uiState.authed || !status.meta;
     globalElements.paneManagerBtn.textContent = uiState.authed ? status.meta : '';
@@ -2998,6 +3022,7 @@ function focusedPaneKey() {
 let paneFocusMruKeys = [];
 let paneMruTraversal = null;
 let paneMruSuppressFocusEvents = false;
+let paneActiveRestoreGuardUntil = 0;
 const PANE_SWITCH_SEND_GUARD_MS = 800;
 const PANE_SWITCH_SEND_GUARD_MESSAGE = 'Pane changed: press Enter again to send';
 
@@ -3018,9 +3043,13 @@ function notePaneFocused(pane) {
   if (!key) return;
   const panes = paneManager?.panes || [];
   if (!panes.some((entry) => String(entry?.key || '') === key)) return;
+  const rememberedKey = rememberedActivePaneKey();
+  if (rememberedKey && key !== rememberedKey && Date.now() < paneActiveRestoreGuardUntil) return;
   paneMruTraversal = null;
   paneMruOrder();
   paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
+  rememberActivePaneKey(key);
+  renderActivePaneState(pane);
   updateBrowserTitle(pane);
 }
 
@@ -3052,10 +3081,57 @@ function forgetFocusedPaneKey(paneKey) {
   const key = String(paneKey || '');
   if (!key) return;
   paneFocusMruKeys = paneFocusMruKeys.filter((entry) => entry !== key);
+  if (rememberedActivePaneKey() === key) storage.remove(ADMIN_ACTIVE_PANE_KEY);
   if (paneMruTraversal?.order) {
     paneMruTraversal.order = paneMruTraversal.order.filter((entry) => entry !== key);
     if (paneMruTraversal.order.length < 2) paneMruTraversal = null;
   }
+}
+
+function activePaneFromState() {
+  const panes = paneManager?.panes || [];
+  if (!panes.length) return null;
+  const candidates = [
+    paneFocusMruKeys[0],
+    focusedPaneKey(),
+    rememberedActivePaneKey()
+  ].filter(Boolean);
+  for (const key of candidates) {
+    const pane = panes.find((entry) => String(entry?.key || '') === String(key));
+    if (pane) return pane;
+  }
+  return panes[0] || null;
+}
+
+function renderActivePaneState(activePane = activePaneFromState()) {
+  const panes = paneManager?.panes || [];
+  const activeKey = String(activePane?.key || '');
+  panes.forEach((pane) => {
+    const isActive = !!activeKey && String(pane?.key || '') === activeKey;
+    const root = pane?.elements?.root;
+    if (!root) return;
+    root.classList.toggle('is-active-pane', isActive);
+    root.dataset.activePane = isActive ? 'true' : 'false';
+    root.setAttribute('aria-current', isActive ? 'true' : 'false');
+  });
+
+  const chip = globalElements.activePaneChip;
+  const value = globalElements.activePaneChipValue;
+  if (!chip || !value) return;
+
+  if (!activePane) {
+    chip.hidden = true;
+    value.textContent = '';
+    chip.title = 'No active pane';
+    chip.setAttribute('aria-label', 'No active pane');
+    return;
+  }
+
+  const label = paneSummaryLabel(activePane);
+  chip.hidden = !uiState.authed;
+  value.textContent = label;
+  chip.title = `Focus ${label}`;
+  chip.setAttribute('aria-label', `Active pane: ${label}. Click to focus.`);
 }
 
 function paneIndexByKey(key) {
@@ -8526,6 +8602,7 @@ function renderPaneIdentity(pane) {
     pane.elements.name.textContent = identity;
   }
   renderPanePairCue(pane);
+  renderActivePaneState();
   if (pane.elements.nicknameBtn) {
     pane.elements.nicknameBtn.classList.toggle('has-nickname', !!nickname);
     pane.elements.nicknameBtn.title = nickname ? `Rename pane nickname: ${nickname}` : 'Set pane nickname';
@@ -10515,7 +10592,17 @@ const paneManager = {
     this.updatePaneLabels();
     this.updateCloseButtons();
     this.applyInferredLayout();
-    updateBrowserTitle(this.panes[0] || null);
+    const storedActivePaneKey = rememberedActivePaneKey();
+    const restoredActivePane = this.panes.find((pane) => pane.key === storedActivePaneKey) || this.panes[0] || null;
+    paneActiveRestoreGuardUntil = storedActivePaneKey ? Date.now() + 1000 : 0;
+    if (restoredActivePane) {
+      paneFocusMruKeys = [
+        restoredActivePane.key,
+        ...this.panes.map((pane) => pane.key).filter((key) => key && key !== restoredActivePane.key)
+      ];
+    }
+    renderActivePaneState(restoredActivePane);
+    updateBrowserTitle(restoredActivePane);
   },
   isLayoutLocked() {
     return !!this.layoutLocked;
@@ -10552,6 +10639,7 @@ const paneManager = {
     });
     this.panes = [];
     this.closedPaneStack = [];
+    renderActivePaneState(null);
   },
   loadAdminPanes() {
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
@@ -10778,6 +10866,7 @@ const paneManager = {
         pane.client.connect();
       }
       this.focusPanePrimary(pane);
+      renderActivePaneState(pane);
       return pane;
     };
 
@@ -11809,7 +11898,11 @@ function focusPaneIndex(idx, { trackMru = true, showHud = false } = {}) {
   const previousPaneKey = focusedPaneKey() || paneMruOrder()[0] || '';
   clearPaneUnread(pane);
   if (trackMru) notePaneFocused(pane);
-  else updateBrowserTitle(pane);
+  else {
+    rememberActivePaneKey(pane.key);
+    renderActivePaneState(pane);
+    updateBrowserTitle(pane);
+  }
   paneMarkSwitchSendGuard(pane, previousPaneKey);
   if (showHud) showPaneSwitchHud(pane);
 
@@ -12463,6 +12556,12 @@ globalElements.logoutBtn?.addEventListener('click', async () => {
 globalElements.addPaneBtn?.addEventListener('click', (event) => {
   event?.preventDefault?.();
   paneManager.openAddPaneMenu(globalElements.addPaneBtn);
+});
+
+globalElements.activePaneChip?.addEventListener('click', () => {
+  const pane = activePaneFromState();
+  const idx = paneManager?.panes?.indexOf?.(pane) ?? -1;
+  if (idx >= 0) focusPaneIndex(idx, { showHud: true });
 });
 
 globalElements.addChatPaneBtn?.addEventListener('click', (event) => {
