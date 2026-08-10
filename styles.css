@@ -1817,6 +1817,11 @@ button.send-btn .btn-icon {
   gap: 6px;
 }
 
+.agents-reset-triage {
+  align-self: end;
+  white-space: nowrap;
+}
+
 .agents-label {
   font-size: 11px;
   text-transform: uppercase;
