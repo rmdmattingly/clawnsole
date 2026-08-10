@@ -110,6 +110,181 @@ function seedLegacyIssueTitleVariants(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedFilterSummaryWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, patch = {}) => ({
+    id,
+    queue,
+    title: '[issue] rmdmattingly/clawnsole#323 filter summary',
+    instructions: 'Repo: rmdmattingly/clawnsole\nIssue: https://github.com/rmdmattingly/clawnsole/issues/323',
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-60000),
+    updatedAt: iso(-60000),
+    dedupeKey: `filter-summary-${id}`,
+    ...patch
+  });
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-120000) } },
+    assignments: {},
+    items: [
+      mkItem('summary-clawnsole-ready'),
+      mkItem('summary-other-ready', {
+        title: '[issue] other/repo#9 alternate repo',
+        instructions: 'Repo: other/repo\nIssue: https://github.com/other/repo/issues/9',
+        dedupeKey: 'filter-summary-other'
+      }),
+      mkItem('summary-clawnsole-failed', {
+        title: '[issue] rmdmattingly/clawnsole#324 failed row',
+        status: 'failed',
+        dedupeKey: 'filter-summary-failed'
+      })
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
+function seedExactDuplicateWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const title = '[issue] rmdmattingly/clawnsole#348 exact duplicate collapse';
+  const mkItem = (id, patch = {}) => ({
+    id,
+    queue,
+    title,
+    instructions: 'Repo: rmdmattingly/clawnsole\nIssue: https://github.com/rmdmattingly/clawnsole/issues/348',
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-120000),
+    updatedAt: iso(-120000),
+    dedupeKey: 'rmdmattingly/clawnsole#348',
+    ...patch
+  });
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-180000) } },
+    assignments: {},
+    items: [
+      mkItem('exact-dup-old', { priority: 20, updatedAt: iso(-90000) }),
+      mkItem('exact-dup-latest', { priority: 5, attempts: 2, updatedAt: iso(-10000) }),
+      mkItem('exact-dup-different-status', { status: 'pending', updatedAt: iso(-5000) }),
+      mkItem('exact-dup-different-title', {
+        title: '[issue] rmdmattingly/clawnsole#348 exact duplicate collapse follow-up',
+        updatedAt: iso(-3000)
+      })
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
+function seedLargeRoutineWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const items = Array.from({ length: 22 }, (_, ix) => ({
+    id: `routine-sweep-${ix}`,
+    queue,
+    title: `[routine] PR review sweep ${ix + 1}`,
+    instructions: 'Recurring dev-team PR review sweep',
+    priority: ix === 7 ? 99 : 10 + ix,
+    status: ix % 3 === 0 ? 'pending' : 'ready',
+    claimedBy: ix === 5 ? 'dev-2' : '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: ix,
+    lastError: '',
+    createdAt: iso(-120000 + ix * 1000),
+    updatedAt: iso(-90000 + ix * 1000),
+    dedupeKey: 'pr-review:sweep'
+  }));
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-180000) } },
+    assignments: {},
+    items
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
+test('workqueue pane: queue switch updates pane identity everywhere', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `identity-${Date.now()}`;
+  await loginAdmin(page, env.serverPort);
+
+  const pane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await expect(pane.getByTestId('pane-type-label')).toHaveText(/^B Workqueue · dev-team$/);
+
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await expect(pane.getByTestId('pane-type-label')).toHaveText(`B Workqueue · ${queue}`);
+  await expect(pane.getByTestId('pane-name-target')).toHaveText(` · ${queue}`);
+
+  await page.keyboard.press('Control+P');
+  const managerRow = page.locator('.pane-manager-row[data-pane-kind="workqueue"]').first();
+  await expect(managerRow.locator('.pane-manager-kind-label')).toHaveText(`B Workqueue · ${queue}`);
+  await expect(managerRow).not.toContainText('main');
+});
+
+function seedKeyboardTriageWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, title, priority) => ({
+    id,
+    queue,
+    title,
+    instructions: `Keyboard triage seed ${title}`,
+    priority,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-60000 + priority),
+    updatedAt: iso(-60000 + priority),
+    dedupeKey: `keyboard-triage-${id}`
+  });
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-120000) } },
+    assignments: {},
+    items: [
+      mkItem('keyboard-triage-a', 'keyboard triage alpha', 30),
+      mkItem('keyboard-triage-b', 'keyboard triage beta', 20)
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 test('workqueue pane: renders + has queue dropdown + does not show chat composer', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -137,6 +312,59 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
   // Workqueue pane should not render the chat composer UI.
   await expect(wqPane.locator('.chat-input-row')).toBeHidden();
   await expect(wqPane.locator('[data-pane-input]')).toBeHidden();
+});
+
+test('workqueue pane: keyboard mode navigates rows and updates status', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `keyboard-triage-${Date.now()}`;
+  seedKeyboardTriageWorkqueueItems(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  const rows = pane.locator('[data-wq-list-body] .wq-row');
+  await expect(rows).toHaveCount(2);
+  await pane.locator('[data-wq-keyboard-mode]').click();
+  await expect(pane.locator('[data-wq-keyboard-mode]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(rows.nth(0)).toHaveClass(/selected/);
+
+  await page.keyboard.press('j');
+  await expect(rows.nth(1)).toHaveClass(/selected/);
+
+  await page.keyboard.press('Enter');
+  await expect(pane.locator('[data-wq-inspect]')).toContainText('keyboard triage beta');
+
+  await page.keyboard.press('2');
+  await expect(rows.nth(1).locator('.wq-col.status')).toContainText('in_progress');
+
+  await page.keyboard.press('3');
+  await expect(rows.nth(1).locator('.wq-col.status')).toContainText('blocked');
+
+  let editPromptMessage = '';
+  page.once('dialog', async (dialog) => {
+    editPromptMessage = dialog.message();
+    await dialog.dismiss();
+  });
+  await page.keyboard.press('e');
+  expect(editPromptMessage).toContain('Edit title');
+
+  await pane.locator('[data-wq-queue-search]').fill('triage');
+  await page.keyboard.press('k');
+  await expect(rows.nth(1)).toHaveClass(/selected/);
+
+  const res = await page.request.get(`http://127.0.0.1:${env.serverPort}/api/workqueue/items?queue=${encodeURIComponent(queue)}&status=ready,blocked,in_progress`);
+  expect(res.ok()).toBeTruthy();
+  const data = await res.json();
+  const beta = data.items.find((item) => item.id === 'keyboard-triage-b');
+  expect(beta?.status).toBe('blocked');
 });
 
 test('workqueue pane: pane grid label switches from chat-only to generic panes', async ({ page }) => {
@@ -208,6 +436,117 @@ test('workqueue pane: status filter uses human labels and queue-scoped counts', 
   await customQueue.press('Enter');
   await expect(wqPane.locator('[data-wq-statusline]')).toContainText('1 item');
   await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
+});
+
+test('workqueue pane: filter summary chips show counts and remove filters', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `filter-summary-${Date.now()}`;
+  seedFilterSummaryWorkqueueItems(queue);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+
+  const summary = wqPane.locator('[data-wq-filter-summary]');
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 3 items');
+  await expect(summary).toBeVisible();
+  await expect(summary).toContainText(`Queue ${queue}`);
+  await expect(summary).toContainText('Scope Unassigned');
+  await expect(summary).toContainText('Status Ready');
+  await expect(wqPane.locator('.wq-row')).toHaveCount(2);
+
+  await wqPane.locator('[data-wq-preset-clawnsole]').click();
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 1 of 3 items');
+  await expect(summary).toContainText('Repo rmdmattingly/clawnsole');
+  await expect(wqPane.locator('.wq-row')).toHaveCount(1);
+
+  await summary.getByRole('button', { name: /Remove repo filter rmdmattingly\/clawnsole/ }).click();
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 3 items');
+  await expect(summary).not.toContainText('Repo rmdmattingly/clawnsole');
+  await expect(wqPane.locator('.wq-row')).toHaveCount(2);
+
+  await wqPane.locator('[data-wq-search]').fill('alternate repo');
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 1 of 3 items');
+  await expect(summary).toContainText('Search alternate repo');
+
+  await summary.locator('[data-wq-clear-all-filters]').click();
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 3 items');
+  await expect(summary).not.toContainText('Search alternate repo');
+  await expect(wqPane.locator('[data-wq-queue-custom]')).toHaveValue(queue);
+});
+
+test('workqueue pane: default rows collapse exact duplicates with expandable members', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `exact-duplicates-${Date.now()}`;
+  seedExactDuplicateWorkqueueItems(queue);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await wqPane.locator('[data-wq-scope="all"]').click();
+
+  const rows = wqPane.locator('[data-wq-list-body] .wq-row');
+  const duplicateRow = wqPane.locator('[data-wq-duplicate-row]').first();
+
+  await expect(wqPane.locator('[data-wq-group-mode="auto"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 4 items');
+  await expect(rows).toHaveCount(3);
+  await expect(duplicateRow).toContainText('x2');
+  await expect(duplicateRow).toContainText('duplicate collapse');
+  await expect(duplicateRow).toHaveAttribute('data-wq-item', 'exact-dup-latest');
+  await expect(wqPane.locator('[data-wq-list-body] .wq-row-child')).toHaveCount(0);
+
+  await duplicateRow.press('Enter');
+  await expect(duplicateRow).toHaveAttribute('aria-expanded', 'true');
+  await expect(wqPane.locator('[data-wq-list-body] .wq-row-child')).toHaveCount(2);
+});
+
+test('workqueue pane: auto view groups large repetitive routine queues', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `large-routine-${Date.now()}`;
+  seedLargeRoutineWorkqueueItems(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-scope="all"]').click();
+
+  const groupRow = pane.locator('[data-wq-group-row="pr-review:sweep"]');
+  await expect(pane.locator('[data-wq-group-mode="auto"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(groupRow).toBeVisible();
+  await expect(groupRow).toContainText('22 rows');
+  await expect(groupRow.locator('.wq-col.status')).toContainText('Ready');
+  await expect(groupRow.locator('.wq-col.status')).toContainText('Pending');
+  await expect(groupRow.locator('.wq-col.prio')).toHaveText('99');
+  await expect(pane.locator('.wq-row')).toHaveCount(1);
+
+  await groupRow.focus();
+  await page.keyboard.press('Enter');
+  await expect(groupRow).toHaveAttribute('aria-expanded', 'true');
+  await expect(pane.locator('.wq-row-child')).toHaveCount(22);
 });
 
 test('workqueue pane: queue target supports search + recent persistence', async ({ page }) => {
@@ -483,25 +822,119 @@ test('workqueue pane: duplicate health summary cleans legacy issue duplicates', 
   expect(issue290.filter((it) => it.status === 'failed').every((it) => String(it.lastError || '').includes('duplicate-cleanup:rmdmattingly/clawnsole#290'))).toBeTruthy();
 });
 
+test('workqueue pane: default rows auto-collapse exact duplicates with count and member expansion', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `exact-duplicates-${Date.now()}`;
+  seedExactDuplicateWorkqueueItems(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  const duplicateRow = pane.locator('[data-wq-duplicate-row]').first();
+  await expect(pane.locator('[data-wq-group-mode="auto"]')).toHaveClass(/active/);
+  await expect(duplicateRow).toBeVisible();
+  await expect(duplicateRow).toContainText('x2');
+  await expect(duplicateRow).toHaveAttribute('data-wq-item', 'exact-dup-latest');
+  await expect(pane.locator('.wq-row')).toHaveCount(3);
+  await expect(pane.locator('[data-wq-item="exact-dup-different-status"]')).toBeVisible();
+
+  await duplicateRow.focus();
+  await page.keyboard.press('Enter');
+  await expect(pane.locator('[data-wq-inspect]')).toContainText('exact-dup-latest');
+  await expect(pane.locator('.wq-row-child', { hasText: 'exact duplicate collapse' })).toHaveCount(2);
+});
+
+test('workqueue pane: grouped mode collapses duplicate issue rows and expands child actions', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `group-mode-${Date.now()}`;
+  seedLegacyDuplicateWorkqueueItems(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await expect(pane.locator('.wq-row')).toHaveCount(4);
+  await pane.locator('[data-wq-group-mode="grouped"]').click();
+  await expect(pane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]')).toBeVisible();
+  await expect(pane.locator('.wq-row')).toHaveCount(2);
+  await expect(pane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]')).toContainText('3 rows');
+  await expect(pane.locator('.wq-row', { hasText: 'unrelated' })).toHaveCount(1);
+
+  const groupRow = pane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]');
+  await groupRow.focus();
+  await page.keyboard.press('Enter');
+  await expect(pane.locator('.wq-row')).toHaveCount(5);
+
+  const child = pane.locator('.wq-row-child', { hasText: 'duplicate health' }).first();
+  await child.focus();
+  await page.keyboard.press('Enter');
+  await expect(pane.locator('[data-wq-inspect]')).toContainText('legacy-dup');
+});
+
 test('workqueue pane: controls toolbar is sticky and list scrolls independently', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
 
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
+  const queue = `sticky-scroll-${Date.now()}`;
+  const stateDir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const now = new Date().toISOString();
+  const items = Array.from({ length: 40 }, (_, ix) => ({
+    id: `sticky-${ix}`,
+    queue,
+    title: `sticky header item ${String(ix).padStart(2, '0')}`,
+    instructions: 'fixture item',
+    priority: ix,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: now,
+    updatedAt: now
+  }));
+  fs.writeFileSync(
+    path.join(stateDir, 'work-queues.json'),
+    JSON.stringify({ version: 1, queues: { [queue]: { name: queue, createdAt: now } }, items, assignments: {} }, null, 2)
+  );
+
   await loginAdmin(page, env.serverPort);
   await addPane(page, 'Workqueue pane');
 
   const wqPane = page.locator('[data-pane]').last();
   const toolbar = wqPane.locator('.wq-pane .wq-toolbar');
+  const list = wqPane.locator('.wq-pane .wq-list').first();
+  const listHeader = wqPane.locator('.wq-pane .wq-list-header').first();
   const listBody = wqPane.locator('.wq-pane [data-wq-list-body]').first();
 
   await expect(toolbar).toBeVisible();
+  await expect(list).toBeVisible();
+  await expect(listHeader).toBeVisible();
   await expect(listBody).toHaveCount(1);
 
+  await wqPane.locator('[data-wq-queue-select]').selectOption(queue);
   const itemsResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
   await wqPane.locator('[data-wq-refresh]').click();
   await itemsResP;
+  await expect(wqPane.locator('.wq-row')).toHaveCount(40);
 
   const styles = await toolbar.evaluate((el) => {
     const cs = window.getComputedStyle(el);
@@ -518,11 +951,34 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
   expect(Number(styles.zIndex)).toBeGreaterThanOrEqual(5);
   expect(styles.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
 
-  const listStyles = await listBody.evaluate((el) => {
+  const listStyles = await list.evaluate((el) => {
     const cs = window.getComputedStyle(el);
     return { overflowY: cs.overflowY };
   });
   expect(['auto', 'scroll']).toContain(listStyles.overflowY);
+
+  const headerStyles = await listHeader.evaluate((el) => {
+    const cs = window.getComputedStyle(el);
+    return {
+      position: cs.position,
+      top: cs.top,
+      zIndex: cs.zIndex,
+      backgroundColor: cs.backgroundColor
+    };
+  });
+  expect(headerStyles.position).toBe('sticky');
+  expect(headerStyles.top).toBe('0px');
+  expect(Number(headerStyles.zIndex)).toBeGreaterThanOrEqual(3);
+  expect(headerStyles.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+
+  const before = await listHeader.boundingBox();
+  await list.evaluate((el) => { el.scrollTop = 260; });
+  await expect.poll(async () => list.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  const after = await listHeader.boundingBox();
+  expect(Math.abs((after?.y || 0) - (before?.y || 0))).toBeLessThanOrEqual(1);
+
+  await listHeader.locator('[data-wq-sort="title"]').click();
+  await expect(listHeader.locator('[data-wq-sort="title"]')).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('workqueue pane: large queues render an initial capped slice and load more incrementally', async ({ page }) => {
@@ -565,6 +1021,36 @@ test('workqueue pane: large queues render an initial capped slice and load more 
   const refreshResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
   await pane.locator('[data-wq-refresh]').click();
   await refreshResP;
+
+  const guard = pane.locator('[data-wq-all-scope-guard]');
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.workqueue.allScopeGuardThreshold', '600'));
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeHidden();
+
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.workqueue.allScopeGuardThreshold', '200'));
+  await pane.locator('[data-wq-scope="assigned"]').click();
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeVisible();
+  await expect(guard).toContainText('Viewing all items (505). Narrow scope?');
+
+  await guard.locator('[data-wq-downscope="assigned"]').click();
+  await expect(pane.locator('[data-wq-scope="assigned"]')).toHaveClass(/active/);
+  await expect(guard).toBeHidden();
+  await expect(pane.locator('.wq-row')).toHaveCount(0);
+
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeVisible();
+  await guard.locator('[data-wq-downscope="unassigned"]').click();
+  await expect(pane.locator('[data-wq-scope="unassigned"]')).toHaveClass(/active/);
+  await expect(guard).toBeHidden();
+
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeVisible();
+  await guard.locator('[data-wq-guard-dismiss]').click();
+  await expect(guard).toBeHidden();
+  await pane.locator('[data-wq-scope="assigned"]').click();
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeHidden();
 
   await expect(pane.locator('.wq-row')).toHaveCount(100);
   await expect(pane.locator('[data-wq-load-more]')).toHaveText('Load more (100/505)');
