@@ -142,6 +142,7 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   return `${sec}s`;
 });
 const formatWorkqueueIssueTitle = __appCore.formatWorkqueueIssueTitle || ((item) => String(item?.title || ''));
+const summarizeWorkqueueIssueDuplicateDensity = __appCore.summarizeWorkqueueIssueDuplicateDensity || (() => ({ density: 0, duplicateRows: 0, duplicateGroups: 0, totalRows: 0 }));
 const summarizeExactWorkqueueDuplicateRows = __appCore.summarizeExactWorkqueueDuplicateRows || ((items) => (Array.isArray(items) ? items : []).map((item) => ({ kind: 'item', item })));
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
@@ -5392,6 +5393,7 @@ function runFleetSelectedAgent(mode = 'chat') {
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress', 'done', 'failed'];
 const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
 const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
+const WORKQUEUE_CANONICAL_DENSITY_THRESHOLD = 0.2;
 const WORKQUEUE_GROUPED_AUTO_THRESHOLD = 20;
 const WORKQUEUE_ALL_SCOPE_GUARD_THRESHOLD_KEY = 'clawnsole.admin.workqueue.allScopeGuardThreshold';
 const WORKQUEUE_ALL_SCOPE_GUARD_DEFAULT_THRESHOLD = 200;
@@ -6468,6 +6470,20 @@ function formatWorkqueueGroupDisplayKey(key) {
   return text.replace(/^(?:issue|dedupe|title):/, '');
 }
 
+function chooseWorkqueueGroupRepresentative(key, items) {
+  const rows = Array.isArray(items) ? items : [];
+  if (String(key || '').startsWith('issue:')) {
+    return rows.slice().sort((a, b) => {
+      const updated = String(b?.updatedAt || '').localeCompare(String(a?.updatedAt || ''));
+      if (updated !== 0) return updated;
+      const created = String(b?.createdAt || '').localeCompare(String(a?.createdAt || ''));
+      if (created !== 0) return created;
+      return String(a?.id || '').localeCompare(String(b?.id || ''));
+    })[0] || null;
+  }
+  return sortWorkqueueItems(rows, { sortKey: 'priority', sortDir: 'desc' })[0] || rows[0] || null;
+}
+
 function summarizeWorkqueueGroups(items) {
   const map = new Map();
   for (const item of Array.isArray(items) ? items : []) {
@@ -6482,8 +6498,7 @@ function summarizeWorkqueueGroups(items) {
   for (const [key, groupItems] of map.entries()) {
     if (groupItems.length <= 1) continue;
     groupedKeys.add(key);
-    const sorted = sortWorkqueueItems(groupItems, { sortKey: 'priority', sortDir: 'desc' });
-    const representative = sorted[0] || groupItems[0];
+    const representative = chooseWorkqueueGroupRepresentative(key, groupItems) || groupItems[0];
     groups.push({
       kind: 'group',
       key,
@@ -6519,9 +6534,10 @@ function normalizeWorkqueueGroupMode(value) {
   return 'auto';
 }
 
-function resolveWorkqueueGroupMode(value, itemCount) {
+function resolveWorkqueueGroupMode(value, itemCount, duplicateSummary) {
   const mode = normalizeWorkqueueGroupMode(value);
   if (mode === 'rows' || mode === 'grouped') return mode;
+  if (Number(duplicateSummary?.density || 0) >= WORKQUEUE_CANONICAL_DENSITY_THRESHOLD) return 'grouped';
   return Number(itemCount || 0) > WORKQUEUE_GROUPED_AUTO_THRESHOLD ? 'grouped' : 'rows';
 }
 
@@ -6715,7 +6731,8 @@ function renderWorkqueuePaneItems(pane) {
   const statusLine = pane.elements?.thread?.querySelector('[data-wq-statusline]');
   if (statusLine) statusLine.textContent = formatWorkqueueVisibleSummary(items.length, totalCount, hiddenCounts);
   renderWorkqueueFilterSummaryForPane(pane, { shownCount: items.length, totalCount, hiddenCounts });
-  const groupMode = resolveWorkqueueGroupMode(pane.workqueue?.groupMode, items.length);
+  const duplicateSummary = summarizeWorkqueueIssueDuplicateDensity(items);
+  const groupMode = resolveWorkqueueGroupMode(pane.workqueue?.groupMode, items.length, duplicateSummary);
   const rows = groupMode === 'grouped'
     ? summarizeWorkqueueGroups(items)
     : sortWorkqueueRowEntries(summarizeWorkqueueExactDuplicateRows(items), { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
@@ -9263,8 +9280,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           <div class="wq-sort" role="group" aria-label="Workqueue row grouping">
             <span class="wq-sort-label">View</span>
             <button type="button" class="wq-sort-btn" data-wq-group-mode="auto">Auto</button>
-            <button type="button" class="wq-sort-btn" data-wq-group-mode="rows">Rows</button>
-            <button type="button" class="wq-sort-btn" data-wq-group-mode="grouped">Grouped</button>
+            <button type="button" class="wq-sort-btn" data-wq-group-mode="rows">Raw rows</button>
+            <button type="button" class="wq-sort-btn" data-wq-group-mode="grouped">Grouped (latest)</button>
           </div>
         </div>
 
@@ -9830,9 +9847,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         const active = key === current;
         btn.classList.toggle('active', active);
         btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-        if (key === 'auto') btn.title = `Auto groups related rows when more than ${WORKQUEUE_GROUPED_AUTO_THRESHOLD} items are visible.`;
+        if (key === 'auto') btn.title = `Auto shows grouped latest rows when canonical issue duplicate density is at least ${Math.round(WORKQUEUE_CANONICAL_DENSITY_THRESHOLD * 100)}% or more than ${WORKQUEUE_GROUPED_AUTO_THRESHOLD} items are visible.`;
         else if (key === 'rows') btn.title = 'Show individual workqueue rows; exact duplicate rows still collapse.';
-        else btn.title = 'Group related issue, routine, or coordination rows.';
+        else btn.title = 'Group related issue, routine, or coordination rows and show the latest issue row as the representative.';
       });
     };
 

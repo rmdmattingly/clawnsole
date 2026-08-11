@@ -5,6 +5,8 @@ const {
   escapeHtml,
   fmtRemaining,
   formatWorkqueueIssueTitle,
+  getWorkqueueIssueKey,
+  summarizeWorkqueueIssueDuplicateDensity,
   summarizeExactWorkqueueDuplicateRows,
   sortWorkqueueItems,
   inferPaneCols,
@@ -145,6 +147,42 @@ test('sortWorkqueueItems priority sort uses updatedAt desc tie-breaker', () => {
 
   const sorted = sortWorkqueueItems(items, { sortKey: 'priority', sortDir: 'desc' });
   assert.deepEqual(sorted.map((it) => it.id), ['c', 'b', 'a']);
+});
+
+test('workqueue canonical issue helpers calculate duplicate density', () => {
+  const items = [
+    {
+      id: 'old',
+      title: '[issue] rmdmattingly/clawnsole#320 Old',
+      updatedAt: '2026-03-01T00:00:00Z'
+    },
+    {
+      id: 'new',
+      title: 'Follow-up',
+      instructions: 'Repo: rmdmattingly/clawnsole\nIssue: #320',
+      updatedAt: '2026-03-02T00:00:00Z'
+    },
+    {
+      id: 'other',
+      title: 'Routine sweep',
+      updatedAt: '2026-03-03T00:00:00Z'
+    },
+    {
+      id: 'solo',
+      meta: { repo: 'RMDMATTINGLY/CLAWNSOLE', issueNumber: 321 },
+      title: 'Solo issue',
+      updatedAt: '2026-03-04T00:00:00Z'
+    }
+  ];
+
+  assert.equal(getWorkqueueIssueKey(items[0]), 'rmdmattingly/clawnsole#320');
+  assert.deepEqual(summarizeWorkqueueIssueDuplicateDensity(items), {
+    totalRows: 4,
+    issueRows: 3,
+    duplicateRows: 1,
+    duplicateGroups: 1,
+    density: 0.25
+  });
 });
 
 test('summarizeExactWorkqueueDuplicateRows collapses same dedupe key title and status only', () => {
