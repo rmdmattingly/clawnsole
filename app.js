@@ -11855,7 +11855,8 @@ function reportBlockedShortcut(reason) {
 }
 
 function isTypingContext(target) {
-  const el = target instanceof Element ? target : document.activeElement;
+  const el = target === undefined ? document.activeElement : target;
+  if (!(el instanceof Element)) return false;
   if (!el) return false;
   try {
     if (el.hidden || el.disabled) return false;
