@@ -227,5 +227,5 @@ test('pane: workqueue scope filter toggles deterministic row counts', async ({ p
   await wqPane.locator('[data-wq-search]').fill(`missing-${runId}`);
   await expect(rowsWithPrefix()).toHaveCount(0);
   await expect(statusLine).toContainText(/Showing 0 of \d+ items .*hidden:.*search \d+/);
-  await expect(wqPane.locator('[data-wq-empty]')).toContainText('No items match current filters.');
+  await expect(wqPane.locator('[data-wq-empty]')).toContainText(`No items match "missing-${runId}".`);
 });
