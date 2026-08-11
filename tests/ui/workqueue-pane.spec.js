@@ -199,6 +199,7 @@ test('workqueue pane: default agent-targeted layout starts assigned and remains 
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
 
+  seedAgentsForWorkqueuePicker();
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
   await loginAdmin(page, env.serverPort);
@@ -230,10 +231,17 @@ test('workqueue pane: default agent-targeted layout starts assigned and remains 
       priority: 1,
       dedupeKey: 'ui-default-layout-unassigned'
     });
-    await post('/api/workqueue/claim-next', { agentId: 'main', queues: ['dev-team'], leaseMs: 900000 });
+    await post('/api/workqueue/claim-next', { agentId: 'dev', queues: ['dev-team'], leaseMs: 900000 });
   });
 
-  const pane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await page.locator('#addPaneBtn').click();
+  const menu = page.locator('[data-testid="pane-add-menu"]');
+  await expect(menu).toBeVisible();
+  await menu.locator('select[aria-label="Chat agent"]').selectOption('dev');
+  await expect(menu.locator('[data-testid="pane-add-menu-workqueue"]')).toHaveText(/\/ assigned/);
+  await menu.locator('[data-testid="pane-add-menu-workqueue"]').click();
+
+  const pane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
   const assignedBtn = pane.locator('[data-wq-scope="assigned"]');
   const allBtn = pane.locator('[data-wq-scope="all"]');
   const rows = pane.locator('[data-wq-list-body] .wq-row');

@@ -7461,7 +7461,7 @@ function getDefaultWorkqueueScope() {
 
 function getDefaultWorkqueueScopeForTarget(agentId) {
   const target = typeof agentId === 'string' ? agentId.trim() : '';
-  return target ? 'assigned' : getDefaultWorkqueueScope();
+  return target && target !== 'main' ? 'assigned' : getDefaultWorkqueueScope();
 }
 
 function computeBaseDeviceLabel() {
