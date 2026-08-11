@@ -54,7 +54,7 @@ async function loginAdminWithBaselinePanes(page, serverPort, { chatAgentId = 'ma
           kind: 'workqueue',
           agentId: 'main',
           queue: 'dev-team',
-          statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+          statusFilter: ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
           scopeFilter: 'all',
           sortKey: 'priority',
           sortDir: 'desc'
