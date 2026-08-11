@@ -195,6 +195,67 @@ function seedExactDuplicateWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+test('workqueue pane: default agent-targeted layout starts assigned and remains overridable', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  seedAgentsForWorkqueuePicker();
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  await page.evaluate(async () => {
+    const post = async (url, body) => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `request failed: ${res.status}`);
+      return data;
+    };
+
+    await post('/api/workqueue/enqueue', {
+      queue: 'dev-team',
+      title: 'Assigned default layout target',
+      instructions: 'assigned default layout test',
+      priority: 2,
+      dedupeKey: 'ui-default-layout-assigned'
+    });
+    await post('/api/workqueue/enqueue', {
+      queue: 'dev-team',
+      title: 'Unassigned default layout target',
+      instructions: 'assigned default layout test',
+      priority: 1,
+      dedupeKey: 'ui-default-layout-unassigned'
+    });
+    await post('/api/workqueue/claim-next', { agentId: 'dev', queues: ['dev-team'], leaseMs: 900000 });
+  });
+
+  await page.locator('#addPaneBtn').click();
+  const menu = page.locator('[data-testid="pane-add-menu"]');
+  await expect(menu).toBeVisible();
+  await menu.locator('select[aria-label="Chat agent"]').selectOption('dev');
+  await expect(menu.locator('[data-testid="pane-add-menu-workqueue"]')).toHaveText(/\/ assigned/);
+  await menu.locator('[data-testid="pane-add-menu-workqueue"]').click();
+
+  const pane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  const assignedBtn = pane.locator('[data-wq-scope="assigned"]');
+  const allBtn = pane.locator('[data-wq-scope="all"]');
+  const rows = pane.locator('[data-wq-list-body] .wq-row');
+
+  await expect(assignedBtn).toHaveAttribute('aria-pressed', 'true');
+  await pane.locator('[data-wq-refresh]').click();
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('Assigned default layout target');
+
+  await allBtn.click();
+  await expect(allBtn).toHaveAttribute('aria-pressed', 'true');
+  await expect(rows).toHaveCount(2);
+});
+
 function seedLargeRoutineWorkqueueItems(queue) {
   const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
   fs.mkdirSync(dir, { recursive: true });
