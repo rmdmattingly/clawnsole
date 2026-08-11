@@ -1784,6 +1784,10 @@ button.send-btn .btn-icon {
   color: var(--muted);
 }
 
+.agents-last-refreshed[data-freshness="stale"] {
+  color: #ffc76e;
+}
+
 .agents-refresh-paused {
   display: inline-flex;
   align-items: center;
@@ -2110,6 +2114,10 @@ button.agents-section-title:hover {
   outline-offset: 2px;
 }
 
+.agents-row[data-freshness="stale"] {
+  border-color: rgba(255, 199, 70, 0.24);
+}
+
 .agents-row-heatmap {
   border-left-width: 4px;
 }
@@ -2256,6 +2264,19 @@ button.agents-section-title:hover {
 
 .agents-age-chip[data-heartbeat-bucket="critical"] {
   border-color: rgba(255, 93, 116, 0.66);
+}
+
+.agents-stale-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid rgba(255, 199, 70, 0.42);
+  border-radius: 999px;
+  color: #ffc76e;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 .agents-age-label {

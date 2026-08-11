@@ -389,6 +389,7 @@ const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
 const ADMIN_AGENT_COLUMNS_KEY = 'clawnsole.admin.agents.columns';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
+const ADMIN_AGENT_STALE_THRESHOLD_MS = 60_000;
 const FLEET_COLUMN_DEFS = [
   { key: 'id', label: 'Agent id', defaultVisible: true },
   { key: 'health', label: 'Health', defaultVisible: true },
@@ -1174,6 +1175,7 @@ let agentAutoRefreshInterval = null;
 let agentsModalAutoRefreshInterval = null;
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
+let agentsLastRefreshFailedAtMs = 0;
 const fleetRefreshLock = {
   lockedAtMs: 0,
   pointerInsideRow: false,
@@ -1294,10 +1296,16 @@ function formatRelativeAge(msAgo) {
 function renderAgentsLastRefreshed() {
   if (!globalElements.agentsLastRefreshed) return;
   if (!agentsLastRefreshedAtMs) {
-    globalElements.agentsLastRefreshed.textContent = 'Last refreshed: never';
+    globalElements.agentsLastRefreshed.textContent = 'Last updated: never';
+    globalElements.agentsLastRefreshed.dataset.freshness = 'unknown';
     return;
   }
-  globalElements.agentsLastRefreshed.textContent = `Last refreshed: ${formatRelativeAge(Date.now() - agentsLastRefreshedAtMs)}`;
+  const ageMs = Date.now() - agentsLastRefreshedAtMs;
+  const isStale = agentsLastRefreshFailedAtMs > agentsLastRefreshedAtMs || ageMs > ADMIN_AGENT_STALE_THRESHOLD_MS;
+  globalElements.agentsLastRefreshed.dataset.freshness = isStale ? 'stale' : 'fresh';
+  globalElements.agentsLastRefreshed.textContent = isStale
+    ? `Stale · ${formatRelativeAge(ageMs)}`
+    : `Last updated: ${formatRelativeAge(ageMs)}`;
 }
 
 function startAgentsModalAutoRefresh() {
@@ -1355,6 +1363,8 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
     }
 
     if (!Array.isArray(next) || next.length === 0) {
+      agentsLastRefreshFailedAtMs = Date.now();
+      renderAgentsLastRefreshed();
       if (prev.length > 0) {
         showToast('Agent refresh failed; showing last-known list.', { kind: 'error', timeoutMs: 3500 });
         return prev;
@@ -1365,6 +1375,7 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
 
     uiState.agents = next;
     agentsLastRefreshedAtMs = Date.now();
+    agentsLastRefreshFailedAtMs = 0;
     renderAgentsLastRefreshed();
 
     // Preserve UI state (selected agent per pane).
@@ -5257,7 +5268,8 @@ function renderAgentsModalList() {
       const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
       const heartbeatTs = Number(lastSeenMap[id]) || 0;
-      const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
+      const heartbeatAgeMs = heartbeatTs > 0 ? Math.max(0, Date.now() - heartbeatTs) : Number.POSITIVE_INFINITY;
+      const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(heartbeatAgeMs) : 'unknown';
       const triage = classify(id);
       const healthLabel = triage.bucket === 'offline_error'
         ? 'Offline/Error'
@@ -5265,10 +5277,13 @@ function renderAgentsModalList() {
           ? 'Stale'
           : 'Healthy';
       const heatBucketLabel = heartbeatAgeBucketLabel(triage.ageBucket);
+      const rowFreshness = heartbeatAgeMs > ADMIN_AGENT_STALE_THRESHOLD_MS ? 'stale' : 'fresh';
+      const freshnessLabel = rowFreshness === 'stale' ? 'stale telemetry' : 'fresh telemetry';
       const statusSnippet = String(statusSnippetMap[id] || '').trim();
       const statusSnippetHtml = visibleColumns.status && statusSnippet
         ? `<span class="agents-status-snippet" data-fleet-column="status">${escapeHtml(statusSnippet)}</span>`
         : '';
+      const staleBadgeHtml = rowFreshness === 'stale' ? '<span class="agents-stale-badge">Stale</span>' : '';
       const model = String(agent?.model || '').trim();
       const host = String(agent?.host || '').trim();
       const modelHtml = visibleColumns.model && model
@@ -5298,6 +5313,8 @@ function renderAgentsModalList() {
         : '';
       row.dataset.heartbeatBucket = triage.ageBucket;
       row.dataset.healthState = triage.bucket;
+      row.dataset.freshness = rowFreshness;
+      row.setAttribute('aria-label', `${label}, ${freshnessLabel}, heartbeat ${heartbeatAge}`);
       row.classList.toggle('agents-row-heatmap', heatmapEnabled);
       row.classList.toggle('agents-row-no-actions', !visibleColumns.actions);
 
@@ -5312,7 +5329,7 @@ function renderAgentsModalList() {
         </div>
         <div class="agents-row-meta">
             ${visibleColumns.heartbeat ? `<span class="agents-age-chip" data-fleet-column="heartbeat" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}" title="Heartbeat age: ${escapeHtml(heartbeatAge)} (${escapeHtml(heatBucketLabel)})">${escapeHtml(heartbeatAge)}</span>` : ''}
-            ${visibleColumns.heartbeatDetail ? `<span class="agents-age-label" data-fleet-column="heartbeatDetail">${escapeHtml(heatBucketLabel)}</span>` : ''}${statusSnippetHtml}${modelHtml}${hostHtml}
+            ${visibleColumns.heartbeatDetail ? `<span class="agents-age-label" data-fleet-column="heartbeatDetail">${escapeHtml(heatBucketLabel)}</span>` : ''}${staleBadgeHtml}${statusSnippetHtml}${modelHtml}${hostHtml}
         </div>
         ${rowActionsHtml}
       `;
@@ -11775,6 +11792,13 @@ globalElements.agentsModal?.addEventListener('keydown', (event) => {
     if (key === 'Enter') {
       event.preventDefault();
       runFleetSelectedAgent(event.shiftKey ? 'workqueue' : 'chat');
+      return;
+    }
+    if (lower === 'r') {
+      event.preventDefault();
+      refreshAgents({ reason: 'fleet_key_refresh', showSuccessToast: true }).catch(() => {
+        showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
+      });
       return;
     }
   }
