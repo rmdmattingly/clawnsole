@@ -4,6 +4,7 @@ const globalElements = {
   deviceId: document.getElementById('deviceId'),
   disconnectBtn: document.getElementById('disconnectBtn'),
   resetLayoutBtn: document.getElementById('resetLayoutBtn'),
+  triageLayoutPresetBtn: document.getElementById('triageLayoutPresetBtn'),
   recurringPromptTarget: document.getElementById('recurringPromptTarget'),
   recurringPromptInterval: document.getElementById('recurringPromptInterval'),
   recurringPromptTimezone: document.getElementById('recurringPromptTimezone'),
@@ -2105,6 +2106,35 @@ function openSettings() {
 function closeSettings({ restoreFocus = true } = {}) {
   closeAdminModal(globalElements.settingsModal, { restoreFocus });
   shortcutOverridesDraft = null;
+}
+
+function applyTriageLayoutPreset() {
+  if (roleState.role !== 'admin') return null;
+
+  const defaultAgent = normalizeAgentId(storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main') || 'main');
+  const panes = () => Array.isArray(paneManager?.panes) ? paneManager.panes : [];
+
+  let chatPane = panes().find((pane) => pane?.role === 'admin' && pane.kind === 'chat') || null;
+  if (!chatPane) chatPane = paneManager.addPane('chat', { agentId: defaultAgent });
+
+  let workqueuePane = panes().find((pane) =>
+    pane?.role === 'admin' &&
+    pane.kind === 'workqueue' &&
+    String(pane.workqueue?.queue || '').trim() === 'dev-team'
+  ) || null;
+  if (!workqueuePane) workqueuePane = paneManager.addPane('workqueue', { queue: 'dev-team' });
+
+  let fleetPane = panes().find((pane) =>
+    pane?.role === 'admin' &&
+    pane.kind === 'timeline' &&
+    String(pane.cronAgentId || '').trim() === 'all'
+  ) || null;
+  if (!fleetPane) fleetPane = openFleetPane();
+
+  if (chatPane) paneManager.focusPanePrimary(chatPane);
+  paneManager.persistAdminPanes();
+  showToast('Triage preset ready: Chat + Workqueue + Fleet.', { kind: 'success', timeoutMs: 1800, testId: 'triage-preset-toast' });
+  return { chatPane, workqueuePane, fleetPane };
 }
 
 const SHORTCUT_OVERRIDE_ACTIONS = [
@@ -4267,6 +4297,22 @@ function buildCommandPaletteItems() {
     ),
     withShortcut(
       {
+        id: 'cmd:triage-layout-preset',
+        label: 'Layout: Triage focus',
+        detail: 'Apply Chat + Workqueue + Fleet panes without duplicating existing panes',
+        paneMeta: [
+          { label: 'Chat', tone: 'type' },
+          { label: 'Workqueue', tone: 'type' },
+          { label: 'Fleet', tone: 'type' },
+          { label: 'reuse existing', tone: 'reuse' }
+        ],
+        searchText: 'triage preset chat workqueue fleet layout',
+        run: () => applyTriageLayoutPreset()
+      },
+      ''
+    ),
+    withShortcut(
+      {
         id: 'cmd:toggle-layout-lock',
         label: 'Layout: Toggle lock',
         detail: paneManager.isLayoutLocked() ? 'Unlock pane reordering' : 'Lock pane reordering',
@@ -4397,9 +4443,9 @@ function buildCommandPaletteItems() {
       }
       return enriched;
     }
-    if (id === 'cmd:reset-layout') {
+    if (id === 'cmd:reset-layout' || id === 'cmd:triage-layout-preset') {
       enriched.group = 'Layout';
-      enriched.priority = 100;
+      enriched.priority = id === 'cmd:triage-layout-preset' ? 105 : 100;
       return enriched;
     }
     if (id === 'cmd:toggle-shortcuts') {
@@ -4875,6 +4921,7 @@ function openFleetPane({ forceNew = false } = {}) {
   pane.cronAgentId = target;
   paneManager.persistAdminPanes();
   paneManager.focusPanePrimary(pane);
+  return pane;
 }
 
 function openAgentWorkqueueFromFleet(agentId) {
@@ -10774,7 +10821,8 @@ const paneManager = {
           return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, nickname, pairedTargetLock };
         }
         if (kind === 'cron' || kind === 'timeline') {
-          return { key, kind, nickname };
+          const cronAgentId = typeof item.cronAgentId === 'string' ? item.cronAgentId.trim() : '';
+          return { key, kind, cronAgentId, nickname };
         }
         const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
         return { key, kind: 'chat', agentId, nickname, pairedTargetLock: !!item.pairedTargetLock };
@@ -10826,7 +10874,7 @@ const paneManager = {
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
-        return { key: pane.key, kind: pane.kind, nickname: paneNickname(pane) };
+        return { key: pane.key, kind: pane.kind, cronAgentId: String(pane.cronAgentId || '').trim(), nickname: paneNickname(pane) };
       }
       return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main', nickname: paneNickname(pane), pairedTargetLock: !!pane.pairedTargetLock };
     });
@@ -12673,6 +12721,11 @@ globalElements.addChatPaneBtn?.addEventListener('click', (event) => {
 globalElements.addQueuePaneBtn?.addEventListener('click', (event) => {
   event?.preventDefault?.();
   paneManager.addPane('workqueue');
+});
+
+globalElements.triageLayoutPresetBtn?.addEventListener('click', (event) => {
+  event?.preventDefault?.();
+  applyTriageLayoutPreset();
 });
 
 // layoutSelect deprecated; layout is inferred from pane count.
