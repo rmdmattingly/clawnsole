@@ -11903,16 +11903,23 @@ function reportBlockedShortcut(reason) {
 }
 
 function isTypingContext(target) {
-  const el = target || document.activeElement;
+  const node = target || document.activeElement;
+  const el = node && node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
   if (!el) return false;
   try {
     if (el.hidden || el.disabled) return false;
     if (el.getClientRects && el.getClientRects().length === 0) return false;
   } catch {}
-  const tag = String(el.tagName || '').toUpperCase();
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
-  if (el.isContentEditable) return true;
-  return false;
+  const editable = el.closest?.(
+    'input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="textbox"], .monaco-editor, .cm-editor, .CodeMirror'
+  ) || null;
+  if (!editable) return false;
+  if (editable.getAttribute?.('contenteditable') === 'false') return false;
+  try {
+    if (editable.hidden || editable.disabled) return false;
+    if (editable.getClientRects && editable.getClientRects().length === 0) return false;
+  } catch {}
+  return true;
 }
 
 function isOverlayElementOpen(el) {
@@ -11951,7 +11958,6 @@ function isTypingShortcutExempt(event) {
   const key = String(event?.key || '').toLowerCase();
   const override = matchingShortcutOverrideAction(event);
   if (override?.typingExempt) return true;
-  if (matchesKeybind(event, 'workqueue.openForActiveChat')) return true;
   return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'p' || key === 'k' || key === 'l');
 }
 
