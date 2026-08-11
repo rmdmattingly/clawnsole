@@ -53,9 +53,89 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await expect(modal).toContainText('Workqueue actions');
   await expect(modal).toContainText('disabled while typing');
   await expect(modal).toContainText('workspace only');
+  await expect(modal.locator('[data-shortcut-status]').first()).toBeVisible();
+  await expect(modal).toContainText('Available');
+  await expect(modal).toContainText('Blocked: modal-open');
+  await expect(modal).toContainText('Blocked: layout-state');
 
   await page.keyboard.press('Escape');
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
+});
+
+test('shortcuts overlay: status panel shows typing-focus block reason', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const input = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+  const modal = page.locator('#shortcutsModal');
+  await input.focus();
+  await input.fill('typing');
+
+  await page.evaluate(() => window.openShortcuts?.());
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await expect(modal).toContainText('Blocked: typing-focus');
+
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+});
+
+test('shortcuts overlay stays in sync with registered shortcut catalog', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  const modal = page.locator('#shortcutsModal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  const result = await page.evaluate(() => {
+    const catalog = window.__clawnsoleShortcutCatalog?.() || [];
+    const rows = Array.from(document.querySelectorAll('#shortcutsModal [data-shortcut-id]'));
+    const renderedIds = rows.map((row) => row.getAttribute('data-shortcut-id')).filter(Boolean);
+    const renderedIdSet = new Set(renderedIds);
+    const renderedTextById = new Map(rows.map((row) => [
+      row.getAttribute('data-shortcut-id'),
+      String(row.textContent || '').replace(/\s+/g, ' ').trim()
+    ]));
+    const missing = catalog
+      .filter((entry) => !renderedIdSet.has(entry.id) || !renderedTextById.get(entry.id)?.includes(entry.label))
+      .map((entry) => entry.id);
+    const duplicateIds = renderedIds.filter((id, idx) => renderedIds.indexOf(id) !== idx);
+    const globalShortcuts = catalog.filter((entry) => entry.global);
+    const duplicateGlobalDisplays = globalShortcuts
+      .filter((entry, idx) => entry.display && globalShortcuts.findIndex((candidate) => candidate.display === entry.display) !== idx)
+      .map((entry) => `${entry.id}:${entry.display}`);
+    return {
+      catalogCount: catalog.length,
+      rowCount: renderedIds.length,
+      missing,
+      duplicateIds,
+      duplicateGlobalDisplays
+    };
+  });
+
+  expect(result.catalogCount).toBeGreaterThan(0);
+  expect(result.rowCount).toBe(result.catalogCount);
+  expect(result.missing).toEqual([]);
+  expect(result.duplicateIds).toEqual([]);
+  expect(result.duplicateGlobalDisplays).toEqual([]);
+  await expect(modal).toContainText('Fleet actions');
+  await expect(modal).toContainText('Open/focus Fleet pane');
+  await expect(modal).toContainText('Open Fleet sorted by heartbeat age');
 });
 
 test('pane-add shortcuts are scoped to workspace and blocked by overlays', async ({ page }) => {
@@ -81,6 +161,7 @@ test('pane-add shortcuts are scoped to workspace and blocked by overlays', async
     }));
   });
 
+  await expect(panes).toHaveCount(2);
   const initialCount = await paneCount();
   await page.click('#connectionStatus');
 
@@ -139,6 +220,72 @@ test('shortcuts modal restores prior focus on close', async ({ page }) => {
   await page.keyboard.press('Escape');
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
   await expect(openBtn).toBeFocused();
+});
+
+test('labeled header controls setting persists and respects narrow viewport fallback', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+  await page.setViewportSize({ width: 1280, height: 800 });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const settingsLabel = page.locator('#settingsBtn .btn-label');
+  const shortcutsLabel = page.locator('#shortcutsBtn .btn-label');
+  await expect(settingsLabel).toBeVisible();
+  await expect(shortcutsLabel).toBeVisible();
+  await expect(page.locator('#settingsBtn')).toHaveAttribute('aria-label', 'Open settings');
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.locator('#headerLabeledControlsEnabled').uncheck();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('body')).toHaveClass(/header-labels-off/);
+  await expect(settingsLabel).toBeHidden();
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await expect(page.locator('body')).toHaveClass(/header-labels-off/);
+  await expect(settingsLabel).toBeHidden();
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.locator('#headerLabeledControlsEnabled').check();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('body')).not.toHaveClass(/header-labels-off/);
+  await expect(settingsLabel).toBeVisible();
+
+  await page.setViewportSize({ width: 760, height: 800 });
+  await expect(settingsLabel).toBeHidden();
+  await expect(page.locator('#settingsBtn')).toHaveAttribute('aria-label', 'Open settings');
+});
+
+test('keyboard settings flags risky shortcuts and updates cheatsheet after applying replacement', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const conflictList = page.getByTestId('keybind-conflict-list');
+  await expect(conflictList).toContainText('Focus Chat composer');
+  await expect(conflictList).toContainText('Reserved by browser location bar');
+  await conflictList.getByRole('button', { name: 'Use Cmd/Ctrl+Shift+M' }).click();
+  await expect(conflictList).toContainText('Using app-safe replacement');
+
+  await page.keyboard.press('Escape');
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  const modal = page.locator('#shortcutsModal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await expect(modal.locator('[data-shortcut-id="chat.composer"]')).toContainText('Cmd/Ctrl+Shift+M');
 });
 
 test('cmd/ctrl+shift+j focuses previous pane with wraparound from unfocused state', async ({ page }) => {
@@ -259,6 +406,28 @@ test('alt+1..3 and cmd/ctrl+1..3 focus panes by visible order; shortcuts do not 
   await page.getByTestId('pane-add-menu-cron').click();
   await expect(page.locator('[data-pane]')).toHaveCount(3);
 
+  const badges = page.getByTestId('pane-index-badge');
+  const hiddenBadgeCount = async () => badges.evaluateAll((els) => els.filter((el) => el.hidden).length);
+  await expect(badges).toHaveCount(3);
+  await expect.poll(hiddenBadgeCount).toBe(3);
+
+  const firstLabelXBefore = await page.getByTestId('pane-name-token').first().evaluate((el) => el.getBoundingClientRect().x);
+  await page.keyboard.down('Alt');
+  await expect(badges).toHaveText(['1', '2', '3']);
+  await expect(badges.first()).toBeVisible();
+  const firstLabelXDuring = await page.getByTestId('pane-name-token').first().evaluate((el) => el.getBoundingClientRect().x);
+  expect(firstLabelXDuring).toBe(firstLabelXBefore);
+  await page.keyboard.up('Alt');
+  await expect.poll(hiddenBadgeCount).toBe(3);
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'false');
+  await expect(badges.first()).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'true');
+  await expect.poll(hiddenBadgeCount).toBe(3);
+
   const activePaneIndex = async () => page.evaluate(() => {
     const panes = Array.from(document.querySelectorAll('[data-pane]'));
     const active = document.activeElement;
@@ -286,6 +455,83 @@ test('alt+1..3 and cmd/ctrl+1..3 focus panes by visible order; shortcuts do not 
 
   await page.keyboard.press('Control+3');
   await expect.poll(activePaneIndex).toBe(0);
+});
+
+test('g then pane letter focuses matching pane and exits cleanly on misses', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('g');
+  await page.keyboard.press('b');
+  await expect.poll(activePaneIndex).toBe(1);
+
+  await page.keyboard.press('g');
+  await page.keyboard.press('z');
+  await expect.poll(activePaneIndex).toBe(1);
+
+  await page.keyboard.press('b');
+  await expect.poll(activePaneIndex).toBe(1);
+});
+
+test('g then pane letter is suppressed while typing and while modals are active', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]')).filter((pane) => pane.getClientRects().length > 0);
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  const firstPaneInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
+  await page.evaluate(() => focusPaneIndex(0));
+  await firstPaneInput.focus();
+  await expect(firstPaneInput).toBeFocused();
+  await expect.poll(activePaneIndex).toBe(0);
+  await page.keyboard.press('g');
+  await page.keyboard.press('b');
+  await expect(firstPaneInput).toHaveValue('gb');
+  await expect.poll(activePaneIndex).toBe(0);
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'false');
+  await page.keyboard.press('g');
+  await page.keyboard.press('b');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'true');
+  await expect.poll(activePaneIndex).not.toBe(1);
 });
 
 test('pane-switch HUD appears for keyboard pane navigation and respects settings', async ({ page }) => {

@@ -7,7 +7,55 @@ test('visiting /admin without auth shows login overlay', async ({ page, clawnsol
 
   await page.goto(clawnsole.adminUrl);
   await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
-  await expect(page.getByTestId('role-pill')).toContainText('signed out');
+  await expect(page.getByTestId('role-pill')).toContainText('Signed out');
+  await expect(page.getByTestId('role-pill')).toHaveAttribute('data-auth-state', 'signed_out');
+  await expect(page.getByTestId('connection-status')).toBeHidden();
+  await expect(page.getByTestId('panes-indicator')).toBeHidden();
+  await expect(page.locator('#logoutBtn')).toContainText('Unlock');
+  await expect(page.locator('#logoutBtn')).toBeEnabled();
+});
+
+test('signed-in auth chip shows session details and actions', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  const chip = page.getByTestId('role-pill');
+  await expect(chip).toContainText('Signed in');
+  await expect(chip).toContainText('Admin');
+  await expect(chip).toHaveAttribute('data-auth-state', 'signed_in');
+  await expect(chip).toHaveAttribute('title', /signed in as Admin in local/i);
+
+  await chip.click();
+  const popover = page.getByTestId('auth-session-popover');
+  await expect(popover).toBeVisible();
+  await expect(popover).toContainText('Signed in');
+  await expect(popover).toContainText('Admin');
+  await expect(popover).toContainText('local');
+  await expect(popover.getByRole('button', { name: 'Settings' })).toBeVisible();
+  await expect(popover.getByRole('button', { name: 'Logout' })).toBeVisible();
+});
+
+test('shortcuts help stays accessible while admin is locked', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.goto(clawnsole.adminUrl);
+  await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
+
+  await expect(page.getByTestId('shortcuts-btn')).toBeVisible();
+  await expect(page.getByTestId('shortcuts-btn')).toBeEnabled();
+  await page.getByTestId('shortcuts-btn').click();
+  await expect(page.getByTestId('shortcuts-modal')).toHaveClass(/open/);
+  await expect(page.getByTestId('shortcuts-modal')).toContainText('Available now');
+  await expect(page.getByTestId('shortcuts-modal')).toContainText('Unlock after entering the admin password');
+  await expect(page.getByTestId('shortcuts-modal')).toContainText('Available after unlock');
+
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('shortcuts-modal')).not.toHaveClass(/open/);
+
+  await page.keyboard.down('Shift');
+  await page.keyboard.press('Slash');
+  await page.keyboard.up('Shift');
+  await expect(page.getByTestId('shortcuts-modal')).toHaveClass(/open/);
 });
 
 test('admin login restores the intended in-app destination', async ({ page, clawnsole }) => {

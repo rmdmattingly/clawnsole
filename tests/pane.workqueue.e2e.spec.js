@@ -86,15 +86,17 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   expect(Math.abs(toolbarTop - threadTop)).toBeLessThan(20);
   expect(Math.abs(layoutBottom - threadBottom)).toBeLessThan(20);
 
+  const list = wqPane.locator('.wq-pane .wq-list').first();
   const listBody = wqPane.locator('.wq-pane [data-wq-list-body]').first();
   // List body exists even when empty; after refresh it should be scrollable.
+  await expect(list).toBeVisible();
   await expect(listBody).toHaveCount(1);
 
   const itemsResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
   await wqPane.locator('[data-wq-refresh]').click();
   await itemsResP;
 
-  const listOverflowY = await listBody.evaluate((el) => getComputedStyle(el).overflowY);
+  const listOverflowY = await list.evaluate((el) => getComputedStyle(el).overflowY);
   expect(listOverflowY).toBe('auto');
 
   // Workqueue pane should not show chat composer controls.
@@ -212,4 +214,18 @@ test('pane: workqueue scope filter toggles deterministic row counts', async ({ p
 
   await wqPane.locator('[data-wq-scope="assigned"]').click();
   await expect(rowsWithPrefix()).toHaveCount(0);
+
+  const statusLine = wqPane.locator('[data-wq-statusline]');
+  await expect(statusLine).toContainText(/Showing 0 of \d+ items/);
+  await expect(wqPane.locator('[data-wq-empty]')).toContainText('No items match current filters.');
+
+  await wqPane.locator('[data-wq-scope="all"]').click();
+  await wqPane.locator('[data-wq-search]').fill(mkTitle('unassigned'));
+  await expect(rowsWithPrefix()).toHaveCount(1);
+  await expect(statusLine).toContainText(/Showing 1 of \d+ items .*hidden:.*search \d+/);
+
+  await wqPane.locator('[data-wq-search]').fill(`missing-${runId}`);
+  await expect(rowsWithPrefix()).toHaveCount(0);
+  await expect(statusLine).toContainText(/Showing 0 of \d+ items .*hidden:.*search \d+/);
+  await expect(wqPane.locator('[data-wq-empty]')).toContainText('No items match current filters.');
 });
