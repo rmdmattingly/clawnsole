@@ -534,6 +534,74 @@ test('g then pane letter is suppressed while typing and while modals are active'
   await expect.poll(activePaneIndex).not.toBe(1);
 });
 
+test('global pane shortcuts are blocked from editable and modal text surfaces', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]')).filter((pane) => pane.getClientRects().length > 0);
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  await page.evaluate(() => focusPaneIndex(0));
+  const composer = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+  await composer.focus();
+  await page.keyboard.press('Control+Shift+K');
+  await expect.poll(activePaneIndex).toBe(0);
+  await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Shortcut paused while typing');
+
+  const workqueueSearch = page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-search]').first();
+  await workqueueSearch.focus();
+  await page.keyboard.press('Control+Shift+K');
+  await expect.poll(activePaneIndex).toBe(1);
+
+  await page.evaluate(() => {
+    const host = document.querySelector('[data-pane][data-pane-kind="chat"]');
+    const editor = document.createElement('div');
+    editor.className = 'monaco-editor';
+    editor.tabIndex = 0;
+    editor.textContent = 'editor';
+    host.appendChild(editor);
+    editor.focus();
+  });
+  await expect.poll(activePaneIndex).toBe(0);
+  await page.keyboard.press('Control+Shift+K');
+  await expect.poll(activePaneIndex).toBe(0);
+
+  await page.evaluate(() => {
+    const host = document.querySelector('[data-pane][data-pane-kind="chat"]');
+    const editable = document.createElement('div');
+    editable.contentEditable = 'true';
+    editable.tabIndex = 0;
+    editable.textContent = 'draft';
+    host.appendChild(editable);
+    editable.focus();
+  });
+  await page.keyboard.press('Control+Shift+K');
+  await expect.poll(activePaneIndex).toBe(0);
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Control+P');
+  await expect(page.getByTestId('pane-manager-modal')).toHaveAttribute('aria-hidden', 'false');
+  await page.locator('#paneManagerSearch').focus();
+  await page.keyboard.press('Control+Shift+K');
+  await expect(page.getByTestId('pane-manager-modal')).toHaveAttribute('aria-hidden', 'false');
+  await expect.poll(activePaneIndex).not.toBe(1);
+});
+
 test('pane-switch HUD appears for keyboard pane navigation and respects settings', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
