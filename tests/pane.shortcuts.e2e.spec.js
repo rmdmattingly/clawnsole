@@ -734,6 +734,12 @@ test('ctrl/cmd+shift+g opens or focuses workqueue for active chat agent', async 
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(0);
 
   await chatInput.focus();
+  await chatInput.fill('typing');
+  await page.keyboard.press('ControlOrMeta+Shift+G');
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(0);
+  await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Shortcut paused while typing');
+
+  await page.click('#connectionStatus');
   await page.keyboard.press('ControlOrMeta+Shift+G');
 
   const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]');
@@ -745,6 +751,54 @@ test('ctrl/cmd+shift+g opens or focuses workqueue for active chat agent', async 
   await page.keyboard.press('ControlOrMeta+Shift+G');
   await expect(wqPane).toHaveCount(1);
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
+});
+
+test('pane-navigation shortcuts are blocked in search and modal text fields', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  await expect(panes).toHaveCount(2);
+  await page.click('#connectionStatus');
+  await page.keyboard.press('ControlOrMeta+P');
+
+  const manager = page.locator('#paneManagerModal');
+  const search = page.getByTestId('pane-manager-search');
+  await expect(manager).toHaveAttribute('aria-hidden', 'false');
+  await search.fill('workqueue');
+  await expect(search).toBeFocused();
+  await page.keyboard.press('ControlOrMeta+Shift+K');
+  await expect(search).toBeFocused();
+  await expect(manager).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Close modal to use this shortcut');
+  await page.evaluate(() => closePaneManager());
+  await expect(manager).toHaveAttribute('aria-hidden', 'true');
+
+  await page.evaluate(() => focusPaneIndex(0));
+  await expect.poll(activePaneIndex).toBe(0);
+  await page.evaluate(() => openWorkqueue());
+  const workqueueModal = page.locator('#workqueueModal');
+  const title = page.locator('#wqEnqueueTitle');
+  await expect(workqueueModal).toHaveAttribute('aria-hidden', 'false');
+  await title.focus();
+  await title.fill('blocked modal shortcut');
+  await page.keyboard.press('ControlOrMeta+Shift+F');
+  await expect(title).toBeFocused();
+  await expect(panes).toHaveCount(2);
 });
 
 test('fleet quick action button + keyboard shortcut focus existing timeline pane without duplicates', async ({ page }) => {
@@ -769,6 +823,12 @@ test('fleet quick action button + keyboard shortcut focus existing timeline pane
   await expect(panes).toHaveCount(3);
   await expect(timelinePanes).toHaveCount(1);
 
+  await page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first().focus();
+  await page.keyboard.press('Control+Shift+F');
+  await expect(panes).toHaveCount(3);
+  await expect(timelinePanes).toHaveCount(1);
+
+  await page.click('#connectionStatus');
   await page.keyboard.press('Control+Shift+F');
   await expect(panes).toHaveCount(3);
   await expect(timelinePanes).toHaveCount(1);
