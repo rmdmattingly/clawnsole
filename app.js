@@ -20,6 +20,8 @@ const globalElements = {
   recurringPromptHistoryEmpty: document.getElementById('recurringPromptHistoryEmpty'),
   status: document.getElementById('connectionStatus'),
   paneManagerBtn: document.getElementById('paneManagerBtn'),
+  activePaneChip: document.getElementById('activePaneChip'),
+  activePaneChipValue: document.querySelector('[data-active-pane-chip-value]'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
   fleetBtn: document.getElementById('fleetBtn'),
@@ -43,6 +45,7 @@ const globalElements = {
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
+  agentsSelectionBar: document.getElementById('agentsSelectionBar'),
   toastHost: document.getElementById('toastHost'),
   commandPaletteModal: document.getElementById('commandPaletteModal'),
   commandPaletteCloseBtn: document.getElementById('commandPaletteCloseBtn'),
@@ -53,6 +56,13 @@ const globalElements = {
   shortcutsDialog: document.getElementById('shortcutsDialog'),
   shortcutsContent: document.getElementById('shortcutsContent'),
   shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
+  shortcutsUnlockedCopy: document.querySelector('[data-shortcuts-unlocked-copy]'),
+  shortcutsLockedCopy: document.querySelector('[data-shortcuts-locked-copy]'),
+  shortcutsGlobalUnlockedTitle: document.querySelector('[data-shortcuts-global-unlocked]'),
+  shortcutsGlobalLockedTitle: document.querySelector('[data-shortcuts-global-locked]'),
+  shortcutsLockedRow: document.querySelector('[data-shortcuts-locked-row]'),
+  shortcutsLockedLabels: Array.from(document.querySelectorAll('[data-shortcuts-locked-label]')),
+  shortcutsAdminGroups: Array.from(document.querySelectorAll('[data-shortcuts-admin-group]')),
   paneManagerModal: document.getElementById('paneManagerModal'),
   paneManagerCloseBtn: document.getElementById('paneManagerCloseBtn'),
   paneManagerSearch: document.getElementById('paneManagerSearch'),
@@ -82,6 +92,7 @@ const globalElements = {
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   paneSwitchHudEnabled: document.getElementById('paneSwitchHudEnabled'),
+  headerLabeledControlsEnabled: document.getElementById('headerLabeledControlsEnabled'),
   keybindConflictList: document.getElementById('keybindConflictList'),
   shortcutOverridesList: document.getElementById('shortcutOverridesList'),
   shortcutOverridesSave: document.getElementById('shortcutOverridesSave'),
@@ -103,6 +114,93 @@ const globalElements = {
   paneGrid: document.getElementById('paneGrid'),
   paneTemplate: document.getElementById('paneTemplate')
 };
+
+const ADMIN_MODAL_KEYS = [
+  'settingsModal',
+  'shortcutsModal',
+  'commandPaletteModal',
+  'paneManagerModal',
+  'workqueueModal',
+  'agentsModal'
+];
+
+const adminModalFocusReturn = new WeakMap();
+
+function getAdminModalElements() {
+  return ADMIN_MODAL_KEYS.map((key) => globalElements[key]).filter(Boolean);
+}
+
+function isAdminModalOpen(modal) {
+  return !!modal?.classList?.contains('open') || modal?.getAttribute?.('aria-hidden') === 'false';
+}
+
+function setAdminModalInactive(modal) {
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+  modal.setAttribute('inert', '');
+}
+
+function setAdminModalActive(modal) {
+  if (!modal) return;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  modal.removeAttribute('inert');
+}
+
+function closeOpenAdminModalsExcept(exceptModal) {
+  const entries = [
+    { modal: globalElements.settingsModal, close: () => closeSettings({ restoreFocus: false }) },
+    { modal: globalElements.shortcutsModal, close: () => closeShortcuts({ restoreFocus: false }) },
+    { modal: globalElements.commandPaletteModal, close: () => closeCommandPalette({ restoreFocus: false }) },
+    { modal: globalElements.paneManagerModal, close: () => closePaneManager({ restoreFocus: false }) },
+    { modal: globalElements.workqueueModal, close: () => closeWorkqueue({ restoreFocus: false }) },
+    { modal: globalElements.agentsModal, close: () => closeAgentsModal({ restoreFocus: false }) }
+  ];
+
+  entries.forEach(({ modal, close }) => {
+    if (!modal || modal === exceptModal || !isAdminModalOpen(modal)) return;
+    close();
+  });
+}
+
+function openAdminModal(modal, { focusReturn = document.activeElement } = {}) {
+  if (!modal) return false;
+  closeOpenAdminModalsExcept(modal);
+  if (focusReturn instanceof HTMLElement && !modal.contains(focusReturn)) {
+    adminModalFocusReturn.set(modal, focusReturn);
+  }
+  setAdminModalActive(modal);
+  return true;
+}
+
+function closeAdminModal(modal, { restoreFocus = true, fallbackFocus = null } = {}) {
+  if (!modal || !isAdminModalOpen(modal)) return false;
+  setAdminModalInactive(modal);
+  if (restoreFocus) {
+    const previous = adminModalFocusReturn.get(modal);
+    adminModalFocusReturn.delete(modal);
+    const target = previous && document.contains(previous) ? previous : fallbackFocus;
+    try { target?.focus?.(); } catch {}
+  } else {
+    adminModalFocusReturn.delete(modal);
+  }
+  return true;
+}
+
+function syncAdminModalInertStates() {
+  let activeFound = false;
+  getAdminModalElements().forEach((modal) => {
+    if (!activeFound && isAdminModalOpen(modal)) {
+      setAdminModalActive(modal);
+      activeFound = true;
+    } else {
+      setAdminModalInactive(modal);
+    }
+  });
+}
+
+syncAdminModalInertStates();
 
 // Pure helpers live in lib/app-core.js so we can unit-test them under Node.
 const __appCore = (typeof window !== 'undefined' && window.AppCore) ? window.AppCore : {};
@@ -131,6 +229,7 @@ const fmtRemaining = __appCore.fmtRemaining || ((msUntil) => {
   return `${sec}s`;
 });
 const formatWorkqueueIssueTitle = __appCore.formatWorkqueueIssueTitle || ((item) => String(item?.title || ''));
+const summarizeWorkqueueIssueDuplicateDensity = __appCore.summarizeWorkqueueIssueDuplicateDensity || (() => ({ density: 0, duplicateRows: 0, duplicateGroups: 0, totalRows: 0 }));
 const summarizeExactWorkqueueDuplicateRows = __appCore.summarizeExactWorkqueueDuplicateRows || ((items) => (Array.isArray(items) ? items : []).map((item) => ({ kind: 'item', item })));
 const sortWorkqueueItems = __appCore.sortWorkqueueItems || ((items, opts) => (Array.isArray(items) ? items.slice() : []));
 const inferPaneCols = __appCore.inferPaneCols || ((count) => {
@@ -186,7 +285,7 @@ const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => (
   authState: !!state?.authed ? 'signed_in' : (String(state?.role || '') === 'admin' ? 'locked' : 'signed_out'),
   startAgentAutoRefresh: String(state?.role || '') === 'admin' && !!state?.authed,
   stopAgentAutoRefresh: String(state?.role || '') !== 'admin' || !state?.authed,
-  rolePillText: !!state?.authed ? `Signed in - ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} - ${state?.environment || 'local'}` : 'Signed out',
+  rolePillText: !!state?.authed ? `Signed in - ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} - ${state?.environment || 'local'}` : (String(state?.role || '') === 'admin' ? 'Locked' : 'Signed out'),
   rolePillAdmin: String(state?.role || '') === 'admin' && !!state?.authed,
   rolePillLocked: !state?.authed && String(state?.role || '') === 'admin',
   rolePillSignedOut: !state?.authed && String(state?.role || '') !== 'admin',
@@ -194,30 +293,38 @@ const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => (
   rolePillTooltip: !!state?.authed
     ? `Session context: signed in as ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} in ${state?.environment || 'local'}. Click for session details.`
     : `Session context: signed out in ${state?.environment || 'local'}. Click to unlock this session.`,
-  authLabel: !!state?.authed ? 'Signed in' : 'Signed out',
+  authLabel: !!state?.authed ? 'Signed in' : (String(state?.role || '') === 'admin' ? 'Locked' : 'Signed out'),
   principalLabel: !!state?.authed ? (String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')) : 'Not signed in',
   environmentLabel: state?.environment || 'local',
-  showAdminControls: String(state?.role || '') === 'admin',
-  logoutEnabled: !!state?.authed,
-  logoutOpacity: !!state?.authed ? '1' : '0.5'
+  showAdminControls: String(state?.role || '') === 'admin' && !!state?.authed,
+  authActionText: !!state?.authed ? 'Logout' : 'Unlock',
+  authActionLabel: !!state?.authed ? 'Log out' : 'Unlock admin',
+  logoutEnabled: true,
+  logoutOpacity: '1'
 }));
+const paneNeedsAttention = __appCore.paneNeedsAttention || ((pane) => {
+  if (!pane) return false;
+  const status = String(pane.statusState || '').trim();
+  return !pane.connected || status === 'error' || status === 'reconnecting' || Number(pane.unreadCount || 0) > 0;
+});
 const deriveGlobalConnectionState = __appCore.deriveGlobalConnectionState || ((state) => {
   if (!state?.authed) return { state: 'disconnected', meta: 'sign in required' };
   const panes = Array.isArray(state?.panes) ? state.panes : [];
   if (panes.length === 0) return { state: 'disconnected', meta: '' };
   const connectedCount = panes.filter((pane) => !!pane?.connected).length;
   const total = panes.length;
+  const disconnectedCount = Math.max(0, total - connectedCount);
+  const unreadCount = panes.reduce((sum, pane) => sum + Math.max(0, Number(pane?.unreadCount || 0)), 0);
+  const attentionCount = panes.filter((pane) => paneNeedsAttention(pane)).length;
   const anyConnecting = panes.some((pane) => pane?.statusState === 'connecting' || pane?.statusState === 'reconnecting');
   const anyError = panes.some((pane) => pane?.statusState === 'error');
-  const firstError = panes.find((pane) => pane?.statusState === 'error' && pane?.statusMeta);
   let nextState = 'disconnected';
   if (connectedCount === total) nextState = 'connected';
   else if (connectedCount > 0 || anyConnecting) nextState = 'reconnecting';
   else if (anyError) nextState = 'error';
-  const meta = connectedCount === 0 && anyError && firstError
-    ? String(firstError.statusMeta || '')
-    : `panes: ${connectedCount}/${total} connected`;
-  return { state: nextState, meta };
+  const meta = `${connectedCount} connected · ${disconnectedCount} disconnected · ${attentionCount} attention`;
+  const ariaLabel = `${connectedCount} of ${total} panes connected; ${disconnectedCount} disconnected; ${unreadCount} unread ${unreadCount === 1 ? 'item' : 'items'}; ${attentionCount} ${attentionCount === 1 ? 'pane needs' : 'panes need'} attention`;
+  return { state: nextState, meta, connectedCount, disconnectedCount, unreadCount, attentionCount, total, ariaLabel };
 });
 const deriveDisconnectButtonState = __appCore.deriveDisconnectButtonState || ((state) => {
   if (!state?.authed) return { disabled: true, text: 'Reconnect' };
@@ -295,6 +402,7 @@ const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
 const PANE_SWITCH_HUD_ENABLED_KEY = 'clawnsole.admin.paneSwitchHud.enabled';
+const HEADER_LABELED_CONTROLS_ENABLED_KEY = 'clawnsole.header.labeledControls';
 const KEYBIND_OVERRIDES_KEY = 'clawnsole.admin.keybindOverrides.v1';
 const SHORTCUT_OVERRIDES_KEY = 'clawnsole.admin.shortcutOverrides.v1';
 const ADMIN_AUTH_DESTINATION_TTL_MS = 10 * 60 * 1000;
@@ -347,7 +455,8 @@ const KEYBIND_CATALOG = [
   { id: 'pane.addChat', group: 'Pane actions', label: 'Add Chat pane (workspace only)', binding: { accel: true, shift: true, key: 'c', display: 'Cmd/Ctrl+Shift+C' } },
   { id: 'pane.addWorkqueue', group: 'Pane actions', label: 'Add Workqueue pane (workspace only)', binding: { accel: true, shift: true, key: 'w', display: 'Cmd/Ctrl+Shift+W' } },
   { id: 'pane.addCron', group: 'Pane actions', label: 'Add Cron pane (workspace only)', binding: { accel: true, shift: true, key: 'r', display: 'Cmd/Ctrl+Shift+R' } },
-  { id: 'pane.addTimeline', group: 'Pane actions', label: 'Add Timeline pane (workspace only)', binding: { accel: true, shift: true, key: 't', display: 'Cmd/Ctrl+Shift+T' } },
+  { id: 'pane.reopenClosed', group: 'Pane actions', label: 'Reopen last closed pane', binding: { accel: true, shift: true, key: 't', display: 'Cmd/Ctrl+Shift+T' } },
+  { id: 'pane.addTimeline', group: 'Pane actions', label: 'Add Timeline pane (workspace only)', binding: { accel: true, shift: true, key: 'y', display: 'Cmd/Ctrl+Shift+Y' } },
   {
     id: 'agents.refresh',
     group: 'Pane actions',
@@ -443,9 +552,20 @@ function renderShortcutKeys(display) {
     .join('');
 }
 
+function shortcutStatusRule(entry) {
+  const id = String(entry?.id || '');
+  if (id === 'global.escape') return 'always';
+  if (id === 'pane.next' || id === 'pane.prev' || id === 'pane.mruNext' || id === 'pane.mruPrev') return 'multi-pane';
+  if (id === 'chat.next' || id === 'chat.prev') return 'multi-chat-pane';
+  if (id === 'pane.unreadNext' || id === 'pane.unreadPrev') return 'unread-pane';
+  if (id === 'pane.manager' || id === 'chat.composer' || id === 'command.palette') return 'modal-only';
+  return 'typing-modal';
+}
+
 function renderShortcutsContent() {
   const root = globalElements.shortcutsContent;
   if (!root) return;
+  const locked = isAdminLocked();
   const groups = [];
   for (const entry of KEYBIND_CATALOG) {
     let group = groups.find((g) => g.name === entry.group);
@@ -455,20 +575,25 @@ function renderShortcutsContent() {
     }
     group.entries.push(entry);
   }
-  const hint = `
+  const hint = locked ? `
+    <div class="hint" style="margin-bottom: 10px;">
+      Admin is locked. These shortcuts are limited to sign-in and help until you unlock.
+    </div>
+  ` : `
     <div class="hint" style="margin-bottom: 10px;">
       Most shortcuts are disabled while typing in inputs, textareas, selects, or contenteditable fields. Global keys like <kbd>Esc</kbd>, <kbd>${escapeHtml(shortcutDisplay('pane.manager'))}</kbd>, and <kbd>${escapeHtml(shortcutDisplay('command.palette'))}</kbd> still work.
     </div>
   `;
   const html = groups.map((group) => `
-    <div class="shortcut-group">
-      <h3 class="shortcut-group-title">${escapeHtml(group.name)}</h3>
+    <div class="shortcut-group${locked && group.name !== 'Global' ? ' shortcut-group-locked' : ''}">
+      <h3 class="shortcut-group-title">${locked && group.name === 'Global' ? 'Available now' : escapeHtml(group.name)}${locked && group.name !== 'Global' ? ' <span class="shortcut-locked-label">Available after unlock</span>' : ''}</h3>
       ${group.entries.map((entry) => `
-        <div class="shortcut-row" data-shortcut-id="${escapeHtml(entry.id)}">
+        <div class="shortcut-row${locked && group.name !== 'Global' ? ' shortcut-row-locked' : ''}" data-shortcut-id="${escapeHtml(entry.id)}" data-shortcut-rule="${escapeHtml(shortcutStatusRule(entry))}">
           <div class="shortcut-keys"${keybindIdToShortcutActionId(entry.id) ? ` data-shortcut-help="${escapeHtml(keybindIdToShortcutActionId(entry.id))}"` : ''}>${renderShortcutKeys(shortcutDisplay(entry.id))}</div>
           <div class="shortcut-desc">${escapeHtml(entry.label)}${isKeybindCustomized(entry.id) ? ' <span class="shortcut-custom">custom</span>' : ''}</div>
         </div>
       `).join('')}
+      ${locked && group.name === 'Global' ? '<div class="shortcut-row"><div class="shortcut-keys"><kbd>Enter</kbd></div><div class="shortcut-desc">Unlock after entering the admin password</div></div>' : ''}
     </div>
   `).join('');
   root.innerHTML = hint + html;
@@ -569,6 +694,7 @@ function isGlobalKeybindEntry(entry) {
 }
 const WQ_RECENT_ENQUEUE_AGENTS_KEY = 'clawnsole.wq.recentEnqueueAgents';
 const WQ_RECENT_TARGETS_MAX = 6;
+const ADMIN_ACTIVE_PANE_KEY = 'clawnsole.admin.activePaneKey';
 
 function readJsonFromStorage(key, fallback) {
   try {
@@ -596,6 +722,16 @@ function getActiveAdminPaneKey() {
   } catch {
     return '';
   }
+}
+
+function rememberedActivePaneKey() {
+  return String(storage.get(ADMIN_ACTIVE_PANE_KEY, '') || '');
+}
+
+function rememberActivePaneKey(key) {
+  const next = String(key || '');
+  if (!next) return;
+  storage.set(ADMIN_ACTIVE_PANE_KEY, next);
 }
 
 function readStoredAdminDestination(key = ADMIN_AUTH_DESTINATION_KEY) {
@@ -892,11 +1028,32 @@ const uiState = {
 let toastSeq = 0;
 function showToast(
   message,
-  { kind = 'info', timeoutMs = 2600, actionLabel = '', onAction = null, secondaryActionLabel = '', onSecondaryAction = null, testId = 'toast' } = {}
+  {
+    kind = 'info',
+    timeoutMs = 2600,
+    actionLabel = '',
+    onAction = null,
+    secondaryActionLabel = '',
+    onSecondaryAction = null,
+    testId = 'toast',
+    role = '',
+    ariaLabel = '',
+    autoFocusAction = false
+  } = {}
 ) {
   if (!globalElements.toastHost) return;
   const text = typeof message === 'string' ? message.trim() : String(message || '').trim();
   if (!text) return;
+
+  const existing = Array.from(globalElements.toastHost.querySelectorAll('[data-testid]')).find((node) => {
+    return (
+      node instanceof HTMLElement &&
+      node.classList.contains('open') &&
+      node.dataset.toastKind === kind &&
+      node.querySelector('.toast-message')?.textContent === text
+    );
+  });
+  if (existing) return existing;
 
   const el = document.createElement('div');
   el.className = `toast ${kind === 'error' ? 'toast-error' : 'toast-info'}`;
@@ -904,6 +1061,8 @@ function showToast(
   el.dataset.toastId = String(id);
   el.setAttribute('data-testid', testId || 'toast');
   el.dataset.toastKind = kind;
+  if (role) el.setAttribute('role', String(role));
+  if (ariaLabel) el.setAttribute('aria-label', String(ariaLabel));
 
   const messageEl = document.createElement('span');
   messageEl.className = 'toast-message';
@@ -950,6 +1109,38 @@ function showToast(
   };
 
   const timer = setTimeout(remove, Math.max(800, Number(timeoutMs) || 2600));
+  const actionButtons = [actionBtn, secondaryActionBtn].filter(Boolean);
+  if (actionButtons.length) {
+    el.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        clearTimeout(timer);
+        try {
+          if (hasSecondaryAction) onSecondaryAction?.();
+        } catch {}
+        remove();
+        return;
+      }
+      if (event.key !== 'Tab' || actionButtons.length < 2) return;
+      const first = actionButtons[0];
+      const last = actionButtons[actionButtons.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+  }
+  if (autoFocusAction && actionBtn) {
+    setTimeout(() => {
+      try {
+        actionBtn.focus();
+      } catch {}
+    }, 0);
+  }
   actionBtn?.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1668,9 +1859,10 @@ async function prepareGateway(kind) {
 function setStatusPill(el, state, meta = '') {
   if (!el) return;
   el.textContent = state;
-  el.classList.remove('connected', 'error', 'working');
+  el.classList.remove('connected', 'error', 'working', 'locked');
   if (state === 'connected') el.classList.add('connected');
   if (state === 'error') el.classList.add('error');
+  if (state === 'locked') el.classList.add('locked');
   if (state === 'connecting' || state === 'reconnecting' || state === 'offline') {
     el.classList.add('working');
   }
@@ -1680,7 +1872,15 @@ function setStatusPill(el, state, meta = '') {
 function updateGlobalStatus() {
   const status = deriveGlobalConnectionState({ authed: uiState.authed, panes: paneManager.panes });
   setStatusPill(globalElements.status, status.state, status.meta);
-  if (globalElements.paneManagerBtn) globalElements.paneManagerBtn.textContent = status.meta;
+  if (globalElements.status) globalElements.status.hidden = !uiState.authed;
+  renderActivePaneState();
+  if (globalElements.paneManagerBtn) {
+    globalElements.paneManagerBtn.hidden = !uiState.authed || !status.meta;
+    globalElements.paneManagerBtn.textContent = uiState.authed ? status.meta : '';
+    const label = status.ariaLabel ? `Open pane manager. Shift-click to filter panes needing attention. ${status.ariaLabel}` : 'Open pane manager';
+    globalElements.paneManagerBtn.setAttribute('aria-label', label);
+    globalElements.paneManagerBtn.title = status.ariaLabel || status.meta || 'Open pane manager';
+  }
 }
 
 function updateConnectionControls() {
@@ -1688,6 +1888,16 @@ function updateConnectionControls() {
   const control = deriveDisconnectButtonState({ authed: uiState.authed, panes: paneManager.panes });
   globalElements.disconnectBtn.disabled = !!control.disabled;
   globalElements.disconnectBtn.textContent = control.text;
+}
+
+function updateAuthAction(authUi) {
+  if (!globalElements.logoutBtn) return;
+  globalElements.logoutBtn.disabled = !authUi.logoutEnabled;
+  globalElements.logoutBtn.style.opacity = authUi.logoutOpacity;
+  globalElements.logoutBtn.setAttribute('aria-label', authUi.authActionLabel);
+  globalElements.logoutBtn.setAttribute('title', authUi.authActionText);
+  const label = globalElements.logoutBtn.querySelector('.btn-label');
+  if (label) label.textContent = authUi.authActionText;
 }
 
 function currentAuthUi() {
@@ -1746,22 +1956,21 @@ function setAuthState(authed) {
     stopAgentAutoRefresh();
   }
 
-  if (globalElements.logoutBtn) {
-    globalElements.logoutBtn.disabled = !authUi.logoutEnabled;
-    globalElements.logoutBtn.style.opacity = authUi.logoutOpacity;
-  }
+  updateAuthAction(authUi);
 }
 
 function setRole(role) {
   roleState.role = role;
   const authUi = renderAuthSessionUi();
 
-  const isAdmin = authUi.isAdmin;
-  const visibleOpacity = isAdmin ? '1' : '0.5';
+  updateAuthAction(authUi);
+
+  const showAdminControls = authUi.showAdminControls;
+  const visibleOpacity = showAdminControls ? '1' : '0.5';
 
   if (globalElements.refreshAgentsBtn) {
-    globalElements.refreshAgentsBtn.hidden = !isAdmin;
-    globalElements.refreshAgentsBtn.disabled = !isAdmin || !uiState.authed;
+    globalElements.refreshAgentsBtn.hidden = !showAdminControls;
+    globalElements.refreshAgentsBtn.disabled = !showAdminControls;
     globalElements.refreshAgentsBtn.style.opacity = visibleOpacity;
   }
 
@@ -1772,35 +1981,35 @@ function setRole(role) {
   }
 
   if (globalElements.settingsBtn) {
-    if (isAdmin) globalElements.settingsBtn.removeAttribute('disabled');
+    if (showAdminControls) globalElements.settingsBtn.removeAttribute('disabled');
     else globalElements.settingsBtn.setAttribute('disabled', 'disabled');
     globalElements.settingsBtn.style.opacity = visibleOpacity;
   }
 
   if (globalElements.paneControls) {
-    globalElements.paneControls.hidden = !isAdmin;
+    globalElements.paneControls.hidden = !showAdminControls;
   }
   if (globalElements.agentsBtn) {
-    globalElements.agentsBtn.hidden = !isAdmin;
-    globalElements.agentsBtn.disabled = !isAdmin;
+    globalElements.agentsBtn.hidden = !showAdminControls;
+    globalElements.agentsBtn.disabled = !showAdminControls;
     globalElements.agentsBtn.style.opacity = visibleOpacity;
   }
 
   if (globalElements.workqueueBtn) {
-    globalElements.workqueueBtn.hidden = !isAdmin;
-    globalElements.workqueueBtn.disabled = !isAdmin;
+    globalElements.workqueueBtn.hidden = !showAdminControls;
+    globalElements.workqueueBtn.disabled = !showAdminControls;
     globalElements.workqueueBtn.style.opacity = visibleOpacity;
   }
 
   if (globalElements.fleetBtn) {
-    globalElements.fleetBtn.hidden = !isAdmin;
-    globalElements.fleetBtn.disabled = !isAdmin;
+    globalElements.fleetBtn.hidden = !showAdminControls;
+    globalElements.fleetBtn.disabled = !showAdminControls;
     globalElements.fleetBtn.style.opacity = visibleOpacity;
   }
 
   if (globalElements.shortcutsBtn) {
-    globalElements.shortcutsBtn.hidden = !isAdmin;
-    globalElements.shortcutsBtn.disabled = !isAdmin;
+    globalElements.shortcutsBtn.hidden = !showAdminControls;
+    globalElements.shortcutsBtn.disabled = !showAdminControls;
     globalElements.shortcutsBtn.style.opacity = visibleOpacity;
   }
 }
@@ -1818,8 +2027,11 @@ function showLogin(message = '') {
   closeAuthSessionPopover();
   globalElements.settingsBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
-  globalElements.shortcutsBtn?.setAttribute('disabled', 'disabled');
-  if (globalElements.shortcutsBtn) globalElements.shortcutsBtn.style.opacity = '0.5';
+  if (globalElements.shortcutsBtn && roleState.role === 'admin') {
+    globalElements.shortcutsBtn.hidden = false;
+    globalElements.shortcutsBtn.removeAttribute('disabled');
+    globalElements.shortcutsBtn.style.opacity = '1';
+  }
   globalElements.fleetBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.fleetBtn) globalElements.fleetBtn.style.opacity = '0.5';
 
@@ -1876,11 +2088,13 @@ function openSettings() {
   if (globalElements.paneSwitchHudEnabled) {
     globalElements.paneSwitchHudEnabled.checked = isPaneSwitchHudEnabled();
   }
+  if (globalElements.headerLabeledControlsEnabled) {
+    globalElements.headerLabeledControlsEnabled.checked = areHeaderLabeledControlsEnabled();
+  }
   renderKeyboardSettings();
   shortcutOverridesDraft = readShortcutOverrides();
   renderShortcutOverrideSettings();
-  globalElements.settingsModal.classList.add('open');
-  globalElements.settingsModal.setAttribute('aria-hidden', 'false');
+  openAdminModal(globalElements.settingsModal);
 
   // Guest mode removed.
 
@@ -1888,9 +2102,8 @@ function openSettings() {
   loadRecurringPrompts();
 }
 
-function closeSettings() {
-  globalElements.settingsModal.classList.remove('open');
-  globalElements.settingsModal.setAttribute('aria-hidden', 'true');
+function closeSettings({ restoreFocus = true } = {}) {
+  closeAdminModal(globalElements.settingsModal, { restoreFocus });
   shortcutOverridesDraft = null;
 }
 
@@ -2586,7 +2799,28 @@ async function deleteRecurringPrompt(id) {
 }
 
 let shortcutsLastFocusedEl = null;
+let shortcutsStatusTimer = null;
 let paneShortcutBadgesAltHeld = false;
+
+const SHORTCUT_STATUS_LABELS = {
+  available: 'Available',
+  'typing-focus': 'Blocked: typing-focus',
+  'modal-open': 'Blocked: modal-open',
+  'layout-state': 'Blocked: layout-state'
+};
+
+function isAdminLocked() {
+  return !uiState.authed && (
+    roleState.role === 'admin' ||
+    globalElements.loginOverlay?.classList?.contains('open') ||
+    globalElements.loginOverlay?.getAttribute?.('aria-hidden') === 'false'
+  );
+}
+
+function syncShortcutsLockedState() {
+  const locked = isAdminLocked();
+  globalElements.shortcutsModal?.classList.toggle('locked-state', locked);
+}
 
 function getModalFocusableElements(modalEl) {
   if (!modalEl || !modalEl.querySelectorAll) return [];
@@ -2594,31 +2828,94 @@ function getModalFocusableElements(modalEl) {
     .filter((el) => !el.disabled && !el.hidden && el.getAttribute('aria-hidden') !== 'true');
 }
 
+function ensureShortcutStatusChip(row) {
+  if (!row) return null;
+  let chip = row.querySelector('[data-shortcut-status]');
+  if (!chip) {
+    chip = document.createElement('div');
+    chip.className = 'shortcut-status';
+    chip.setAttribute('data-shortcut-status', '');
+    row.appendChild(chip);
+  }
+  return chip;
+}
+
+function shortcutsModalIsOpen() {
+  return !!globalElements.shortcutsModal?.classList?.contains('open');
+}
+
+function getShortcutRowBlockReason(row) {
+  const rule = String(row?.getAttribute?.('data-shortcut-rule') || 'typing-modal');
+  if (rule === 'always') return '';
+
+  const typingReference = shortcutsModalIsOpen() ? shortcutsLastFocusedEl : document.activeElement;
+  if (rule !== 'modal-only' && isTypingContext(typingReference)) return 'typing-focus';
+
+  const panes = paneManager?.panes || [];
+  const paneCount = panes.length;
+  const chatPaneCount = panes.filter((pane) => pane.kind === 'chat').length;
+  const hasUnreadPane = panes.some((pane) => paneUnreadCount(pane) > 0);
+  if (rule === 'multi-pane' && paneCount < 2) return 'layout-state';
+  if (rule === 'multi-chat-pane' && chatPaneCount < 2) return 'layout-state';
+  if (rule === 'unread-pane' && !hasUnreadPane) return 'layout-state';
+
+  if (shortcutsModalIsOpen() && rule !== 'always') return 'modal-open';
+
+  return '';
+}
+
+function updateShortcutsStatus() {
+  const modal = globalElements.shortcutsModal;
+  if (!modal) return;
+  modal.querySelectorAll('.shortcut-row').forEach((row) => {
+    const chip = ensureShortcutStatusChip(row);
+    if (!chip) return;
+    const reason = getShortcutRowBlockReason(row);
+    const state = reason || 'available';
+    chip.textContent = SHORTCUT_STATUS_LABELS[state] || SHORTCUT_STATUS_LABELS.available;
+    chip.dataset.state = state;
+  });
+}
+
+function startShortcutsStatusUpdates() {
+  window.clearInterval(shortcutsStatusTimer);
+  updateShortcutsStatus();
+  shortcutsStatusTimer = window.setInterval(updateShortcutsStatus, 500);
+}
+
+function stopShortcutsStatusUpdates() {
+  window.clearInterval(shortcutsStatusTimer);
+  shortcutsStatusTimer = null;
+}
+
 function openShortcuts() {
   const modal = globalElements.shortcutsModal;
   if (!modal) return;
   if (modal.classList.contains('open')) {
     renderShortcutsContent();
+    syncShortcutsLockedState();
     updatePaneShortcutBadges();
+    updateShortcutsStatus();
     return;
   }
   renderShortcutsContent();
+  syncShortcutsLockedState();
   shortcutsLastFocusedEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
+  openAdminModal(modal, { focusReturn: shortcutsLastFocusedEl });
+  startShortcutsStatusUpdates();
   updatePaneShortcutBadges();
   window.setTimeout(() => {
     (globalElements.shortcutsDialog || globalElements.shortcutsCloseBtn || modal).focus?.();
   }, 0);
 }
 
-function closeShortcuts() {
+function closeShortcuts({ restoreFocus = true } = {}) {
   const modal = globalElements.shortcutsModal;
   if (!modal || !modal.classList.contains('open')) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
+  closeAdminModal(modal, { restoreFocus });
+  stopShortcutsStatusUpdates();
   updatePaneShortcutBadges();
-  if (shortcutsLastFocusedEl && document.contains(shortcutsLastFocusedEl)) {
+  if (restoreFocus && shortcutsLastFocusedEl && document.contains(shortcutsLastFocusedEl)) {
     shortcutsLastFocusedEl.focus?.();
   }
   shortcutsLastFocusedEl = null;
@@ -2631,6 +2928,7 @@ const paneManagerUiState = {
   selectedIndex: 0,
   query: '',
   unreadOnly: false,
+  attentionOnly: false,
   visiblePaneKeys: [],
   collapsedKinds: {
     chat: false,
@@ -2713,13 +3011,14 @@ function updateBrowserTitle(pane = null) {
   document.title = paneBrowserTitle(selectedPane);
 }
 
-function paneIdentityLabel(pane, { includeUnread = false } = {}) {
+function paneIdentityLabel(pane, { includeUnread = false, includeDraft = true } = {}) {
   const letter = paneHeaderLetter(pane);
   const type = paneLabel(pane);
   const target = paneDisplayTargetLabel(pane);
   const nickname = paneNickname(pane);
   const unread = paneUnreadCount(pane);
-  return `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}`;
+  const draft = includeDraft && paneHasDraftChanges(pane);
+  return `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}${draft ? ' • unsent draft' : ''}`;
 }
 
 function paneSummaryLabel(pane) {
@@ -2732,6 +3031,16 @@ function paneSummaryLabel(pane) {
 function isPaneSwitchHudEnabled() {
   return String(storage.get(PANE_SWITCH_HUD_ENABLED_KEY, '1') || '1') !== '0';
 }
+
+function areHeaderLabeledControlsEnabled() {
+  return String(storage.get(HEADER_LABELED_CONTROLS_ENABLED_KEY, '1') || '1') !== '0';
+}
+
+function applyHeaderLabeledControlsSetting() {
+  document.body.classList.toggle('header-labels-off', !areHeaderLabeledControlsEnabled());
+}
+
+applyHeaderLabeledControlsSetting();
 
 let paneSwitchHudHideTimer = null;
 
@@ -2812,6 +3121,9 @@ function focusedPaneKey() {
 let paneFocusMruKeys = [];
 let paneMruTraversal = null;
 let paneMruSuppressFocusEvents = false;
+let paneActiveRestoreGuardUntil = 0;
+const PANE_SWITCH_SEND_GUARD_MS = 800;
+const PANE_SWITCH_SEND_GUARD_MESSAGE = 'Pane changed: press Enter again to send';
 
 function paneMruOrder() {
   const panes = paneManager?.panes || [];
@@ -2830,20 +3142,95 @@ function notePaneFocused(pane) {
   if (!key) return;
   const panes = paneManager?.panes || [];
   if (!panes.some((entry) => String(entry?.key || '') === key)) return;
+  const rememberedKey = rememberedActivePaneKey();
+  if (rememberedKey && key !== rememberedKey && Date.now() < paneActiveRestoreGuardUntil) return;
   paneMruTraversal = null;
   paneMruOrder();
   paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
+  rememberActivePaneKey(key);
+  renderActivePaneState(pane);
   updateBrowserTitle(pane);
+}
+
+function paneMarkSwitchSendGuard(pane, fromPaneKey) {
+  const fromKey = String(fromPaneKey || '');
+  if (!pane || pane.kind !== 'chat' || !fromKey || fromKey === pane.key) return;
+  pane.sendGuard = {
+    paneSwitchAt: Date.now(),
+    consumed: false,
+    fromPaneKey: fromKey
+  };
+}
+
+function paneConsumeSwitchSendGuard(pane) {
+  const guard = pane?.sendGuard;
+  if (!guard || guard.consumed) return false;
+  const elapsed = Date.now() - Number(guard.paneSwitchAt || 0);
+  if (elapsed < 0 || elapsed > PANE_SWITCH_SEND_GUARD_MS) return false;
+  guard.consumed = true;
+  showToast(PANE_SWITCH_SEND_GUARD_MESSAGE, {
+    kind: 'info',
+    timeoutMs: 1800,
+    testId: 'pane-switch-send-guard-toast'
+  });
+  return true;
 }
 
 function forgetFocusedPaneKey(paneKey) {
   const key = String(paneKey || '');
   if (!key) return;
   paneFocusMruKeys = paneFocusMruKeys.filter((entry) => entry !== key);
+  if (rememberedActivePaneKey() === key) storage.remove(ADMIN_ACTIVE_PANE_KEY);
   if (paneMruTraversal?.order) {
     paneMruTraversal.order = paneMruTraversal.order.filter((entry) => entry !== key);
     if (paneMruTraversal.order.length < 2) paneMruTraversal = null;
   }
+}
+
+function activePaneFromState() {
+  const panes = paneManager?.panes || [];
+  if (!panes.length) return null;
+  const candidates = [
+    paneFocusMruKeys[0],
+    focusedPaneKey(),
+    rememberedActivePaneKey()
+  ].filter(Boolean);
+  for (const key of candidates) {
+    const pane = panes.find((entry) => String(entry?.key || '') === String(key));
+    if (pane) return pane;
+  }
+  return panes[0] || null;
+}
+
+function renderActivePaneState(activePane = activePaneFromState()) {
+  const panes = paneManager?.panes || [];
+  const activeKey = String(activePane?.key || '');
+  panes.forEach((pane) => {
+    const isActive = !!activeKey && String(pane?.key || '') === activeKey;
+    const root = pane?.elements?.root;
+    if (!root) return;
+    root.classList.toggle('is-active-pane', isActive);
+    root.dataset.activePane = isActive ? 'true' : 'false';
+    root.setAttribute('aria-current', isActive ? 'true' : 'false');
+  });
+
+  const chip = globalElements.activePaneChip;
+  const value = globalElements.activePaneChipValue;
+  if (!chip || !value) return;
+
+  if (!activePane) {
+    chip.hidden = true;
+    value.textContent = '';
+    chip.title = 'No active pane';
+    chip.setAttribute('aria-label', 'No active pane');
+    return;
+  }
+
+  const label = paneSummaryLabel(activePane);
+  chip.hidden = !uiState.authed;
+  value.textContent = label;
+  chip.title = `Focus ${label}`;
+  chip.setAttribute('aria-label', `Active pane: ${label}. Click to focus.`);
 }
 
 function paneIndexByKey(key) {
@@ -2911,6 +3298,7 @@ function clearPaneUnread(pane) {
   pane.unreadKind = '';
   renderPaneIdentity(pane);
   renderPaneActivityBadge(pane);
+  updateGlobalStatus();
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -2942,6 +3330,32 @@ function renderPaneActivityBadge(pane) {
   badge.title = countLabel;
 }
 
+function renderPaneDraftBadge(pane) {
+  const badge = pane?.elements?.draftBadge;
+  if (!badge) return;
+
+  const hasDraft = paneHasDraftChanges(pane);
+  if (!hasDraft) {
+    badge.hidden = true;
+    badge.textContent = 'Draft';
+    badge.setAttribute('aria-label', 'No unsent draft');
+    badge.title = 'No unsent draft';
+    return;
+  }
+
+  const label = `Unsent draft in this ${paneLabel(pane).toLowerCase()} pane`;
+  badge.hidden = false;
+  badge.textContent = 'Draft';
+  badge.setAttribute('aria-label', label);
+  badge.title = label;
+}
+
+function refreshPaneDraftState(pane) {
+  renderPaneIdentity(pane);
+  renderPaneDraftBadge(pane);
+  if (isPaneManagerOpen()) renderPaneManager();
+}
+
 function markPaneUnread(pane, increment = 1, kind = 'chat') {
   if (!pane) return;
   const activeKey = focusedPaneKey();
@@ -2951,6 +3365,7 @@ function markPaneUnread(pane, increment = 1, kind = 'chat') {
   pane.unreadKind = String(kind || 'activity');
   renderPaneIdentity(pane);
   renderPaneActivityBadge(pane);
+  updateGlobalStatus();
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -3304,6 +3719,7 @@ function renderPaneManager() {
 
   const query = String(paneManagerUiState.query || '').trim().toLowerCase();
   const filtered = panes.filter((pane) => {
+    if (paneManagerUiState.attentionOnly && !paneNeedsAttention(pane)) return false;
     if (paneManagerUiState.unreadOnly && paneUnreadCount(pane) <= 0) return false;
     return paneMatchesSearchQuery(pane, query);
   });
@@ -3375,9 +3791,12 @@ function renderPaneManager() {
         const duplicateCount = duplicateCounts.get(paneDuplicateKey(pane)) || 0;
         const isDuplicate = duplicateCount > 1;
         const unreadCount = paneUnreadCount(pane);
+        const hasDraft = paneHasDraftChanges(pane);
         const paneIdentity = paneSummaryLabel(pane);
         const nickname = paneNickname(pane);
         const pairedAction = getPaneManagerPairedAction(pane);
+        const rowLabel = `${paneIdentity}${nickname ? `, nickname ${nickname}` : ''}${unreadCount > 0 ? `, ${unreadCount} unread` : ''}${hasDraft ? ', unsent draft' : ''}`;
+        row.setAttribute('aria-label', rowLabel);
 
         const lockDisabled = paneManager.isLayoutLocked();
 
@@ -3391,6 +3810,7 @@ function renderPaneManager() {
               <span class="pane-manager-pane-id" title="Internal pane id">${paneManagerHighlightHtml(String(pane?.key || ''), query)}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
               ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
+              ${hasDraft ? '<span class="pane-manager-draft-badge" data-testid="pane-manager-draft-badge" title="Unsent draft">Draft</span>' : ''}
             </div>
             <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
           </div>
@@ -3491,7 +3911,7 @@ function renderPaneManager() {
   });
 }
 
-function openPaneManager() {
+function openPaneManager({ attentionOnly = false } = {}) {
   if (roleState.role !== 'admin') return;
   if (!uiState.authed) {
     showLogin('Please sign in to continue.');
@@ -3501,11 +3921,11 @@ function openPaneManager() {
 
   paneManagerUiState.open = true;
   paneManagerUiState.selectedIndex = 0;
+  paneManagerUiState.attentionOnly = !!attentionOnly;
   paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
   paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
 
-  globalElements.paneManagerModal.classList.add('open');
-  globalElements.paneManagerModal.setAttribute('aria-hidden', 'false');
+  openAdminModal(globalElements.paneManagerModal);
   renderPaneManager();
 
   // Focus quick-find for immediate filtering.
@@ -3518,14 +3938,8 @@ function openPaneManager() {
 function closePaneManager({ restoreFocus = true } = {}) {
   if (!globalElements.paneManagerModal) return;
   paneManagerUiState.open = false;
-  globalElements.paneManagerModal.classList.remove('open');
-  globalElements.paneManagerModal.setAttribute('aria-hidden', 'true');
-  if (restoreFocus) {
-    try {
-      const pane = paneManager?.panes?.[0];
-      pane?.elements?.input?.focus?.();
-    } catch {}
-  }
+  const pane = paneManager?.panes?.[0];
+  closeAdminModal(globalElements.paneManagerModal, { restoreFocus, fallbackFocus: pane?.elements?.input || null });
 }
 
 function paneManagerHandleKeydown(event) {
@@ -3633,14 +4047,8 @@ function closeCommandPalette({ restoreFocus = true } = {}) {
   if (!globalElements.commandPaletteModal) return;
   commandPaletteState.open = false;
   commandPaletteState.originPaneKey = '';
-  globalElements.commandPaletteModal.classList.remove('open');
-  globalElements.commandPaletteModal.setAttribute('aria-hidden', 'true');
-  if (restoreFocus) {
-    try {
-      const pane = paneManager?.panes?.[0];
-      pane?.elements?.input?.focus?.();
-    } catch {}
-  }
+  const pane = paneManager?.panes?.[0];
+  closeAdminModal(globalElements.commandPaletteModal, { restoreFocus, fallbackFocus: pane?.elements?.input || null });
 }
 
 function scoreFuzzy(hay, needle) {
@@ -3723,6 +4131,16 @@ function buildCommandPaletteItems() {
     ),
     withShortcut(
       {
+        id: 'cmd:reopen-closed-pane',
+        label: 'Panes: Reopen last closed pane',
+        detail: 'Restore the most recently closed pane and recoverable draft state',
+        paneMeta: commandPalettePaneMeta({ type: 'Pane', target: 'last closed', mode: 'restore' }),
+        run: () => paneManager.reopenLastClosedPane()
+      },
+      '⌘/Ctrl+Shift+T'
+    ),
+    withShortcut(
+      {
         id: 'cmd:add-workqueue',
         label: 'Open Workqueue: dev-team',
         detail: 'Focus matching queue target or create one',
@@ -3769,7 +4187,7 @@ function buildCommandPaletteItems() {
         paneMeta: commandPalettePaneMeta({ type: 'Timeline', target: 'gateway', mode: 'create or focus' }),
         run: () => paneManager.addPane('timeline')
       },
-      '⌘/Ctrl+Shift+T'
+      '⌘/Ctrl+Shift+Y'
     ),
     withShortcut(
       {
@@ -4205,8 +4623,7 @@ function openCommandPalette() {
   commandPaletteState.selectedIndex = 0;
   commandPaletteState.expandedSubgroups = new Set();
 
-  globalElements.commandPaletteModal.classList.add('open');
-  globalElements.commandPaletteModal.setAttribute('aria-hidden', 'false');
+  openAdminModal(globalElements.commandPaletteModal);
 
   if (globalElements.commandPaletteInput) {
     globalElements.commandPaletteInput.value = '';
@@ -4228,11 +4645,9 @@ function openCommandPalette() {
 }
 
 // Agents (admin-only)
-
 function openAgentsModal() {
   if (roleState.role !== 'admin') return;
-  globalElements.agentsModal?.classList.add('open');
-  globalElements.agentsModal?.setAttribute('aria-hidden', 'false');
+  openAdminModal(globalElements.agentsModal);
 
   // Bootstrap persisted controls.
   const filter = getFleetFilter();
@@ -4337,10 +4752,9 @@ function resetFleetSort() {
   renderAgentsModalList();
 }
 
-function closeAgentsModal() {
+function closeAgentsModal({ restoreFocus = true } = {}) {
   clearFleetRefreshLock();
-  globalElements.agentsModal?.classList.remove('open');
-  globalElements.agentsModal?.setAttribute('aria-hidden', 'true');
+  closeAdminModal(globalElements.agentsModal, { restoreFocus });
   stopAgentsModalAutoRefresh();
   stopAgentsModalFreshnessTicker();
 }
@@ -4495,6 +4909,85 @@ function openAgentTriageFromFleet(agentId) {
   const target = normalizeAgentId(agentId || 'main');
   openAgentChatFromFleet(target);
   openAgentWorkqueueFromFleet(target);
+}
+
+function renderFleetSelectionBar({ classify = null, lastSeenMap = null } = {}) {
+  const bar = globalElements.agentsSelectionBar;
+  if (!bar) return;
+
+  const id = String(fleetSelectionState.selectedAgentId || '').trim();
+  const visibleRows = getFleetSelectableRows();
+  const selectedVisible = id && visibleRows.some((row) => String(row.dataset.agentId || '') === id);
+  if (!id || !selectedVisible) {
+    bar.hidden = true;
+    bar.dataset.agentId = '';
+    bar.innerHTML = '';
+    return;
+  }
+
+  const agent = getAgentRecord(id);
+  const label = formatAgentLabel(agent, { includeId: true });
+  const map = lastSeenMap || getAgentLastSeenMap();
+  const heartbeatTs = Number(map[id]) || 0;
+  const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
+  const triage = typeof classify === 'function'
+    ? classify(id)
+    : (() => {
+        const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
+        const paneState = getAgentPaneStateMap()[id] || 'unknown';
+        const ageMs = heartbeatTs > 0 ? Math.max(0, Date.now() - heartbeatTs) : Number.POSITIVE_INFINITY;
+        const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs: withinMinutes * 60_000, paneState });
+        if (paneState === 'error' || paneState === 'offline' || !Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket };
+        return { bucket: ageMs <= withinMinutes * 60_000 ? 'active' : 'stale', ageBucket };
+      })();
+  const healthLabel = triage.bucket === 'offline_error'
+    ? 'Offline/Error'
+    : triage.bucket === 'stale'
+      ? 'Stale'
+      : 'Healthy';
+
+  bar.hidden = false;
+  if (String(bar.dataset.agentId || '') !== id) {
+    bar.dataset.agentId = id;
+    bar.innerHTML = `
+      <div class="agents-selection-main">
+        <div class="agents-selection-title" data-agents-selection-title></div>
+        <div class="agents-selection-meta">
+          <span class="agents-health-state-chip" data-agents-selection-health></span>
+          <span class="agents-age-chip" data-agents-selection-age></span>
+        </div>
+      </div>
+      <div class="agents-selection-actions" role="group" aria-label="Selected agent actions">
+        <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}">Open Chat</button>
+        <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}">Open Workqueue</button>
+        <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}">Open Timeline</button>
+      </div>
+    `;
+
+    bar.querySelectorAll('[data-agent-action]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const action = String(btn.getAttribute('data-agent-action') || '').trim();
+        const target = String(btn.getAttribute('data-agent-id') || '').trim();
+        if (action === 'open-chat') openAgentChatFromFleet(target);
+        else if (action === 'open-timeline') openAgentTimelineFromFleet(target);
+        else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(target);
+      });
+    });
+  }
+
+  const titleEl = bar.querySelector('[data-agents-selection-title]');
+  const healthEl = bar.querySelector('[data-agents-selection-health]');
+  const ageEl = bar.querySelector('[data-agents-selection-age]');
+  if (titleEl) titleEl.textContent = label;
+  if (healthEl) {
+    healthEl.textContent = healthLabel;
+    healthEl.dataset.healthState = triage.bucket;
+  }
+  if (ageEl) {
+    ageEl.textContent = heartbeatAge;
+    ageEl.dataset.heartbeatBucket = triage.ageBucket || '';
+  }
 }
 
 function findActivePaneFromFocus() {
@@ -4857,6 +5350,7 @@ function renderAgentsModalList() {
   const empty = ordered.length === 0;
   if (globalElements.agentsEmpty) globalElements.agentsEmpty.hidden = !empty;
   restoreFleetScrollAnchor(root, scrollAnchor);
+  renderFleetSelectionBar({ classify, lastSeenMap });
   if (focusedAgentId) {
     try {
       root.querySelector(`.agents-row[data-agent-id="${CSS.escape(focusedAgentId)}"]`)?.focus?.({ preventScroll: true });
@@ -4899,6 +5393,7 @@ function reconcileFleetSelection(visibleAgents) {
     fleetSelectionState.selectedIndex = 0;
     fleetSelectionState.notice = '';
     fleetSelectionState.missingAgentId = '';
+    renderFleetSelectionBar();
     return;
   }
   const previousId = String(fleetSelectionState.selectedAgentId || '').trim();
@@ -4931,6 +5426,7 @@ function selectFleetAgent(agentId, { focusRow = false } = {}) {
   fleetSelectionState.notice = '';
   fleetSelectionState.missingAgentId = '';
   rows.forEach((row, index) => row.setAttribute('aria-selected', index === ix ? 'true' : 'false'));
+  renderFleetSelectionBar();
   if (focusRow) {
     try {
       rows[ix].focus({ preventScroll: true });
@@ -4964,6 +5460,7 @@ function runFleetSelectedAgent(mode = 'chat') {
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress', 'done', 'failed'];
 const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
 const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
+const WORKQUEUE_CANONICAL_DENSITY_THRESHOLD = 0.2;
 const WORKQUEUE_GROUPED_AUTO_THRESHOLD = 20;
 const WORKQUEUE_ALL_SCOPE_GUARD_THRESHOLD_KEY = 'clawnsole.admin.workqueue.allScopeGuardThreshold';
 const WORKQUEUE_ALL_SCOPE_GUARD_DEFAULT_THRESHOLD = 200;
@@ -5039,18 +5536,16 @@ const workqueueState = {
 
 function openWorkqueue() {
   if (roleState.role !== 'admin') return;
-  globalElements.workqueueModal?.classList.add('open');
-  globalElements.workqueueModal?.setAttribute('aria-hidden', 'false');
+  openAdminModal(globalElements.workqueueModal);
   // Sorting wiring is synchronous; bootstrap it immediately so UI tests can click sort buttons deterministically.
   ensureWorkqueueModalSorting();
   ensureWorkqueueBootstrapped();
   startWorkqueueAutoRefresh();
 }
 
-function closeWorkqueue() {
+function closeWorkqueue({ restoreFocus = true } = {}) {
   stopWorkqueueAutoRefresh();
-  globalElements.workqueueModal?.classList.remove('open');
-  globalElements.workqueueModal?.setAttribute('aria-hidden', 'true');
+  closeAdminModal(globalElements.workqueueModal, { restoreFocus });
 }
 
 function renderWorkqueueStatusFilters() {
@@ -6040,6 +6535,20 @@ function formatWorkqueueGroupDisplayKey(key) {
   return text.replace(/^(?:issue|dedupe|title):/, '');
 }
 
+function chooseWorkqueueGroupRepresentative(key, items) {
+  const rows = Array.isArray(items) ? items : [];
+  if (String(key || '').startsWith('issue:')) {
+    return rows.slice().sort((a, b) => {
+      const updated = String(b?.updatedAt || '').localeCompare(String(a?.updatedAt || ''));
+      if (updated !== 0) return updated;
+      const created = String(b?.createdAt || '').localeCompare(String(a?.createdAt || ''));
+      if (created !== 0) return created;
+      return String(a?.id || '').localeCompare(String(b?.id || ''));
+    })[0] || null;
+  }
+  return sortWorkqueueItems(rows, { sortKey: 'priority', sortDir: 'desc' })[0] || rows[0] || null;
+}
+
 function summarizeWorkqueueGroups(items) {
   const map = new Map();
   for (const item of Array.isArray(items) ? items : []) {
@@ -6054,8 +6563,7 @@ function summarizeWorkqueueGroups(items) {
   for (const [key, groupItems] of map.entries()) {
     if (groupItems.length <= 1) continue;
     groupedKeys.add(key);
-    const sorted = sortWorkqueueItems(groupItems, { sortKey: 'priority', sortDir: 'desc' });
-    const representative = sorted[0] || groupItems[0];
+    const representative = chooseWorkqueueGroupRepresentative(key, groupItems) || groupItems[0];
     groups.push({
       kind: 'group',
       key,
@@ -6091,9 +6599,10 @@ function normalizeWorkqueueGroupMode(value) {
   return 'auto';
 }
 
-function resolveWorkqueueGroupMode(value, itemCount) {
+function resolveWorkqueueGroupMode(value, itemCount, duplicateSummary) {
   const mode = normalizeWorkqueueGroupMode(value);
   if (mode === 'rows' || mode === 'grouped') return mode;
+  if (Number(duplicateSummary?.density || 0) >= WORKQUEUE_CANONICAL_DENSITY_THRESHOLD) return 'grouped';
   return Number(itemCount || 0) > WORKQUEUE_GROUPED_AUTO_THRESHOLD ? 'grouped' : 'rows';
 }
 
@@ -6287,7 +6796,8 @@ function renderWorkqueuePaneItems(pane) {
   const statusLine = pane.elements?.thread?.querySelector('[data-wq-statusline]');
   if (statusLine) statusLine.textContent = formatWorkqueueVisibleSummary(items.length, totalCount, hiddenCounts);
   renderWorkqueueFilterSummaryForPane(pane, { shownCount: items.length, totalCount, hiddenCounts });
-  const groupMode = resolveWorkqueueGroupMode(pane.workqueue?.groupMode, items.length);
+  const duplicateSummary = summarizeWorkqueueIssueDuplicateDensity(items);
+  const groupMode = resolveWorkqueueGroupMode(pane.workqueue?.groupMode, items.length, duplicateSummary);
   const rows = groupMode === 'grouped'
     ? summarizeWorkqueueGroups(items)
     : sortWorkqueueRowEntries(summarizeWorkqueueExactDuplicateRows(items), { sortKey: pane.workqueue?.sortKey, sortDir: pane.workqueue?.sortDir });
@@ -7484,6 +7994,7 @@ function paneRenderAttachments(pane) {
     remove.addEventListener('click', () => {
       pane.attachments.files.splice(index, 1);
       paneRenderAttachments(pane);
+      refreshPaneDraftState(pane);
     });
     pill.append(name, remove);
     list.appendChild(pill);
@@ -7532,6 +8043,7 @@ async function paneHandleFileSelection(pane, event) {
   }
   event.target.value = '';
   paneRenderAttachments(pane);
+  refreshPaneDraftState(pane);
 }
 
 async function paneUploadAttachments(pane) {
@@ -7551,6 +8063,7 @@ async function paneUploadAttachments(pane) {
   const data = await res.json();
   pane.attachments.files = [];
   paneRenderAttachments(pane);
+  refreshPaneDraftState(pane);
   pane.elements.attachmentStatus.textContent = '';
   return Array.isArray(data.files) ? data.files : [];
 }
@@ -7609,6 +8122,24 @@ function paneIsAbortable(pane) {
   if (!pane.connected) return false;
   if (pane.abortState && pane.abortState.active) return true;
   return Boolean(pane.thinking?.active || (pane.chat?.runs && pane.chat.runs.size > 0));
+}
+
+function paneHasUnsentDraft(pane) {
+  if (!pane || pane.kind !== 'chat') return false;
+  return Boolean(String(pane.elements?.input?.value || '').trim());
+}
+
+function paneHasActiveRun(pane) {
+  if (!pane || pane.kind !== 'chat') return false;
+  return Boolean(
+    pane.thinking?.active ||
+      pane.activeRunId ||
+      (pane.chat?.runs && pane.chat.runs.size > 0) ||
+      pane.abortState?.active ||
+      pane.inFlight ||
+      pane.pendingSend ||
+      (Array.isArray(pane.outbox) && pane.outbox.length > 0)
+  );
 }
 
 function paneRenderStopControl(pane) {
@@ -7855,6 +8386,7 @@ async function paneSendChat(pane) {
     paneClearChatHistory(pane, { wipeStorage: true });
     pane.elements.input.value = '';
     paneUpdateCommandHints(pane);
+    refreshPaneDraftState(pane);
     addFeed('event', 'chat', `cleared local history (${pane.sessionKey()})`);
     return;
   }
@@ -7863,6 +8395,7 @@ async function paneSendChat(pane) {
     paneClearChatHistory(pane, { wipeStorage: true });
     pane.elements.input.value = '';
     paneUpdateCommandHints(pane);
+    refreshPaneDraftState(pane);
     pane.client.request('sessions.reset', { key });
     addFeed('event', 'chat', `reset session (${key})`);
     return;
@@ -7944,6 +8477,7 @@ async function paneSendChat(pane) {
 
   pane.elements.input.value = '';
   paneUpdateCommandHints(pane);
+  refreshPaneDraftState(pane);
 }
 
 function handleGatewayFrame(pane, data) {
@@ -8154,16 +8688,18 @@ function renderPaneIdentity(pane) {
   const target = paneDisplayTargetLabel(pane);
   const nickname = paneNickname(pane);
   const unread = paneUnreadCount(pane);
-  const identity = `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}`;
+  const draft = paneHasDraftChanges(pane);
+  const identity = `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}${draft ? ' • unsent draft' : ''}`;
   pane.elements.name.title = paneIdentityLabel(pane, { includeUnread: false });
   pane.elements.name.setAttribute('aria-label', identity);
   if (pane.elements.nameToken && pane.elements.nameTarget) {
     pane.elements.nameToken.textContent = `${letter} ${type}`;
-    pane.elements.nameTarget.textContent = ` · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}`;
+    pane.elements.nameTarget.textContent = ` · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}${draft ? ' • unsent draft' : ''}`;
   } else {
     pane.elements.name.textContent = identity;
   }
   renderPanePairCue(pane);
+  renderActivePaneState();
   if (pane.elements.nicknameBtn) {
     pane.elements.nicknameBtn.classList.toggle('has-nickname', !!nickname);
     pane.elements.nicknameBtn.title = nickname ? `Rename pane nickname: ${nickname}` : 'Set pane nickname';
@@ -8495,6 +9031,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     agentWarning: root.querySelector('[data-pane-agent-warning]'),
     agentPill: root.querySelector('[data-pane-agent-pill]'),
     status: root.querySelector('[data-pane-status]'),
+    draftBadge: root.querySelector('[data-pane-draft-badge]'),
     activityBadge: root.querySelector('[data-pane-activity-badge]'),
     helpDetails: root.querySelector('[data-pane-help]'),
     helpPopover: root.querySelector('[data-pane-help-popover]'),
@@ -8564,6 +9101,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     catchUp: { active: false, attemptsLeft: 0, timer: null },
     outbox: [],
     inFlight: null,
+    sendGuard: null,
     chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
     legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
     sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
@@ -8807,8 +9345,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           <div class="wq-sort" role="group" aria-label="Workqueue row grouping">
             <span class="wq-sort-label">View</span>
             <button type="button" class="wq-sort-btn" data-wq-group-mode="auto">Auto</button>
-            <button type="button" class="wq-sort-btn" data-wq-group-mode="rows">Rows</button>
-            <button type="button" class="wq-sort-btn" data-wq-group-mode="grouped">Grouped</button>
+            <button type="button" class="wq-sort-btn" data-wq-group-mode="rows">Raw rows</button>
+            <button type="button" class="wq-sort-btn" data-wq-group-mode="grouped">Grouped (latest)</button>
           </div>
         </div>
 
@@ -9374,9 +9912,9 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         const active = key === current;
         btn.classList.toggle('active', active);
         btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-        if (key === 'auto') btn.title = `Auto groups related rows when more than ${WORKQUEUE_GROUPED_AUTO_THRESHOLD} items are visible.`;
+        if (key === 'auto') btn.title = `Auto shows grouped latest rows when canonical issue duplicate density is at least ${Math.round(WORKQUEUE_CANONICAL_DENSITY_THRESHOLD * 100)}% or more than ${WORKQUEUE_GROUPED_AUTO_THRESHOLD} items are visible.`;
         else if (key === 'rows') btn.title = 'Show individual workqueue rows; exact duplicate rows still collapse.';
-        else btn.title = 'Group related issue, routine, or coordination rows.';
+        else btn.title = 'Group related issue, routine, or coordination rows and show the latest issue row as the representative.';
       });
     };
 
@@ -10025,6 +10563,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     pane.client = buildClientForPane(pane);
     setStatusPill(elements.status, 'disconnected', '');
     renderPaneIdentity(pane);
+    renderPaneDraftBadge(pane);
     return pane;
   }
 
@@ -10059,12 +10598,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       if (elements.sendBtn.disabled) return;
+      if (!event.metaKey && !event.ctrlKey && paneConsumeSwitchSendGuard(pane)) return;
       paneSendChat(pane);
     }
   });
 
   elements.input.addEventListener('input', () => {
     paneUpdateCommandHints(pane);
+    refreshPaneDraftState(pane);
   });
 
   elements.attachBtn.addEventListener('click', () => {
@@ -10098,6 +10639,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   pane.client = buildClientForPane(pane);
   setStatusPill(elements.status, 'disconnected', '');
   renderPaneIdentity(pane);
+  renderPaneDraftBadge(pane);
   return pane;
 }
 
@@ -10106,6 +10648,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 const paneManager = {
   panes: [],
   maxPanes: 6,
+  closedPaneStack: [],
+  closedPaneStackLimit: 5,
   layoutLocked: false,
   lastFocusedPaneKey: '',
   init() {
@@ -10145,7 +10689,17 @@ const paneManager = {
     this.updatePaneLabels();
     this.updateCloseButtons();
     this.applyInferredLayout();
-    updateBrowserTitle(this.panes[0] || null);
+    const storedActivePaneKey = rememberedActivePaneKey();
+    const restoredActivePane = this.panes.find((pane) => pane.key === storedActivePaneKey) || this.panes[0] || null;
+    paneActiveRestoreGuardUntil = storedActivePaneKey ? Date.now() + 1000 : 0;
+    if (restoredActivePane) {
+      paneFocusMruKeys = [
+        restoredActivePane.key,
+        ...this.panes.map((pane) => pane.key).filter((key) => key && key !== restoredActivePane.key)
+      ];
+    }
+    renderActivePaneState(restoredActivePane);
+    updateBrowserTitle(restoredActivePane);
   },
   isLayoutLocked() {
     return !!this.layoutLocked;
@@ -10181,6 +10735,8 @@ const paneManager = {
       } catch {}
     });
     this.panes = [];
+    this.closedPaneStack = [];
+    renderActivePaneState(null);
   },
   loadAdminPanes() {
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
@@ -10279,6 +10835,88 @@ const paneManager = {
   hasUnsentDrafts() {
     return anyPaneHasDraftChanges(this.panes);
   },
+  snapshotClosedPane(pane, index = -1) {
+    if (!pane) return null;
+    const kind = normalizePaneKind(pane.kind || 'chat');
+    const snapshot = {
+      kind,
+      index: Number.isInteger(index) ? index : -1,
+      agentId: normalizeAgentId(pane.agentId || 'main'),
+      cronAgentId: String(pane.cronAgentId || '').trim(),
+      nickname: paneNickname(pane),
+      pairedTargetLock: !!pane.pairedTargetLock,
+      draftText: kind === 'chat' ? String(pane.elements?.input?.value || '') : ''
+    };
+
+    if (kind === 'workqueue') {
+      snapshot.queue = String(pane.workqueue?.queue || 'dev-team').trim() || 'dev-team';
+      snapshot.statusFilter = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter.slice() : [];
+      snapshot.scopeFilter = normalizeWorkqueueScope(pane.workqueue?.scopeFilter);
+      snapshot.quickFilters = {
+        sources: Array.isArray(pane.workqueue?.quickFilters?.sources) ? pane.workqueue.quickFilters.sources.slice() : [],
+        repos: Array.isArray(pane.workqueue?.quickFilters?.repos) ? pane.workqueue.quickFilters.repos.slice() : [],
+        search: String(pane.workqueue?.quickFilters?.search || '').trim()
+      };
+      snapshot.groupMode = normalizeWorkqueueGroupMode(pane.workqueue?.groupMode);
+      snapshot.sortKey = pane.workqueue?.sortKey || 'priority';
+      snapshot.sortDir = pane.workqueue?.sortDir === 'asc' ? 'asc' : 'desc';
+    }
+
+    return snapshot;
+  },
+  pushClosedPaneSnapshot(pane, index = -1) {
+    const snapshot = this.snapshotClosedPane(pane, index);
+    if (!snapshot) return;
+    this.closedPaneStack.unshift(snapshot);
+    this.closedPaneStack = this.closedPaneStack.slice(0, this.closedPaneStackLimit);
+  },
+  reopenLastClosedPane() {
+    if (roleState.role !== 'admin') return null;
+    if (!this.closedPaneStack.length) {
+      showToast('No recently closed pane.', { kind: 'info', timeoutMs: 1800, testId: 'reopen-pane-empty-toast' });
+      return null;
+    }
+    if (this.panes.length >= this.maxPanes) {
+      showToast('Maximum panes are already open.', { kind: 'info', timeoutMs: 1800, testId: 'reopen-pane-full-toast' });
+      return null;
+    }
+
+    const snapshot = this.closedPaneStack.shift();
+    const pane = this.restoreClosedPaneSnapshot(snapshot);
+    if (!pane) {
+      showToast('Could not reopen pane.', { kind: 'info', timeoutMs: 1800, testId: 'reopen-pane-failed-toast' });
+      return null;
+    }
+    showToast(`Reopened ${paneLabel(pane)} pane.`, { kind: 'success', timeoutMs: 1600, testId: 'reopen-pane-toast' });
+    return pane;
+  },
+  restoreClosedPaneSnapshot(snapshot) {
+    if (!snapshot) return null;
+    const kind = normalizePaneKind(snapshot.kind || 'chat');
+    const options = {
+      forceNew: true,
+      insertIndex: Number.isInteger(snapshot.index) ? snapshot.index : undefined,
+      agentId: snapshot.agentId,
+      cronAgentId: snapshot.cronAgentId,
+      nickname: snapshot.nickname,
+      pairedTargetLock: !!snapshot.pairedTargetLock,
+      restoreDraftText: kind === 'chat' ? String(snapshot.draftText || '') : ''
+    };
+
+    if (kind === 'workqueue') {
+      Object.assign(options, {
+        queue: snapshot.queue,
+        statusFilter: snapshot.statusFilter,
+        scopeFilter: snapshot.scopeFilter,
+        quickFilters: snapshot.quickFilters,
+        groupMode: snapshot.groupMode,
+        sortKey: snapshot.sortKey,
+        sortDir: snapshot.sortDir
+      });
+    }
+
+    return this.addPane(kind, options);
+  },
   resetAdminLayoutToDefault({ confirm = true } = {}) {
     if (roleState.role !== 'admin') return;
     if (confirm && this.hasUnsentDrafts()) {
@@ -10309,6 +10947,25 @@ const paneManager = {
     const nextCronAgentId = String(options?.cronAgentId || '').trim();
     const nextScopeFilter = normalizeWorkqueueScope(options?.scopeFilter ?? getDefaultWorkqueueScope());
     const forceNew = Boolean(options?.forceNew);
+    const insertCreatedPane = (pane) => {
+      const rawIndex = Number(options?.insertIndex);
+      const idx = Number.isInteger(rawIndex) ? Math.max(0, Math.min(rawIndex, this.panes.length)) : this.panes.length;
+      const beforeRoot = this.panes[idx]?.elements?.root || null;
+      this.panes.splice(idx, 0, pane);
+      globalElements.paneGrid.insertBefore(pane.elements.root, beforeRoot);
+    };
+    const finishCreatedPane = (pane, { connect = false } = {}) => {
+      this.updatePaneLabels();
+      this.updateCloseButtons();
+      this.applyInferredLayout();
+      this.persistAdminPanes();
+      if (connect && uiState.authed) {
+        pane.client.connect();
+      }
+      this.focusPanePrimary(pane);
+      renderActivePaneState(pane);
+      return pane;
+    };
 
     const findMatchingPane = () => {
       if (normalizedKind === 'workqueue') {
@@ -10347,18 +11004,16 @@ const paneManager = {
           ? options.statusFilter
           : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
         scopeFilter: nextScopeFilter,
+        quickFilters: options?.quickFilters,
         groupMode: normalizeWorkqueueGroupMode(options?.groupMode),
+        sortKey: options?.sortKey,
+        sortDir: options?.sortDir,
         nickname: options?.nickname,
+        pairedTargetLock: !!options?.pairedTargetLock,
         closable: true
       });
-      this.panes.push(pane);
-      globalElements.paneGrid.appendChild(pane.elements.root);
-      this.updatePaneLabels();
-      this.updateCloseButtons();
-      this.applyInferredLayout();
-      this.persistAdminPanes();
-      this.focusPanePrimary(pane);
-      return pane;
+      insertCreatedPane(pane);
+      return finishCreatedPane(pane);
     }
 
     if (normalizedKind === 'cron' || normalizedKind === 'timeline') {
@@ -10370,36 +11025,32 @@ const paneManager = {
         nickname: options?.nickname,
         closable: true
       });
-      this.panes.push(pane);
-      globalElements.paneGrid.appendChild(pane.elements.root);
-      this.updatePaneLabels();
-      this.updateCloseButtons();
-      this.applyInferredLayout();
-      this.persistAdminPanes();
-      if (uiState.authed) {
-        pane.client.connect();
-      }
-      this.focusPanePrimary(pane);
-      return pane;
+      insertCreatedPane(pane);
+      return finishCreatedPane(pane, { connect: true });
     }
 
     const agentId = normalizeAgentId(options?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
-    const pane = createPane({ key: `p${randomId().slice(0, 8)}`, role: 'admin', kind: 'chat', agentId, nickname: options?.nickname, closable: true });
-    this.panes.push(pane);
-    globalElements.paneGrid.appendChild(pane.elements.root);
-    this.updatePaneLabels();
-    this.updateCloseButtons();
-    this.applyInferredLayout();
-    this.persistAdminPanes();
-    if (uiState.authed) {
-      pane.client.connect();
+    const pane = createPane({
+      key: `p${randomId().slice(0, 8)}`,
+      role: 'admin',
+      kind: 'chat',
+      agentId,
+      nickname: options?.nickname,
+      pairedTargetLock: !!options?.pairedTargetLock,
+      closable: true
+    });
+    if (typeof options?.restoreDraftText === 'string' && pane.elements?.input) {
+      pane.elements.input.value = options.restoreDraftText;
+      paneUpdateCommandHints(pane);
     }
-    this.focusPanePrimary(pane);
-    return pane;
+    insertCreatedPane(pane);
+    return finishCreatedPane(pane, { connect: true });
   },
   focusPanePrimary(pane) {
     if (!pane?.elements?.root) return;
+    const previousPaneKey = focusedPaneKey() || paneMruOrder()[0] || '';
     notePaneFocused(pane);
+    paneMarkSwitchSendGuard(pane, previousPaneKey);
 
     try {
       pane.elements.root.focus?.({ preventScroll: true });
@@ -10445,6 +11096,31 @@ const paneManager = {
     const kind = String(pane?.kind || '');
     if (!isAnchorPaneKind(kind)) return false;
     return this.panes.filter((entry) => String(entry?.kind || 'chat') === kind).length === 1;
+  },
+  maybeOfferCloseLossGuard(pane) {
+    if (pane?.kind !== 'chat') return false;
+    const hasDraft = paneHasUnsentDraft(pane);
+    const hasRun = paneHasActiveRun(pane);
+    if (!hasDraft && !hasRun) return false;
+
+    const message = hasRun
+      ? 'Closing this pane will stop an active run and discard any unsent text.'
+      : 'Closing this pane will discard unsent draft text.';
+
+    showToast(message, {
+      kind: 'error',
+      timeoutMs: 12000,
+      role: 'dialog',
+      ariaLabel: 'Close pane warning',
+      actionLabel: 'Close pane',
+      secondaryActionLabel: 'Cancel',
+      testId: 'pane-close-loss-guard-toast',
+      autoFocusAction: true,
+      onAction: () => this.removePane(pane.key, { skipCloseLossGuard: true }),
+      onSecondaryAction: () => {}
+    });
+
+    return true;
   },
   maybeOfferAnchorReplace(pane) {
     if (!this.isLastAnchorPane(pane)) return false;
@@ -10551,7 +11227,7 @@ const paneManager = {
         testId: 'pane-add-menu-timeline',
         title: 'New Timeline pane',
         subtitle: 'Timeline -> gateway',
-        shortcut: 'Shortcut: Ctrl/Cmd+Shift+T (Alt/Option+click = Open anyway)'
+        shortcut: 'Shortcut: Ctrl/Cmd+Shift+Y (Alt/Option+click = Open anyway)'
       });
 
       menu.appendChild(chatBtn);
@@ -10721,18 +11397,26 @@ const paneManager = {
     const idx = this.panes.findIndex((pane) => pane.key === key);
     if (idx < 0) return null;
     const targetKind = isAnchorPaneKind(kind) ? kind : 'chat';
-    const removed = this.removePane(key, { skipAnchorGuard: true, focusFallback: false });
+    const removed = this.removePane(key, { skipAnchorGuard: true, focusFallback: false, recordClosed: false });
     if (!removed) return null;
     return this.addPane(targetKind, { ...options, forceNew: true });
   },
-  removePane(key, { skipAnchorGuard = false, focusFallback = true, source = 'unknown' } = {}) {
+  removePane(key, {
+    skipAnchorGuard = false,
+    skipCloseLossGuard = false,
+    focusFallback = true,
+    source = 'unknown',
+    recordClosed = true
+  } = {}) {
     if (roleState.role !== 'admin') return;
     if (this.panes.length <= 1) return;
     const idx = this.panes.findIndex((pane) => pane.key === key);
     if (idx < 0) return;
     const candidate = this.panes[idx];
+    if (!skipCloseLossGuard && this.maybeOfferCloseLossGuard(candidate, { source })) return;
     if (!skipAnchorGuard && this.maybeOfferAnchorReplace(candidate, { source })) return;
     const [pane] = this.panes.splice(idx, 1);
+    if (recordClosed) this.pushClosedPaneSnapshot(pane, idx);
     forgetFocusedPaneKey(pane?.key || key);
     try {
       pane.client?.disconnect(true);
@@ -10848,6 +11532,10 @@ globalElements.settingsModal?.addEventListener('click', (event) => {
 });
 globalElements.paneSwitchHudEnabled?.addEventListener('change', () => {
   storage.set(PANE_SWITCH_HUD_ENABLED_KEY, globalElements.paneSwitchHudEnabled.checked ? '1' : '0');
+});
+globalElements.headerLabeledControlsEnabled?.addEventListener('change', () => {
+  storage.set(HEADER_LABELED_CONTROLS_ENABLED_KEY, globalElements.headerLabeledControlsEnabled.checked ? '1' : '0');
+  applyHeaderLabeledControlsSetting();
 });
 function handleShortcutOverrideInputKeydown(event) {
   const input = event.target?.closest?.('[data-shortcut-action]');
@@ -11017,6 +11705,7 @@ globalElements.agentsModal?.addEventListener('click', (event) => {
 });
 globalElements.agentsModal?.addEventListener('keydown', (event) => {
   if (isTypingContext(event.target)) return;
+  if (event.target instanceof Element && event.target.closest('button, a, input, select, textarea, summary')) return;
   const key = String(event.key || '');
   const lower = key.toLowerCase();
   if (matchesKeybind(event, 'triage.return')) {
@@ -11252,6 +11941,9 @@ function isNonTrivialGlobalShortcut(event) {
 
 function blockedGlobalShortcutReason(event) {
   if (!isNonTrivialGlobalShortcut(event)) return '';
+  const key = String(event.key || '');
+  const isQuestion = (key === '?' || (key === '/' && event.shiftKey)) && !event.metaKey && !event.ctrlKey && !event.altKey;
+  if (isQuestion && isAdminLocked()) return '';
   if (isAnyOverlayOpen()) return 'modal';
   if (isTypingContext(event.target) && !isTypingShortcutExempt(event)) return 'typing';
   if (hasPaneNumberLayoutMismatch(event)) return 'layout';
@@ -11314,9 +12006,15 @@ function closeTopmostOverlay() {
 function focusPaneIndex(idx, { trackMru = true, showHud = false } = {}) {
   const pane = paneManager.panes[idx];
   if (!pane) return;
+  const previousPaneKey = focusedPaneKey() || paneMruOrder()[0] || '';
   clearPaneUnread(pane);
   if (trackMru) notePaneFocused(pane);
-  else updateBrowserTitle(pane);
+  else {
+    rememberActivePaneKey(pane.key);
+    renderActivePaneState(pane);
+    updateBrowserTitle(pane);
+  }
+  paneMarkSwitchSendGuard(pane, previousPaneKey);
   if (showHud) showPaneSwitchHud(pane);
 
   try {
@@ -11574,13 +12272,33 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
+  // Reopen closed pane (admin-only)
+  if (matchesKeybind(event, 'pane.reopenClosed') && roleState.role === 'admin' && !isTypingContext(event.target) && !isAnyOverlayOpen()) {
+    event.preventDefault();
+    paneManager.closeAddPaneMenu();
+    paneManager.reopenLastClosedPane();
+    return;
+  }
+
   // Add-pane shortcuts (admin-only)
   // Ctrl/Cmd+Shift+C → new chat
   // Ctrl/Cmd+Shift+W → focus matching workqueue target (Alt/Option adds anyway)
   // Ctrl/Cmd+Shift+R → focus matching cron target (Alt/Option adds anyway)
-  // Ctrl/Cmd+Shift+T → focus matching timeline target (Alt/Option adds anyway)
+  // Ctrl/Cmd+Shift+Y → focus matching timeline target (Alt/Option adds anyway)
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey;
-  if (isAccel && roleState.role === 'admin' && !isTypingContext(event.target) && !isAnyOverlayOpen()) {
+  if (isAccel && roleState.role === 'admin' && !isAnyOverlayOpen()) {
+    if (matchesKeybind(event, 'workqueue.openForActiveChat')) {
+      event.preventDefault();
+      openWorkqueueForActiveChatAgent();
+      return;
+    }
+    if (matchesKeybindWithOptionalAlt(event, 'triage.return') && !event.altKey) {
+      event.preventDefault();
+      paneManager.closeAddPaneMenu();
+      returnToTriageSource();
+      return;
+    }
+    if (isTypingContext(event.target)) return;
     const addPaneShortcuts = [
       ['pane.addChat', 'chat'],
       ['pane.addWorkqueue', 'workqueue'],
@@ -11619,13 +12337,6 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Cmd/Ctrl+Shift+G targets the focused chat pane, so allow it from the chat input.
-  if (matchesKeybind(event, 'workqueue.openForActiveChat') && roleState.role === 'admin') {
-    event.preventDefault();
-    openWorkqueueForActiveChatAgent();
-    return;
-  }
-
   if (!event.defaultPrevented && roleState.role === 'admin') {
     const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
     const activePane = (paneManager?.panes || []).find((pane) => String(pane?.key || '') === activeKey);
@@ -11634,11 +12345,18 @@ window.addEventListener('keydown', (event) => {
     }
   }
 
+  const key = String(event.key || '');
+
+  const isQuestion = key === '?' || (key === '/' && event.shiftKey);
+  if (isAdminLocked() && isQuestion && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault();
+    openShortcuts();
+    return;
+  }
+
   // Never steal focus / override browser shortcuts while typing.
   if (isTypingContext(event.target)) return;
   if (isAnyOverlayOpen()) return;
-
-  const key = String(event.key || '');
 
   // Ctrl+Tab walks panes in most-recently-used order; Shift reverses the traversal.
   if (matchesKeybind(event, 'pane.mruNext') || matchesKeybind(event, 'pane.mruPrev')) {
@@ -11648,7 +12366,6 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  const isQuestion = key === '?' || (key === '/' && event.shiftKey);
   if (isQuestion && !event.metaKey && !event.ctrlKey && !event.altKey) {
     event.preventDefault();
     openShortcuts();
@@ -11829,7 +12546,7 @@ globalElements.layoutLockBtn?.addEventListener('click', () => {
 
 globalElements.paneManagerBtn?.addEventListener('click', (event) => {
   event?.preventDefault?.();
-  openPaneManager();
+  openPaneManager({ attentionOnly: !!event?.shiftKey });
 });
 
 globalElements.paneManagerCloseBtn?.addEventListener('click', () => closePaneManager());
@@ -11837,6 +12554,7 @@ globalElements.paneManagerCloseBtn?.addEventListener('click', () => closePaneMan
 globalElements.paneManagerSearch?.addEventListener('input', () => {
   paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
   paneManagerUiState.selectedIndex = 0;
+  paneManagerUiState.attentionOnly = false;
   renderPaneManager();
 });
 
@@ -11847,6 +12565,7 @@ globalElements.paneManagerSearch?.addEventListener('keydown', (event) => {
 globalElements.paneManagerUnreadOnly?.addEventListener('change', () => {
   paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
   paneManagerUiState.selectedIndex = 0;
+  paneManagerUiState.attentionOnly = false;
   renderPaneManager();
 });
 
@@ -11926,6 +12645,10 @@ globalElements.loginPassword?.addEventListener('keydown', (event) => {
 });
 
 globalElements.logoutBtn?.addEventListener('click', async () => {
+  if (!uiState.authed) {
+    showLogin();
+    return;
+  }
   try {
     await fetch('/auth/logout', { method: 'POST' });
   } catch {}
@@ -11938,6 +12661,12 @@ globalElements.logoutBtn?.addEventListener('click', async () => {
 globalElements.addPaneBtn?.addEventListener('click', (event) => {
   event?.preventDefault?.();
   paneManager.openAddPaneMenu(globalElements.addPaneBtn);
+});
+
+globalElements.activePaneChip?.addEventListener('click', () => {
+  const pane = activePaneFromState();
+  const idx = paneManager?.panes?.indexOf?.(pane) ?? -1;
+  if (idx >= 0) focusPaneIndex(idx, { showHud: true });
 });
 
 globalElements.addChatPaneBtn?.addEventListener('click', (event) => {

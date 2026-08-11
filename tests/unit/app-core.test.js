@@ -5,11 +5,14 @@ const {
   escapeHtml,
   fmtRemaining,
   formatWorkqueueIssueTitle,
+  getWorkqueueIssueKey,
+  summarizeWorkqueueIssueDuplicateDensity,
   summarizeExactWorkqueueDuplicateRows,
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
   normalizeAdminDestination,
+  paneNeedsAttention,
   deriveAuthOverlayState,
   deriveGlobalConnectionState,
   deriveDisconnectButtonState,
@@ -146,6 +149,42 @@ test('sortWorkqueueItems priority sort uses updatedAt desc tie-breaker', () => {
   assert.deepEqual(sorted.map((it) => it.id), ['c', 'b', 'a']);
 });
 
+test('workqueue canonical issue helpers calculate duplicate density', () => {
+  const items = [
+    {
+      id: 'old',
+      title: '[issue] rmdmattingly/clawnsole#320 Old',
+      updatedAt: '2026-03-01T00:00:00Z'
+    },
+    {
+      id: 'new',
+      title: 'Follow-up',
+      instructions: 'Repo: rmdmattingly/clawnsole\nIssue: #320',
+      updatedAt: '2026-03-02T00:00:00Z'
+    },
+    {
+      id: 'other',
+      title: 'Routine sweep',
+      updatedAt: '2026-03-03T00:00:00Z'
+    },
+    {
+      id: 'solo',
+      meta: { repo: 'RMDMATTINGLY/CLAWNSOLE', issueNumber: 321 },
+      title: 'Solo issue',
+      updatedAt: '2026-03-04T00:00:00Z'
+    }
+  ];
+
+  assert.equal(getWorkqueueIssueKey(items[0]), 'rmdmattingly/clawnsole#320');
+  assert.deepEqual(summarizeWorkqueueIssueDuplicateDensity(items), {
+    totalRows: 4,
+    issueRows: 3,
+    duplicateRows: 1,
+    duplicateGroups: 1,
+    density: 0.25
+  });
+});
+
 test('summarizeExactWorkqueueDuplicateRows collapses same dedupe key title and status only', () => {
   const items = [
     {
@@ -258,13 +297,18 @@ test('deriveAuthOverlayState captures auth/role transition flags', () => {
     principalLabel: 'Admin',
     environmentLabel: 'local',
     showAdminControls: true,
+    authActionText: 'Logout',
+    authActionLabel: 'Log out',
     logoutEnabled: true,
     logoutOpacity: '1'
   });
 
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).startAgentAutoRefresh, false);
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).rolePillText, 'Locked');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).showAdminControls, false);
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).authActionText, 'Unlock');
   assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest', environment: 'qa' }).rolePillText, 'Signed in - Guest - qa');
-  assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '0.5');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '1');
 });
 
 test('extractChatText converts attachment/file payloads to markdown links', () => {
@@ -317,7 +361,16 @@ test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard err
         { connected: false, statusState: 'reconnecting' }
       ]
     }),
-    { state: 'reconnecting', meta: 'panes: 1/2 connected' }
+    {
+      state: 'reconnecting',
+      meta: '1 connected · 1 disconnected · 1 attention',
+      connectedCount: 1,
+      disconnectedCount: 1,
+      unreadCount: 0,
+      attentionCount: 1,
+      total: 2,
+      ariaLabel: '1 of 2 panes connected; 1 disconnected; 0 unread items; 1 pane needs attention'
+    }
   );
 
   assert.deepEqual(
@@ -328,7 +381,41 @@ test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard err
         { connected: false, statusState: 'error', statusMeta: 'gateway disconnected' }
       ]
     }),
-    { state: 'error', meta: 'auth expired' }
+    {
+      state: 'error',
+      meta: '0 connected · 2 disconnected · 2 attention',
+      connectedCount: 0,
+      disconnectedCount: 2,
+      unreadCount: 0,
+      attentionCount: 2,
+      total: 2,
+      ariaLabel: '0 of 2 panes connected; 2 disconnected; 0 unread items; 2 panes need attention'
+    }
+  );
+});
+
+test('deriveGlobalConnectionState counts unread attention for screen readers', () => {
+  assert.equal(paneNeedsAttention({ connected: true, statusState: 'connected', unreadCount: 0 }), false);
+  assert.equal(paneNeedsAttention({ connected: true, statusState: 'connected', unreadCount: 2 }), true);
+
+  assert.deepEqual(
+    deriveGlobalConnectionState({
+      authed: true,
+      panes: [
+        { connected: true, statusState: 'connected', unreadCount: 2 },
+        { connected: true, statusState: 'connected', unreadCount: 0 }
+      ]
+    }),
+    {
+      state: 'connected',
+      meta: '2 connected · 0 disconnected · 1 attention',
+      connectedCount: 2,
+      disconnectedCount: 0,
+      unreadCount: 2,
+      attentionCount: 1,
+      total: 2,
+      ariaLabel: '2 of 2 panes connected; 0 disconnected; 2 unread items; 1 pane needs attention'
+    }
   );
 });
 

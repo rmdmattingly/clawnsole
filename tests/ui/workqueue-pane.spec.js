@@ -500,11 +500,12 @@ test('workqueue pane: default rows collapse exact duplicates with expandable mem
   await wqPane.locator('[data-wq-queue-custom]').fill(queue);
   await wqPane.locator('[data-wq-queue-custom]').press('Enter');
   await wqPane.locator('[data-wq-scope="all"]').click();
+  await wqPane.locator('[data-wq-group-mode="rows"]').click();
 
   const rows = wqPane.locator('[data-wq-list-body] .wq-row');
   const duplicateRow = wqPane.locator('[data-wq-duplicate-row]').first();
 
-  await expect(wqPane.locator('[data-wq-group-mode="auto"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(wqPane.locator('[data-wq-group-mode="rows"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 4 items');
   await expect(rows).toHaveCount(3);
   await expect(duplicateRow).toContainText('x2');
@@ -709,12 +710,9 @@ test('workqueue pane: normalizes mixed legacy issue title prefixes', async ({ pa
   await pane.locator('[data-wq-queue-custom]').fill(queue);
   await pane.locator('[data-wq-queue-custom]').press('Enter');
 
-  await expect(pane.locator('.wq-row')).toHaveCount(3);
-  await expect(pane.locator('.wq-row .wq-col.title')).toHaveText([
-    '[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles',
-    '[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles',
-    '[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles'
-  ]);
+  await expect(pane.locator('.wq-row')).toHaveCount(1);
+  await expect(pane.locator('.wq-row .wq-col.title')).toContainText('[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles');
+  await expect(pane.locator('.wq-row .wq-group-count')).toContainText('3 rows');
 });
 
 test('workqueue pane: long table titles stay discoverable on hover and focus', async ({ page }) => {
@@ -802,6 +800,7 @@ test('workqueue pane: duplicate health summary cleans legacy issue duplicates', 
   await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
   await pane.locator('[data-wq-queue-custom]').fill(queue);
   await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-group-mode="rows"]').click();
   await expect(pane.locator('[data-wq-statusline]')).toContainText('4 item');
 
   const duplicateHealth = pane.locator('[data-wq-duplicate-health]');
@@ -837,9 +836,10 @@ test('workqueue pane: default rows auto-collapse exact duplicates with count and
   await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
   await pane.locator('[data-wq-queue-custom]').fill(queue);
   await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-group-mode="rows"]').click();
 
   const duplicateRow = pane.locator('[data-wq-duplicate-row]').first();
-  await expect(pane.locator('[data-wq-group-mode="auto"]')).toHaveClass(/active/);
+  await expect(pane.locator('[data-wq-group-mode="rows"]')).toHaveClass(/active/);
   await expect(duplicateRow).toBeVisible();
   await expect(duplicateRow).toContainText('x2');
   await expect(duplicateRow).toHaveAttribute('data-wq-item', 'exact-dup-latest');
@@ -867,6 +867,7 @@ test('workqueue pane: grouped mode collapses duplicate issue rows and expands ch
   await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
   await pane.locator('[data-wq-queue-custom]').fill(queue);
   await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-group-mode="rows"]').click();
 
   await expect(pane.locator('.wq-row')).toHaveCount(4);
   await pane.locator('[data-wq-group-mode="grouped"]').click();
@@ -892,19 +893,49 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
 
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
+  const queue = `sticky-scroll-${Date.now()}`;
+  const stateDir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const now = new Date().toISOString();
+  const items = Array.from({ length: 40 }, (_, ix) => ({
+    id: `sticky-${ix}`,
+    queue,
+    title: `sticky header item ${String(ix).padStart(2, '0')}`,
+    instructions: 'fixture item',
+    priority: ix,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: now,
+    updatedAt: now
+  }));
+  fs.writeFileSync(
+    path.join(stateDir, 'work-queues.json'),
+    JSON.stringify({ version: 1, queues: { [queue]: { name: queue, createdAt: now } }, items, assignments: {} }, null, 2)
+  );
+
   await loginAdmin(page, env.serverPort);
   await addPane(page, 'Workqueue pane');
 
   const wqPane = page.locator('[data-pane]').last();
   const toolbar = wqPane.locator('.wq-pane .wq-toolbar');
+  const list = wqPane.locator('.wq-pane .wq-list').first();
+  const listHeader = wqPane.locator('.wq-pane .wq-list-header').first();
   const listBody = wqPane.locator('.wq-pane [data-wq-list-body]').first();
 
   await expect(toolbar).toBeVisible();
+  await expect(list).toBeVisible();
+  await expect(listHeader).toBeVisible();
   await expect(listBody).toHaveCount(1);
 
+  await wqPane.locator('[data-wq-queue-select]').selectOption(queue);
   const itemsResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
   await wqPane.locator('[data-wq-refresh]').click();
   await itemsResP;
+  await expect(wqPane.locator('.wq-row')).toHaveCount(40);
 
   const styles = await toolbar.evaluate((el) => {
     const cs = window.getComputedStyle(el);
@@ -921,11 +952,34 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
   expect(Number(styles.zIndex)).toBeGreaterThanOrEqual(5);
   expect(styles.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
 
-  const listStyles = await listBody.evaluate((el) => {
+  const listStyles = await list.evaluate((el) => {
     const cs = window.getComputedStyle(el);
     return { overflowY: cs.overflowY };
   });
   expect(['auto', 'scroll']).toContain(listStyles.overflowY);
+
+  const headerStyles = await listHeader.evaluate((el) => {
+    const cs = window.getComputedStyle(el);
+    return {
+      position: cs.position,
+      top: cs.top,
+      zIndex: cs.zIndex,
+      backgroundColor: cs.backgroundColor
+    };
+  });
+  expect(headerStyles.position).toBe('sticky');
+  expect(headerStyles.top).toBe('0px');
+  expect(Number(headerStyles.zIndex)).toBeGreaterThanOrEqual(3);
+  expect(headerStyles.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+
+  const before = await listHeader.boundingBox();
+  await list.evaluate((el) => { el.scrollTop = 260; });
+  await expect.poll(async () => list.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  const after = await listHeader.boundingBox();
+  expect(Math.abs((after?.y || 0) - (before?.y || 0))).toBeLessThanOrEqual(1);
+
+  await listHeader.locator('[data-wq-sort="title"]').click();
+  await expect(listHeader.locator('[data-wq-sort="title"]')).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('workqueue pane: large queues render an initial capped slice and load more incrementally', async ({ page }) => {

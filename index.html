@@ -40,6 +40,18 @@
               data-testid="panes-indicator"
             ></button>
           </div>
+          <button
+            id="activePaneChip"
+            class="active-pane-chip"
+            type="button"
+            aria-label="Focus active pane"
+            title="Focus active pane"
+            data-testid="active-pane-chip"
+            hidden
+          >
+            <span class="active-pane-chip__label">Active</span>
+            <span class="active-pane-chip__value" data-active-pane-chip-value></span>
+          </button>
           <div id="paneControls" class="pane-controls" hidden>
             <div class="pane-add-wrap">
               <button id="addPaneBtn" class="icon-btn action-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add pane" title="Add Pane (Ctrl/Cmd+Shift+N)" data-testid="add-pane-btn">
@@ -91,16 +103,17 @@
             <span class="btn-icon" aria-hidden="true">WQ</span>
             <span class="btn-label">Workqueue</span>
           </button>
-          <button id="shortcutsBtn" class="icon-btn" type="button" aria-label="Open keyboard shortcuts" title="Keyboard shortcuts (?)" hidden data-testid="shortcuts-btn">
-            ?
+          <button id="shortcutsBtn" class="icon-btn action-btn" type="button" aria-label="Open keyboard shortcuts" title="Keyboard shortcuts (?)" hidden data-testid="shortcuts-btn">
+            <span class="btn-icon" aria-hidden="true">?</span>
+            <span class="btn-label">Shortcuts</span>
           </button>
           <button id="settingsBtn" class="icon-btn action-btn" type="button" aria-label="Open settings" title="Settings">
             <span class="btn-icon" aria-hidden="true">⚙︎</span>
             <span class="btn-label">Settings</span>
           </button>
-          <button id="logoutBtn" class="icon-btn action-btn" type="button" aria-label="Log out" title="Logout">
+          <button id="logoutBtn" class="icon-btn action-btn" type="button" aria-label="Unlock admin" title="Unlock">
             <span class="btn-icon" aria-hidden="true">⎋</span>
-            <span class="btn-label">Logout</span>
+            <span class="btn-label">Unlock</span>
           </button>
         </div>
       </header>
@@ -139,6 +152,7 @@
                 <button class="pane-agent-pill" data-pane-agent-pill data-pane-target-lock type="button" data-testid="pane-target-lock" hidden></button>
                 <div class="pane-agent-warning" data-pane-agent-warning hidden></div>
 
+                <div class="pane-draft-badge" data-pane-draft-badge data-testid="pane-draft-badge" hidden aria-live="polite" aria-label="No unsent draft">Draft</div>
                 <details class="pane-help" data-pane-help>
                   <summary class="icon-btn" type="button" aria-label="What is this pane?" data-testid="pane-help">?</summary>
                   <div class="pane-help-popover" data-pane-help-popover></div>
@@ -470,6 +484,7 @@
 
           <div id="agentsList" class="agents-list" aria-label="Agent list"></div>
           <div id="agentsEmpty" class="hint" hidden>No agents match.</div>
+          <div id="agentsSelectionBar" class="agents-selection-bar" aria-live="polite" hidden></div>
         </div>
       </div>
     </div>
@@ -508,6 +523,14 @@
             <label class="inline-checkbox">
               <input id="paneSwitchHudEnabled" type="checkbox" checked />
               Show pane-switch HUD
+            </label>
+          </section>
+
+          <section class="settings-section" aria-label="Header controls">
+            <h3>Header controls</h3>
+            <label class="inline-checkbox">
+              <input id="headerLabeledControlsEnabled" type="checkbox" checked />
+              Labeled header controls
             </label>
           </section>
 
