@@ -255,6 +255,16 @@ const normalizePaneKind = __appCore.normalizePaneKind || ((rawKind) => {
             ? 'timeline'
             : 'chat';
 });
+const normalizeWorkqueueScope = __appCore.normalizeWorkqueueScope || ((scope) => {
+  const s = String(scope || '').trim().toLowerCase();
+  return s === 'assigned' || s === 'unassigned' ? s : 'all';
+});
+const deriveDefaultWorkqueueScope = __appCore.deriveDefaultWorkqueueScope || (({ explicitScope, explicitAgentId, storedDefault = 'unassigned' } = {}) => {
+  if (explicitScope !== undefined && explicitScope !== null && String(explicitScope).trim()) {
+    return normalizeWorkqueueScope(explicitScope);
+  }
+  return String(explicitAgentId || '').trim() ? 'assigned' : normalizeWorkqueueScope(storedDefault || 'unassigned');
+});
 const normalizeAdminDestination = __appCore.normalizeAdminDestination || ((candidate, { origin = '', now = Date.now(), ttlMs = 10 * 60 * 1000 } = {}) => {
   const value = candidate && typeof candidate === 'object' ? candidate : {};
   const href = typeof value.href === 'string' ? value.href.trim() : '';
@@ -784,9 +794,10 @@ function buildDefaultAdminPanes(defaultAgent = 'main') {
     {
       key: `p${randomId().slice(0, 8)}`,
       kind: 'workqueue',
+      agentId,
       queue: 'dev-team',
       statusFilter: ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
-      scopeFilter: getDefaultWorkqueueScope(),
+      scopeFilter: getInitialWorkqueueScope({ explicitAgentId: agentId }),
       sortKey: 'priority',
       sortDir: 'desc'
     }
@@ -7594,13 +7605,17 @@ const ADMIN_LAYOUT_MODE_KEY = 'clawnsole.admin.layoutMode';
 const ADMIN_DEFAULT_AGENT_KEY = 'clawnsole.admin.agentId';
 const WORKQUEUE_SCOPE_PREF_KEY = 'clawnsole.admin.workqueue.scope.v1';
 
-function normalizeWorkqueueScope(scope) {
-  return scope === 'assigned' || scope === 'unassigned' ? scope : 'all';
-}
-
 function getDefaultWorkqueueScope() {
   // Low-noise triage default: focus on unassigned work first.
   return normalizeWorkqueueScope(storage.get(WORKQUEUE_SCOPE_PREF_KEY, 'unassigned'));
+}
+
+function getInitialWorkqueueScope({ explicitScope, explicitAgentId } = {}) {
+  return deriveDefaultWorkqueueScope({
+    explicitScope,
+    explicitAgentId,
+    storedDefault: storage.get(WORKQUEUE_SCOPE_PREF_KEY, 'unassigned')
+  });
 }
 
 function computeBaseDeviceLabel() {
@@ -9111,7 +9126,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
-      scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScope()),
+      scopeFilter: getInitialWorkqueueScope({ explicitScope: scopeFilter, explicitAgentId: agentId }),
       quickFilters: {
         sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
         repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : [],
@@ -10809,7 +10824,10 @@ const paneManager = {
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'];
-          const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
+          const scopeFilter = getInitialWorkqueueScope({
+            explicitScope: item.scopeFilter,
+            explicitAgentId: item.agentId
+          });
           const quickFilters = {
             sources: Array.isArray(item?.quickFilters?.sources) ? item.quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
             repos: Array.isArray(item?.quickFilters?.repos) ? item.quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : [],
@@ -10993,7 +11011,10 @@ const paneManager = {
     const nextQueue = String(options?.queue || 'dev-team').trim() || 'dev-team';
     const nextAgentId = normalizeAgentId(options?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
     const nextCronAgentId = String(options?.cronAgentId || '').trim();
-    const nextScopeFilter = normalizeWorkqueueScope(options?.scopeFilter ?? getDefaultWorkqueueScope());
+    const nextScopeFilter = getInitialWorkqueueScope({
+      explicitScope: options?.scopeFilter,
+      explicitAgentId: Object.prototype.hasOwnProperty.call(options || {}, 'agentId') ? options?.agentId : ''
+    });
     const forceNew = Boolean(options?.forceNew);
     const insertCreatedPane = (pane) => {
       const rawIndex = Number(options?.insertIndex);

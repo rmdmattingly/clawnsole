@@ -560,6 +560,7 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue(agentId || 'main');
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-scope="assigned"]')).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('agents modal can return to previous triage context after opening workqueue', async ({ page, clawnsole }) => {
@@ -641,6 +642,7 @@ test('agents modal triage action opens chat and workqueue from non-chat layout',
   await expect(page.locator('[data-pane][data-pane-kind="chat"] [data-pane-agent-select]')).toHaveValue('alpha');
   const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
   await expect(wqPane.locator('[data-wq-claim-agent]')).toHaveValue('alpha');
+  await expect(wqPane.locator('[data-wq-scope="assigned"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
 });
 

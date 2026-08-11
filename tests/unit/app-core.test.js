@@ -11,6 +11,8 @@ const {
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
+  normalizeWorkqueueScope,
+  deriveDefaultWorkqueueScope,
   normalizeAdminDestination,
   paneNeedsAttention,
   deriveAuthOverlayState,
@@ -279,6 +281,25 @@ test('normalizePaneKind handles aliases safely', () => {
   assert.equal(normalizePaneKind('timeline'), 'timeline');
   assert.equal(normalizePaneKind('ti'), 'timeline');
   assert.equal(normalizePaneKind('x'), 'chat');
+});
+
+test('deriveDefaultWorkqueueScope prefers assigned for explicit workqueue agent targets', () => {
+  assert.equal(normalizeWorkqueueScope('assigned'), 'assigned');
+  assert.equal(normalizeWorkqueueScope('UNASSIGNED'), 'unassigned');
+  assert.equal(normalizeWorkqueueScope('unknown'), 'all');
+
+  assert.equal(
+    deriveDefaultWorkqueueScope({ explicitAgentId: 'hop', storedDefault: 'unassigned' }),
+    'assigned'
+  );
+  assert.equal(
+    deriveDefaultWorkqueueScope({ explicitAgentId: '', storedDefault: 'unassigned' }),
+    'unassigned'
+  );
+  assert.equal(
+    deriveDefaultWorkqueueScope({ explicitAgentId: 'hop', explicitScope: 'all', storedDefault: 'unassigned' }),
+    'all'
+  );
 });
 
 test('deriveAuthOverlayState captures auth/role transition flags', () => {
