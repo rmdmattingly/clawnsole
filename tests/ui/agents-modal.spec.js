@@ -358,7 +358,9 @@ test('fleet refresh keeps scroll anchor and keyboard triage selection', async ({
       .evaluateAll((els) => els.map((el) => el.value))
   )).toContain('agent-20');
 
-  await reopenedRow20.focus();
+  await page.waitForTimeout(350);
+  await reopenedRow20.click();
+  await expect(reopenedRow20).toBeFocused();
   const timelineCountBeforePeriod = await page.locator('[data-pane][data-pane-kind="timeline"]').count();
   await page.keyboard.press('.');
   await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(timelineCountBeforePeriod + 1);
