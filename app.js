@@ -6384,24 +6384,30 @@ function getWorkqueueQuickFilterBreakdown(items, quickFilters) {
     current = next;
   }
   if (search) {
-    const next = current.filter((it) => {
-      const haystack = [
-        it?.id,
-        it?.title,
-        it?.instructions,
-        it?.dedupeKey,
-        it?.status,
-        it?.claimedBy,
-        getWorkqueueItemRepo(it),
-        getWorkqueueItemSource(it)
-      ].map((v) => String(v || '').toLowerCase()).join('\n');
-      return haystack.includes(search);
-    });
+    const next = current.filter((it) => workqueueItemMatchesSearch(it, search));
     hidden.search = current.length - next.length;
     current = next;
   }
 
   return { items: current, hidden };
+}
+
+function workqueueItemMatchesSearch(item, search) {
+  const query = String(search || '').trim().toLowerCase();
+  if (!query) return true;
+  const meta = item?.meta && typeof item.meta === 'object' ? item.meta : {};
+  const haystack = [
+    item?.id,
+    item?.title,
+    item?.instructions,
+    item?.dedupeKey,
+    item?.status,
+    item?.claimedBy,
+    getWorkqueueItemRepo(item),
+    getWorkqueueItemSource(item),
+    JSON.stringify(meta)
+  ].map((v) => String(v || '').toLowerCase()).join('\n');
+  return haystack.includes(query);
 }
 
 function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount, hiddenCounts } = {}) {
@@ -6892,8 +6898,9 @@ function renderWorkqueuePaneItems(pane) {
       const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
       const statusLabel = statuses.length ? statuses.join(', ') : 'default';
       const scopeLabel = pane.workqueue?.scopeFilter || 'all';
+      const itemSearch = String(pane.workqueue?.quickFilters?.search || '').trim();
       const filtersHidingAll = totalCount > 0;
-      const title = filtersHidingAll ? 'No items match current filters.' : 'No items in this queue.';
+      const title = itemSearch ? `No items match "${itemSearch}".` : (filtersHidingAll ? 'No items match current filters.' : 'No items in this queue.');
       const hiddenSummary = formatWorkqueueHiddenBreakdown(hiddenCounts);
       empty.innerHTML = `
         <div class="empty-state">
@@ -6901,6 +6908,7 @@ function renderWorkqueuePaneItems(pane) {
           <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
           ${filtersHidingAll ? `<div class="hint" style="margin-top:6px;">Showing 0 of <span class="mono">${escapeHtml(String(totalCount))}</span> items${hiddenSummary ? ` · ${escapeHtml(hiddenSummary)}` : ''}.</div>` : ''}
           <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            ${itemSearch ? '<button type="button" class="secondary" data-wq-empty-clear-search>Clear item search</button>' : ''}
             <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
             <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
           </div>
@@ -6911,6 +6919,7 @@ function renderWorkqueuePaneItems(pane) {
       const refreshBtn = pane.elements?.thread?.querySelector('[data-wq-refresh]');
       const enqueueDetails = pane.elements?.thread?.querySelector('details.wq-enqueue');
       empty.querySelector('[data-wq-empty-refresh]')?.addEventListener('click', () => refreshBtn?.click());
+      empty.querySelector('[data-wq-empty-clear-search]')?.addEventListener('click', () => pane.workqueue?.setQuickSearch?.(''));
       empty.querySelector('[data-wq-empty-enqueue]')?.addEventListener('click', () => {
         try {
           enqueueDetails?.setAttribute('open', '');
@@ -9347,8 +9356,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       <div class="wq-toolbar">
         <div class="wq-toolbar-row">
           <label class="wq-field">
-            <span class="wq-label">Queue</span>
-            <input data-wq-queue-search type="search" placeholder="Search queues" aria-label="Search queues" autocomplete="off" />
+            <span class="wq-label">Queue target</span>
+            <input data-wq-queue-search type="search" placeholder="Filter queue list..." aria-label="Filter queue list" autocomplete="off" />
             <select data-wq-queue-select aria-label="Select workqueue target"></select>
             <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
           </label>
@@ -9397,8 +9406,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           </div>
 
           <label class="wq-field wq-search-field">
-            <span class="wq-label">Search</span>
-            <input data-wq-search type="search" placeholder="Filter tasks" autocomplete="off" />
+            <span class="wq-label">Search items</span>
+            <input data-wq-search data-wq-item-search type="search" placeholder="Search items..." aria-label="Search items" autocomplete="off" />
           </label>
 
           <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
@@ -12428,6 +12437,24 @@ window.addEventListener('keydown', (event) => {
   if (!event.defaultPrevented && roleState.role === 'admin') {
     const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
     const activePane = (paneManager?.panes || []).find((pane) => String(pane?.key || '') === activeKey);
+    if (
+      activePane?.kind === 'workqueue' &&
+      String(event.key || '') === '/' &&
+      !event.shiftKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !isTypingContext(event.target) &&
+      !isAnyOverlayOpen()
+    ) {
+      const itemSearch = activePane.elements?.thread?.querySelector?.('[data-wq-item-search]');
+      if (itemSearch) {
+        event.preventDefault();
+        itemSearch.focus();
+        itemSearch.select?.();
+        return;
+      }
+    }
     if (activePane?.kind === 'workqueue' && activePane?.workqueue?.keyboardMode) {
       if (handleWorkqueuePaneKeyboard(event, activePane)) return;
     }
