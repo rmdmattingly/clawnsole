@@ -477,7 +477,9 @@ const KEYBIND_CATALOG = [
   { id: 'fleet.sortHeartbeatGlobal', group: 'Fleet actions', label: 'Open Fleet sorted by heartbeat age', binding: { accel: true, shift: true, key: 'h', display: 'Cmd/Ctrl+Shift+H' } },
   { id: 'fleet.next', group: 'Fleet actions', label: 'Move Fleet selection down', binding: { key: 'j', display: 'J / Down' } },
   { id: 'fleet.prev', group: 'Fleet actions', label: 'Move Fleet selection up', binding: { key: 'k', display: 'K / Up' } },
-  { id: 'fleet.runSelected', group: 'Fleet actions', label: 'Run selected Fleet agent', binding: { key: 'Enter', display: 'Enter' } },
+  { id: 'fleet.openChatSelected', group: 'Fleet actions', label: 'Open Chat for selected Fleet agent', binding: { key: 'Enter', display: 'Enter' } },
+  { id: 'fleet.openWorkqueueSelected', group: 'Fleet actions', label: 'Open Workqueue for selected Fleet agent', binding: { key: 'Enter', shift: true, display: 'Shift+Enter' } },
+  { id: 'fleet.openTimelineSelected', group: 'Fleet actions', label: 'Open Timeline for selected Fleet agent', binding: { key: '.', display: '.' } },
   { id: 'fleet.toggleHeartbeatSort', group: 'Fleet actions', label: 'Toggle Fleet heartbeat age sort', binding: { key: 'h', display: 'H / Shift+H' } }
 ];
 
@@ -5511,6 +5513,7 @@ function runFleetSelectedAgent(mode = 'chat') {
   const id = String(fleetSelectionState.selectedAgentId || '').trim();
   if (!id) return false;
   if (mode === 'workqueue') openAgentWorkqueueFromFleet(id);
+  else if (mode === 'timeline') openAgentTimelineFromFleet(id);
   else openAgentChatFromFleet(id);
   return true;
 }
@@ -11805,6 +11808,11 @@ globalElements.agentsModal?.addEventListener('keydown', (event) => {
     if (key === 'Enter') {
       event.preventDefault();
       runFleetSelectedAgent(event.shiftKey ? 'workqueue' : 'chat');
+      return;
+    }
+    if (key === '.') {
+      event.preventDefault();
+      runFleetSelectedAgent('timeline');
       return;
     }
   }
