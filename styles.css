@@ -2663,6 +2663,21 @@ kbd {
   gap: 8px;
 }
 
+.wq-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.wq-archive-toggle.active,
+.wq-status-presets .secondary.active {
+  border-color: rgba(127, 209, 185, 0.5);
+  background: rgba(127, 209, 185, 0.14);
+  color: var(--text);
+}
+
 .wq-autorefresh {
   display: flex;
   align-items: center;

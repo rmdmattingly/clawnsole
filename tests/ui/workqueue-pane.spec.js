@@ -195,6 +195,44 @@ function seedExactDuplicateWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedArchivedToggleWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, status, title) => ({
+    id,
+    queue,
+    title,
+    instructions: 'archived toggle regression',
+    priority: 10,
+    status,
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-60000),
+    updatedAt: iso(-60000),
+    dedupeKey: `archived-toggle-${id}`
+  });
+
+  const data = {
+    version: 1,
+    queues: {
+      'dev-team': { name: 'dev-team', createdAt: iso(-120000) },
+      [queue]: { name: queue, createdAt: iso(-120000) }
+    },
+    assignments: {},
+    items: [
+      mkItem('archived-ready', 'ready', 'archived toggle ready row'),
+      mkItem('archived-done', 'done', 'archived toggle done row'),
+      mkItem('archived-failed', 'failed', 'archived toggle failed row')
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 test('workqueue pane: default agent-targeted layout starts assigned and remains overridable', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -254,6 +292,45 @@ test('workqueue pane: default agent-targeted layout starts assigned and remains 
   await allBtn.click();
   await expect(allBtn).toHaveAttribute('aria-pressed', 'true');
   await expect(rows).toHaveCount(2);
+});
+
+test('workqueue pane: new panes default to non-terminal statuses with archived toggle', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `pane-archived-${Date.now()}`;
+  seedArchivedToggleWorkqueueItems(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  const defaultPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await defaultPane.locator('[data-wq-queue-select]').selectOption(queue);
+  await expect(defaultPane.locator('[data-wq-statusline]')).toContainText('Showing 1 of 3 items');
+  await expect(defaultPane.locator('[data-wq-list-body]')).toContainText('archived toggle ready row');
+  await expect(defaultPane.locator('[data-wq-list-body]')).not.toContainText('archived toggle done row');
+
+  await addPane(page, 'Workqueue pane');
+  const newPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await newPane.locator('[data-wq-queue-select]').selectOption(queue);
+  await expect(newPane.locator('[data-wq-statusline]')).toContainText('Showing 1 of 3 items');
+  await expect(newPane.locator('[data-wq-list-body]')).not.toContainText('archived toggle failed row');
+
+  await newPane.locator('[data-wq-status-details] summary').click();
+  const archivedToggle = newPane.locator('[data-wq-status-preset="all"]');
+  await expect(newPane.locator('[data-wq-archive-hint]')).toHaveText('Archived done/failed items hidden.');
+  await expect(archivedToggle).toHaveText('Show archived');
+  await expect(archivedToggle).toHaveAttribute('aria-pressed', 'false');
+
+  await archivedToggle.click();
+  await expect(newPane.locator('[data-wq-statusline]')).toContainText('3 item');
+  await expect(newPane.locator('[data-wq-list-body]')).toContainText('archived toggle done row');
+  await expect(newPane.locator('[data-wq-list-body]')).toContainText('archived toggle failed row');
+
+  await newPane.locator('[data-wq-status-details] summary').click();
+  await expect(archivedToggle).toHaveText('Hide archived');
+  await expect(archivedToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(newPane.locator('[data-wq-archive-hint]')).toHaveText('Archived done/failed items shown.');
 });
 
 function seedLargeRoutineWorkqueueItems(queue) {
