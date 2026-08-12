@@ -426,8 +426,9 @@
         <div class="modal-body">
           <div class="agents-toolbar">
             <div class="agents-refresh-state">
-              <span id="agentsLastRefreshed" class="agents-last-refreshed" aria-live="polite">Last refreshed: never</span>
+              <span id="agentsLastRefreshed" class="agents-last-refreshed" role="status" aria-live="polite" aria-atomic="true">Last updated: never</span>
               <span id="agentsRefreshPaused" class="agents-refresh-paused" aria-live="polite" hidden></span>
+              <button id="agentsRefreshStateBtn" type="button" class="secondary agents-refresh-state-btn" aria-label="Refresh Fleet">Refresh</button>
             </div>
             <label class="agents-field">
               <span class="agents-label">Search</span>

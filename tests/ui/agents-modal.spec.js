@@ -70,8 +70,40 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await page.getByRole('button', { name: 'Open agents' }).click();
   await expect(page.locator('#agentsModal')).toHaveClass(/open/);
 
-  await expect(page.locator('#agentsLastRefreshed')).toContainText('Last refreshed:');
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Last updated:');
   await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText(/\d+[smhd]/);
+});
+
+test('agents modal marks stale fleet data and supports header refresh parity', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({ alpha: Date.now() - 11 * 60_000 }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const row = page.locator('#agentsList .agents-row').filter({ hasText: 'Alpha (alpha)' });
+  await expect(row).toHaveClass(/is-stale/);
+  await expect(row.locator('.agents-health-state-chip')).toHaveText('Stale');
+
+  await page.evaluate(() => window.__debug.setAgentsLastRefreshedAtMs(Date.now() - 70_000));
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Stale');
+
+  agents = [{ id: 'beta', name: 'Beta', displayName: 'Beta' }];
+  await page.getByRole('button', { name: 'Refresh Fleet' }).click();
+  await expect(page.locator('#agentsList')).toContainText('Beta (beta)');
+
+  agents = [{ id: 'gamma', name: 'Gamma', displayName: 'Gamma' }];
+  await page.keyboard.press('r');
+  await expect(page.locator('#agentsList')).toContainText('Gamma (gamma)');
 });
 
 test('agents modal defers auto-refresh while a fleet row is active, then catches up once', async ({ page, clawnsole }) => {
