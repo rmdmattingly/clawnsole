@@ -75,6 +75,8 @@ const globalElements = {
   workqueueCloseBtn: document.getElementById('workqueueCloseBtn'),
   wqQueueSelect: document.getElementById('wqQueueSelect'),
   wqStatusFilters: document.getElementById('wqStatusFilters'),
+  wqShowArchivedBtn: document.getElementById('wqShowArchivedBtn'),
+  wqArchivedHint: document.getElementById('wqArchivedHint'),
   wqAutoRefreshEnabled: document.getElementById('wqAutoRefreshEnabled'),
   wqAutoRefreshInterval: document.getElementById('wqAutoRefreshInterval'),
   wqRefreshBtn: document.getElementById('wqRefreshBtn'),
@@ -5521,6 +5523,8 @@ function runFleetSelectedAgent(mode = 'chat') {
 // Workqueue (admin-only)
 
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress', 'done', 'failed'];
+const WORKQUEUE_ACTIVE_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress'];
+const WORKQUEUE_TERMINAL_STATUSES = ['done', 'failed'];
 const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
 const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
 const WORKQUEUE_CANONICAL_DENSITY_THRESHOLD = 0.2;
@@ -5583,7 +5587,7 @@ function getWorkqueueAllScopeGuardThreshold() {
 const workqueueState = {
   queues: [],
   selectedQueue: '',
-  statusFilter: new Set(['ready', 'pending', 'blocked', 'claimed', 'in_progress']),
+  statusFilter: new Set(WORKQUEUE_ACTIVE_STATUSES),
   statusCounts: Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0])),
   items: [],
   selectedItemId: null,
@@ -5596,6 +5600,11 @@ const workqueueState = {
   autoRefreshTimer: null,
   sortingBootstrapped: false
 };
+
+function workqueueIncludesArchived(statuses) {
+  const set = new Set((Array.isArray(statuses) ? statuses : Array.from(statuses || [])).map((s) => String(s || '').trim()));
+  return WORKQUEUE_TERMINAL_STATUSES.every((s) => set.has(s));
+}
 
 function openWorkqueue() {
   if (roleState.role !== 'admin') return;
@@ -5614,6 +5623,15 @@ function closeWorkqueue({ restoreFocus = true } = {}) {
 function renderWorkqueueStatusFilters() {
   const root = globalElements.wqStatusFilters;
   if (!root) return;
+  const archivedShown = workqueueIncludesArchived(workqueueState.statusFilter);
+  if (globalElements.wqShowArchivedBtn) {
+    globalElements.wqShowArchivedBtn.textContent = archivedShown ? 'Hide archived' : 'Show archived';
+    globalElements.wqShowArchivedBtn.classList.toggle('active', archivedShown);
+    globalElements.wqShowArchivedBtn.setAttribute('aria-pressed', archivedShown ? 'true' : 'false');
+  }
+  if (globalElements.wqArchivedHint) {
+    globalElements.wqArchivedHint.textContent = archivedShown ? 'Archived done/failed items shown.' : 'Archived done/failed items hidden.';
+  }
   root.innerHTML = '';
   for (const s of WORKQUEUE_STATUSES) {
     const id = `wq-status-${s}`;
@@ -5630,6 +5648,18 @@ function renderWorkqueueStatusFilters() {
     });
     root.appendChild(label);
   }
+}
+
+async function toggleWorkqueueModalArchived() {
+  const archivedShown = workqueueIncludesArchived(workqueueState.statusFilter);
+  if (archivedShown) {
+    for (const s of WORKQUEUE_TERMINAL_STATUSES) workqueueState.statusFilter.delete(s);
+  } else {
+    for (const s of WORKQUEUE_ACTIVE_STATUSES) workqueueState.statusFilter.add(s);
+    for (const s of WORKQUEUE_TERMINAL_STATUSES) workqueueState.statusFilter.add(s);
+  }
+  renderWorkqueueStatusFilters();
+  await fetchAndRenderWorkqueueItems();
 }
 
 function ensureWorkqueueModalSorting() {
@@ -9135,7 +9165,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
-      statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
+      statusFilter: Array.isArray(statusFilter) ? statusFilter : Array.from(WORKQUEUE_ACTIVE_STATUSES),
       scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScopeForTarget(agentId)),
       quickFilters: {
         sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
@@ -9364,9 +9394,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
                     <button type="button" class="secondary" data-wq-status-preset="default">Default</button>
                     <button type="button" class="secondary" data-wq-status-preset="open">Open</button>
                     <button type="button" class="secondary" data-wq-status-preset="active">Active</button>
-                    <button type="button" class="secondary" data-wq-status-preset="all">All</button>
+                    <button type="button" class="secondary" data-wq-status-preset="all" aria-pressed="false">Show archived</button>
                     <button type="button" class="secondary" data-wq-status-clear>Clear</button>
                   </div>
+                  <div class="hint wq-archive-hint" data-wq-archive-hint>Archived done/failed items hidden.</div>
                   <div class="wq-status-filters" data-wq-status-options></div>
                 </div>
               </details>
@@ -9523,6 +9554,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const statusOptionsEl = elements.thread.querySelector('[data-wq-status-options]');
     const statusDetailsEl = elements.thread.querySelector('[data-wq-status-details]');
     const statusClearBtn = elements.thread.querySelector('[data-wq-status-clear]');
+    const archiveHintEl = elements.thread.querySelector('[data-wq-archive-hint]');
     const sourceBtns = Array.from(elements.thread.querySelectorAll('[data-wq-source]'));
     const repoChipsEl = elements.thread.querySelector('[data-wq-repo-chips]');
     const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
@@ -9532,7 +9564,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const keyboardModeBtn = elements.thread.querySelector('[data-wq-keyboard-mode]');
     const keyboardHint = elements.thread.querySelector('[data-wq-keyboard-hint]');
 
-    const DEFAULT_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress'];
+    const DEFAULT_STATUSES = WORKQUEUE_ACTIVE_STATUSES;
 
     const statusSet = new Set(
       (Array.isArray(pane.workqueue?.statusFilter) && pane.workqueue.statusFilter.length ? pane.workqueue.statusFilter : DEFAULT_STATUSES)
@@ -9696,6 +9728,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
       statusSelectedEl.innerHTML = '';
       const selected = Array.from(statusSet);
+      const archivedShown = workqueueIncludesArchived(selected);
       if (selected.length) {
         for (const s of selected) {
           const chip = document.createElement('span');
@@ -9708,6 +9741,15 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         hint.className = 'hint';
         hint.textContent = 'none (will show default on refresh)';
         statusSelectedEl.appendChild(hint);
+      }
+      if (archiveHintEl) {
+        archiveHintEl.textContent = archivedShown ? 'Archived done/failed items shown.' : 'Archived done/failed items hidden.';
+      }
+      const archivedPreset = statusRootEl.querySelector('[data-wq-status-preset="all"]');
+      if (archivedPreset) {
+        archivedPreset.textContent = archivedShown ? 'Hide archived' : 'Show archived';
+        archivedPreset.classList.toggle('active', archivedShown);
+        archivedPreset.setAttribute('aria-pressed', archivedShown ? 'true' : 'false');
       }
 
       statusOptionsEl.innerHTML = '';
@@ -9856,7 +9898,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           const preset = String(btn.getAttribute('data-wq-status-preset') || 'default');
           if (preset === 'open') return applyStatuses(['ready', 'pending'], { closeMenu: true });
           if (preset === 'active') return applyStatuses(['claimed', 'in_progress'], { closeMenu: true });
-          if (preset === 'all') return applyStatuses(Array.from(WORKQUEUE_STATUSES), { closeMenu: true });
+          if (preset === 'all') {
+            const archivedShown = workqueueIncludesArchived(Array.from(statusSet));
+            return applyStatuses(archivedShown ? DEFAULT_STATUSES : Array.from(WORKQUEUE_STATUSES), { closeMenu: true });
+          }
           return applyStatuses(DEFAULT_STATUSES, { closeMenu: true });
         });
       });
@@ -10833,7 +10878,7 @@ const paneManager = {
           const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
-            : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'];
+            : Array.from(WORKQUEUE_ACTIVE_STATUSES);
           const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScopeForTarget(agentId));
           const quickFilters = {
             sources: Array.isArray(item?.quickFilters?.sources) ? item.quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
@@ -11075,7 +11120,7 @@ const paneManager = {
         queue: nextQueue,
         statusFilter: Array.isArray(options?.statusFilter) && options.statusFilter.length
           ? options.statusFilter
-          : ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
+          : Array.from(WORKQUEUE_ACTIVE_STATUSES),
         scopeFilter: nextScopeFilter,
         quickFilters: options?.quickFilters,
         groupMode: normalizeWorkqueueGroupMode(options?.groupMode),
@@ -11892,6 +11937,9 @@ globalElements.fleetBtn?.addEventListener('click', (event) => {
   openFleetPane({ forceNew });
 });
 globalElements.workqueueCloseBtn?.addEventListener('click', () => closeWorkqueue());
+globalElements.wqShowArchivedBtn?.addEventListener('click', () => {
+  void toggleWorkqueueModalArchived();
+});
 globalElements.workqueueModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.workqueueModal) closeWorkqueue();
 });
