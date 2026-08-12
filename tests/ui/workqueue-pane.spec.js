@@ -154,6 +154,37 @@ function seedFilterSummaryWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedEmptyRecoveryWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-120000) } },
+    assignments: {},
+    items: [
+      {
+        id: 'empty-recovery-failed',
+        queue,
+        title: '[issue] rmdmattingly/clawnsole#388 hidden failed row',
+        instructions: 'Repo: rmdmattingly/clawnsole\nIssue: https://github.com/rmdmattingly/clawnsole/issues/388',
+        priority: 10,
+        status: 'failed',
+        claimedBy: '',
+        claimedAt: '',
+        leaseUntil: 0,
+        attempts: 0,
+        lastError: '',
+        createdAt: iso(-60000),
+        updatedAt: iso(-60000),
+        dedupeKey: 'empty-recovery-hidden-failed'
+      }
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 function seedExactDuplicateWorkqueueItems(queue) {
   const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
   fs.mkdirSync(dir, { recursive: true });
@@ -497,6 +528,48 @@ test('workqueue pane: status filter uses human labels and queue-scoped counts', 
   await customQueue.press('Enter');
   await expect(wqPane.locator('[data-wq-statusline]')).toContainText('1 item');
   await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
+});
+
+test('workqueue pane: empty state offers recovery actions when filters hide rows', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `empty-recovery-${Date.now()}`;
+  seedEmptyRecoveryWorkqueueItems(queue);
+
+  await page.addInitScript(() => {
+    window.__wqFeedEvents = [];
+    const originalLog = console.log;
+    console.log = (...args) => {
+      if (args[0] === '[clawnsole]' && args[1]?.label === 'workqueue.emptyRecovery') {
+        window.__wqFeedEvents.push(args[1]);
+      }
+      return originalLog.apply(console, args);
+    };
+  });
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+
+  const empty = wqPane.locator('[data-wq-empty]');
+  await expect(empty).toBeVisible();
+  await expect(empty).toContainText('0 visible of 1 total; hidden by status 1.');
+  await expect(empty.locator('[data-wq-empty-reset-scope]')).toBeVisible();
+  await expect(empty.locator('[data-wq-empty-clear-status]')).toBeVisible();
+  await expect(empty.locator('[data-wq-empty-show-all]')).toBeVisible();
+
+  await empty.locator('[data-wq-empty-show-all]').click();
+
+  await expect(wqPane.locator('[data-wq-list-body] .wq-row')).toHaveCount(1);
+  await expect(wqPane.locator('[data-wq-list-body]')).toContainText('hidden failed row');
+  const events = await page.evaluate(() => window.__wqFeedEvents.map((entry) => entry.payload));
+  expect(events).toContain('action=show-all');
 });
 
 test('workqueue pane: filter summary chips show counts and remove filters', async ({ page }) => {
