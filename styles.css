@@ -1784,6 +1784,17 @@ button.send-btn .btn-icon {
   color: var(--muted);
 }
 
+.agents-last-refreshed[data-freshness="stale"] {
+  color: #ffcb6b;
+  font-weight: 700;
+}
+
+.agents-refresh-state-btn {
+  min-height: 24px;
+  padding: 3px 9px;
+  font-size: 12px;
+}
+
 .agents-refresh-paused {
   display: inline-flex;
   align-items: center;
@@ -2099,6 +2110,11 @@ button.agents-section-title:hover {
 .agents-row[aria-selected="true"] {
   border-color: rgba(77, 196, 255, 0.7);
   background: rgba(77, 196, 255, 0.11);
+}
+
+.agents-row.is-stale {
+  border-color: rgba(255, 203, 107, 0.32);
+  background: rgba(255, 203, 107, 0.05);
 }
 
 .agents-row-no-actions {

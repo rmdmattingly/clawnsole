@@ -44,6 +44,7 @@ const globalElements = {
   agentsSortIndicator: document.getElementById('agentsSortIndicator'),
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
+  agentsRefreshStateBtn: document.getElementById('agentsRefreshStateBtn'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
   agentsSelectionBar: document.getElementById('agentsSelectionBar'),
@@ -1174,6 +1175,8 @@ let agentAutoRefreshInterval = null;
 let agentsModalAutoRefreshInterval = null;
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
+const FLEET_DEFAULT_STALE_THRESHOLD_MINUTES = 1;
+const FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES = 10;
 const fleetRefreshLock = {
   lockedAtMs: 0,
   pointerInsideRow: false,
@@ -1196,10 +1199,12 @@ function renderFleetRefreshPaused() {
   if (!fleetRefreshLock.lockedAtMs) {
     el.hidden = true;
     el.textContent = '';
+    renderAgentsLastRefreshed();
     return;
   }
   el.hidden = false;
   el.textContent = `Refresh paused \u2022 ${formatRelativeAge(Date.now() - fleetRefreshLock.lockedAtMs)}`;
+  renderAgentsLastRefreshed();
 }
 
 function hasFleetRowInteraction() {
@@ -1294,10 +1299,16 @@ function formatRelativeAge(msAgo) {
 function renderAgentsLastRefreshed() {
   if (!globalElements.agentsLastRefreshed) return;
   if (!agentsLastRefreshedAtMs) {
-    globalElements.agentsLastRefreshed.textContent = 'Last refreshed: never';
+    globalElements.agentsLastRefreshed.textContent = 'Last updated: never';
+    globalElements.agentsLastRefreshed.dataset.freshness = 'unknown';
     return;
   }
-  globalElements.agentsLastRefreshed.textContent = `Last refreshed: ${formatRelativeAge(Date.now() - agentsLastRefreshedAtMs)}`;
+  const ageMs = Date.now() - agentsLastRefreshedAtMs;
+  const staleMs = FLEET_DEFAULT_STALE_THRESHOLD_MINUTES * 60_000;
+  const age = formatRelativeAge(ageMs);
+  const stale = ageMs > staleMs || fleetRefreshLock.lockedAtMs;
+  globalElements.agentsLastRefreshed.dataset.freshness = stale ? 'stale' : 'fresh';
+  globalElements.agentsLastRefreshed.textContent = stale ? `Stale · ${age}` : `Last updated: ${age}`;
 }
 
 function startAgentsModalAutoRefresh() {
@@ -4708,7 +4719,7 @@ function openAgentsModal() {
   if (globalElements.agentsSort) globalElements.agentsSort.value = sort;
   if (globalElements.agentsHeatmapToggle) globalElements.agentsHeatmapToggle.checked = heatmapEnabled;
   if (globalElements.agentsActiveMinutes) {
-    const minutes = Number(storage.get(ADMIN_AGENT_ACTIVE_MINUTES_KEY, '10')) || 10;
+    const minutes = Number(storage.get(ADMIN_AGENT_ACTIVE_MINUTES_KEY, String(FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES))) || FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES;
     globalElements.agentsActiveMinutes.value = String(Math.max(1, minutes));
   }
   syncFleetDensityControl();
@@ -4980,7 +4991,7 @@ function renderFleetSelectionBar({ classify = null, lastSeenMap = null } = {}) {
   const triage = typeof classify === 'function'
     ? classify(id)
     : (() => {
-        const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
+        const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES);
         const paneState = getAgentPaneStateMap()[id] || 'unknown';
         const ageMs = heartbeatTs > 0 ? Math.max(0, Date.now() - heartbeatTs) : Number.POSITIVE_INFINITY;
         const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs: withinMinutes * 60_000, paneState });
@@ -5089,7 +5100,7 @@ function renderAgentsModalList() {
     ? String(document.activeElement.closest?.('.agents-row')?.dataset?.agentId || '')
     : '';
   const search = String(globalElements.agentsSearch?.value || '').trim().toLowerCase();
-  const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || 10);
+  const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES);
   const activeWindowMs = withinMinutes * 60_000;
   const filterMode = getFleetFilter();
   const sortMode = getFleetSort();
@@ -5257,6 +5268,7 @@ function renderAgentsModalList() {
       const label = formatAgentLabel(agent, { includeId: true });
       const pinnedNow = pins.has(id);
       const heartbeatTs = Number(lastSeenMap[id]) || 0;
+      const heartbeatAgeMs = heartbeatTs > 0 ? Math.max(0, Date.now() - heartbeatTs) : Number.POSITIVE_INFINITY;
       const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
       const triage = classify(id);
       const healthLabel = triage.bucket === 'offline_error'
@@ -5298,6 +5310,7 @@ function renderAgentsModalList() {
         : '';
       row.dataset.heartbeatBucket = triage.ageBucket;
       row.dataset.healthState = triage.bucket;
+      row.classList.toggle('is-stale', triage.bucket === 'stale' || heartbeatAgeMs > FLEET_DEFAULT_STALE_THRESHOLD_MINUTES * 60_000);
       row.classList.toggle('agents-row-heatmap', heatmapEnabled);
       row.classList.toggle('agents-row-no-actions', !visibleColumns.actions);
 
@@ -6159,6 +6172,10 @@ async function renderWorkqueuePane(rootEl, { queue = '' } = {}) {
 window.__debug = window.__debug || {};
 window.__debug.renderWorkqueuePane = renderWorkqueuePane;
 window.__debug.refreshAgents = refreshAgents;
+window.__debug.setAgentsLastRefreshedAtMs = (value) => {
+  agentsLastRefreshedAtMs = Math.max(0, Number(value) || 0);
+  renderAgentsLastRefreshed();
+};
 
 function getWorkqueueItemRepo(item) {
   const repo = String(item?.meta?.repo || '').trim();
@@ -11746,6 +11763,12 @@ globalElements.agentsModalRefreshBtn?.addEventListener('click', () => {
     showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
   });
 });
+globalElements.agentsRefreshStateBtn?.addEventListener('click', () => {
+  clearFleetRefreshLock();
+  refreshAgents({ reason: 'manual', showSuccessToast: true }).catch(() => {
+    showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
+  });
+});
 
 globalElements.agentsBtn?.addEventListener('click', () => openAgentsModal());
 globalElements.agentsCloseBtn?.addEventListener('click', () => {
@@ -11836,9 +11859,10 @@ globalElements.agentsHeartbeatSortBtn?.addEventListener('click', () => setFleetH
 globalElements.agentsSortResetBtn?.addEventListener('click', () => resetFleetSort());
 
 globalElements.agentsActiveMinutes?.addEventListener('change', () => {
-  const minutes = Math.max(1, Number(globalElements.agentsActiveMinutes.value) || 10);
+  const minutes = Math.max(1, Number(globalElements.agentsActiveMinutes.value) || FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES);
   globalElements.agentsActiveMinutes.value = String(minutes);
   storage.set(ADMIN_AGENT_ACTIVE_MINUTES_KEY, minutes);
+  renderAgentsLastRefreshed();
   renderAgentsModalList();
 });
 
@@ -12412,6 +12436,19 @@ window.addEventListener('keydown', (event) => {
 
   // Never steal focus / override browser shortcuts while typing.
   if (isTypingContext(event.target)) return;
+  if (
+    isAgentsModalOpen() &&
+    roleState.role === 'admin' &&
+    key.toLowerCase() === 'r' &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey
+  ) {
+    event.preventDefault();
+    globalElements.agentsRefreshStateBtn?.click?.();
+    return;
+  }
   if (isAnyOverlayOpen()) return;
 
   // Ctrl+Tab walks panes in most-recently-used order; Shift reverses the traversal.
