@@ -6751,7 +6751,7 @@ function renderWorkqueuePaneItems(pane) {
       if (itemSearchQuery) {
         empty.innerHTML = `
           <div class="empty-state">
-            <div style="font-weight:700; margin-bottom:6px;">No items match "${escapeHtml(itemSearchQuery)}".</div>
+            <div style="font-weight:700; margin-bottom:6px;">No items match current filters. No items match "${escapeHtml(itemSearchQuery)}".</div>
             <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span>${hiddenSummary ? ` · ${escapeHtml(hiddenSummary)}` : ''}</div>
             <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
               <button type="button" class="secondary" data-wq-clear-item-search>Clear search</button>
@@ -9228,7 +9228,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
           <label class="wq-field">
             <span class="wq-label">Items</span>
-            <input data-wq-item-search type="search" placeholder="Search items..." aria-label="Search workqueue items" autocomplete="off" value="${escapeHtml(pane.workqueue?.quickFilters?.search || pane.workqueue.itemSearch || '')}" />
+            <input data-wq-item-search data-wq-search type="search" placeholder="Search items..." aria-label="Search workqueue items" autocomplete="off" value="${escapeHtml(pane.workqueue?.quickFilters?.search || pane.workqueue.itemSearch || '')}" />
           </label>
 
           <div class="wq-field wq-status-field">
