@@ -3064,7 +3064,8 @@ function paneIdentityLabel(pane, { includeUnread = false, includeDraft = true } 
   const nickname = paneNickname(pane);
   const unread = paneUnreadCount(pane);
   const draft = includeDraft && paneHasDraftChanges(pane);
-  return `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}${draft ? ' • unsent draft' : ''}`;
+  const pinned = paneIsPinned(pane);
+  return `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${pinned ? ' • pinned' : ''}${includeUnread && unread > 0 ? ` • ${unread} unread` : ''}${draft ? ' • unsent draft' : ''}`;
 }
 
 function paneSummaryLabel(pane) {
@@ -3396,6 +3397,37 @@ function renderPaneDraftBadge(pane) {
   badge.title = label;
 }
 
+function paneIsPinned(pane) {
+  return !!pane?.pinned;
+}
+
+function renderPanePinState(pane) {
+  if (!pane) return;
+  const pinned = paneIsPinned(pane);
+  const root = pane.elements?.root;
+  if (root) {
+    root.classList.toggle('pane-pinned', pinned);
+    root.dataset.panePinned = pinned ? 'true' : 'false';
+  }
+  const btn = pane.elements?.pinBtn;
+  if (btn) {
+    btn.classList.toggle('is-pinned', pinned);
+    btn.setAttribute('aria-pressed', pinned ? 'true' : 'false');
+    btn.setAttribute('aria-label', pinned ? 'Unpin pane' : 'Pin pane');
+    btn.title = pinned ? 'Unpin pane' : 'Pin pane';
+  }
+}
+
+function togglePanePinned(pane) {
+  if (!pane) return;
+  pane.pinned = !pane.pinned;
+  renderPanePinState(pane);
+  renderPaneIdentity(pane);
+  paneManager?.persistAdminPanes?.();
+  if (isPaneManagerOpen()) renderPaneManager();
+  showToast(pane.pinned ? 'Pane pinned.' : 'Pane unpinned.', { kind: 'info', timeoutMs: 1800, testId: 'pane-pin-toast' });
+}
+
 function refreshPaneDraftState(pane) {
   renderPaneIdentity(pane);
   renderPaneDraftBadge(pane);
@@ -3461,6 +3493,7 @@ function paneSearchFields(pane) {
     { key: 'target', value: paneTargetLabel(pane) },
     { key: 'targetDisplay', value: paneDisplayTargetLabel(pane) },
     { key: 'nickname', value: paneNickname(pane) },
+    { key: 'pin', value: paneIsPinned(pane) ? 'pinned pin protected' : '' },
     { key: 'queue', value: queue },
     { key: 'paneId', value: pane?.key || '' }
   ].map((field) => ({ ...field, value: String(field.value || '') })).filter((field) => field.value);
@@ -3838,10 +3871,11 @@ function renderPaneManager() {
         const isDuplicate = duplicateCount > 1;
         const unreadCount = paneUnreadCount(pane);
         const hasDraft = paneHasDraftChanges(pane);
+        const pinned = paneIsPinned(pane);
         const paneIdentity = paneSummaryLabel(pane);
         const nickname = paneNickname(pane);
         const pairedAction = getPaneManagerPairedAction(pane);
-        const rowLabel = `${paneIdentity}${nickname ? `, nickname ${nickname}` : ''}${unreadCount > 0 ? `, ${unreadCount} unread` : ''}${hasDraft ? ', unsent draft' : ''}`;
+        const rowLabel = `${paneIdentity}${nickname ? `, nickname ${nickname}` : ''}${pinned ? ', pinned' : ''}${unreadCount > 0 ? `, ${unreadCount} unread` : ''}${hasDraft ? ', unsent draft' : ''}`;
         row.setAttribute('aria-label', rowLabel);
 
         const lockDisabled = paneManager.isLayoutLocked();
@@ -3855,6 +3889,7 @@ function renderPaneManager() {
               ${nickname ? `<span class="pane-manager-nickname" data-testid="pane-manager-nickname" title="${escapeHtml(`Pane nickname: ${nickname}`)}">${paneManagerHighlightHtml(nickname, query)}</span>` : ''}
               <span class="pane-manager-pane-id" title="Internal pane id">${paneManagerHighlightHtml(String(pane?.key || ''), query)}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
+              ${pinned ? '<span class="pane-manager-pinned-badge" data-testid="pane-manager-pinned-badge" title="Pinned pane">Pinned</span>' : ''}
               ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
               ${hasDraft ? '<span class="pane-manager-draft-badge" data-testid="pane-manager-draft-badge" title="Unsent draft">Draft</span>' : ''}
             </div>
@@ -3865,6 +3900,7 @@ function renderPaneManager() {
             <button class="secondary pane-manager-down" type="button" data-action="move-down" data-testid="pane-manager-move-down" title="${lockDisabled ? 'Layout is locked' : 'Move pane down'}" aria-label="Move pane down" ${(visibleIdx === visibleKeys.length - 1 || lockDisabled) ? 'disabled' : ''}>↓</button>
             ${isDuplicate ? '<button class="secondary pane-manager-close-others" type="button" data-action="close-others" data-testid="pane-manager-close-others">Close others</button>' : ''}
             ${pairedAction ? `<button class="secondary pane-manager-paired" type="button" data-action="paired" data-testid="pane-manager-paired-action" data-paired-kind="${escapeHtml(pairedAction.pairedKind)}" data-paired-state="${escapeHtml(pairedAction.state)}" data-paired-target="${escapeHtml(pairedAction.target)}" title="${escapeHtml(pairedAction.title)}" aria-label="${escapeHtml(pairedAction.title)}" ${pairedAction.disabled ? 'disabled' : ''}>${escapeHtml(pairedAction.text)}</button>` : ''}
+            <button class="secondary pane-manager-pin" type="button" data-action="pin" data-testid="pane-manager-pin" aria-pressed="${pinned ? 'true' : 'false'}">${pinned ? 'Unpin' : 'Pin'}</button>
             <button class="secondary pane-manager-nickname-action" type="button" data-action="nickname" data-testid="pane-manager-nickname-action">Nickname</button>
             <button class="secondary pane-manager-focus" type="button" data-action="focus">Focus</button>
             <button class="secondary pane-manager-close" type="button" data-action="close">Close</button>
@@ -3932,6 +3968,10 @@ function renderPaneManager() {
           }
           if (action === 'nickname') {
             promptPaneNickname(pane);
+            return;
+          }
+          if (action === 'pin') {
+            togglePanePinned(pane);
             return;
           }
           if (action === 'paired') {
@@ -8879,7 +8919,8 @@ function renderPaneIdentity(pane) {
   const nickname = paneNickname(pane);
   const unread = paneUnreadCount(pane);
   const draft = paneHasDraftChanges(pane);
-  const identity = `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${unread > 0 ? ` • ${unread} unread` : ''}${draft ? ' • unsent draft' : ''}`;
+  const pinned = paneIsPinned(pane);
+  const identity = `${letter} ${type} · ${target}${nickname ? ` · ${nickname}` : ''}${pinned ? ' • pinned' : ''}${unread > 0 ? ` • ${unread} unread` : ''}${draft ? ' • unsent draft' : ''}`;
   pane.elements.name.title = paneIdentityLabel(pane, { includeUnread: false });
   pane.elements.name.setAttribute('aria-label', identity);
   if (pane.elements.nameToken && pane.elements.nameTarget) {
@@ -8889,6 +8930,7 @@ function renderPaneIdentity(pane) {
     pane.elements.name.textContent = identity;
   }
   renderPanePairCue(pane);
+  renderPanePinState(pane);
   renderActivePaneState();
   if (pane.elements.nicknameBtn) {
     pane.elements.nicknameBtn.classList.toggle('has-nickname', !!nickname);
@@ -9197,7 +9239,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, cronAgentId, nickname, pairedTargetLock = false, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, cronAgentId, nickname, pairedTargetLock = false, pinned = false, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   root.tabIndex = -1;
@@ -9222,6 +9264,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     agentPill: root.querySelector('[data-pane-agent-pill]'),
     status: root.querySelector('[data-pane-status]'),
     draftBadge: root.querySelector('[data-pane-draft-badge]'),
+    pinBtn: root.querySelector('[data-pane-pin]'),
     activityBadge: root.querySelector('[data-pane-activity-badge]'),
     helpDetails: root.querySelector('[data-pane-help]'),
     helpPopover: root.querySelector('[data-pane-help-popover]'),
@@ -9282,6 +9325,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     unreadCount: 0,
     unreadKind: '',
     pairedTargetLock: !!pairedTargetLock,
+    pinned: !!pinned,
     scroll: { pinned: true },
     thinking: { active: false, timer: null, dotsTimer: null, bubble: null },
     activeRunId: null,
@@ -9318,7 +9362,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     promptPaneNickname(pane);
   });
   elements.agentPill?.addEventListener('click', () => paneToggleTargetLock(pane));
+  elements.pinBtn?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    togglePanePinned(pane);
+  });
   renderPaneTargetLockChip(pane);
+  renderPanePinState(pane);
 
   // Pane header: kind label + type pill (icon + text)
   try {
@@ -10891,6 +10941,7 @@ const paneManager = {
         sortDir: cfg.sortDir,
         nickname: cfg.nickname,
         pairedTargetLock: cfg.pairedTargetLock,
+        pinned: cfg.pinned,
         closable: true
       })
     );
@@ -10980,18 +11031,18 @@ const paneManager = {
           const sortKey = typeof item.sortKey === 'string' ? item.sortKey : 'priority';
           const sortDir = item.sortDir === 'asc' ? 'asc' : 'desc';
           const groupMode = normalizeWorkqueueGroupMode(item.groupMode);
-          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, nickname, pairedTargetLock };
+          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, nickname, pairedTargetLock, pinned: !!item.pinned };
         }
         if (kind === 'cron' || kind === 'timeline') {
           const cronAgentId = typeof item.cronAgentId === 'string' ? item.cronAgentId.trim() : '';
-          return { key, kind, cronAgentId, nickname };
+          return { key, kind, cronAgentId, nickname, pinned: !!item.pinned };
         }
         const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
-        return { key, kind: 'chat', agentId, nickname, pairedTargetLock: !!item.pairedTargetLock };
+        return { key, kind: 'chat', agentId, nickname, pairedTargetLock: !!item.pairedTargetLock, pinned: !!item.pinned };
       }
       // Super-legacy format: ['pabc','pdef'] (treat as chat panes)
       if (typeof item === 'string' && item) {
-        return { key: item, kind: 'chat', agentId: defaultAgent, pairedTargetLock: false };
+        return { key: item, kind: 'chat', agentId: defaultAgent, pairedTargetLock: false, pinned: false };
       }
       return null;
     };
@@ -11032,13 +11083,14 @@ const paneManager = {
           groupMode: normalizeWorkqueueGroupMode(pane.workqueue?.groupMode),
           sortKey: pane.workqueue?.sortKey || 'priority',
           sortDir: pane.workqueue?.sortDir || 'desc',
-          nickname: paneNickname(pane)
+          nickname: paneNickname(pane),
+          pinned: paneIsPinned(pane)
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
-        return { key: pane.key, kind: pane.kind, cronAgentId: String(pane.cronAgentId || '').trim(), nickname: paneNickname(pane) };
+        return { key: pane.key, kind: pane.kind, cronAgentId: String(pane.cronAgentId || '').trim(), nickname: paneNickname(pane), pinned: paneIsPinned(pane) };
       }
-      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main', nickname: paneNickname(pane), pairedTargetLock: !!pane.pairedTargetLock };
+      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main', nickname: paneNickname(pane), pairedTargetLock: !!pane.pairedTargetLock, pinned: paneIsPinned(pane) };
     });
     storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
@@ -11055,6 +11107,7 @@ const paneManager = {
       cronAgentId: String(pane.cronAgentId || '').trim(),
       nickname: paneNickname(pane),
       pairedTargetLock: !!pane.pairedTargetLock,
+      pinned: paneIsPinned(pane),
       draftText: kind === 'chat' ? String(pane.elements?.input?.value || '') : ''
     };
 
@@ -11110,6 +11163,7 @@ const paneManager = {
       cronAgentId: snapshot.cronAgentId,
       nickname: snapshot.nickname,
       pairedTargetLock: !!snapshot.pairedTargetLock,
+      pinned: !!snapshot.pinned,
       restoreDraftText: kind === 'chat' ? String(snapshot.draftText || '') : ''
     };
 
@@ -11220,6 +11274,7 @@ const paneManager = {
         sortDir: options?.sortDir,
         nickname: options?.nickname,
         pairedTargetLock: !!options?.pairedTargetLock,
+        pinned: !!options?.pinned,
         closable: true
       });
       insertCreatedPane(pane);
@@ -11233,6 +11288,7 @@ const paneManager = {
         kind: normalizedKind,
         cronAgentId: nextCronAgentId,
         nickname: options?.nickname,
+        pinned: !!options?.pinned,
         closable: true
       });
       insertCreatedPane(pane);
@@ -11247,6 +11303,7 @@ const paneManager = {
       agentId,
       nickname: options?.nickname,
       pairedTargetLock: !!options?.pairedTargetLock,
+      pinned: !!options?.pinned,
       closable: true
     });
     if (typeof options?.restoreDraftText === 'string' && pane.elements?.input) {
@@ -11347,6 +11404,33 @@ const paneManager = {
       onSecondaryAction: () => {}
     });
 
+    return true;
+  },
+  maybeOfferPinnedGuard(pane, { source = 'unknown', action = 'close' } = {}) {
+    if (!paneIsPinned(pane)) return false;
+    const labelKind = paneLabel(pane);
+    const isKeyboard = String(source || '').includes('keyboard');
+    if (isKeyboard) {
+      showToast(`Pinned ${labelKind} pane is protected. Unpin it before closing with the keyboard.`, {
+        kind: 'info',
+        timeoutMs: 3200,
+        testId: 'pane-pinned-keyboard-toast'
+      });
+      return true;
+    }
+
+    const actionLabel = action === 'replace' ? `Replace pinned ${labelKind} pane` : `Close pinned ${labelKind} pane`;
+    showToast(`Pinned ${labelKind} pane is protected.`, {
+      timeoutMs: 10000,
+      actionLabel,
+      secondaryActionLabel: 'Cancel',
+      testId: 'pane-pinned-guard-toast',
+      onAction: () => {
+        if (action === 'replace') this.replacePane(pane.key, pane.kind, anchorPaneOptions(pane), { skipPinnedGuard: true });
+        else this.removePane(pane.key, { skipPinnedGuard: true, source: 'pinned-override' });
+      },
+      onSecondaryAction: () => {}
+    });
     return true;
   },
   openAddPaneMenu(anchorEl) {
@@ -11604,18 +11688,20 @@ const paneManager = {
       } catch {}
     }
   },
-  replacePane(key, kind = 'chat', options = {}) {
+  replacePane(key, kind = 'chat', options = {}, { skipPinnedGuard = false } = {}) {
     if (roleState.role !== 'admin') return null;
     const idx = this.panes.findIndex((pane) => pane.key === key);
     if (idx < 0) return null;
+    if (!skipPinnedGuard && this.maybeOfferPinnedGuard(this.panes[idx], { source: 'replace', action: 'replace' })) return null;
     const targetKind = isAnchorPaneKind(kind) ? kind : 'chat';
-    const removed = this.removePane(key, { skipAnchorGuard: true, focusFallback: false, recordClosed: false });
+    const removed = this.removePane(key, { skipAnchorGuard: true, skipPinnedGuard: true, focusFallback: false, recordClosed: false });
     if (!removed) return null;
     return this.addPane(targetKind, { ...options, forceNew: true });
   },
   removePane(key, {
     skipAnchorGuard = false,
     skipCloseLossGuard = false,
+    skipPinnedGuard = false,
     focusFallback = true,
     source = 'unknown',
     recordClosed = true
@@ -11625,6 +11711,7 @@ const paneManager = {
     const idx = this.panes.findIndex((pane) => pane.key === key);
     if (idx < 0) return;
     const candidate = this.panes[idx];
+    if (!skipPinnedGuard && this.maybeOfferPinnedGuard(candidate, { source, action: this.isLastAnchorPane(candidate) ? 'replace' : 'close' })) return;
     if (!skipCloseLossGuard && this.maybeOfferCloseLossGuard(candidate, { source })) return;
     if (!skipAnchorGuard && this.maybeOfferAnchorReplace(candidate, { source })) return;
     const [pane] = this.panes.splice(idx, 1);
