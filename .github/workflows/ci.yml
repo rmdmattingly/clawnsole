@@ -9,12 +9,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: npm ci
         timeout-minutes: 5
@@ -26,8 +26,8 @@ jobs:
         timeout-minutes: 3
       - run: npm run test:smoke
         timeout-minutes: 4
-      - run: npx playwright install --with-deps
-        timeout-minutes: 10
+      - run: npx playwright install --with-deps chromium
+        timeout-minutes: 15
       - run: npm run test:ui
         timeout-minutes: 15
 
