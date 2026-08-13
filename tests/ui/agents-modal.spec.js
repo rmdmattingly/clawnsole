@@ -380,6 +380,48 @@ test('fleet refresh keeps scroll anchor and keyboard triage selection', async ({
   await expect(page.locator(`#agentsList .agents-row[data-agent-id="${selectedIdAfterFilter}"]`)).toHaveAttribute('aria-selected', 'true');
 });
 
+test('agents modal copies selected fleet agent id with keyboard shortcut', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.addInitScript(() => {
+    window.__copiedText = '';
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text) => {
+          window.__copiedText = String(text);
+        }
+      }
+    });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const alpha = page.locator('#agentsList .agents-row[data-agent-id="alpha"]');
+  const beta = page.locator('#agentsList .agents-row[data-agent-id="beta"]');
+  await alpha.click();
+  await page.keyboard.press('j');
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+
+  await page.keyboard.press('y');
+  await expect(page.getByTestId('fleet-copy-agent-toast').last()).toContainText('Copied beta');
+  await expect(beta).toBeFocused();
+  await expect.poll(() => page.evaluate(() => window.__copiedText)).toBe('beta');
+
+  await beta.locator('[data-agent-action="copy-id"]').first().click();
+  await expect(page.getByTestId('fleet-copy-agent-toast').last()).toContainText('Copied beta');
+});
+
 test('fleet list keeps header and identity columns visible while scrolling', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 

@@ -479,6 +479,7 @@ const KEYBIND_CATALOG = [
   { id: 'fleet.sortHeartbeatGlobal', group: 'Fleet actions', label: 'Open Fleet sorted by heartbeat age', binding: { accel: true, shift: true, key: 'h', display: 'Cmd/Ctrl+Shift+H' } },
   { id: 'fleet.next', group: 'Fleet actions', label: 'Move Fleet selection down', binding: { key: 'j', display: 'J / Down' } },
   { id: 'fleet.prev', group: 'Fleet actions', label: 'Move Fleet selection up', binding: { key: 'k', display: 'K / Up' } },
+  { id: 'fleet.copySelectedAgentId', group: 'Fleet actions', label: 'Copy selected Fleet agent id', binding: { key: 'y', display: 'Y' } },
   { id: 'fleet.openChatSelected', group: 'Fleet actions', label: 'Open Chat for selected Fleet agent', binding: { key: 'Enter', display: 'Enter' } },
   { id: 'fleet.openWorkqueueSelected', group: 'Fleet actions', label: 'Open Workqueue for selected Fleet agent', binding: { key: 'Enter', shift: true, display: 'Shift+Enter' } },
   { id: 'fleet.openTimelineSelected', group: 'Fleet actions', label: 'Open Timeline for selected Fleet agent', binding: { key: '.', display: '.' } },
@@ -4973,6 +4974,46 @@ function openAgentTriageFromFleet(agentId) {
   openAgentWorkqueueFromFleet(target);
 }
 
+async function writeTextToClipboard(text) {
+  const value = String(text || '');
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const input = document.createElement('textarea');
+  input.value = value;
+  input.setAttribute('readonly', '');
+  input.style.position = 'fixed';
+  input.style.left = '-9999px';
+  input.style.top = '0';
+  document.body.appendChild(input);
+  input.select();
+  try {
+    if (!document.execCommand('copy')) throw new Error('copy command failed');
+  } finally {
+    input.remove();
+  }
+}
+
+async function copyFleetAgentId(agentId = '') {
+  const id = String(agentId || fleetSelectionState.selectedAgentId || '').trim();
+  if (!id) {
+    showToast('No Fleet agent selected.', { kind: 'info', timeoutMs: 2200, testId: 'fleet-copy-agent-toast' });
+    return false;
+  }
+
+  try {
+    await writeTextToClipboard(id);
+    selectFleetAgent(id, { focusRow: true });
+    showToast(`Copied ${id}`, { kind: 'success', timeoutMs: 1800, testId: 'fleet-copy-agent-toast' });
+    return true;
+  } catch {
+    showToast('Could not copy agent id.', { kind: 'error', timeoutMs: 2600, testId: 'fleet-copy-agent-toast' });
+    return false;
+  }
+}
+
 function renderFleetSelectionBar({ classify = null, lastSeenMap = null } = {}) {
   const bar = globalElements.agentsSelectionBar;
   if (!bar) return;
@@ -5023,6 +5064,7 @@ function renderFleetSelectionBar({ classify = null, lastSeenMap = null } = {}) {
         <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}">Open Chat</button>
         <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}">Open Workqueue</button>
         <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}">Open Timeline</button>
+        <button type="button" class="secondary agents-action-btn" data-agent-action="copy-id" data-agent-id="${escapeHtml(id)}">Copy ID</button>
       </div>
     `;
 
@@ -5034,6 +5076,7 @@ function renderFleetSelectionBar({ classify = null, lastSeenMap = null } = {}) {
         if (action === 'open-chat') openAgentChatFromFleet(target);
         else if (action === 'open-timeline') openAgentTimelineFromFleet(target);
         else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(target);
+        else if (action === 'copy-id') copyFleetAgentId(target);
       });
     });
   }
@@ -5300,6 +5343,7 @@ function renderAgentsModalList() {
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Chat</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Timeline</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Workqueue</button>
+          <button type="button" class="secondary agents-action-btn" data-agent-action="copy-id" data-agent-id="${escapeHtml(id)}" title="Copy agent id" aria-label="Copy agent id for ${escapeHtml(label)}">Copy ID</button>
         </div>
         <details class="agents-row-actions-overflow">
           <summary class="secondary" aria-label="More actions for ${escapeHtml(label)}" title="More actions">⋯</summary>
@@ -5308,6 +5352,7 @@ function renderAgentsModalList() {
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-chat" data-agent-id="${escapeHtml(id)}" title="Open Chat" aria-label="Open Chat for ${escapeHtml(label)}">Open Chat</button>
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Open Timeline</button>
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Open Workqueue</button>
+            <button type="button" class="secondary agents-action-btn" data-agent-action="copy-id" data-agent-id="${escapeHtml(id)}" title="Copy agent id" aria-label="Copy agent id for ${escapeHtml(label)}">Copy agent id</button>
           </div>
         </details>
       `
@@ -5360,6 +5405,7 @@ function renderAgentsModalList() {
           else if (action === 'open-chat') openAgentChatFromFleet(id);
           else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
           else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(id);
+          else if (action === 'copy-id') copyFleetAgentId(id);
         });
       });
 
@@ -11894,6 +11940,11 @@ globalElements.agentsModal?.addEventListener('keydown', (event) => {
     if (key === 'ArrowUp' || lower === 'k') {
       event.preventDefault();
       moveFleetSelection(-1);
+      return;
+    }
+    if (lower === 'y') {
+      event.preventDefault();
+      copyFleetAgentId();
       return;
     }
     if (key === 'Enter') {
