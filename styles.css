@@ -3204,6 +3204,11 @@ kbd {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+[data-wq-empty] {
+  position: relative;
+  z-index: 4;
+}
+
 .wq-list-body {
   min-height: 0;
   flex: 1;
