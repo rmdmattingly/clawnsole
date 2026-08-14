@@ -1206,6 +1206,12 @@ button.send-btn.primary:hover {
   filter: brightness(1.03) saturate(1.04);
 }
 
+button.send-btn.confirming {
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.92), rgba(217, 119, 6, 0.92));
+  border-color: rgba(251, 191, 36, 0.95);
+  color: #111827;
+}
+
 button.send-btn .btn-icon {
   width: 20px;
   height: 20px;
@@ -3795,7 +3801,6 @@ kbd {
 .destination-strip {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   padding: 8px 10px;
   border-radius: 10px;
@@ -3818,10 +3823,30 @@ kbd {
   cursor: pointer;
   border-radius: 8px;
   padding: 4px 8px;
+  min-height: 30px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .destination-strip-target:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+.destination-strip-confirm {
+  margin-left: auto;
+  color: var(--warning);
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.destination-strip-confirm:empty {
+  display: none;
 }
 
 .attachment-row {

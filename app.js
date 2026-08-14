@@ -97,6 +97,7 @@ const globalElements = {
   settingsModal: document.getElementById('settingsModal'),
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   paneSwitchHudEnabled: document.getElementById('paneSwitchHudEnabled'),
+  sendConfirmGuardEnabled: document.getElementById('sendConfirmGuardEnabled'),
   headerLabeledControlsEnabled: document.getElementById('headerLabeledControlsEnabled'),
   keybindConflictList: document.getElementById('keybindConflictList'),
   shortcutOverridesList: document.getElementById('shortcutOverridesList'),
@@ -408,6 +409,7 @@ const ADMIN_AUTH_DESTINATION_KEY = 'clawnsole.admin.authDestination.v1';
 const ADMIN_AUTH_RESTORE_PENDING_KEY = 'clawnsole.admin.authRestorePending.v1';
 const ADMIN_AUTH_RESTORE_NOTICE_KEY = 'clawnsole.admin.authRestoreNotice.v1';
 const PANE_SWITCH_HUD_ENABLED_KEY = 'clawnsole.admin.paneSwitchHud.enabled';
+const SEND_CONFIRM_GUARD_ENABLED_KEY = 'clawnsole.admin.sendConfirmGuard.enabled';
 const HEADER_LABELED_CONTROLS_ENABLED_KEY = 'clawnsole.header.labeledControls';
 const KEYBIND_OVERRIDES_KEY = 'clawnsole.admin.keybindOverrides.v1';
 const SHORTCUT_OVERRIDES_KEY = 'clawnsole.admin.shortcutOverrides.v1';
@@ -2140,6 +2142,9 @@ function openSettings() {
   if (globalElements.paneSwitchHudEnabled) {
     globalElements.paneSwitchHudEnabled.checked = isPaneSwitchHudEnabled();
   }
+  if (globalElements.sendConfirmGuardEnabled) {
+    globalElements.sendConfirmGuardEnabled.checked = isSendConfirmGuardEnabled();
+  }
   if (globalElements.headerLabeledControlsEnabled) {
     globalElements.headerLabeledControlsEnabled.checked = areHeaderLabeledControlsEnabled();
   }
@@ -3113,6 +3118,10 @@ function isPaneSwitchHudEnabled() {
   return String(storage.get(PANE_SWITCH_HUD_ENABLED_KEY, '1') || '1') !== '0';
 }
 
+function isSendConfirmGuardEnabled() {
+  return String(storage.get(SEND_CONFIRM_GUARD_ENABLED_KEY, '1') || '1') !== '0';
+}
+
 function areHeaderLabeledControlsEnabled() {
   return String(storage.get(HEADER_LABELED_CONTROLS_ENABLED_KEY, '1') || '1') !== '0';
 }
@@ -3203,7 +3212,7 @@ let paneFocusMruKeys = [];
 let paneMruTraversal = null;
 let paneMruSuppressFocusEvents = false;
 let paneActiveRestoreGuardUntil = 0;
-const PANE_SWITCH_SEND_GUARD_MS = 800;
+const PANE_SWITCH_SEND_GUARD_MS = 5000;
 const PANE_SWITCH_SEND_GUARD_MESSAGE = 'Pane changed: press Enter again to send';
 
 function paneMruOrder() {
@@ -3236,25 +3245,66 @@ function notePaneFocused(pane) {
 function paneMarkSwitchSendGuard(pane, fromPaneKey) {
   const fromKey = String(fromPaneKey || '');
   if (!pane || pane.kind !== 'chat' || !fromKey || fromKey === pane.key) return;
+  if (!isSendConfirmGuardEnabled()) return;
   pane.sendGuard = {
     paneSwitchAt: Date.now(),
     consumed: false,
-    fromPaneKey: fromKey
+    fromPaneKey: fromKey,
+    typedAfterSwitch: false
   };
+  paneRenderSendGuard(pane);
 }
 
 function paneConsumeSwitchSendGuard(pane) {
   const guard = pane?.sendGuard;
   if (!guard || guard.consumed) return false;
+  if (!isSendConfirmGuardEnabled()) return false;
+  if (guard.typedAfterSwitch) return false;
   const elapsed = Date.now() - Number(guard.paneSwitchAt || 0);
   if (elapsed < 0 || elapsed > PANE_SWITCH_SEND_GUARD_MS) return false;
   guard.consumed = true;
+  paneRenderSendGuard(pane);
   showToast(PANE_SWITCH_SEND_GUARD_MESSAGE, {
     kind: 'info',
     timeoutMs: 1800,
     testId: 'pane-switch-send-guard-toast'
   });
   return true;
+}
+
+function paneComposerContextLabel(pane) {
+  if (!pane) return 'Unknown';
+  return `${paneLabel(pane)} · ${paneDisplayTargetLabel(pane) || paneTargetLabel(pane) || 'unknown'}`;
+}
+
+function paneRenderSendGuard(pane) {
+  const hint = pane?.elements?.sendConfirmHint;
+  const sendBtn = pane?.elements?.sendBtn;
+  if (!hint || !sendBtn) return;
+  const guard = pane?.sendGuard;
+  const active = Boolean(
+    isSendConfirmGuardEnabled() &&
+    guard &&
+    !guard.typedAfterSwitch &&
+    Date.now() - Number(guard.paneSwitchAt || 0) <= PANE_SWITCH_SEND_GUARD_MS
+  );
+  const context = paneComposerContextLabel(pane);
+  hint.textContent = active ? `Press again to send to ${context}` : '';
+  hint.hidden = !active;
+  sendBtn.classList.toggle('confirming', active);
+  sendBtn.setAttribute('aria-label', active ? `Confirm send to ${context}` : 'Send message');
+}
+
+function paneClearSwitchSendGuard(pane) {
+  if (!pane?.sendGuard) return;
+  pane.sendGuard = null;
+  paneRenderSendGuard(pane);
+}
+
+function paneMarkTypedAfterSwitch(pane) {
+  if (!pane?.sendGuard) return;
+  pane.sendGuard.typedAfterSwitch = true;
+  paneRenderSendGuard(pane);
 }
 
 function forgetFocusedPaneKey(paneKey) {
@@ -9131,18 +9181,21 @@ function anyPaneHasDraftChanges(panes) {
 function paneSetDestinationStrip(pane) {
   const strip = pane?.elements?.destinationStrip;
   const valueEl = pane?.elements?.destinationValue;
+  const labelEl = pane?.elements?.destinationLabel;
   if (!strip || !valueEl) return;
   if (pane.kind !== 'chat' || pane.role !== 'admin') {
     strip.hidden = true;
     return;
   }
   strip.hidden = false;
+  if (labelEl) labelEl.textContent = 'Chat';
   const raw = typeof pane.agentId === 'string' ? pane.agentId.trim() : '';
   const hasSelection = Boolean(raw);
   const agentId = hasSelection ? normalizeAgentId(raw) : '';
   const agent = hasSelection ? getAgentRecord(agentId) : null;
   const displayText = hasSelection ? formatAgentLabel(agent, { includeId: false }) : 'Pick agent…';
   valueEl.textContent = displayText;
+  paneRenderSendGuard(pane);
 }
 
 function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true, syncFromPaneKey = '' } = {}) {
@@ -9261,8 +9314,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     scrollDownBtn: root.querySelector('[data-pane-scroll-down]'),
     inputRow: root.querySelector('.chat-input-row'),
     destinationStrip: root.querySelector('[data-pane-destination-strip]'),
+    destinationLabel: root.querySelector('[data-pane-destination-label]'),
     destinationButton: root.querySelector('[data-pane-destination-button]'),
     destinationValue: root.querySelector('[data-pane-destination-value]'),
+    sendConfirmHint: root.querySelector('[data-pane-send-confirm-hint]'),
     input: root.querySelector('[data-pane-input]'),
     commandHints: root.querySelector('[data-pane-command-hints]'),
     fileInput: root.querySelector('[data-pane-file-input]'),
@@ -10829,8 +10884,15 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     if (elements.closeBtn) elements.closeBtn.hidden = true;
   }
 
+  elements.sendBtn.addEventListener('pointerdown', () => {
+    const previousPaneKey = focusedPaneKey() || paneMruOrder()[0] || '';
+    paneMarkSwitchSendGuard(pane, previousPaneKey);
+  });
+
   elements.sendBtn.addEventListener('click', () => {
     if (elements.sendBtn.disabled) return;
+    if (paneConsumeSwitchSendGuard(pane)) return;
+    paneClearSwitchSendGuard(pane);
     paneSendChat(pane);
   });
 
@@ -10839,11 +10901,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       event.preventDefault();
       if (elements.sendBtn.disabled) return;
       if (!event.metaKey && !event.ctrlKey && paneConsumeSwitchSendGuard(pane)) return;
+      paneClearSwitchSendGuard(pane);
       paneSendChat(pane);
     }
   });
 
   elements.input.addEventListener('input', () => {
+    paneMarkTypedAfterSwitch(pane);
     paneUpdateCommandHints(pane);
     refreshPaneDraftState(pane);
   });
@@ -11775,6 +11839,10 @@ globalElements.settingsModal?.addEventListener('click', (event) => {
 });
 globalElements.paneSwitchHudEnabled?.addEventListener('change', () => {
   storage.set(PANE_SWITCH_HUD_ENABLED_KEY, globalElements.paneSwitchHudEnabled.checked ? '1' : '0');
+});
+globalElements.sendConfirmGuardEnabled?.addEventListener('change', () => {
+  storage.set(SEND_CONFIRM_GUARD_ENABLED_KEY, globalElements.sendConfirmGuardEnabled.checked ? '1' : '0');
+  paneManager.panes.forEach((pane) => paneClearSwitchSendGuard(pane));
 });
 globalElements.headerLabeledControlsEnabled?.addEventListener('change', () => {
   storage.set(HEADER_LABELED_CONTROLS_ENABLED_KEY, globalElements.headerLabeledControlsEnabled.checked ? '1' : '0');
