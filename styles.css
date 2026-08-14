@@ -1373,6 +1373,16 @@ button.send-btn .btn-icon {
   font-size: 12px;
 }
 
+.login-caps-hint {
+  min-height: 18px;
+  color: var(--warning);
+  font-size: 12px;
+}
+
+.login-caps-hint[hidden] {
+  display: none;
+}
+
 .modal {
   position: fixed;
   inset: 0;
