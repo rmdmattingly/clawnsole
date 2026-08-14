@@ -43,6 +43,7 @@ const globalElements = {
   agentsSortResetBtn: document.getElementById('agentsSortResetBtn'),
   agentsSortIndicator: document.getElementById('agentsSortIndicator'),
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
+  agentsResetTriageBtn: document.getElementById('agentsResetTriageBtn'),
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
   agentsRefreshStateBtn: document.getElementById('agentsRefreshStateBtn'),
   agentsList: document.getElementById('agentsList'),
@@ -383,6 +384,7 @@ const storage = {
 // Agent list UX (pins + triage)
 const ADMIN_AGENT_PINS_KEY = 'clawnsole.admin.agentPins';
 const ADMIN_AGENT_LAST_SEEN_KEY = 'clawnsole.admin.agentLastSeenAtMs';
+const ADMIN_AGENT_QUERY_KEY = 'clawnsole.admin.agents.query';
 const ADMIN_AGENT_FILTER_KEY = 'clawnsole.admin.agents.filter';
 const ADMIN_AGENT_SORT_KEY = 'clawnsole.admin.agents.sort';
 const ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY = 'clawnsole.admin.agents.preHeartbeatSort';
@@ -928,6 +930,31 @@ function getFleetSort() {
   const raw = String(storage.get(ADMIN_AGENT_SORT_KEY, 'recent_desc') || 'recent_desc').trim();
   const allowed = new Set(['recent_desc', 'heartbeat_age_desc', 'agent_id_asc']);
   return allowed.has(raw) ? raw : 'recent_desc';
+}
+
+function getFleetQuery() {
+  return String(storage.get(ADMIN_AGENT_QUERY_KEY, '') || '');
+}
+
+function setAgentsFilterUi(filter) {
+  globalElements.agentsFilterButtons.forEach((btn) => {
+    const key = btn.getAttribute('data-agents-filter') || '';
+    const active = key === filter;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+
+function resetAgentsTriageView() {
+  storage.remove(ADMIN_AGENT_QUERY_KEY);
+  storage.remove(ADMIN_AGENT_FILTER_KEY);
+  storage.remove(ADMIN_AGENT_SORT_KEY);
+  storage.remove(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY);
+  if (globalElements.agentsSearch) globalElements.agentsSearch.value = '';
+  if (globalElements.agentsSort) globalElements.agentsSort.value = 'recent_desc';
+  setAgentsFilterUi('all');
+  renderAgentsModalList();
+  globalElements.agentsSearch?.focus?.();
 }
 
 function getFleetHeatmapEnabled() {
@@ -4712,15 +4739,11 @@ function openAgentsModal() {
   openAdminModal(globalElements.agentsModal);
 
   // Bootstrap persisted controls.
+  if (globalElements.agentsSearch) globalElements.agentsSearch.value = getFleetQuery();
   const filter = getFleetFilter();
   const sort = getFleetSort();
   const heatmapEnabled = getFleetHeatmapEnabled();
-  globalElements.agentsFilterButtons.forEach((btn) => {
-    const key = btn.getAttribute('data-agents-filter') || '';
-    const active = key === filter;
-    btn.classList.toggle('active', active);
-    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-  });
+  setAgentsFilterUi(filter);
   if (globalElements.agentsSort) globalElements.agentsSort.value = sort;
   if (globalElements.agentsHeatmapToggle) globalElements.agentsHeatmapToggle.checked = heatmapEnabled;
   if (globalElements.agentsActiveMinutes) {
@@ -11964,25 +11987,29 @@ globalElements.agentsModal?.addEventListener('keydown', (event) => {
   else resetFleetSort();
 });
 
-globalElements.agentsSearch?.addEventListener('input', () => renderAgentsModalList());
+globalElements.agentsSearch?.addEventListener('input', () => {
+  storage.set(ADMIN_AGENT_QUERY_KEY, globalElements.agentsSearch.value || '');
+  renderAgentsModalList();
+});
 globalElements.agentsSearch?.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
   event.preventDefault();
   event.stopPropagation();
-  globalElements.agentsSearch.value = '';
-  renderAgentsModalList();
-  globalElements.agentsSearch.focus();
+  if (globalElements.agentsSearch.value) {
+    globalElements.agentsSearch.value = '';
+    storage.remove(ADMIN_AGENT_QUERY_KEY);
+    renderAgentsModalList();
+    globalElements.agentsSearch.focus();
+    return;
+  }
+  closeAgentsModal();
 });
 
 globalElements.agentsFilterButtons.forEach((btn) => {
   btn.addEventListener('click', () => {
     const key = String(btn.getAttribute('data-agents-filter') || 'all').trim() || 'all';
     storage.set(ADMIN_AGENT_FILTER_KEY, key);
-    globalElements.agentsFilterButtons.forEach((chip) => {
-      const active = (chip.getAttribute('data-agents-filter') || '') === key;
-      chip.classList.toggle('active', active);
-      chip.setAttribute('aria-pressed', active ? 'true' : 'false');
-    });
+    setAgentsFilterUi(key);
     renderAgentsModalList();
   });
 });
@@ -12007,6 +12034,7 @@ globalElements.agentsHeatmapToggle?.addEventListener('change', () => {
 
 globalElements.agentsHeartbeatSortBtn?.addEventListener('click', () => setFleetHeartbeatSort());
 globalElements.agentsSortResetBtn?.addEventListener('click', () => resetFleetSort());
+globalElements.agentsResetTriageBtn?.addEventListener('click', () => resetAgentsTriageView());
 
 globalElements.agentsActiveMinutes?.addEventListener('change', () => {
   const minutes = Math.max(1, Number(globalElements.agentsActiveMinutes.value) || FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES);

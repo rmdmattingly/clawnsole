@@ -1830,6 +1830,10 @@ button.send-btn .btn-icon {
   gap: 8px;
 }
 
+.agents-reset-field {
+  align-items: flex-start;
+}
+
 .agents-heatmap-controls {
   min-width: 280px;
 }
