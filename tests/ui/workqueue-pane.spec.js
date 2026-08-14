@@ -871,6 +871,67 @@ test('workqueue pane: scope filter toggles assigned/unassigned/all deterministic
   await expect(rows).toHaveCount(2);
 });
 
+test('workqueue pane: empty state explains hidden rows and offers recovery actions', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  const recoveryLogs = [];
+  page.on('console', (msg) => {
+    const text = msg.text();
+    if (text.includes('workqueue_recovery')) recoveryLogs.push(text);
+  });
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const queue = `empty-recovery-${Date.now()}`;
+  await page.evaluate(async ({ queue }) => {
+    const post = async (url, body) => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error(`${url} failed: ${res.status}`);
+      const data = await res.json();
+      if (!data?.ok) throw new Error(`${url} failed: ${data?.error || 'not ok'}`);
+      return data;
+    };
+
+    const created = await post('/api/workqueue/enqueue', { queue, title: 'done recovery row', instructions: 'x', priority: 1 });
+    await post('/api/workqueue/update', { itemId: created.item.id, patch: { status: 'done' } });
+  }, { queue });
+
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await wqPane.locator('[data-wq-refresh]').click();
+
+  const empty = wqPane.locator('[data-wq-empty]');
+  await expect(empty).toBeVisible();
+  await expect(empty.locator('[data-wq-empty-reason]')).toContainText('0 visible of 1 total');
+  await expect(empty.locator('[data-wq-empty-reason]')).toContainText('status=');
+
+  const clearStatus = empty.locator('[data-wq-empty-action="clear-status"]');
+  await clearStatus.focus();
+  await expect(clearStatus).toBeFocused();
+  await clearStatus.click();
+  await expect(wqPane.locator('[data-wq-list-body] .wq-row')).toHaveCount(1);
+  await expect.poll(() => recoveryLogs.some((line) => line.includes('clear-status'))).toBe(true);
+
+  await wqPane.locator('[data-wq-scope="assigned"]').click();
+  await expect(empty).toBeVisible();
+  await expect(empty.locator('[data-wq-empty-reason]')).toContainText('scope=assigned');
+
+  await empty.locator('[data-wq-empty-action="show-all"]').click();
+  await expect(wqPane.locator('[data-wq-list-body] .wq-row')).toHaveCount(1);
+  await expect(wqPane.locator('[data-wq-scope="all"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => recoveryLogs.some((line) => line.includes('show-all'))).toBe(true);
+});
+
 test('workqueue pane: source chips + clawnsole preset filter items without reload', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);

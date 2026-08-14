@@ -7109,6 +7109,13 @@ function renderWorkqueuePaneItems(pane) {
       const filtersHidingAll = totalCount > 0;
       const title = filtersHidingAll ? 'No items match current filters.' : 'No items in this queue.';
       const hiddenSummary = formatWorkqueueHiddenBreakdown(hiddenCounts);
+      const emptyReasonParts = [];
+      if (hiddenCounts.status > 0) emptyReasonParts.push(`status=${statusLabel}`);
+      if (hiddenCounts.scope > 0) emptyReasonParts.push(`scope=${scopeLabel}`);
+      if (hiddenCounts.source > 0) emptyReasonParts.push(`source filter`);
+      if (hiddenCounts.repo > 0) emptyReasonParts.push(`repo filter`);
+      if (hiddenCounts.search > 0) emptyReasonParts.push(`search`);
+      const emptyHiddenReason = emptyReasonParts.length ? `hidden by ${emptyReasonParts.join(' + ')}` : hiddenSummary;
       if (itemSearchQuery) {
         empty.innerHTML = `
           <div class="empty-state">
@@ -7133,12 +7140,20 @@ function renderWorkqueuePaneItems(pane) {
           itemSearchEl?.focus?.();
         });
       } else {
+        const filterRecoveryActions = filtersHidingAll
+          ? `
+            <button type="button" class="secondary" data-wq-empty-action="reset-scope">Reset scope</button>
+            <button type="button" class="secondary" data-wq-empty-action="clear-status">Clear status filters</button>
+            <button type="button" class="secondary" data-wq-empty-action="show-all">Show all rows</button>
+          `
+          : '';
         empty.innerHTML = `
         <div class="empty-state">
           <div style="font-weight:700; margin-bottom:6px;">${escapeHtml(title)}</div>
           <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
-          ${filtersHidingAll ? `<div class="hint" style="margin-top:6px;">Showing 0 of <span class="mono">${escapeHtml(String(totalCount))}</span> items${hiddenSummary ? ` · ${escapeHtml(hiddenSummary)}` : ''}.</div>` : ''}
+          ${filtersHidingAll ? `<div class="hint" data-wq-empty-reason style="margin-top:6px;">0 visible of <span class="mono">${escapeHtml(String(totalCount))}</span> total${emptyHiddenReason ? `; ${escapeHtml(emptyHiddenReason)}` : ''}.</div>` : ''}
           <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            ${filterRecoveryActions}
             <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
             <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
           </div>
@@ -7155,6 +7170,12 @@ function renderWorkqueuePaneItems(pane) {
             enqueueDetails?.scrollIntoView({ block: 'nearest' });
             pane.elements?.thread?.querySelector('[data-wq-enqueue-title]')?.focus();
           } catch {}
+        });
+        empty.querySelectorAll('[data-wq-empty-action]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const action = String(btn.getAttribute('data-wq-empty-action') || '').trim();
+            pane.elements?.thread?.dispatchEvent(new CustomEvent('wq:recovery-action', { bubbles: true, detail: { action } }));
+          });
         });
       }
     }
@@ -9894,6 +9915,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       renderWorkqueuePaneItems(pane);
     };
 
+    const recordWorkqueueRecoveryAction = (action) => {
+      addFeed('info', `workqueue_recovery:${action}`, {
+        action,
+        queue: String(pane.workqueue?.queue || 'dev-team'),
+        totalRows: Array.isArray(pane.workqueue?.countItems) ? pane.workqueue.countItems.length : 0
+      });
+    };
+
     const applyStatuses = async (next, { closeMenu = false } = {}) => {
       statusSet.clear();
       for (const s of next) statusSet.add(s);
@@ -10200,6 +10229,32 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       await applyStatuses(DEFAULT_STATUSES);
     };
     pane.workqueue.clearAllFilters = clearAllFilters;
+
+    elements.thread.addEventListener('wq:recovery-action', async (event) => {
+      const action = String(event?.detail?.action || '').trim();
+      if (!action) return;
+      recordWorkqueueRecoveryAction(action);
+      if (action === 'reset-scope') {
+        setScope(getDefaultWorkqueueScopeForTarget(pane.agentId));
+        return;
+      }
+      if (action === 'clear-status') {
+        await applyStatuses([]);
+        return;
+      }
+      if (action === 'show-all') {
+        sourceSet.clear();
+        repoSet.clear();
+        searchQuery = '';
+        pane.workqueue.itemSearch = '';
+        if (searchEl) searchEl.value = '';
+        resetRenderLimit();
+        persistQuickFilters();
+        updateQuickFilterUi();
+        setScope('all');
+        await applyStatuses([]);
+      }
+    });
 
     clearQuickBtn?.addEventListener('click', () => {
       sourceSet.clear();
