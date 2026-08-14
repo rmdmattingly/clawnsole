@@ -1067,6 +1067,7 @@ const uiState = {
   agents: []
 };
 
+let loginInFlight = false;
 let toastSeq = 0;
 function showToast(
   message,
@@ -2072,6 +2073,7 @@ function showLogin(message = '') {
   globalElements.loginOverlay.setAttribute('aria-hidden', 'false');
   globalElements.loginError.textContent = message;
   globalElements.loginPassword.value = '';
+  setLoginSubmitting(false);
 
   // Guest role selection removed.
 
@@ -2087,10 +2089,33 @@ function showLogin(message = '') {
   globalElements.fleetBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.fleetBtn) globalElements.fleetBtn.style.opacity = '0.5';
 
-  const isTouch = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
-  if (!isTouch) {
-    globalElements.loginPassword.focus();
+  focusLoginPassword();
+}
+
+function setLoginSubmitting(submitting) {
+  loginInFlight = Boolean(submitting);
+  if (globalElements.loginPassword) {
+    globalElements.loginPassword.disabled = loginInFlight;
   }
+  if (globalElements.loginBtn) {
+    globalElements.loginBtn.disabled = loginInFlight;
+    globalElements.loginBtn.textContent = loginInFlight ? 'Unlocking...' : 'Unlock';
+    globalElements.loginBtn.setAttribute('aria-busy', loginInFlight ? 'true' : 'false');
+  }
+}
+
+function focusLoginPassword() {
+  const isTouch = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  if (isTouch) return;
+
+  const focusIfOpen = () => {
+    if (!globalElements.loginOverlay?.classList.contains('open')) return;
+    if (globalElements.loginPassword?.disabled) return;
+    globalElements.loginPassword?.focus();
+  };
+
+  window.requestAnimationFrame?.(focusIfOpen);
+  window.setTimeout(focusIfOpen, 50);
 }
 
 function hideLogin() {
@@ -2101,11 +2126,15 @@ function hideLogin() {
 }
 
 async function attemptLogin() {
+  if (loginInFlight) return;
+
   const password = globalElements.loginPassword.value.trim();
   if (!password) {
     showLogin('Password required.');
     return;
   }
+
+  setLoginSubmitting(true);
   try {
     const res = await fetch('/auth/login', {
       method: 'POST',
@@ -2114,6 +2143,7 @@ async function attemptLogin() {
       credentials: 'include'
     });
     if (!res.ok) {
+      setLoginSubmitting(false);
       showLogin('Invalid password. Try again.');
       return;
     }
@@ -2132,6 +2162,7 @@ async function attemptLogin() {
     }
     window.location.replace(nextHref);
   } catch {
+    setLoginSubmitting(false);
     showLogin('Login failed. Please retry.');
   }
 }
