@@ -189,12 +189,16 @@ test('chat pane: keyboard pane switch guards immediate Enter send once', async (
   await page.locator('#addPaneBtn').focus();
   await page.keyboard.press('Alt+3');
   await expect(secondInput).toBeFocused();
+  await expect(secondPane.locator('[data-pane-destination-strip]')).toContainText(/Chat/i);
+  await expect(secondPane.locator('[data-pane-send-confirm-hint]')).toContainText(/Press again to send to Chat/);
 
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('pane-switch-send-guard-toast')).toContainText('Pane changed: press Enter again to send');
+  await expect(secondPane.locator('[data-pane-send-confirm-hint]')).toContainText(/Press again to send to Chat/);
   await expect(secondPane.locator('[data-chat-role="user"]')).toHaveCount(0);
 
   await page.keyboard.press('Enter');
+  await expect(secondPane.locator('[data-pane-send-confirm-hint]')).toBeEmpty();
   await expect(secondPane.locator('[data-chat-role="user"]').last()).toContainText('guarded send');
   await expect(secondPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: guarded send');
 
@@ -209,6 +213,34 @@ test('chat pane: keyboard pane switch guards immediate Enter send once', async (
 
   await page.keyboard.press('Control+Enter');
   await expect(secondPane.locator('[data-chat-role="user"]').last()).toContainText('override send');
+});
+
+test('chat pane: pane switch send guard can be disabled while context banner remains', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.sendConfirmGuard.enabled', '0'));
+  await addPane(page, 'Chat pane');
+
+  const chatPanes = page.locator('[data-pane][data-pane-kind="chat"]');
+  const firstPane = chatPanes.first();
+  const secondPane = chatPanes.last();
+  const secondInput = secondPane.locator('[data-pane-input]');
+
+  await expect(secondPane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+  await secondInput.fill('unguarded send');
+  await firstPane.locator('[data-pane-input]').focus();
+  await page.locator('#addPaneBtn').focus();
+  await page.keyboard.press('Alt+3');
+  await expect(secondInput).toBeFocused();
+  await expect(secondPane.locator('[data-pane-destination-strip]')).toContainText(/Chat/i);
+
+  await page.keyboard.press('Enter');
+  await expect(secondPane.locator('[data-pane-send-confirm-hint]')).toBeEmpty();
+  await expect(secondPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: unguarded send');
 });
 
 test('chat pane: draft badge appears, persists across pane switches, and clears on send', async ({ page }) => {
