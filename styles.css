@@ -3167,6 +3167,7 @@ kbd {
   flex-direction: column;
   min-height: 0;
   overflow: auto;
+  scroll-padding-top: 52px;
   scrollbar-gutter: stable both-edges;
 }
 
@@ -3232,6 +3233,14 @@ kbd {
   color: var(--muted);
   background: rgba(12, 15, 20, 0.98);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wq-load-more {
+  align-self: flex-start;
+  margin: 10px 12px 12px;
+  position: relative;
+  scroll-margin-top: 52px;
+  z-index: 4;
 }
 
 [data-wq-empty] {
