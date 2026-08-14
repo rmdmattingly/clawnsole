@@ -269,6 +269,58 @@ test('agents modal quick filter narrows list and Esc clears it', async ({ page, 
   await expect(rows).toHaveCount(initialCount);
 });
 
+test('agents modal persists triage query and sort until reset', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const search = page.locator('#agentsSearch');
+  const sort = page.locator('#agentsSort');
+  await search.fill('alpha');
+  await sort.selectOption('agent_id_asc');
+  await expect(page.locator('#agentsList .agents-row')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'Close agents' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(search).toHaveValue('alpha');
+  await expect(sort).toHaveValue('agent_id_asc');
+  await expect(page.locator('#agentsList .agents-row')).toHaveCount(1);
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsSearch')).toHaveValue('alpha');
+  await expect(page.locator('#agentsSort')).toHaveValue('agent_id_asc');
+
+  await page.locator('#agentsSearch').focus();
+  await page.locator('#agentsSearch').press('Escape');
+  await expect(page.locator('#agentsSearch')).toHaveValue('');
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+  await page.locator('#agentsSearch').focus();
+  await page.locator('#agentsSearch').press('Escape');
+  await expect(page.locator('#agentsModal')).not.toHaveClass(/open/);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await page.locator('#agentsSearch').fill('alpha');
+  await page.locator('#agentsSort').selectOption('agent_id_asc');
+  await page.getByRole('button', { name: 'Reset agents triage view' }).click();
+  await expect(page.locator('#agentsSearch')).toHaveValue('');
+  await expect(page.locator('#agentsSort')).toHaveValue('recent_desc');
+  await expect(page.locator('#agentsList .agents-row')).toHaveCount(2);
+});
+
 test('fleet refresh preserves selected row and falls back when it disappears', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
