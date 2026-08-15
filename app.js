@@ -37,6 +37,8 @@ const globalElements = {
   agentsSearch: document.getElementById('agentsSearch'),
   agentsResetTriageBtn: document.getElementById('agentsResetTriageBtn'),
   agentsFilterButtons: Array.from(document.querySelectorAll('[data-agents-filter]')),
+  agentsSnoozedToggle: document.getElementById('agentsSnoozedToggle'),
+  agentsClearSnoozesBtn: document.getElementById('agentsClearSnoozesBtn'),
   agentsDensityButtons: Array.from(document.querySelectorAll('[data-agents-density]')),
   agentsColumnPicker: document.getElementById('agentsColumnPicker'),
   agentsColumnOptions: document.getElementById('agentsColumnOptions'),
@@ -389,6 +391,7 @@ const storage = {
 const ADMIN_AGENT_PINS_KEY = 'clawnsole.admin.agentPins';
 const ADMIN_AGENT_LAST_SEEN_KEY = 'clawnsole.admin.agentLastSeenAtMs';
 const ADMIN_AGENT_SEARCH_KEY = 'clawnsole.admin.agents.search';
+const ADMIN_AGENT_SNOOZES_KEY = 'clawnsole.admin.agentSnoozes.v1';
 const ADMIN_AGENT_FILTER_KEY = 'clawnsole.admin.agents.filter';
 const ADMIN_AGENT_SORT_KEY = 'clawnsole.admin.agents.sort';
 const ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY = 'clawnsole.admin.agents.preHeartbeatSort';
@@ -398,6 +401,8 @@ const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
 const ADMIN_AGENT_COLUMNS_KEY = 'clawnsole.admin.agents.columns';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
+const FLEET_SNOOZE_30M_MS = 30 * 60_000;
+const FLEET_SNOOZE_2H_MS = 2 * 60 * 60_000;
 const FLEET_COLUMN_DEFS = [
   { key: 'id', label: 'Agent id', defaultVisible: true },
   { key: 'health', label: 'Health', defaultVisible: true },
@@ -970,6 +975,53 @@ function setPinnedAgentIds(ids) {
   writeJsonToStorage(ADMIN_AGENT_PINS_KEY, out);
 }
 
+function getAgentSnoozeMap({ now = Date.now(), prune = true } = {}) {
+  const obj = readJsonFromStorage(ADMIN_AGENT_SNOOZES_KEY, {});
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {};
+  const out = {};
+  let changed = false;
+  for (const [agentId, expiresAt] of Object.entries(obj)) {
+    const id = String(agentId || '').trim();
+    const until = Number(expiresAt) || 0;
+    if (!id || until <= now) {
+      changed = true;
+      continue;
+    }
+    out[id] = until;
+  }
+  if (prune && changed) writeJsonToStorage(ADMIN_AGENT_SNOOZES_KEY, out);
+  return out;
+}
+
+function setAgentSnoozeMap(map) {
+  writeJsonToStorage(ADMIN_AGENT_SNOOZES_KEY, map && typeof map === 'object' ? map : {});
+}
+
+function snoozeFleetAgent(agentId, durationMs) {
+  const id = String(agentId || '').trim();
+  const ms = Number(durationMs) || 0;
+  if (!id || ms <= 0) return;
+  const map = getAgentSnoozeMap();
+  map[id] = Date.now() + ms;
+  setAgentSnoozeMap(map);
+  renderAgentsModalList();
+}
+
+function clearFleetAgentSnooze(agentId) {
+  const id = String(agentId || '').trim();
+  if (!id) return;
+  const map = getAgentSnoozeMap();
+  delete map[id];
+  setAgentSnoozeMap(map);
+  renderAgentsModalList();
+}
+
+function clearAllFleetSnoozes() {
+  setAgentSnoozeMap({});
+  fleetShowSnoozed = false;
+  renderAgentsModalList();
+}
+
 function togglePinnedAgentId(id) {
   const trimmed = String(id || '').trim();
   if (!trimmed) return;
@@ -1326,6 +1378,7 @@ let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
 const FLEET_DEFAULT_STALE_THRESHOLD_MINUTES = 1;
 const FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES = 10;
+let fleetShowSnoozed = false;
 const fleetRefreshLock = {
   lockedAtMs: 0,
   pointerInsideRow: false,
@@ -5401,6 +5454,7 @@ function renderAgentsModalList() {
   syncFleetDensityControl();
 
   const pins = getPinnedAgentIds();
+  const snoozeMap = getAgentSnoozeMap();
   const lastSeenMap = getAgentLastSeenMap();
   const paneStateMap = getAgentPaneStateMap();
   const statusSnippetMap = getAgentStatusSnippetMap();
@@ -5449,10 +5503,14 @@ function renderAgentsModalList() {
     return sortAgentsByLastSeen(arr);
   };
 
-  const filtered = baseAgents.filter(matches);
+  const snoozedIds = new Set(Object.keys(snoozeMap));
+  const snoozedMatches = sortAgents(baseAgents.filter((agent) => snoozedIds.has(String(agent?.id || '').trim()) && matches(agent)));
+  const activeAgents = baseAgents.filter((agent) => !snoozedIds.has(String(agent?.id || '').trim()));
+  const filtered = activeAgents.filter(matches);
   const pinned = sortAgents(filtered.filter((a) => pins.has(String(a?.id || '').trim())));
   const rest = sortAgents(filtered.filter((a) => !pins.has(String(a?.id || '').trim())));
-  const ordered = [...pinned, ...rest];
+  const shownSnoozed = fleetShowSnoozed ? snoozedMatches : [];
+  const ordered = [...pinned, ...rest, ...shownSnoozed];
   const needsAttention = rest.filter((agent) => classify(agent?.id).bucket !== 'active');
   const healthy = rest.filter((agent) => classify(agent?.id).bucket === 'active');
   const fleetSummary = baseAgents.reduce((acc, agent) => {
@@ -5464,7 +5522,7 @@ function renderAgentsModalList() {
   }, { needsTriage: 0, healthy: 0, disconnected: 0 });
   const healthyCollapseDefault = baseAgents.length > ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD;
   const healthyCollapsed = String(storage.get(ADMIN_AGENT_HEALTHY_COLLAPSED_KEY, healthyCollapseDefault ? '1' : '0')) === '1';
-  const visibleAgents = [...pinned, ...needsAttention, ...(healthyCollapsed ? [] : healthy)];
+  const visibleAgents = [...pinned, ...needsAttention, ...(healthyCollapsed ? [] : healthy), ...shownSnoozed];
   reconcileFleetSelection(visibleAgents);
 
   root.innerHTML = '';
@@ -5523,6 +5581,19 @@ function renderAgentsModalList() {
     root.appendChild(header);
   };
 
+  const renderSnoozeControls = () => {
+    const count = Object.keys(snoozeMap).length;
+    if (globalElements.agentsSnoozedToggle) {
+      globalElements.agentsSnoozedToggle.hidden = count === 0;
+      globalElements.agentsSnoozedToggle.textContent = `Snoozed (${count})`;
+      globalElements.agentsSnoozedToggle.classList.toggle('active', fleetShowSnoozed);
+      globalElements.agentsSnoozedToggle.setAttribute('aria-pressed', fleetShowSnoozed ? 'true' : 'false');
+    }
+    if (globalElements.agentsClearSnoozesBtn) {
+      globalElements.agentsClearSnoozesBtn.hidden = count === 0;
+    }
+  };
+
   const renderSection = (title, agents, { collapsible = false, collapsed = false } = {}) => {
     const section = document.createElement('div');
     section.className = 'agents-section';
@@ -5562,6 +5633,11 @@ function renderAgentsModalList() {
       const heartbeatTs = Number(lastSeenMap[id]) || 0;
       const heartbeatAgeMs = heartbeatTs > 0 ? Math.max(0, Date.now() - heartbeatTs) : Number.POSITIVE_INFINITY;
       const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
+      const snoozedUntil = Number(snoozeMap[id]) || 0;
+      const snoozed = snoozedUntil > Date.now();
+      const snoozeChipHtml = snoozed
+        ? `<span class="agents-snooze-chip" title="Snoozed until ${escapeHtml(new Date(snoozedUntil).toLocaleTimeString())}">${escapeHtml(`Snoozed ${fmtRemaining(snoozedUntil - Date.now())}`)}</span>`
+        : '';
       const triage = classify(id);
       const healthLabel = triage.bucket === 'offline_error'
         ? 'Offline/Error'
@@ -5589,6 +5665,9 @@ function renderAgentsModalList() {
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Timeline</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Workqueue</button>
           <button type="button" class="secondary agents-action-btn" data-agent-action="copy-id" data-agent-id="${escapeHtml(id)}" title="Copy agent id" aria-label="Copy agent id for ${escapeHtml(label)}">Copy ID</button>
+          <button type="button" class="secondary agents-action-btn" data-agent-action="snooze-30m" data-agent-id="${escapeHtml(id)}" title="Snooze for 30 minutes" aria-label="Snooze ${escapeHtml(label)} for 30 minutes">Snooze 30m</button>
+          <button type="button" class="secondary agents-action-btn" data-agent-action="snooze-2h" data-agent-id="${escapeHtml(id)}" title="Snooze for 2 hours" aria-label="Snooze ${escapeHtml(label)} for 2 hours">Snooze 2h</button>
+          ${snoozed ? `<button type="button" class="secondary agents-action-btn" data-agent-action="clear-snooze" data-agent-id="${escapeHtml(id)}" title="Clear snooze" aria-label="Clear snooze for ${escapeHtml(label)}">Unsnooze</button>` : ''}
         </div>
         <details class="agents-row-actions-overflow">
           <summary class="secondary" aria-label="More actions for ${escapeHtml(label)}" title="More actions">⋯</summary>
@@ -5598,6 +5677,9 @@ function renderAgentsModalList() {
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-timeline" data-agent-id="${escapeHtml(id)}" title="Open Timeline" aria-label="Open Timeline for ${escapeHtml(label)}">Open Timeline</button>
             <button type="button" class="secondary agents-action-btn" data-agent-action="open-workqueue" data-agent-id="${escapeHtml(id)}" title="Open Workqueue" aria-label="Open Workqueue">Open Workqueue</button>
             <button type="button" class="secondary agents-action-btn" data-agent-action="copy-id" data-agent-id="${escapeHtml(id)}" title="Copy agent id" aria-label="Copy agent id for ${escapeHtml(label)}">Copy agent id</button>
+            <button type="button" class="secondary agents-action-btn" data-agent-action="snooze-30m" data-agent-id="${escapeHtml(id)}" title="Snooze for 30 minutes" aria-label="Snooze ${escapeHtml(label)} for 30 minutes">Snooze 30m</button>
+            <button type="button" class="secondary agents-action-btn" data-agent-action="snooze-2h" data-agent-id="${escapeHtml(id)}" title="Snooze for 2 hours" aria-label="Snooze ${escapeHtml(label)} for 2 hours">Snooze 2h</button>
+            ${snoozed ? `<button type="button" class="secondary agents-action-btn" data-agent-action="clear-snooze" data-agent-id="${escapeHtml(id)}" title="Clear snooze" aria-label="Clear snooze for ${escapeHtml(label)}">Unsnooze</button>` : ''}
           </div>
         </details>
       `
@@ -5605,6 +5687,7 @@ function renderAgentsModalList() {
       row.dataset.heartbeatBucket = triage.ageBucket;
       row.dataset.healthState = triage.bucket;
       row.classList.toggle('is-stale', triage.bucket === 'stale' || heartbeatAgeMs > FLEET_DEFAULT_STALE_THRESHOLD_MINUTES * 60_000);
+      if (snoozed) row.dataset.snoozed = 'true';
       row.classList.toggle('agents-row-heatmap', heatmapEnabled);
       row.classList.toggle('agents-row-no-actions', !visibleColumns.actions);
 
@@ -5619,7 +5702,7 @@ function renderAgentsModalList() {
         </div>
         <div class="agents-row-meta">
             ${visibleColumns.heartbeat ? `<span class="agents-age-chip" data-fleet-column="heartbeat" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}" title="Heartbeat age: ${escapeHtml(heartbeatAge)} (${escapeHtml(heatBucketLabel)})">${escapeHtml(heartbeatAge)}</span>` : ''}
-            ${visibleColumns.heartbeatDetail ? `<span class="agents-age-label" data-fleet-column="heartbeatDetail">${escapeHtml(heatBucketLabel)}</span>` : ''}${statusSnippetHtml}${modelHtml}${hostHtml}
+            ${visibleColumns.heartbeatDetail ? `<span class="agents-age-label" data-fleet-column="heartbeatDetail">${escapeHtml(heatBucketLabel)}</span>` : ''}${snoozeChipHtml}${statusSnippetHtml}${modelHtml}${hostHtml}
         </div>
         ${rowActionsHtml}
       `;
@@ -5651,6 +5734,9 @@ function renderAgentsModalList() {
           else if (action === 'open-timeline') openAgentTimelineFromFleet(id);
           else if (action === 'open-workqueue') openAgentWorkqueueFromFleet(id);
           else if (action === 'copy-id') copyFleetAgentId(id);
+          else if (action === 'snooze-30m') snoozeFleetAgent(id, FLEET_SNOOZE_30M_MS);
+          else if (action === 'snooze-2h') snoozeFleetAgent(id, FLEET_SNOOZE_2H_MS);
+          else if (action === 'clear-snooze') clearFleetAgentSnooze(id);
         });
       });
 
@@ -5680,11 +5766,13 @@ function renderAgentsModalList() {
     root.appendChild(section);
   };
 
+  renderSnoozeControls();
   renderSummary();
   renderFleetHeader();
   if (pinned.length > 0) renderSection('Pinned', pinned);
   renderSection('Needs attention', needsAttention);
   renderSection('Healthy', healthy, { collapsible: true, collapsed: healthyCollapsed });
+  if (fleetShowSnoozed) renderSection('Snoozed', snoozedMatches);
 
   if (globalElements.agentsHeatmapToggle) globalElements.agentsHeatmapToggle.checked = heatmapEnabled;
   if (globalElements.agentsHeartbeatSortBtn) {
@@ -12484,6 +12572,13 @@ globalElements.agentsFilterButtons.forEach((btn) => {
     renderAgentsModalList();
   });
 });
+
+globalElements.agentsSnoozedToggle?.addEventListener('click', () => {
+  fleetShowSnoozed = !fleetShowSnoozed;
+  renderAgentsModalList();
+});
+
+globalElements.agentsClearSnoozesBtn?.addEventListener('click', () => clearAllFleetSnoozes());
 
 globalElements.agentsDensityButtons.forEach((btn) => {
   btn.addEventListener('click', () => {

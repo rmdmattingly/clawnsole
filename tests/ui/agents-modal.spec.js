@@ -206,6 +206,45 @@ test('agents modal shows fleet health summary counts and refreshes them', async 
   await expect(summary.locator('.agents-health-chip.disconnected')).toContainText('0');
 });
 
+test('agents modal snoozes noisy agents and can reveal or clear them', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+
+  const alpha = page.locator('#agentsList .agents-row').filter({ hasText: 'Alpha (alpha)' });
+  await expect(alpha).toBeVisible();
+  await alpha.locator('[data-agent-action="snooze-30m"]').first().click();
+  await expect(page.locator('#agentsList')).not.toContainText('Alpha (alpha)');
+  await expect(page.locator('#agentsSnoozedToggle')).toHaveText('Snoozed (1)');
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+
+  await expect(page.locator('#agentsList')).not.toContainText('Alpha (alpha)');
+  await page.locator('#agentsSnoozedToggle').click();
+  await expect(page.locator('#agentsList .agents-section-title').filter({ hasText: 'Snoozed (1)' })).toBeVisible();
+  await expect(page.locator('#agentsList .agents-row[data-snoozed="true"]')).toContainText('Alpha (alpha)');
+
+  await page.locator('#agentsClearSnoozesBtn').click();
+  await expect(page.locator('#agentsSnoozedToggle')).toBeHidden();
+  await expect(page.locator('#agentsList')).toContainText('Alpha (alpha)');
+});
+
 test('agents modal shows row health and heartbeat-age chips', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
