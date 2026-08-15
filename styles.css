@@ -1822,24 +1822,46 @@ button.send-btn .btn-icon {
   text-transform: uppercase;
 }
 
+.pane-manager-state-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.pane-manager-state-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .pane-manager-unread-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 7px;
-  border-radius: 999px;
   border: 1px solid rgba(239, 68, 68, 0.45);
   background: rgba(239, 68, 68, 0.14);
   color: #fecaca;
-  font-size: 10px;
-  font-weight: 700;
 }
 
 .pane-manager-draft-badge {
-  height: 18px;
-  padding: 0 7px;
+  border: 1px solid rgba(245, 158, 11, 0.42);
+  background: rgba(245, 158, 11, 0.13);
+  color: #fde68a;
+}
+
+.pane-manager-disconnected-badge {
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  background: rgba(148, 163, 184, 0.12);
+  color: #cbd5e1;
 }
 
 .pane-manager-state {

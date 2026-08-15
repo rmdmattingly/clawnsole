@@ -3291,6 +3291,24 @@ function paneSummaryLabel(pane) {
   return `${letter} ${type} · ${target}`;
 }
 
+function paneManagerStateChipMarkup(pane, { unreadCount = paneUnreadCount(pane), hasDraft = paneHasDraftChanges(pane), state = '' } = {}) {
+  const chips = [];
+  if (unreadCount > 0) {
+    const label = `${unreadCount} unread`;
+    chips.push(`<span class="pane-manager-state-chip pane-manager-unread-badge" data-testid="pane-manager-unread-badge" data-state-chip="unread" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`);
+  }
+  if (hasDraft) {
+    chips.push('<span class="pane-manager-state-chip pane-manager-draft-badge" data-testid="pane-manager-draft-badge" data-state-chip="draft" title="Unsent draft">Draft</span>');
+  }
+  const normalizedState = String(state || '').trim().toLowerCase();
+  if (normalizedState === 'disconnected' || normalizedState === 'error') {
+    const label = normalizedState === 'error' ? 'Error' : 'Disconnected';
+    chips.push(`<span class="pane-manager-state-chip pane-manager-disconnected-badge" data-testid="pane-manager-disconnected-badge" data-state-chip="disconnected" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`);
+  }
+  if (!chips.length) return '';
+  return `<span class="pane-manager-state-chips" aria-hidden="true">${chips.join('')}</span>`;
+}
+
 function isPaneSwitchHudEnabled() {
   return String(storage.get(PANE_SWITCH_HUD_ENABLED_KEY, '1') || '1') !== '0';
 }
@@ -4152,8 +4170,7 @@ function renderPaneManager() {
               <span class="pane-manager-pane-id" title="Internal pane id">${paneManagerHighlightHtml(String(pane?.key || ''), query)}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
               ${pinned ? '<span class="pane-manager-pinned-badge" data-testid="pane-manager-pinned-badge" title="Pinned pane">Pinned</span>' : ''}
-              ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
-              ${hasDraft ? '<span class="pane-manager-draft-badge" data-testid="pane-manager-draft-badge" title="Unsent draft">Draft</span>' : ''}
+              ${paneManagerStateChipMarkup(pane, { unreadCount, hasDraft, state })}
             </div>
             <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
           </div>
