@@ -23,6 +23,8 @@ const globalElements = {
   paneManagerBtn: document.getElementById('paneManagerBtn'),
   activePaneChip: document.getElementById('activePaneChip'),
   activePaneChipValue: document.querySelector('[data-active-pane-chip-value]'),
+  layoutModeChip: document.getElementById('layoutModeChip'),
+  layoutModeChipValue: document.querySelector('[data-layout-mode-chip-value]'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
   fleetBtn: document.getElementById('fleetBtn'),
@@ -802,6 +804,110 @@ function buildDefaultAdminPanes(defaultAgent = 'main') {
       sortDir: 'desc'
     }
   ];
+}
+
+function paneConfigMatchesChatWorkqueueLayout(configs) {
+  if (!Array.isArray(configs) || configs.length !== 2) return false;
+  const kinds = configs.map((pane) => normalizePaneKind(pane?.kind || 'chat')).sort();
+  if (kinds[0] !== 'chat' || kinds[1] !== 'workqueue') return false;
+  const workqueue = configs.find((pane) => normalizePaneKind(pane?.kind || 'chat') === 'workqueue');
+  return String(workqueue?.queue || 'dev-team').trim() === 'dev-team';
+}
+
+function paneConfigMatchesTriageLayout(configs) {
+  if (!Array.isArray(configs) || configs.length !== 3) return false;
+  const hasChat = configs.some((pane) => normalizePaneKind(pane?.kind || 'chat') === 'chat');
+  const hasWorkqueue = configs.some((pane) =>
+    normalizePaneKind(pane?.kind || 'chat') === 'workqueue' &&
+    String(pane?.queue || 'dev-team').trim() === 'dev-team'
+  );
+  const hasFleet = configs.some((pane) =>
+    normalizePaneKind(pane?.kind || 'chat') === 'timeline' &&
+    String(pane?.cronAgentId || '').trim() === 'all'
+  );
+  return hasChat && hasWorkqueue && hasFleet;
+}
+
+function detectAdminLayoutMode(configs) {
+  if (paneConfigMatchesChatWorkqueueLayout(configs)) {
+    return { key: 'chat-workqueue', label: 'Chat+Workqueue', custom: false };
+  }
+  if (paneConfigMatchesTriageLayout(configs)) {
+    return { key: 'triage', label: 'Triage', custom: false };
+  }
+  return { key: 'custom', label: 'Custom', custom: true };
+}
+
+function currentAdminPaneConfigs() {
+  if (!paneManager || !Array.isArray(paneManager.panes)) return [];
+  return paneManager.serializeAdminPanes();
+}
+
+function preferredLayoutRestoreAgentId() {
+  const active = activePaneFromState();
+  if (active?.kind === 'chat' || active?.kind === 'workqueue') {
+    return normalizeAgentId(active.agentId || 'main');
+  }
+  const existing = (paneManager?.panes || []).find((pane) => pane?.kind === 'chat' || pane?.kind === 'workqueue');
+  if (existing) return normalizeAgentId(existing.agentId || 'main');
+  return normalizeAgentId(storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main') || 'main');
+}
+
+function renderLayoutModeChip() {
+  const chip = globalElements.layoutModeChip;
+  const value = globalElements.layoutModeChipValue;
+  if (!chip || !value) return;
+
+  const mode = detectAdminLayoutMode(currentAdminPaneConfigs());
+  chip.hidden = !(uiState.authed && roleState.role === 'admin');
+  chip.dataset.layoutMode = mode.key;
+  chip.dataset.layoutCustom = mode.custom ? 'true' : 'false';
+  value.textContent = mode.label;
+  chip.setAttribute(
+    'aria-label',
+    mode.custom
+      ? 'Layout mode: Custom. Click to restore Chat and Workqueue layout.'
+      : `Layout mode: ${mode.label}.`
+  );
+  chip.title = mode.custom ? 'Restore Chat + Workqueue layout' : `${mode.label} layout active`;
+}
+
+function restoreRecommendedLayoutFromChip() {
+  if (roleState.role !== 'admin') return;
+  const mode = detectAdminLayoutMode(currentAdminPaneConfigs());
+  if (!mode.custom) {
+    showToast(`${mode.label} layout is active.`, { kind: 'info', timeoutMs: 1600, testId: 'layout-mode-active-toast' });
+    return;
+  }
+
+  if (paneManager.hasUnsentDrafts()) {
+    const ok = window.confirm('Restore Chat + Workqueue layout? Unsent draft text or attachments will be discarded.');
+    if (!ok) return;
+  }
+
+  const previousRaw = storage.get(ADMIN_PANES_KEY, '');
+  const restoreAgent = preferredLayoutRestoreAgentId();
+  storage.set(ADMIN_PANES_KEY, JSON.stringify(buildDefaultAdminPanes(restoreAgent)));
+  paneManager.init();
+  paneManager.connectAll();
+  try {
+    paneManager.focusPanePrimary(paneManager.panes.find((pane) => pane.kind === 'chat') || paneManager.panes[0]);
+  } catch {}
+
+  showToast('Restored Chat + Workqueue layout.', {
+    kind: 'info',
+    timeoutMs: 9000,
+    actionLabel: previousRaw ? 'Revert' : '',
+    onAction: previousRaw
+      ? () => {
+          storage.set(ADMIN_PANES_KEY, previousRaw);
+          paneManager.init();
+          paneManager.connectAll();
+          showToast('Layout reverted.', { kind: 'info', timeoutMs: 1600, testId: 'layout-mode-revert-toast' });
+        }
+      : null,
+    testId: 'layout-mode-restore-toast'
+  });
 }
 
 function fallbackToDefaultAdminDestination() {
@@ -3380,6 +3486,7 @@ function renderActivePaneState(activePane = activePaneFromState()) {
   value.textContent = label;
   chip.title = `Focus ${label}`;
   chip.setAttribute('aria-label', `Active pane: ${label}. Click to focus.`);
+  renderLayoutModeChip();
 }
 
 function paneIndexByKey(key) {
@@ -11258,7 +11365,11 @@ const paneManager = {
   },
   persistAdminPanes() {
     if (roleState.role !== 'admin') return;
-    const payload = this.panes.map((pane) => {
+    storage.set(ADMIN_PANES_KEY, JSON.stringify(this.serializeAdminPanes()));
+    renderLayoutModeChip();
+  },
+  serializeAdminPanes() {
+    return this.panes.map((pane) => {
       if (pane.kind === 'workqueue') {
         return {
           key: pane.key,
@@ -11285,7 +11396,6 @@ const paneManager = {
       }
       return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main', nickname: paneNickname(pane), pairedTargetLock: !!pane.pairedTargetLock, pinned: paneIsPinned(pane) };
     });
-    storage.set(ADMIN_PANES_KEY, JSON.stringify(payload));
   },
   hasUnsentDrafts() {
     return anyPaneHasDraftChanges(this.panes);
@@ -11971,6 +12081,7 @@ const paneManager = {
       if (!pane.elements.closeBtn) return;
       pane.elements.closeBtn.hidden = !(allowClose && pane.role === 'admin');
     });
+    renderLayoutModeChip();
   },
   applyLayout(cols) {
     const clamped = Math.max(1, Math.min(3, Number(cols) || 1));
@@ -11982,6 +12093,7 @@ const paneManager = {
     if (!globalElements.paneGrid) return;
     const cols = inferPaneCols(this.panes.length);
     this.applyLayout(cols);
+    renderLayoutModeChip();
   },
   connectAll() {
     this.panes.forEach((pane, index) => {
@@ -13236,6 +13348,10 @@ globalElements.activePaneChip?.addEventListener('click', () => {
   const pane = activePaneFromState();
   const idx = paneManager?.panes?.indexOf?.(pane) ?? -1;
   if (idx >= 0) focusPaneIndex(idx, { showHud: true });
+});
+
+globalElements.layoutModeChip?.addEventListener('click', () => {
+  restoreRecommendedLayoutFromChip();
 });
 
 globalElements.addChatPaneBtn?.addEventListener('click', (event) => {
