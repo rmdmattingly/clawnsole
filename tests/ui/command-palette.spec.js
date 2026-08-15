@@ -202,5 +202,47 @@ test('command palette: opens or focuses Workqueue for active chat agent', async 
 
   await wqPane.locator('[data-wq-queue-select]').focus();
   await runCommand('workqueue for active chat agent');
-  await expect(page.getByTestId('toast').last()).toContainText('No active chat agent selected');
+  await expect(page.getByTestId('toast').filter({ hasText: 'No active chat agent selected' })).toBeVisible();
+});
+
+test('layout triage preset reuses panes and preserves chat draft', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await loginAdminWithChatOnlyPane(page, env.serverPort);
+
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
+  await expect(chatInput).toBeVisible();
+  await chatInput.fill('draft stays put');
+  await expect(page.locator('[data-pane]')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await expect(page.locator('#triageLayoutPresetBtn')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await page.keyboard.press('ControlOrMeta+K');
+  const input = page.locator('#commandPaletteInput');
+  await expect(input).toBeVisible();
+  await input.fill('triage preset');
+  const firstHit = page.locator('#commandPaletteList [role="option"]').first();
+  await expect(firstHit).toHaveAttribute('data-command-palette-id', 'cmd:triage-layout-preset');
+  await expect(firstHit.locator('.command-palette-item-label')).toHaveText('Layout: Triage focus');
+  await page.keyboard.press('Enter');
+
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+  await expect(chatInput).toHaveValue('draft stays put');
+
+  await page.keyboard.press('ControlOrMeta+K');
+  await expect(input).toBeVisible();
+  await input.fill('triage preset');
+  await page.keyboard.press('Enter');
+
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+  await expect(chatInput).toHaveValue('draft stays put');
 });

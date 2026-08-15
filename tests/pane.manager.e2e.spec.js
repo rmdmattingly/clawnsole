@@ -299,6 +299,77 @@ test('pane manager: status stays in sync with pane header while modal is open', 
   await expect(chatManagerState).toHaveText('disconnected');
 });
 
+test('pane manager: paired action focuses existing counterpart and opens missing counterpart', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.keyboard.press('Control+P');
+  const modal = page.locator('#paneManagerModal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  const chatRow = page.locator('.pane-manager-row', { hasText: 'Chat · main' }).first();
+  await chatRow.evaluate((row) => {
+    const paired = row.querySelector('[data-action="paired"]');
+    paired?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+  const focusedKindAfterFocus = await page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    const pane = panes.find((p) => p === active || (active && p.contains(active)));
+    return pane?.getAttribute('data-pane-kind') || null;
+  });
+  expect(focusedKindAfterFocus).toBe('workqueue');
+
+  // Start the missing-counterpart path from a Workqueue-only stored layout.
+  await page.evaluate(() => {
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([
+        {
+          key: 'ptestwqonly',
+          kind: 'workqueue',
+          agentId: 'main',
+          queue: 'dev-team',
+          statusFilter: ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
+          scopeFilter: 'assigned',
+          sortKey: 'priority',
+          sortDir: 'desc'
+        }
+      ])
+    );
+  });
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.keyboard.press('Control+P');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  // Trigger Paired from Workqueue row; should open Chat and focus it.
+  const workqueueRow = page.locator('.pane-manager-row', { hasText: 'Workqueue' }).first();
+  await workqueueRow.evaluate((row) => {
+    const paired = row.querySelector('[data-action="paired"]');
+    paired?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  const focusedKindAfterOpen = await page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    const pane = panes.find((p) => p === active || (active && p.contains(active)));
+    return pane?.getAttribute('data-pane-kind') || null;
+  });
+  expect(focusedKindAfterOpen).toBe('chat');
+});
+
 test('pane manager: supports reordering panes', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
