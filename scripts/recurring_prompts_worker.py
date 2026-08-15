@@ -39,6 +39,10 @@ def _json_request(base_url: str, method: str, path: str, *, data=None, headers=N
         except json.JSONDecodeError:
             payload = {"error": raw or str(err)}
         return err.code, payload, err.headers
+    except urllib.error.URLError as err:
+        return 0, {"error": str(getattr(err, "reason", err))}, {}
+    except (TimeoutError, OSError) as err:
+        return 0, {"error": str(err) or "request failed"}, {}
 
 
 def _login(base_url: str, password: str, timeout: int) -> str:
@@ -76,7 +80,7 @@ def _load_prompts(base_url: str, cookie: str, timeout: int):
     return prompts if isinstance(prompts, list) else []
 
 
-def _trigger_prompt(base_url: str, cookie: str, prompt: dict, now_ms: int, timeout: int, dry_run: bool):
+def _trigger_prompt(base_url: str, cookie: str, prompt: dict, now_ms: int, timeout: int, dry_run: bool, device_label: str):
     prompt_id = str(prompt.get("id") or "").strip()
     if not prompt_id:
         return {"ok": False, "error": "missing prompt id"}
@@ -93,7 +97,7 @@ def _trigger_prompt(base_url: str, cookie: str, prompt: dict, now_ms: int, timeo
         data={
             "scheduledAt": scheduled_at,
             "idempotencyKey": idempotency_key,
-            "deviceLabel": "python-worker",
+            "deviceLabel": device_label,
             "dryRun": dry_run,
         },
         headers={"Cookie": cookie, "Idempotency-Key": idempotency_key},
@@ -136,7 +140,15 @@ def run_once(args) -> dict:
     for prompt in due:
         last_error = None
         for attempt in range(args.retries + 1):
-            result = _trigger_prompt(args.base_url, cookie, prompt, now_ms, args.timeout, args.dry_run)
+            result = _trigger_prompt(
+                args.base_url,
+                cookie,
+                prompt,
+                now_ms,
+                args.timeout,
+                args.dry_run,
+                args.device_label,
+            )
             if result.get("ok"):
                 delivered += 1
                 if result.get("duplicate"):
@@ -168,6 +180,7 @@ def parse_args(argv):
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--backoff", type=float, default=1.0)
     parser.add_argument("--max-backoff", type=float, default=10.0)
+    parser.add_argument("--device-label", default=os.environ.get("CLAWNSOLE_WORKER_DEVICE_LABEL", "python-worker"))
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 

@@ -22,7 +22,7 @@
   </head>
   <body>
     <div class="app">
-      <header id="topbar" class="topbar minimal">
+      <header class="topbar minimal">
         <div class="brand compact">
           <div class="brand-mark"></div>
           <div>
@@ -40,47 +40,93 @@
               data-testid="panes-indicator"
             ></button>
           </div>
+          <button
+            id="activePaneChip"
+            class="active-pane-chip"
+            type="button"
+            aria-label="Focus active pane"
+            title="Focus active pane"
+            data-testid="active-pane-chip"
+            hidden
+          >
+            <span class="active-pane-chip__label">Active</span>
+            <span class="active-pane-chip__value" data-active-pane-chip-value></span>
+          </button>
+          <button
+            id="layoutModeChip"
+            class="layout-mode-chip"
+            type="button"
+            aria-label="Layout mode"
+            title="Layout mode"
+            data-testid="layout-mode-chip"
+            hidden
+          >
+            <span class="layout-mode-chip__label">Layout</span>
+            <span class="layout-mode-chip__value" data-layout-mode-chip-value>Custom</span>
+          </button>
           <div id="paneControls" class="pane-controls" hidden>
             <div class="pane-add-wrap">
-              <button id="addPaneBtn" class="icon-btn action-btn topbar-action-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add pane" title="Add Pane (Ctrl/Cmd+Shift+N)" data-testid="add-pane-btn">
+              <button id="addPaneBtn" class="icon-btn action-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add pane" title="Add Pane (Ctrl/Cmd+Shift+N)" data-testid="add-pane-btn">
                 <span class="btn-icon" aria-hidden="true">+</span>
                 <span class="btn-label">Add Pane</span>
               </button>
             </div>
+            <button id="layoutLockBtn" class="icon-btn" type="button" aria-label="Lock pane layout" aria-pressed="false" data-testid="layout-lock-btn">🔓</button>
             <select id="layoutSelect" aria-label="Pane layout">
               <option value="1">1-up</option>
               <option value="2" selected>2-up</option>
               <option value="3">3-up</option>
             </select>
           </div>
-          <div class="role-pill" id="rolePill" data-testid="role-pill">signed out</div>
-          <button id="refreshAgentsBtn" class="icon-btn action-btn topbar-action-btn" type="button" aria-label="Refresh agent list" title="Refresh (Ctrl/Cmd+R)" hidden>
+          <button
+            class="role-pill signed-out"
+            id="rolePill"
+            type="button"
+            data-testid="role-pill"
+            data-auth-state="signed_out"
+            aria-haspopup="dialog"
+            aria-expanded="false"
+            aria-controls="authSessionPopover"
+            aria-label="Authentication status"
+            title="Session context: signed out. Click to unlock this session."
+          >Signed out</button>
+          <div id="authSessionPopover" class="auth-session-popover" data-testid="auth-session-popover" role="dialog" aria-label="Session details" hidden>
+            <div class="auth-session-popover__status" data-auth-session-status>Signed out</div>
+            <div class="auth-session-popover__principal" data-auth-session-principal>Not signed in</div>
+            <div class="auth-session-popover__env" data-auth-session-env>local</div>
+            <div class="auth-session-popover__actions">
+              <button type="button" class="secondary" data-auth-session-action="settings">Settings</button>
+              <button type="button" class="secondary" data-auth-session-action="unlock">Unlock</button>
+              <button type="button" class="secondary" data-auth-session-action="logout">Logout</button>
+            </div>
+          </div>
+          <button id="refreshAgentsBtn" class="icon-btn action-btn" type="button" aria-label="Refresh agent list" title="Refresh (Ctrl/Cmd+R)" hidden>
             <span class="btn-icon" aria-hidden="true">⟳</span>
             <span class="btn-label">Refresh</span>
           </button>
-          <button id="agentsBtn" class="icon-btn action-btn topbar-action-btn" type="button" aria-label="Open agents" title="Agents" hidden>
+          <button id="agentsBtn" class="icon-btn action-btn" type="button" aria-label="Open agents" title="Agents" hidden>
             <span class="btn-icon" aria-hidden="true">★</span>
             <span class="btn-label">Agents</span>
           </button>
-          <button id="fleetBtn" class="icon-btn topbar-action-btn" type="button" aria-label="Open fleet pane" title="Open Fleet pane (Cmd/Ctrl+Shift+F)" hidden>
+          <button id="fleetBtn" class="icon-btn action-btn" type="button" aria-label="Open fleet pane" title="Open Fleet pane (Cmd/Ctrl+Shift+F)" hidden>
             <span class="btn-icon" aria-hidden="true">FL</span>
             <span class="btn-label">Fleet</span>
           </button>
-          <button id="workqueueBtn" class="icon-btn action-btn topbar-action-btn" type="button" aria-label="Open workqueue" title="Workqueue (g w)" hidden>
+          <button id="workqueueBtn" class="icon-btn action-btn" type="button" aria-label="Open workqueue" title="Workqueue (g w)" hidden>
             <span class="btn-icon" aria-hidden="true">WQ</span>
             <span class="btn-label">Workqueue</span>
           </button>
-          <button id="shortcutsBtn" class="icon-btn topbar-action-btn" type="button" aria-label="Open keyboard shortcuts" title="Keyboard shortcuts (?)" hidden data-testid="shortcuts-btn">
+          <button id="shortcutsBtn" class="icon-btn action-btn" type="button" aria-label="Open keyboard shortcuts" title="Keyboard shortcuts (?)" hidden data-testid="shortcuts-btn">
             <span class="btn-icon" aria-hidden="true">?</span>
             <span class="btn-label">Shortcuts</span>
           </button>
-          <button id="settingsBtn" class="icon-btn action-btn topbar-action-btn" type="button" aria-label="Open settings" title="Settings">
+          <button id="settingsBtn" class="icon-btn action-btn" type="button" aria-label="Open settings" title="Settings">
             <span class="btn-icon" aria-hidden="true">⚙︎</span>
             <span class="btn-label">Settings</span>
           </button>
-          <button id="logoutBtn" class="icon-btn action-btn topbar-action-btn" type="button" aria-label="Log out" title="Logout">
+          <button id="logoutBtn" class="icon-btn action-btn" type="button" aria-label="Unlock admin" title="Unlock">
             <span class="btn-icon" aria-hidden="true">⎋</span>
-            <span class="btn-label">Logout</span>
+            <span class="btn-label">Unlock</span>
           </button>
         </div>
       </header>
@@ -92,12 +138,20 @@
         <template id="paneTemplate">
           <section class="chat-panel pane" data-pane data-testid="pane">
             <div class="pane-header">
+              <span class="pane-index-badge" data-pane-index-badge data-testid="pane-index-badge" hidden aria-hidden="true">1</span>
               <div class="pane-header-left">
                 <div class="pane-type-badge pane-type-pill" data-pane-type-pill data-testid="pane-type-pill" aria-label="Pane type">
                   <span class="pane-type-icon" data-pane-type-icon aria-hidden="true">💬</span>
                   <span class="pane-type-text" data-pane-type-text>CHAT</span>
                 </div>
-                <div class="pane-name" data-pane-name data-testid="pane-type-label">Pane</div>
+                <span class="pane-pair-cue" data-pane-pair-cue data-testid="pane-pair-cue" hidden></span>
+                <div class="pane-name" data-pane-name data-testid="pane-type-label">
+                  <span class="pane-name-token" data-pane-name-token data-testid="pane-name-token">A Chat</span>
+                  <span class="pane-name-target" data-pane-name-target data-testid="pane-name-target"> · main</span>
+                </div>
+                <button class="icon-btn pane-nickname-btn" data-pane-nickname type="button" aria-label="Set pane nickname" title="Set pane nickname" data-testid="pane-nickname">
+                  ✎
+                </button>
                 <div class="pane-agent" data-pane-agent-wrap>
                   <span class="agent-label" data-pane-target-label data-testid="pane-target-label">Agent</span>
                   <button class="agent-pill-btn" type="button" data-pane-agent-button aria-label="Change agent" data-testid="pane-agent-button">
@@ -108,9 +162,13 @@
                 </div>
               </div>
               <div class="pane-header-right">
-                <div class="pane-agent-pill" data-pane-agent-pill data-testid="pane-agent-pill" hidden></div>
+                <button class="pane-agent-pill" data-pane-agent-pill data-pane-target-lock type="button" data-testid="pane-target-lock" hidden></button>
                 <div class="pane-agent-warning" data-pane-agent-warning hidden></div>
 
+                <div class="pane-draft-badge" data-pane-draft-badge data-testid="pane-draft-badge" hidden aria-live="polite" aria-label="No unsent draft">Draft</div>
+                <button class="icon-btn pane-pin" data-pane-pin type="button" aria-label="Pin pane" title="Pin pane" data-testid="pane-pin" aria-pressed="false">
+                  📌
+                </button>
                 <details class="pane-help" data-pane-help>
                   <summary class="icon-btn" type="button" aria-label="What is this pane?" data-testid="pane-help">?</summary>
                   <div class="pane-help-popover" data-pane-help-popover></div>
@@ -132,10 +190,11 @@
             <div class="chat-input-row">
               <div class="chat-input-stack">
                 <div class="destination-strip" data-pane-destination-strip data-testid="pane-destination-strip">
-                  <span class="destination-strip-label">Sending to</span>
+                  <span class="destination-strip-label" data-pane-destination-label>Chat</span>
                   <button class="destination-strip-target" type="button" data-pane-destination-button aria-label="Change destination" data-testid="pane-destination-button">
                     <span data-pane-destination-value data-testid="pane-destination-value">main</span>
                   </button>
+                  <span class="destination-strip-confirm" data-pane-send-confirm-hint aria-live="polite"></span>
                 </div>
                 <textarea data-pane-input placeholder="Message..." data-testid="pane-input"></textarea>
                 <div data-pane-command-hints class="command-hints" aria-live="polite"></div>
@@ -202,6 +261,9 @@
           Password
           <input id="loginPassword" type="password" placeholder="Enter password" data-testid="login-password" />
         </label>
+        <div id="loginCapsHint" class="login-caps-hint" role="status" aria-live="polite" hidden data-testid="login-caps-hint">
+          Caps Lock is on
+        </div>
         <div id="loginError" class="login-error" role="alert" data-testid="login-error"></div>
         <button id="loginBtn" class="primary" data-testid="login-button">Unlock</button>
       </div>
@@ -238,48 +300,7 @@
             ✕
           </button>
         </div>
-        <div class="modal-body">
-          <div class="hint" style="margin-bottom: 10px;">
-            Most shortcuts are disabled while typing in inputs, textareas, selects, or contenteditable fields. Global keys like <kbd>Esc</kbd>, <kbd>Cmd/Ctrl+P</kbd>, and <kbd>Cmd/Ctrl+K</kbd> still work.
-          </div>
-
-          <div class="shortcut-group">
-            <h3 class="shortcut-group-title">Global</h3>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>?</kbd></div><div class="shortcut-desc">Open this help overlay</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Esc</kbd></div><div class="shortcut-desc">Close overlay / menus</div></div>
-          </div>
-
-          <div class="shortcut-group">
-            <h3 class="shortcut-group-title">Pane focus/navigation</h3>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Alt</kbd>/<kbd>Option</kbd>+<kbd>1</kbd>..<kbd>9</kbd></div><div class="shortcut-desc">Focus panes 1-9 by visible order</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>4</kbd></div><div class="shortcut-desc">Focus pane 1-4</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>P</kbd></div><div class="shortcut-desc">Open Pane Manager</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next pane</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous pane</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Focus next Chat pane only</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>J</kbd></div><div class="shortcut-desc">Focus previous Chat pane only</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>c</kbd></div><div class="shortcut-desc">Return to last active Chat pane</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>L</kbd></div><div class="shortcut-desc">Focus Chat composer</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Tab</kbd></div><div class="shortcut-desc">Switch panes by most-recent focus order</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></div><div class="shortcut-desc">Reverse most-recent pane traversal</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>]</kbd></div><div class="shortcut-desc">Next unread pane</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd></div><div class="shortcut-desc">Previous unread pane</div></div>
-          </div>
-
-          <div class="shortcut-group">
-            <h3 class="shortcut-group-title">Pane actions</h3>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd></div><div class="shortcut-desc">Open command palette</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="shortcut-desc">Add pane</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C/W/R/T</kbd></div><div class="shortcut-desc">Add Chat/Workqueue/Cron/Timeline pane (workspace only)</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></div><div class="shortcut-desc">Open/focus Fleet pane</div></div>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>R</kbd></div><div class="shortcut-desc">Refresh agent list</div></div>
-          </div>
-
-          <div class="shortcut-group">
-            <h3 class="shortcut-group-title">Workqueue actions</h3>
-            <div class="shortcut-row"><div class="shortcut-keys"><kbd>g</kbd> <kbd>w</kbd></div><div class="shortcut-desc">Open Workqueue modal</div></div>
-          </div>
-        </div>
+        <div id="shortcutsContent" class="modal-body"></div>
       </div>
     </div>
 
@@ -295,7 +316,7 @@
           </div>
           <label class="pane-manager-search-wrap" for="paneManagerSearch">
             <span class="pane-manager-search-label">Quick find</span>
-            <input id="paneManagerSearch" class="pane-manager-search" type="search" placeholder="Filter by title, type, or target" autocomplete="off" data-testid="pane-manager-search" />
+            <input id="paneManagerSearch" class="pane-manager-search" type="search" placeholder="Find pane (A, Workqueue, dev-agent...)" autocomplete="off" data-testid="pane-manager-search" />
           </label>
           <label class="pane-manager-unread-only"><input id="paneManagerUnreadOnly" type="checkbox" data-testid="pane-manager-unread-only" /> Unread only</label>
           <div id="paneManagerList" class="pane-manager-list" role="listbox" aria-label="Open panes" data-testid="pane-manager-list"></div>
@@ -320,6 +341,10 @@
             </label>
             <div class="wq-field">
               Status
+              <div class="wq-status-actions">
+                <button id="wqShowArchivedBtn" class="secondary wq-archive-toggle" type="button" aria-pressed="false">Show archived</button>
+                <span id="wqArchivedHint" class="hint">Archived done/failed items hidden.</span>
+              </div>
               <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters"></div>
             </div>
             <label class="wq-field">
@@ -413,17 +438,27 @@
       <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="agentsTitle">
         <div class="modal-header">
           <h2 id="agentsTitle">Agents</h2>
-          <button id="agentsCloseBtn" class="icon-btn" type="button" aria-label="Close agents">
-            ✕
-          </button>
+          <div class="modal-header-actions">
+            <button id="agentsModalRefreshBtn" class="icon-btn" type="button" aria-label="Refresh agents modal">
+              ↻
+            </button>
+            <button id="agentsCloseBtn" class="icon-btn" type="button" aria-label="Close agents">
+              ✕
+            </button>
+          </div>
         </div>
         <div class="modal-body">
           <div class="agents-toolbar">
-            <div id="agentsLastRefreshed" class="agents-last-refreshed" aria-live="polite">Last refreshed: never</div>
+            <div class="agents-refresh-state">
+              <span id="agentsLastRefreshed" class="agents-last-refreshed" role="status" aria-live="polite" aria-atomic="true">Last updated: never</span>
+              <span id="agentsRefreshPaused" class="agents-refresh-paused" aria-live="polite" hidden></span>
+              <button id="agentsRefreshStateBtn" type="button" class="secondary agents-refresh-state-btn" aria-label="Refresh Fleet">Refresh</button>
+            </div>
             <label class="agents-field">
               <span class="agents-label">Search</span>
               <input id="agentsSearch" type="text" placeholder="Filter agents…" />
             </label>
+            <button id="agentsResetTriageBtn" type="button" class="secondary agents-reset-triage">Reset agents triage view</button>
             <div class="agents-field agents-triage">
               <span class="agents-label">Triage</span>
               <div class="agents-filter-chips" role="group" aria-label="Fleet triage filters">
@@ -431,6 +466,13 @@
                 <button type="button" class="agents-chip" data-agents-filter="active" aria-pressed="false">Active</button>
                 <button type="button" class="agents-chip" data-agents-filter="stale" aria-pressed="false">Stale</button>
                 <button type="button" class="agents-chip" data-agents-filter="offline_error" aria-pressed="false">Offline/Error</button>
+              </div>
+            </div>
+            <div class="agents-field agents-snooze-controls">
+              <span class="agents-label">Snooze</span>
+              <div class="agents-snooze-actions">
+                <button id="agentsSnoozedToggle" type="button" class="agents-chip" aria-pressed="false" hidden>Snoozed (0)</button>
+                <button id="agentsClearSnoozesBtn" type="button" class="agents-chip" hidden>Clear snoozes</button>
               </div>
             </div>
             <label class="agents-field">
@@ -464,10 +506,18 @@
                 <button type="button" class="agents-chip" data-agents-density="compact" aria-pressed="false">Compact</button>
               </div>
             </div>
+            <div class="agents-field agents-columns">
+              <span class="agents-label">Columns</span>
+              <details id="agentsColumnPicker" class="agents-column-picker">
+                <summary class="agents-chip">Columns</summary>
+                <div id="agentsColumnOptions" class="agents-column-options" role="group" aria-label="Fleet columns"></div>
+              </details>
+            </div>
           </div>
 
           <div id="agentsList" class="agents-list" aria-label="Agent list"></div>
           <div id="agentsEmpty" class="hint" hidden>No agents match.</div>
+          <div id="agentsSelectionBar" class="agents-selection-bar" aria-live="polite" hidden></div>
         </div>
       </div>
     </div>
@@ -496,6 +546,7 @@
           <div class="button-row">
             <button id="disconnectBtn">Disconnect</button>
             <button id="resetLayoutBtn" type="button" class="secondary">Reset to recommended layout</button>
+            <button id="triageLayoutPresetBtn" type="button" class="secondary">Triage preset</button>
           </div>
           <div class="hint">
             Auto-connecting with the gateway token from your local OpenClaw config.
@@ -508,9 +559,35 @@
               Show pane-switch HUD
             </label>
             <label class="inline-checkbox">
-              <input id="labeledHeaderControlsEnabled" type="checkbox" />
+              <input id="sendConfirmGuardEnabled" type="checkbox" checked />
+              Confirm quick sends after switching panes
+            </label>
+          </section>
+
+          <section class="settings-section" aria-label="Header controls">
+            <h3>Header controls</h3>
+            <label class="inline-checkbox">
+              <input id="headerLabeledControlsEnabled" type="checkbox" checked />
               Labeled header controls
             </label>
+          </section>
+
+          <section class="settings-section" aria-label="Keyboard">
+            <h3>Keyboard</h3>
+            <div id="keybindConflictList" class="keybind-conflict-list" data-testid="keybind-conflict-list"></div>
+          </section>
+
+          <section class="settings-section" aria-label="Shortcut overrides">
+            <div class="settings-section-head">
+              <h3>Shortcut overrides</h3>
+              <button id="shortcutOverridesResetAll" type="button" class="secondary">Reset all</button>
+            </div>
+            <p class="hint">Click a shortcut field, press a key combo, then save changes.</p>
+            <div id="shortcutOverridesList" class="shortcut-overrides-list"></div>
+            <div id="shortcutOverridesError" class="settings-error" role="alert" hidden></div>
+            <div class="button-row">
+              <button id="shortcutOverridesSave" type="button">Save shortcuts</button>
+            </div>
           </section>
 
           <section class="settings-section" aria-label="Recurring admin prompts">
@@ -589,13 +666,6 @@
             </div>
           </section>
 
-          <div class="hint" style="margin-top: 12px;">
-            <div style="font-weight: 600; margin-bottom: 6px;">Keyboard shortcuts (admin)</div>
-            <div>New Chat pane: <code>Ctrl/Cmd</code> + <code>Shift</code> + <code>C</code></div>
-            <div>New Workqueue pane: <code>Ctrl/Cmd</code> + <code>Shift</code> + <code>W</code></div>
-            <div>New Cron pane: <code>Ctrl/Cmd</code> + <code>Shift</code> + <code>R</code></div>
-            <div>New Timeline pane: <code>Ctrl/Cmd</code> + <code>Shift</code> + <code>T</code></div>
-          </div>
         </div>
       </div>
     </div>
