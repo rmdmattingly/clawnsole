@@ -658,6 +658,84 @@ test('workqueue pane: default rows collapse exact duplicates with expandable mem
   await expect(wqPane.locator('[data-wq-list-body] .wq-row-child')).toHaveCount(2);
 });
 
+test('workqueue pane: direct shortcuts focus queue, item, and status controls with blocked feedback', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  const queue = `shortcut-search-${Date.now()}`;
+  await page.evaluate(async ({ queue }) => {
+    const enqueue = async (title) => {
+      const res = await fetch('/api/workqueue/enqueue', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queue, title, instructions: `seed ${title}`, priority: 1 })
+      });
+      if (!res.ok) throw new Error(`enqueue failed: ${res.status}`);
+    };
+    await enqueue('shortcut alpha target');
+    await enqueue('shortcut beta hidden');
+  }, { queue });
+
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await expect(pane.locator('[data-wq-list-body] .wq-row')).toHaveCount(2);
+
+  await expect(pane.locator('[data-wq-queue-search]')).toBeVisible();
+  await expect(pane.locator('[data-wq-search]')).toBeVisible();
+  await pane.locator('[data-wq-refresh]').focus();
+  await page.keyboard.press('?');
+  await expect(page.locator('#shortcutsModal')).toHaveClass(/open/);
+  await expect(page.locator('#shortcutsModal')).toContainText('Focus Workqueue queue search');
+  await expect(page.locator('#shortcutsModal')).toContainText('Focus Workqueue item search');
+  await expect(page.locator('#shortcutsModal')).toContainText('Focus Workqueue status filter');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#shortcutsModal')).not.toHaveClass(/open/);
+
+  const pressAlt = async (key) => page.evaluate((nextKey) => {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: nextKey,
+      altKey: true,
+      bubbles: true,
+      cancelable: true
+    }));
+  }, key);
+
+  await pane.locator('[data-wq-refresh]').focus();
+  await pressAlt('q');
+  await expect(pane.locator('[data-wq-queue-search]')).toBeFocused();
+
+  await pane.locator('[data-wq-refresh]').focus();
+  await pressAlt('f');
+  await expect(pane.locator('[data-wq-search]')).toBeFocused();
+  await pane.locator('[data-wq-search]').fill('alpha');
+  await expect(pane.locator('[data-wq-list-body] .wq-row')).toHaveCount(1);
+  await expect(pane.locator('[data-wq-list-body] .wq-row')).toContainText('shortcut alpha target');
+
+  await pane.locator('[data-wq-refresh]').focus();
+  await pressAlt('s');
+  await expect(pane.locator('[data-wq-status-details] summary')).toBeFocused();
+  await expect(pane.locator('[data-wq-status-details]')).toHaveAttribute('open', '');
+
+  await page.evaluate(() => {
+    document.querySelector('[data-wq-queue-search]')?.setAttribute('hidden', '');
+  });
+  await pane.locator('[data-wq-refresh]').focus();
+  await pressAlt('q');
+  await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Shortcut target is unavailable');
+
+  await page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').focus();
+  await pressAlt('f');
+  await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Focus a Workqueue pane');
+});
+
 test('workqueue pane: auto view groups large repetitive routine queues', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
