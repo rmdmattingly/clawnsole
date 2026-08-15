@@ -439,6 +439,8 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
   await expect(wqPane.locator('.wq-pane')).toHaveCount(1);
   await expect(wqPane.locator('[data-wq-queue-search]')).toBeVisible();
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
+  await expect(wqPane.getByText('Viewing queue')).toBeVisible();
+  await expect(wqPane.locator('[data-wq-queue-select]')).toHaveAttribute('aria-label', 'Viewing queue');
 
   // Header target should describe queue context (not agent).
   await expect(wqPane.locator('[data-pane-target-label]')).toHaveText('Queue');
@@ -795,6 +797,51 @@ test('workqueue pane: queue filter and item search are distinct controls', async
   await expect(wqPane.locator('[data-wq-item-search]')).toBeFocused();
 });
 
+test('workqueue pane: enqueue destination is distinct from viewing queue', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  const baseUrl = `http://127.0.0.1:${env.serverPort}`;
+  const seed = await page.request.post(`${baseUrl}/api/workqueue/enqueue`, {
+    data: {
+      queue: 'qa-destination',
+      title: 'seed destination queue',
+      instructions: 'seed',
+      priority: 1
+    }
+  });
+  expect(seed.ok()).toBeTruthy();
+
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('details.wq-enqueue summary').click();
+
+  const viewingQueue = await pane.locator('[data-wq-queue-select]').inputValue();
+  const destinationSearch = pane.locator('[data-wq-enqueue-target-search]');
+  const destinationSelect = pane.locator('[data-wq-enqueue-target-select]');
+
+  await expect(destinationSearch).toBeVisible();
+  await expect(destinationSelect).toHaveAttribute('aria-label', 'Enqueue destination queue');
+  await expect(pane.getByLabel('Enqueue destination', { exact: true }).getByText('Enqueue to')).toBeVisible();
+  await expect(pane.getByText('New items go here; the viewed queue stays separate.')).toBeVisible();
+
+  await destinationSearch.fill('qa-destination');
+  await expect(destinationSelect.locator('option', { hasText: 'qa-destination' })).toHaveCount(1);
+  await destinationSearch.press('Enter');
+
+  await pane.locator('[data-wq-enqueue-title]').fill('destination-confirmation-test');
+  await pane.locator('[data-wq-enqueue-submit]').click();
+
+  await expect(pane.locator('[data-wq-enqueue-status]')).toContainText(/Enqueued to qa-destination:/);
+  await expect(page.getByTestId('toast').last()).toContainText(/Enqueued to qa-destination:/);
+  await expect(pane.locator('[data-wq-queue-select]')).toHaveValue(viewingQueue);
+});
+
 test('workqueue pane: enqueue assignment target supports search, keyboard select, and recents', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -846,8 +893,11 @@ test('workqueue pane: viewing queue and enqueue destination are unambiguous', as
   await pane.locator('[data-wq-queue-custom]').press('Enter');
 
   await pane.locator('details.wq-enqueue summary').click();
-  await expect(pane.getByText('Enqueue to')).toBeVisible();
+  await expect(pane.getByLabel('Enqueue destination', { exact: true }).getByText('Enqueue to')).toBeVisible();
   await expect(pane.locator('[data-wq-enqueue-destination]')).toHaveText(queue);
+
+  await pane.locator('[data-wq-enqueue-target-search]').fill(queue);
+  await expect(pane.locator('[data-wq-enqueue-target-select]')).toHaveValue(queue);
 
   await pane.locator('[data-wq-enqueue-title]').fill('Destination clarity item');
   await pane.locator('[data-wq-enqueue-instructions]').fill('Verify destination copy and toast.');
