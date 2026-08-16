@@ -58,6 +58,45 @@ test('shortcuts help stays accessible while admin is locked', async ({ page, cla
   await expect(page.getByTestId('shortcuts-modal')).toHaveClass(/open/);
 });
 
+test('login password shows Caps Lock hint only while active and focused', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.goto(clawnsole.adminUrl);
+  const password = page.getByTestId('login-password');
+  const hint = page.getByTestId('login-caps-hint');
+
+  await expect(hint).toBeHidden();
+  await password.evaluate((node) => {
+    node.focus();
+    const event = Object.assign(new Event('keydown', { bubbles: true }), {
+      key: 'A',
+      getModifierState: (key) => key === 'CapsLock'
+    });
+    node.dispatchEvent(event);
+  });
+  await expect(hint).toBeVisible();
+
+  await password.evaluate((node) => {
+    const event = Object.assign(new Event('keyup', { bubbles: true }), {
+      key: 'a',
+      getModifierState: () => false
+    });
+    node.dispatchEvent(event);
+  });
+  await expect(hint).toBeHidden();
+
+  await password.evaluate((node) => {
+    const event = Object.assign(new Event('keydown', { bubbles: true }), {
+      key: 'A',
+      getModifierState: (key) => key === 'CapsLock'
+    });
+    node.dispatchEvent(event);
+  });
+  await expect(hint).toBeVisible();
+  await password.evaluate((node) => node.blur());
+  await expect(hint).toBeHidden();
+});
+
 test('admin login restores the intended in-app destination', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 

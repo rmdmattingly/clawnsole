@@ -52,6 +52,18 @@
             <span class="active-pane-chip__label">Active</span>
             <span class="active-pane-chip__value" data-active-pane-chip-value></span>
           </button>
+          <button
+            id="layoutModeChip"
+            class="layout-mode-chip"
+            type="button"
+            aria-label="Layout mode"
+            title="Layout mode"
+            data-testid="layout-mode-chip"
+            hidden
+          >
+            <span class="layout-mode-chip__label">Layout</span>
+            <span class="layout-mode-chip__value" data-layout-mode-chip-value>Custom</span>
+          </button>
           <div id="paneControls" class="pane-controls" hidden>
             <div class="pane-add-wrap">
               <button id="addPaneBtn" class="icon-btn action-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add pane" title="Add Pane (Ctrl/Cmd+Shift+N)" data-testid="add-pane-btn">
@@ -96,8 +108,9 @@
             <span class="btn-icon" aria-hidden="true">★</span>
             <span class="btn-label">Agents</span>
           </button>
-          <button id="fleetBtn" class="icon-btn" type="button" aria-label="Open fleet pane" title="Open Fleet pane (Cmd/Ctrl+Shift+F)" hidden>
-            FL
+          <button id="fleetBtn" class="icon-btn action-btn" type="button" aria-label="Open fleet pane" title="Open Fleet pane (Cmd/Ctrl+Shift+F)" hidden>
+            <span class="btn-icon" aria-hidden="true">FL</span>
+            <span class="btn-label">Fleet</span>
           </button>
           <button id="workqueueBtn" class="icon-btn action-btn" type="button" aria-label="Open workqueue" title="Workqueue (g w)" hidden>
             <span class="btn-icon" aria-hidden="true">WQ</span>
@@ -153,6 +166,9 @@
                 <div class="pane-agent-warning" data-pane-agent-warning hidden></div>
 
                 <div class="pane-draft-badge" data-pane-draft-badge data-testid="pane-draft-badge" hidden aria-live="polite" aria-label="No unsent draft">Draft</div>
+                <button class="icon-btn pane-pin" data-pane-pin type="button" aria-label="Pin pane" title="Pin pane" data-testid="pane-pin" aria-pressed="false">
+                  📌
+                </button>
                 <details class="pane-help" data-pane-help>
                   <summary class="icon-btn" type="button" aria-label="What is this pane?" data-testid="pane-help">?</summary>
                   <div class="pane-help-popover" data-pane-help-popover></div>
@@ -174,10 +190,11 @@
             <div class="chat-input-row">
               <div class="chat-input-stack">
                 <div class="destination-strip" data-pane-destination-strip data-testid="pane-destination-strip">
-                  <span class="destination-strip-label">Sending to</span>
+                  <span class="destination-strip-label" data-pane-destination-label>Chat</span>
                   <button class="destination-strip-target" type="button" data-pane-destination-button aria-label="Change destination" data-testid="pane-destination-button">
                     <span data-pane-destination-value data-testid="pane-destination-value">main</span>
                   </button>
+                  <span class="destination-strip-confirm" data-pane-send-confirm-hint aria-live="polite"></span>
                 </div>
                 <textarea data-pane-input placeholder="Message..." data-testid="pane-input"></textarea>
                 <div data-pane-command-hints class="command-hints" aria-live="polite"></div>
@@ -244,6 +261,9 @@
           Password
           <input id="loginPassword" type="password" placeholder="Enter password" data-testid="login-password" />
         </label>
+        <div id="loginCapsHint" class="login-caps-hint" role="status" aria-live="polite" hidden data-testid="login-caps-hint">
+          Caps Lock is on
+        </div>
         <div id="loginError" class="login-error" role="alert" data-testid="login-error"></div>
         <button id="loginBtn" class="primary" data-testid="login-button">Unlock</button>
       </div>
@@ -341,6 +361,10 @@
             </label>
             <div class="wq-field">
               Status
+              <div class="wq-status-actions">
+                <button id="wqShowArchivedBtn" class="secondary wq-archive-toggle" type="button" aria-pressed="false">Show archived</button>
+                <span id="wqArchivedHint" class="hint">Archived done/failed items hidden.</span>
+              </div>
               <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters"></div>
             </div>
             <label class="wq-field">
@@ -446,13 +470,15 @@
         <div class="modal-body">
           <div class="agents-toolbar">
             <div class="agents-refresh-state">
-              <span id="agentsLastRefreshed" class="agents-last-refreshed" aria-live="polite">Last refreshed: never</span>
+              <span id="agentsLastRefreshed" class="agents-last-refreshed" role="status" aria-live="polite" aria-atomic="true">Last updated: never</span>
               <span id="agentsRefreshPaused" class="agents-refresh-paused" aria-live="polite" hidden></span>
+              <button id="agentsRefreshStateBtn" type="button" class="secondary agents-refresh-state-btn" aria-label="Refresh Fleet">Refresh</button>
             </div>
             <label class="agents-field">
               <span class="agents-label">Search</span>
               <input id="agentsSearch" type="text" placeholder="Filter agents…" />
             </label>
+            <button id="agentsResetTriageBtn" type="button" class="secondary agents-reset-triage">Reset agents triage view</button>
             <div class="agents-field agents-triage">
               <span class="agents-label">Triage</span>
               <div class="agents-filter-chips" role="group" aria-label="Fleet triage filters">
@@ -460,6 +486,13 @@
                 <button type="button" class="agents-chip" data-agents-filter="active" aria-pressed="false">Active</button>
                 <button type="button" class="agents-chip" data-agents-filter="stale" aria-pressed="false">Stale</button>
                 <button type="button" class="agents-chip" data-agents-filter="offline_error" aria-pressed="false">Offline/Error</button>
+              </div>
+            </div>
+            <div class="agents-field agents-snooze-controls">
+              <span class="agents-label">Snooze</span>
+              <div class="agents-snooze-actions">
+                <button id="agentsSnoozedToggle" type="button" class="agents-chip" aria-pressed="false" hidden>Snoozed (0)</button>
+                <button id="agentsClearSnoozesBtn" type="button" class="agents-chip" hidden>Clear snoozes</button>
               </div>
             </div>
             <label class="agents-field">
@@ -533,6 +566,7 @@
           <div class="button-row">
             <button id="disconnectBtn">Disconnect</button>
             <button id="resetLayoutBtn" type="button" class="secondary">Reset to recommended layout</button>
+            <button id="triageLayoutPresetBtn" type="button" class="secondary">Triage preset</button>
           </div>
           <div class="hint">
             Auto-connecting with the gateway token from your local OpenClaw config.
@@ -543,6 +577,10 @@
             <label class="inline-checkbox">
               <input id="paneSwitchHudEnabled" type="checkbox" checked />
               Show pane-switch HUD
+            </label>
+            <label class="inline-checkbox">
+              <input id="sendConfirmGuardEnabled" type="checkbox" checked />
+              Confirm quick sends after switching panes
             </label>
           </section>
 
