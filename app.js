@@ -3307,7 +3307,9 @@ function areHeaderLabeledControlsEnabled() {
 }
 
 function applyHeaderLabeledControlsSetting() {
-  document.body.classList.toggle('header-labels-off', !areHeaderLabeledControlsEnabled());
+  const enabled = areHeaderLabeledControlsEnabled();
+  document.body.classList.toggle('header-labels-off', !enabled);
+  document.getElementById('topbar')?.classList.toggle('labeled-header-controls', enabled);
 }
 
 applyHeaderLabeledControlsSetting();
