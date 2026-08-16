@@ -93,9 +93,13 @@ test('settings: labeled header controls toggle persists with narrow-width fallba
   await clawnsole.gotoAndLoginAdmin(page);
 
   const workqueueLabel = page.locator('#workqueueBtn .btn-label');
-  await expect(workqueueLabel).toBeHidden();
+  await expect(workqueueLabel).toBeVisible();
 
   await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByLabel('Labeled header controls').uncheck();
+  await expect(page.locator('#topbar')).not.toHaveClass(/labeled-header-controls/);
+  await expect(workqueueLabel).toBeHidden();
+
   await page.getByLabel('Labeled header controls').check();
   await expect(page.locator('#topbar')).toHaveClass(/labeled-header-controls/);
   await expect(workqueueLabel).toBeVisible();

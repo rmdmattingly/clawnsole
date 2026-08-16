@@ -3303,7 +3303,7 @@ function isSendConfirmGuardEnabled() {
 }
 
 function areHeaderLabeledControlsEnabled() {
-  return String(storage.get(HEADER_LABELED_CONTROLS_ENABLED_KEY, '0') || '0') !== '0';
+  return String(storage.get(HEADER_LABELED_CONTROLS_ENABLED_KEY, '1') || '1') !== '0';
 }
 
 function applyHeaderLabeledControlsSetting() {
