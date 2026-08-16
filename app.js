@@ -3303,11 +3303,13 @@ function isSendConfirmGuardEnabled() {
 }
 
 function areHeaderLabeledControlsEnabled() {
-  return String(storage.get(HEADER_LABELED_CONTROLS_ENABLED_KEY, '1') || '1') !== '0';
+  return String(storage.get(HEADER_LABELED_CONTROLS_ENABLED_KEY, '0') || '0') !== '0';
 }
 
 function applyHeaderLabeledControlsSetting() {
-  document.body.classList.toggle('header-labels-off', !areHeaderLabeledControlsEnabled());
+  const enabled = areHeaderLabeledControlsEnabled();
+  document.body.classList.toggle('header-labels-off', !enabled);
+  document.getElementById('topbar')?.classList.toggle('labeled-header-controls', enabled);
 }
 
 applyHeaderLabeledControlsSetting();
