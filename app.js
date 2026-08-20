@@ -6269,6 +6269,7 @@ function renderWorkqueueItems() {
     const col = document.createElement('section');
     col.className = 'wq-board-col';
     col.setAttribute('data-wq-col', colDef.status);
+    col.setAttribute('data-testid', `workqueue-board-col-${colDef.status}`);
 
     const colItems = Array.isArray(itemsByStatus[colDef.status]) ? itemsByStatus[colDef.status] : [];
 
@@ -6305,6 +6306,7 @@ function renderWorkqueueItems() {
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'wq-card';
+      card.setAttribute('data-testid', 'workqueue-card');
       if (it.id && it.id === workqueueState.selectedItemId) card.classList.add('selected');
       if (it.id) card.setAttribute('data-wq-item', it.id);
 
@@ -6385,8 +6387,8 @@ function renderWorkqueueInspect(item) {
   const actions = document.createElement('div');
   actions.className = 'wq-inspect-actions';
   actions.innerHTML = `
-    <button type="button" class="btn" data-wq-action="edit">Edit</button>
-    <button type="button" class="btn danger" data-wq-action="delete">Delete</button>
+    <button type="button" class="btn" data-wq-action="edit" data-testid="workqueue-inspect-edit">Edit</button>
+    <button type="button" class="btn danger" data-wq-action="delete" data-testid="workqueue-inspect-delete">Delete</button>
   `;
 
   const meta = root.querySelector('.wq-inspect-meta');
