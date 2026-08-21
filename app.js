@@ -584,6 +584,57 @@ function shortcutStatusRule(entry) {
   return 'typing-modal';
 }
 
+let shortcutsSearchQuery = '';
+let shortcutsCategoryFilter = 'all';
+
+const SHORTCUT_CATEGORY_FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'global', label: 'Global' },
+  { id: 'chat', label: 'Chat' },
+  { id: 'workqueue', label: 'Workqueue' },
+  { id: 'fleet', label: 'Fleet' }
+];
+
+function shortcutCategory(entry) {
+  const id = String(entry?.id || '').toLowerCase();
+  const group = String(entry?.group || '').toLowerCase();
+  const label = String(entry?.label || '').toLowerCase();
+  if (group === 'global') return 'global';
+  if (id.startsWith('chat.') || label.includes('chat')) return 'chat';
+  if (group.includes('workqueue') || id.startsWith('workqueue.') || label.includes('workqueue')) return 'workqueue';
+  if (group.includes('fleet') || id.startsWith('fleet.') || label.includes('fleet')) return 'fleet';
+  return 'pane';
+}
+
+function shortcutSearchText(entry) {
+  return [
+    entry?.id,
+    entry?.group,
+    entry?.label,
+    shortcutDisplay(entry?.id),
+    shortcutCategory(entry)
+  ].map((value) => String(value || '').toLowerCase()).join(' ');
+}
+
+function shortcutMatchesFilters(entry) {
+  const query = shortcutsSearchQuery.trim().toLowerCase();
+  const category = shortcutsCategoryFilter || 'all';
+  if (category !== 'all' && shortcutCategory(entry) !== category) return false;
+  if (query && !shortcutSearchText(entry).includes(query)) return false;
+  return true;
+}
+
+function focusShortcutsSearchInput() {
+  const input = document.getElementById('shortcutsSearchInput');
+  if (!(input instanceof HTMLElement)) return false;
+  try {
+    input.focus({ preventScroll: true });
+  } catch {
+    input.focus();
+  }
+  return document.activeElement === input;
+}
+
 function renderShortcutsContent() {
   const root = globalElements.shortcutsContent;
   if (!root) return;
@@ -606,10 +657,26 @@ function renderShortcutsContent() {
       Most shortcuts are disabled while typing in inputs, textareas, selects, or contenteditable fields. Global keys like <kbd>Esc</kbd>, <kbd>${escapeHtml(shortcutDisplay('pane.manager'))}</kbd>, and <kbd>${escapeHtml(shortcutDisplay('command.palette'))}</kbd> still work.
     </div>
   `;
-  const html = groups.map((group) => `
+  const filterControls = `
+    <div class="shortcut-filter-bar">
+      <label class="shortcut-search-label" for="shortcutsSearchInput">Search shortcuts</label>
+      <input id="shortcutsSearchInput" class="shortcut-search-input" type="search" autocomplete="off" placeholder="Search keys, actions, categories" value="${escapeHtml(shortcutsSearchQuery)}" data-testid="shortcuts-search" />
+      <div class="shortcut-filter-chips" aria-label="Shortcut category filters">
+        ${SHORTCUT_CATEGORY_FILTERS.map((filter) => `
+          <button type="button" class="shortcut-filter-chip${shortcutsCategoryFilter === filter.id ? ' active' : ''}" data-shortcut-filter="${escapeHtml(filter.id)}" aria-pressed="${shortcutsCategoryFilter === filter.id ? 'true' : 'false'}">${escapeHtml(filter.label)}</button>
+        `).join('')}
+      </div>
+    </div>
+  `;
+  let visibleRows = 0;
+  const html = groups.map((group) => {
+    const entries = group.entries.filter(shortcutMatchesFilters);
+    visibleRows += entries.length;
+    if (!entries.length && !(locked && group.name === 'Global' && shortcutsCategoryFilter === 'all' && !shortcutsSearchQuery.trim())) return '';
+    return `
     <div class="shortcut-group${locked && group.name !== 'Global' ? ' shortcut-group-locked' : ''}">
       <h3 class="shortcut-group-title">${locked && group.name === 'Global' ? 'Available now' : escapeHtml(group.name)}${locked && group.name !== 'Global' ? ' <span class="shortcut-locked-label">Available after unlock</span>' : ''}</h3>
-      ${group.entries.map((entry) => `
+      ${entries.map((entry) => `
         <div class="shortcut-row${locked && group.name !== 'Global' ? ' shortcut-row-locked' : ''}" data-shortcut-id="${escapeHtml(entry.id)}" data-shortcut-rule="${escapeHtml(shortcutStatusRule(entry))}">
           <div class="shortcut-keys"${keybindIdToShortcutActionId(entry.id) ? ` data-shortcut-help="${escapeHtml(keybindIdToShortcutActionId(entry.id))}"` : ''}>${renderShortcutKeys(shortcutDisplay(entry.id))}</div>
           <div class="shortcut-desc">${escapeHtml(entry.label)}${isKeybindCustomized(entry.id) ? ' <span class="shortcut-custom">custom</span>' : ''}</div>
@@ -617,8 +684,28 @@ function renderShortcutsContent() {
       `).join('')}
       ${locked && group.name === 'Global' ? '<div class="shortcut-row"><div class="shortcut-keys"><kbd>Enter</kbd></div><div class="shortcut-desc">Unlock after entering the admin password</div></div>' : ''}
     </div>
-  `).join('');
-  root.innerHTML = hint + html;
+  `;
+  }).join('');
+  const emptyState = visibleRows ? '' : '<div class="shortcut-empty-state" role="status">No shortcuts match your filters.</div>';
+  root.innerHTML = filterControls + hint + html + emptyState;
+  const searchInput = root.querySelector('#shortcutsSearchInput');
+  searchInput?.addEventListener('input', () => {
+    shortcutsSearchQuery = searchInput.value || '';
+    renderShortcutsContent();
+    const nextInput = globalElements.shortcutsContent?.querySelector('#shortcutsSearchInput');
+    nextInput?.focus?.();
+    const end = nextInput?.value?.length || 0;
+    try { nextInput?.setSelectionRange?.(end, end); } catch {}
+    updateShortcutsStatus();
+  });
+  root.querySelectorAll('[data-shortcut-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      shortcutsCategoryFilter = button.getAttribute('data-shortcut-filter') || 'all';
+      renderShortcutsContent();
+      globalElements.shortcutsContent?.querySelector('#shortcutsSearchInput')?.focus?.();
+      updateShortcutsStatus();
+    });
+  });
 }
 
 function shortcutCatalogSnapshot() {
@@ -3170,7 +3257,10 @@ function openShortcuts() {
   startShortcutsStatusUpdates();
   updatePaneShortcutBadges();
   window.setTimeout(() => {
+    if (focusShortcutsSearchInput()) return;
     (globalElements.shortcutsDialog || globalElements.shortcutsCloseBtn || modal).focus?.();
+    window.requestAnimationFrame?.(() => focusShortcutsSearchInput());
+    window.setTimeout(() => focusShortcutsSearchInput(), 75);
   }, 0);
 }
 

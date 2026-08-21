@@ -116,6 +116,39 @@ test('shortcuts overlay: status panel shows typing-focus block reason', async ({
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
 });
 
+test('shortcuts overlay filters by search text and category chips', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.click('#shortcutsBtn');
+  const modal = page.locator('#shortcutsModal');
+  const search = page.getByTestId('shortcuts-search');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await expect(search).toBeFocused();
+
+  await search.fill('cmd/ctrl+shift+g');
+  await expect(modal.locator('[data-shortcut-id="workqueue.openForActiveChat"]')).toBeVisible();
+  await expect(modal.locator('[data-shortcut-id="fleet.open"]')).toHaveCount(0);
+
+  await search.fill('');
+  await modal.getByRole('button', { name: 'Fleet' }).click();
+  await expect(modal.locator('[data-shortcut-id="fleet.open"]')).toBeVisible();
+  await expect(modal.locator('[data-shortcut-id="workqueue.open"]')).toHaveCount(0);
+
+  await search.fill('definitely-no-shortcut');
+  await expect(modal).toContainText('No shortcuts match your filters.');
+
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+});
+
 test('shortcuts overlay stays in sync with registered shortcut catalog', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
