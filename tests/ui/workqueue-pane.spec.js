@@ -75,6 +75,44 @@ function seedLegacyDuplicateWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedLowDensityIssueWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const statePath = path.join(dir, 'work-queues.json');
+  const existing = fs.existsSync(statePath)
+    ? JSON.parse(fs.readFileSync(statePath, 'utf8'))
+    : { version: 1, queues: {}, assignments: {}, items: [] };
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, issueNumber, offsetMs) => ({
+    id,
+    queue,
+    title: `[issue] rmdmattingly/clawnsole#${issueNumber} low density ${issueNumber}`,
+    instructions: `Repo: rmdmattingly/clawnsole\nIssue: #${issueNumber}`,
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(offsetMs),
+    updatedAt: iso(offsetMs),
+    dedupeKey: `rmdmattingly/clawnsole#${issueNumber}`
+  });
+
+  existing.queues = { ...(existing.queues || {}), [queue]: { name: queue, createdAt: iso(-120000) } };
+  existing.assignments = existing.assignments || {};
+  existing.items = [
+    ...(Array.isArray(existing.items) ? existing.items : []),
+    mkItem('low-density-1', 401, -40000),
+    mkItem('low-density-2', 402, -30000),
+    mkItem('low-density-3', 403, -20000),
+    mkItem('low-density-4', 404, -10000)
+  ];
+  fs.writeFileSync(statePath, JSON.stringify(existing, null, 2));
+}
+
 function seedLegacyIssueTitleVariants(queue) {
   const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
   fs.mkdirSync(dir, { recursive: true });
@@ -766,6 +804,49 @@ test('workqueue pane: auto view groups large repetitive routine queues', async (
   await page.keyboard.press('Enter');
   await expect(groupRow).toHaveAttribute('aria-expanded', 'true');
   await expect(pane.locator('.wq-row-child')).toHaveCount(22);
+});
+
+test('workqueue pane: auto view adapts to issue duplicate density and persists per queue', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const highQueue = `issue-density-high-${Date.now()}`;
+  const lowQueue = `issue-density-low-${Date.now()}`;
+  seedLegacyDuplicateWorkqueueItems(highQueue);
+  seedLowDensityIssueWorkqueueItems(lowQueue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(highQueue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await expect(pane.locator('[data-wq-group-mode="auto"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]')).toBeVisible();
+  await expect(pane.locator('.wq-row')).toHaveCount(2);
+
+  await pane.locator('[data-wq-group-mode="rows"]').click();
+  await expect(pane.locator('[data-wq-group-mode="rows"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]')).toHaveCount(0);
+  await expect(pane.locator('.wq-row')).toHaveCount(4);
+
+  await page.reload();
+  const restoredPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await restoredPane.locator('[data-wq-queue-select]').selectOption(highQueue);
+  await restoredPane.locator('[data-wq-queue-select]').press('Enter');
+  await expect(restoredPane.locator('[data-wq-group-mode="rows"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(restoredPane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]')).toHaveCount(0);
+  await expect(restoredPane.locator('.wq-row')).toHaveCount(4);
+
+  await restoredPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await restoredPane.locator('[data-wq-queue-custom]').fill(lowQueue);
+  await restoredPane.locator('[data-wq-queue-custom]').press('Enter');
+  await expect(restoredPane.locator('[data-wq-group-mode="auto"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(restoredPane.locator('[data-wq-group-row]')).toHaveCount(0);
+  await expect(restoredPane.locator('.wq-row')).toHaveCount(4);
 });
 
 test('workqueue pane: queue target supports search + recent persistence', async ({ page }) => {

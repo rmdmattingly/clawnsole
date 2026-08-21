@@ -5981,6 +5981,7 @@ const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
 const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
 const WORKQUEUE_CANONICAL_DENSITY_THRESHOLD = 0.2;
 const WORKQUEUE_GROUPED_AUTO_THRESHOLD = 20;
+const WORKQUEUE_GROUP_MODE_PREF_KEY = 'clawnsole.admin.workqueue.groupMode.v1';
 const WORKQUEUE_ALL_SCOPE_GUARD_THRESHOLD_KEY = 'clawnsole.admin.workqueue.allScopeGuardThreshold';
 const WORKQUEUE_ALL_SCOPE_GUARD_DEFAULT_THRESHOLD = 200;
 const WORKQUEUE_HEADER_META = {
@@ -7134,6 +7135,24 @@ function normalizeWorkqueueGroupMode(value) {
   const s = String(value || '').trim().toLowerCase();
   if (s === 'rows' || s === 'grouped') return s;
   return 'auto';
+}
+
+function workqueueGroupModePreferenceKey(pane) {
+  const paneKey = encodeURIComponent(String(pane?.key || 'workqueue'));
+  const queue = encodeURIComponent(String(pane?.workqueue?.queue || 'dev-team').trim() || 'dev-team');
+  return `${WORKQUEUE_GROUP_MODE_PREF_KEY}.${paneKey}.${queue}`;
+}
+
+function loadWorkqueueGroupModePreference(pane) {
+  const mode = normalizeWorkqueueGroupMode(storage.get(workqueueGroupModePreferenceKey(pane), 'auto'));
+  return mode === 'auto' ? '' : mode;
+}
+
+function saveWorkqueueGroupModePreference(pane, mode) {
+  const normalized = normalizeWorkqueueGroupMode(mode);
+  const key = workqueueGroupModePreferenceKey(pane);
+  if (normalized === 'auto') storage.remove(key);
+  else storage.set(key, normalized);
 }
 
 function resolveWorkqueueGroupMode(value, itemCount, duplicateSummary) {
@@ -10262,6 +10281,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const doRefresh = async () => {
       const q = getQueueValue() || 'dev-team';
       pane.workqueue.queue = q;
+      pane.workqueue.groupMode = loadWorkqueueGroupModePreference(pane) || 'auto';
+      pane.workqueue.updateGroupModeUi?.();
       updateEnqueueDestination();
       resetRenderLimit();
       rememberRecentWorkqueueTarget(q);
@@ -10652,10 +10673,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         else btn.title = 'Group related issue, routine, or coordination rows and show the latest issue row as the representative.';
       });
     };
+    pane.workqueue.updateGroupModeUi = updateGroupModeUi;
 
     groupModeBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
         pane.workqueue.groupMode = normalizeWorkqueueGroupMode(btn.getAttribute('data-wq-group-mode'));
+        saveWorkqueueGroupModePreference(pane, pane.workqueue.groupMode);
         resetRenderLimit();
         updateGroupModeUi();
         renderWorkqueuePaneItems(pane);
