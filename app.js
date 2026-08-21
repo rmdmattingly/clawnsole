@@ -5172,8 +5172,11 @@ function openWorkqueueForActiveChatAgent() {
   paneManager.persistAdminPanes();
   paneManager.focusPanePrimary(pane);
   try {
-    const scopeBtn = pane.elements?.thread?.querySelector?.('[data-wq-scope="assigned"]');
-    scopeBtn?.click?.();
+    if (typeof pane.workqueue?.setScope === 'function') pane.workqueue.setScope('assigned');
+    else {
+      const scopeBtn = pane.elements?.thread?.querySelector?.('[data-wq-scope="assigned"]');
+      scopeBtn?.click?.();
+    }
   } catch {
     renderWorkqueuePaneItems(pane);
   }
@@ -5184,10 +5187,15 @@ function openWorkqueueForActiveChatAgent() {
       (queueSelect || pane.elements?.thread)?.focus?.();
     } catch {}
   };
+  try {
+    requestAnimationFrame(() => requestAnimationFrame(focusWorkqueuePane));
+  } catch {}
   setTimeout(focusWorkqueuePane, 0);
   setTimeout(focusWorkqueuePane, 30);
   setTimeout(focusWorkqueuePane, 120);
   setTimeout(focusWorkqueuePane, 300);
+  setTimeout(focusWorkqueuePane, 750);
+  setTimeout(focusWorkqueuePane, 1500);
   showToast(`Workqueue scoped to ${agentId}`, { kind: 'info', timeoutMs: 1600 });
   return pane;
 }
