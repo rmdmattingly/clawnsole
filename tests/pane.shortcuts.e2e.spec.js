@@ -329,6 +329,39 @@ test('cmd/ctrl+shift+j focuses previous pane with wraparound from unfocused stat
   await expect.poll(activePaneIndex).toBe(2);
 });
 
+test('topbar shortcut hints follow active pane and typing focus', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const strip = page.getByTestId('shortcut-hint-strip');
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+  await chatInput.focus();
+  await expect(strip).toBeHidden();
+
+  await page.locator('[data-pane]').first().getByTestId('pane-help').focus();
+  await expect(strip).toBeVisible();
+  await expect(strip).toContainText('Composer');
+  await expect(strip).toContainText('All shortcuts');
+
+  await page.evaluate(() => window.focusPaneIndex?.(1));
+  await expect(page.getByTestId('active-pane-chip')).toContainText('B Workqueue');
+  await expect(strip).toContainText('Queue search');
+  await expect(strip).toContainText('Workqueue modal');
+
+  await page.getByLabel('Open fleet pane').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+  await page.locator('[data-pane]').nth(2).getByTestId('pane-help').focus();
+  await expect(strip).toContainText('Move selection');
+  await expect(strip).toContainText('Open Workqueue');
+});
+
 test('cmd/ctrl+alt+j/k cycles chat panes only and keeps typing guard', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);

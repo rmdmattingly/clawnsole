@@ -191,6 +191,52 @@ body::before {
   font-weight: 700;
 }
 
+.shortcut-hint-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(560px, 40vw);
+  min-height: 34px;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.74);
+  white-space: nowrap;
+}
+
+.shortcut-hint-strip[hidden] {
+  display: none !important;
+}
+
+.shortcut-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 5px 7px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(9, 12, 16, 0.52);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.shortcut-hint kbd {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--accent);
+  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.shortcut-hint span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .layout-mode-chip {
   display: inline-flex;
   align-items: center;
@@ -4343,6 +4389,19 @@ kbd {
 
   .topbar-actions {
     gap: 6px;
+  }
+
+  .shortcut-hint-strip {
+    order: 9;
+    flex-basis: 100%;
+    max-width: 100%;
+    min-height: 28px;
+    gap: 4px;
+  }
+
+  .shortcut-hint {
+    padding: 4px 6px;
+    font-size: 10px;
   }
 
   .status-pill,
