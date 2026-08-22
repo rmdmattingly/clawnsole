@@ -502,7 +502,8 @@ test('workqueue: collapseCanonicalIssueDuplicates safely backfills existing dupl
     instructions: 'https://github.com/rmdmattingly/clawnsole/issues/298',
     dedupeKey: 'issue:rmdmattingly/clawnsole#298',
     createdAt: '2026-01-01T00:00:01.000Z',
-    updatedAt: '2026-01-01T00:00:01.000Z'
+    updatedAt: '2026-01-01T00:00:01.000Z',
+    lastNote: 'legacy note'
   });
   saveState(root, state);
 
@@ -512,9 +513,49 @@ test('workqueue: collapseCanonicalIssueDuplicates safely backfills existing dupl
 
   const result = collapseCanonicalIssueDuplicates(root, { queue: 'dev-team' });
   assert.equal(result.removedCount, 1);
+  assert.ok(result.backupFile.endsWith('.json'));
+  assert.ok(fs.existsSync(result.backupFile));
   const finalState = loadState(root);
   assert.equal(finalState.items.length, 1);
   assert.equal(finalState.items[0].id, first.id);
   assert.equal(finalState.items[0].dedupeKey, 'rmdmattingly/clawnsole#298');
-  assert.equal(finalState.items[0].seenCount, 2);
+  assert.equal(finalState.items[0].meta.migrationMergedCount, 1);
+  assert.equal(finalState.items[0].result.migrationMerged[0].id, 'duplicate-existing-row');
+  assert.equal(finalState.items[0].result.migrationMerged[0].lastNote, 'legacy note');
+});
+
+test('workqueue: collapseCanonicalIssueDuplicates uses deterministic survivor policy', () => {
+  const root = tempRoot();
+  const olderActive = enqueueItem(root, {
+    queue: 'dev-team',
+    title: '[issue] rmdmattingly/clawnsole#399 active',
+    instructions: 'active',
+    priority: 1,
+    meta: { repo: 'rmdmattingly/clawnsole', issueNumber: 399 }
+  });
+
+  const state = loadState(root);
+  const active = state.items.find((it) => it.id === olderActive.id);
+  const terminal = {
+    ...active,
+    id: 'newer-terminal-row',
+    title: '[issue] rmdmattingly/clawnsole#399 terminal',
+    instructions: 'terminal',
+    priority: 99
+  };
+  terminal.status = 'done';
+  terminal.updatedAt = '2026-01-03T00:00:00.000Z';
+  active.status = 'ready';
+  active.updatedAt = '2026-01-01T00:00:00.000Z';
+  state.items.push(terminal);
+  saveState(root, state);
+
+  const result = collapseCanonicalIssueDuplicates(root, { queue: 'dev-team' });
+  assert.equal(result.removedCount, 1);
+  assert.equal(result.removed[0].keptId, olderActive.id);
+
+  const finalState = loadState(root);
+  assert.equal(finalState.items.length, 1);
+  assert.equal(finalState.items[0].id, olderActive.id);
+  assert.equal(finalState.items[0].result.migrationMerged[0].id, 'newer-terminal-row');
 });
