@@ -140,6 +140,53 @@ test('shortcuts overlay: status panel shows typing-focus block reason', async ({
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
 });
 
+test('inline shortcut hints follow active pane and hide while typing', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const strip = page.getByTestId('shortcut-hint-strip');
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+
+  await expect(chatInput).toBeFocused();
+  await expect(strip).toBeHidden();
+
+  await page.locator('[data-pane][data-pane-kind="chat"]').first().click({ position: { x: 18, y: 18 } });
+  await expect(strip).toBeVisible();
+  await expect(strip).toHaveAttribute('data-pane-kind', 'chat');
+  await expect(strip).toContainText('Chat');
+  await expect(strip).toContainText('Cmd/Ctrl+L');
+  await expect(strip).toContainText('Press ?');
+
+  await page.locator('[data-pane][data-pane-kind="workqueue"]').first().click({ position: { x: 18, y: 18 } });
+  await expect(strip).toBeVisible();
+  await expect(strip).toHaveAttribute('data-pane-kind', 'workqueue');
+  await expect(strip).toContainText('Workqueue');
+  await expect(strip).toContainText('j/k');
+  await expect(strip).toContainText('Enter');
+
+  await page.getByTestId('shortcut-hint-strip').getByRole('button', { name: 'Press ? for all shortcuts' }).click();
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'false');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'true');
+
+  await page.getByRole('button', { name: 'Open fleet pane' }).click();
+  await page.locator('[data-pane][data-pane-kind="timeline"]').first().click({ position: { x: 18, y: 18 } });
+  await expect(strip).toBeVisible();
+  await expect(strip).toHaveAttribute('data-pane-kind', 'timeline');
+  await expect(strip).toContainText('Fleet');
+  await expect(strip).toContainText('Shift+Enter');
+
+  await chatInput.focus();
+  await expect(strip).toBeHidden();
+});
+
 test('shortcuts overlay stays in sync with registered shortcut catalog', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);

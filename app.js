@@ -25,6 +25,7 @@ const globalElements = {
   activePaneChipValue: document.querySelector('[data-active-pane-chip-value]'),
   layoutModeChip: document.getElementById('layoutModeChip'),
   layoutModeChipValue: document.querySelector('[data-layout-mode-chip-value]'),
+  shortcutHintStrip: document.getElementById('shortcutHintStrip'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
   fleetBtn: document.getElementById('fleetBtn'),
@@ -499,6 +500,84 @@ const KEYBIND_CATALOG = [
   { id: 'fleet.toggleHeartbeatSort', group: 'Fleet actions', label: 'Toggle Fleet heartbeat age sort', binding: { key: 'h', display: 'H / Shift+H' } }
 ];
 
+const SHORTCUT_HINTS_BY_PANE_KIND = {
+  chat: ['chat.composer', 'workqueue.openForActiveChat', 'pane.next', 'chat.return'],
+  workqueue: ['workqueue.move', 'workqueue.inspect', 'workqueue.status', 'workqueue.focusItemSearch'],
+  cron: ['pane.next', 'pane.manager', 'command.palette'],
+  timeline: ['fleet.next', 'fleet.openChatSelected', 'fleet.openWorkqueueSelected', 'fleet.toggleHeartbeatSort']
+};
+
+function shortcutHintLabel(id) {
+  const entry = keybindEntry(id);
+  if (!entry) return '';
+  const label = String(entry.label || '')
+    .replace(/\s+\(.*?\)/g, '')
+    .replace(/^Focus\s+/i, '')
+    .replace(/^Open\/focus\s+/i, 'Open ')
+    .replace(/^Open\s+/i, '')
+    .trim();
+  return label || entry.label;
+}
+
+function shortcutHintContextLabel(pane) {
+  const kind = normalizePaneKind(pane?.kind || 'chat');
+  if (kind === 'timeline') return 'Fleet';
+  return paneLabel(pane);
+}
+
+function isShortcutHintTypingContext(target = document.activeElement) {
+  const el = target;
+  if (!(el instanceof Element)) return false;
+  if (el.matches?.('input, textarea, [contenteditable=""], [contenteditable="true"], [role="textbox"]')) return true;
+  if (el.isContentEditable || el.closest?.('[contenteditable="true"], [contenteditable=""], [role="textbox"]')) return true;
+  return false;
+}
+
+function renderShortcutHintStrip(activePane = activePaneFromState()) {
+  const root = globalElements.shortcutHintStrip;
+  if (!root) return;
+
+  const locked = !uiState.authed || roleState.role !== 'admin';
+  const typing = isShortcutHintTypingContext();
+  if (locked || typing || !activePane) {
+    root.hidden = true;
+    root.innerHTML = '';
+    root.removeAttribute('data-pane-kind');
+    return;
+  }
+
+  const kind = normalizePaneKind(activePane.kind || 'chat');
+  const ids = SHORTCUT_HINTS_BY_PANE_KIND[kind] || SHORTCUT_HINTS_BY_PANE_KIND.chat;
+  const hints = ids
+    .map((id) => {
+      const display = shortcutDisplay(id);
+      const label = shortcutHintLabel(id);
+      if (!display || !label) return '';
+      return `
+        <span class="shortcut-hint" data-shortcut-hint="${escapeHtml(id)}">
+          <span class="shortcut-hint__keys">${renderShortcutKeys(display)}</span>
+          <span class="shortcut-hint__label">${escapeHtml(label)}</span>
+        </span>
+      `;
+    })
+    .filter(Boolean);
+
+  if (!hints.length) {
+    root.hidden = true;
+    root.innerHTML = '';
+    root.removeAttribute('data-pane-kind');
+    return;
+  }
+
+  root.dataset.paneKind = kind;
+  root.hidden = false;
+  root.innerHTML = `
+    <span class="shortcut-hint-strip__context">${escapeHtml(shortcutHintContextLabel(activePane))}</span>
+    ${hints.slice(0, 4).join('')}
+    <button class="shortcut-hint-strip__all" type="button" data-shortcut-hint-all aria-label="Press ? for all shortcuts" title="Press ? for all shortcuts">Press ?</button>
+  `;
+}
+
 function readKeybindOverrides() {
   try {
     const parsed = JSON.parse(storage.get(KEYBIND_OVERRIDES_KEY, '{}'));
@@ -535,6 +614,7 @@ function setKeybindOverride(id, binding) {
   writeKeybindOverrides(overrides);
   renderKeyboardSettings();
   renderShortcutsContent();
+  renderShortcutHintStrip();
   return true;
 }
 
@@ -545,6 +625,7 @@ function resetKeybindOverride(id) {
   writeKeybindOverrides(overrides);
   renderKeyboardSettings();
   renderShortcutsContent();
+  renderShortcutHintStrip();
   return true;
 }
 
@@ -3655,6 +3736,7 @@ function renderActivePaneState(activePane = activePaneFromState()) {
   chip.title = `Focus ${label}`;
   chip.setAttribute('aria-label', `Active pane: ${label}. Click to focus.`);
   renderLayoutModeChip();
+  renderShortcutHintStrip(activePane);
 }
 
 function paneIndexByKey(key) {
@@ -12708,6 +12790,12 @@ globalElements.shortcutOverridesSave?.addEventListener('click', () => saveShortc
 globalElements.shortcutOverridesResetAll?.addEventListener('click', () => resetAllShortcutOverrides());
 
 globalElements.shortcutsBtn?.addEventListener('click', () => openShortcuts());
+globalElements.shortcutHintStrip?.addEventListener('pointerdown', (event) => {
+  const target = event.target instanceof HTMLElement ? event.target.closest('[data-shortcut-hint-all]') : null;
+  if (!target) return;
+  event.preventDefault();
+  openShortcuts();
+});
 globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
 globalElements.shortcutsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.shortcutsModal) closeShortcuts();
@@ -13987,6 +14075,14 @@ window.addEventListener('online', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   paneManager.connectIfNeeded();
+});
+
+document.addEventListener('focusin', () => {
+  renderShortcutHintStrip();
+});
+
+document.addEventListener('focusout', () => {
+  setTimeout(() => renderShortcutHintStrip(), 0);
 });
 
 window.addEventListener('load', () => {

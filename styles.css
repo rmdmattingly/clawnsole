@@ -233,6 +233,85 @@ body::before {
   font-weight: 700;
 }
 
+.shortcut-hint-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: min(560px, 44vw);
+  padding: 5px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(10, 12, 16, 0.32);
+  color: rgba(241, 245, 249, 0.86);
+  overflow: hidden;
+}
+
+.shortcut-hint-strip[hidden] {
+  display: none !important;
+}
+
+.shortcut-hint-strip__context {
+  flex: 0 0 auto;
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.shortcut-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.shortcut-hint__keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.shortcut-hint__keys kbd {
+  min-width: 0;
+  padding: 1px 4px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.shortcut-hint__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: rgba(226, 232, 240, 0.74);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.shortcut-hint-strip__all {
+  flex: 0 0 auto;
+  min-width: 42px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(127, 209, 185, 0.34);
+  background: rgba(127, 209, 185, 0.1);
+  color: #d7fff3;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.shortcut-hint-strip__all:hover {
+  border-color: rgba(127, 209, 185, 0.58);
+  background: rgba(127, 209, 185, 0.18);
+}
+
 .agent-switch {
   display: inline-flex;
   align-items: center;
