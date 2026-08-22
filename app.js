@@ -11454,6 +11454,7 @@ const paneManager = {
     );
     this.panes.forEach((pane) => globalElements.paneGrid.appendChild(pane.elements.root));
     this.updatePaneLabels();
+    updatePaneShortcutBadges();
     this.updateCloseButtons();
     this.applyInferredLayout();
     const storedActivePaneKey = rememberedActivePaneKey();
@@ -12267,6 +12268,7 @@ const paneManager = {
     }
 
     this.updatePaneLabels();
+    updatePaneShortcutBadges();
     this.persistAdminPanes();
     updateGlobalStatus();
     return true;
