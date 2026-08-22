@@ -188,7 +188,7 @@ test('shortcuts overlay stays in sync with registered shortcut catalog', async (
   expect(result.duplicateIds).toEqual([]);
   expect(result.duplicateGlobalDisplays).toEqual([]);
   await expect(modal).toContainText('Fleet actions');
-  await expect(modal).toContainText('Open/focus Fleet pane');
+  await expect(modal).toContainText('Focus Fleet: first needs attention');
   await expect(modal).toContainText('Open Fleet sorted by heartbeat age');
   await expect(modal).toContainText('Open Chat for selected Fleet agent');
   await expect(modal).toContainText('Open Workqueue for selected Fleet agent');
@@ -897,6 +897,8 @@ test('fleet quick action button + keyboard shortcut focus existing timeline pane
   await page.keyboard.press('Control+Shift+F');
   await expect(panes).toHaveCount(3);
   await expect(timelinePanes).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#agentsModal')).not.toHaveClass(/open/);
 
   await fleetBtn.click({ modifiers: ['Alt'] });
   await expect(timelinePanes).toHaveCount(2);
