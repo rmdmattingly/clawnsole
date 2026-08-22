@@ -75,6 +75,44 @@ function seedLegacyDuplicateWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedLowDensityIssueWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const statePath = path.join(dir, 'work-queues.json');
+  const existing = fs.existsSync(statePath)
+    ? JSON.parse(fs.readFileSync(statePath, 'utf8'))
+    : { version: 1, queues: {}, assignments: {}, items: [] };
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, issueNumber, offsetMs) => ({
+    id,
+    queue,
+    title: `[issue] rmdmattingly/clawnsole#${issueNumber} low density ${issueNumber}`,
+    instructions: `Repo: rmdmattingly/clawnsole\nIssue: #${issueNumber}`,
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(offsetMs),
+    updatedAt: iso(offsetMs),
+    dedupeKey: `rmdmattingly/clawnsole#${issueNumber}`
+  });
+
+  existing.queues = { ...(existing.queues || {}), [queue]: { name: queue, createdAt: iso(-120000) } };
+  existing.assignments = existing.assignments || {};
+  existing.items = [
+    ...(Array.isArray(existing.items) ? existing.items : []),
+    mkItem('low-density-1', 401, -40000),
+    mkItem('low-density-2', 402, -30000),
+    mkItem('low-density-3', 403, -20000),
+    mkItem('low-density-4', 404, -10000)
+  ];
+  fs.writeFileSync(statePath, JSON.stringify(existing, null, 2));
+}
+
 function seedLegacyIssueTitleVariants(queue) {
   const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
   fs.mkdirSync(dir, { recursive: true });
@@ -195,6 +233,175 @@ function seedExactDuplicateWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedArchivedToggleWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, status, title) => ({
+    id,
+    queue,
+    title,
+    instructions: 'archived toggle regression',
+    priority: 10,
+    status,
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-60000),
+    updatedAt: iso(-60000),
+    dedupeKey: `archived-toggle-${id}`
+  });
+
+  const data = {
+    version: 1,
+    queues: {
+      'dev-team': { name: 'dev-team', createdAt: iso(-120000) },
+      [queue]: { name: queue, createdAt: iso(-120000) }
+    },
+    assignments: {},
+    items: [
+      mkItem('archived-ready', 'ready', 'archived toggle ready row'),
+      mkItem('archived-done', 'done', 'archived toggle done row'),
+      mkItem('archived-failed', 'failed', 'archived toggle failed row')
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
+test('workqueue pane: default agent-targeted layout starts assigned and remains overridable', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  seedAgentsForWorkqueuePicker();
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  await page.evaluate(async () => {
+    const post = async (url, body) => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `request failed: ${res.status}`);
+      return data;
+    };
+
+    await post('/api/workqueue/enqueue', {
+      queue: 'dev-team',
+      title: 'Assigned default layout target',
+      instructions: 'assigned default layout test',
+      priority: 2,
+      dedupeKey: 'ui-default-layout-assigned'
+    });
+    await post('/api/workqueue/enqueue', {
+      queue: 'dev-team',
+      title: 'Unassigned default layout target',
+      instructions: 'assigned default layout test',
+      priority: 1,
+      dedupeKey: 'ui-default-layout-unassigned'
+    });
+    await post('/api/workqueue/claim-next', { agentId: 'dev', queues: ['dev-team'], leaseMs: 900000 });
+  });
+
+  await page.locator('#addPaneBtn').click();
+  const menu = page.locator('[data-testid="pane-add-menu"]');
+  await expect(menu).toBeVisible();
+  await menu.locator('select[aria-label="Chat agent"]').selectOption('dev');
+  await expect(menu.locator('[data-testid="pane-add-menu-workqueue"]')).toHaveText(/\/ assigned/);
+  await menu.locator('[data-testid="pane-add-menu-workqueue"]').click();
+
+  const pane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  const assignedBtn = pane.locator('[data-wq-scope="assigned"]');
+  const allBtn = pane.locator('[data-wq-scope="all"]');
+  const rows = pane.locator('[data-wq-list-body] .wq-row');
+
+  await expect(assignedBtn).toHaveAttribute('aria-pressed', 'true');
+  await pane.locator('[data-wq-refresh]').click();
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('Assigned default layout target');
+
+  await allBtn.click();
+  await expect(allBtn).toHaveAttribute('aria-pressed', 'true');
+  await expect(rows).toHaveCount(2);
+});
+
+test('workqueue pane: new panes default to non-terminal statuses with archived toggle', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `pane-archived-${Date.now()}`;
+  seedArchivedToggleWorkqueueItems(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  const defaultPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await defaultPane.locator('[data-wq-queue-select]').selectOption(queue);
+  await expect(defaultPane.locator('[data-wq-statusline]')).toContainText('Showing 1 of 3 items');
+  await expect(defaultPane.locator('[data-wq-list-body]')).toContainText('archived toggle ready row');
+  await expect(defaultPane.locator('[data-wq-list-body]')).not.toContainText('archived toggle done row');
+
+  await addPane(page, 'Workqueue pane');
+  const newPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await newPane.locator('[data-wq-queue-select]').selectOption(queue);
+  await expect(newPane.locator('[data-wq-statusline]')).toContainText('Showing 1 of 3 items');
+  await expect(newPane.locator('[data-wq-list-body]')).not.toContainText('archived toggle failed row');
+
+  await newPane.locator('[data-wq-status-details] summary').click();
+  const archivedToggle = newPane.locator('[data-wq-status-preset="all"]');
+  await expect(newPane.locator('[data-wq-archive-hint]')).toHaveText('Archived done/failed items hidden.');
+  await expect(archivedToggle).toHaveText('Show archived');
+  await expect(archivedToggle).toHaveAttribute('aria-pressed', 'false');
+
+  await archivedToggle.click();
+  await expect(newPane.locator('[data-wq-statusline]')).toContainText('3 item');
+  await expect(newPane.locator('[data-wq-list-body]')).toContainText('archived toggle done row');
+  await expect(newPane.locator('[data-wq-list-body]')).toContainText('archived toggle failed row');
+
+  await newPane.locator('[data-wq-status-details] summary').click();
+  await expect(archivedToggle).toHaveText('Hide archived');
+  await expect(archivedToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(newPane.locator('[data-wq-archive-hint]')).toHaveText('Archived done/failed items shown.');
+});
+
+function seedLargeRoutineWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const items = Array.from({ length: 22 }, (_, ix) => ({
+    id: `routine-sweep-${ix}`,
+    queue,
+    title: `[routine] PR review sweep ${ix + 1}`,
+    instructions: 'Recurring dev-team PR review sweep',
+    priority: ix === 7 ? 99 : 10 + ix,
+    status: ix % 3 === 0 ? 'pending' : 'ready',
+    claimedBy: ix === 5 ? 'dev-2' : '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: ix,
+    lastError: '',
+    createdAt: iso(-120000 + ix * 1000),
+    updatedAt: iso(-90000 + ix * 1000),
+    dedupeKey: 'pr-review:sweep'
+  }));
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-180000) } },
+    assignments: {},
+    items
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 test('workqueue pane: queue switch updates pane identity everywhere', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -270,6 +477,8 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
   await expect(wqPane.locator('.wq-pane')).toHaveCount(1);
   await expect(wqPane.locator('[data-wq-queue-search]')).toBeVisible();
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
+  await expect(wqPane.getByText('Viewing queue')).toBeVisible();
+  await expect(wqPane.locator('[data-wq-queue-select]')).toHaveAttribute('aria-label', 'Viewing queue');
 
   // Header target should describe queue context (not agent).
   await expect(wqPane.locator('[data-pane-target-label]')).toHaveText('Queue');
@@ -442,7 +651,7 @@ test('workqueue pane: filter summary chips show counts and remove filters', asyn
   await expect(summary).not.toContainText('Repo rmdmattingly/clawnsole');
   await expect(wqPane.locator('.wq-row')).toHaveCount(2);
 
-  await wqPane.locator('[data-wq-search]').fill('alternate repo');
+  await wqPane.locator('[data-wq-item-search]').fill('alternate repo');
   await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 1 of 3 items');
   await expect(summary).toContainText('Search alternate repo');
 
@@ -469,6 +678,7 @@ test('workqueue pane: default rows collapse exact duplicates with expandable mem
   await wqPane.locator('[data-wq-queue-custom]').fill(queue);
   await wqPane.locator('[data-wq-queue-custom]').press('Enter');
   await wqPane.locator('[data-wq-scope="all"]').click();
+  await wqPane.locator('[data-wq-group-mode="rows"]').click();
 
   const rows = wqPane.locator('[data-wq-list-body] .wq-row');
   const duplicateRow = wqPane.locator('[data-wq-duplicate-row]').first();
@@ -484,6 +694,159 @@ test('workqueue pane: default rows collapse exact duplicates with expandable mem
   await duplicateRow.press('Enter');
   await expect(duplicateRow).toHaveAttribute('aria-expanded', 'true');
   await expect(wqPane.locator('[data-wq-list-body] .wq-row-child')).toHaveCount(2);
+});
+
+test('workqueue pane: direct shortcuts focus queue, item, and status controls with blocked feedback', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  const queue = `shortcut-search-${Date.now()}`;
+  await page.evaluate(async ({ queue }) => {
+    const enqueue = async (title) => {
+      const res = await fetch('/api/workqueue/enqueue', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queue, title, instructions: `seed ${title}`, priority: 1 })
+      });
+      if (!res.ok) throw new Error(`enqueue failed: ${res.status}`);
+    };
+    await enqueue('shortcut alpha target');
+    await enqueue('shortcut beta hidden');
+  }, { queue });
+
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await expect(pane.locator('[data-wq-list-body] .wq-row')).toHaveCount(2);
+
+  await expect(pane.locator('[data-wq-queue-search]')).toBeVisible();
+  await expect(pane.locator('[data-wq-search]')).toBeVisible();
+  await pane.locator('[data-wq-refresh]').focus();
+  await page.keyboard.press('?');
+  await expect(page.locator('#shortcutsModal')).toHaveClass(/open/);
+  await expect(page.locator('#shortcutsModal')).toContainText('Focus Workqueue queue search');
+  await expect(page.locator('#shortcutsModal')).toContainText('Focus Workqueue item search');
+  await expect(page.locator('#shortcutsModal')).toContainText('Focus Workqueue status filter');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#shortcutsModal')).not.toHaveClass(/open/);
+
+  const pressAlt = async (key) => page.evaluate((nextKey) => {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: nextKey,
+      altKey: true,
+      bubbles: true,
+      cancelable: true
+    }));
+  }, key);
+
+  await pane.locator('[data-wq-refresh]').focus();
+  await pressAlt('q');
+  await expect(pane.locator('[data-wq-queue-search]')).toBeFocused();
+
+  await pane.locator('[data-wq-refresh]').focus();
+  await pressAlt('f');
+  await expect(pane.locator('[data-wq-search]')).toBeFocused();
+  await pane.locator('[data-wq-search]').fill('alpha');
+  await expect(pane.locator('[data-wq-list-body] .wq-row')).toHaveCount(1);
+  await expect(pane.locator('[data-wq-list-body] .wq-row')).toContainText('shortcut alpha target');
+
+  await pane.locator('[data-wq-refresh]').focus();
+  await pressAlt('s');
+  await expect(pane.locator('[data-wq-status-details] summary')).toBeFocused();
+  await expect(pane.locator('[data-wq-status-details]')).toHaveAttribute('open', '');
+
+  await page.evaluate(() => {
+    document.querySelector('[data-wq-queue-search]')?.setAttribute('hidden', '');
+  });
+  await pane.locator('[data-wq-refresh]').focus();
+  await pressAlt('q');
+  await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Shortcut target is unavailable');
+
+  await page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').focus();
+  await pressAlt('f');
+  await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Focus a Workqueue pane');
+});
+
+test('workqueue pane: auto view groups large repetitive routine queues', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `large-routine-${Date.now()}`;
+  seedLargeRoutineWorkqueueItems(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-scope="all"]').click();
+
+  const groupRow = pane.locator('[data-wq-group-row="pr-review:sweep"]');
+  await expect(pane.locator('[data-wq-group-mode="auto"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(groupRow).toBeVisible();
+  await expect(groupRow).toContainText('22 rows');
+  await expect(groupRow.locator('.wq-col.status')).toContainText('Ready');
+  await expect(groupRow.locator('.wq-col.status')).toContainText('Pending');
+  await expect(groupRow.locator('.wq-col.prio')).toHaveText('99');
+  await expect(pane.locator('.wq-row')).toHaveCount(1);
+
+  await groupRow.focus();
+  await page.keyboard.press('Enter');
+  await expect(groupRow).toHaveAttribute('aria-expanded', 'true');
+  await expect(pane.locator('.wq-row-child')).toHaveCount(22);
+});
+
+test('workqueue pane: auto view adapts to issue duplicate density and persists per queue', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const highQueue = `issue-density-high-${Date.now()}`;
+  const lowQueue = `issue-density-low-${Date.now()}`;
+  seedLegacyDuplicateWorkqueueItems(highQueue);
+  seedLowDensityIssueWorkqueueItems(lowQueue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(highQueue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await expect(pane.locator('[data-wq-group-mode="auto"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]')).toBeVisible();
+  await expect(pane.locator('.wq-row')).toHaveCount(2);
+
+  await pane.locator('[data-wq-group-mode="rows"]').click();
+  await expect(pane.locator('[data-wq-group-mode="rows"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]')).toHaveCount(0);
+  await expect(pane.locator('.wq-row')).toHaveCount(4);
+
+  await page.reload();
+  const restoredPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await restoredPane.locator('[data-wq-queue-select]').selectOption(highQueue);
+  await restoredPane.locator('[data-wq-queue-select]').press('Enter');
+  await expect(restoredPane.locator('[data-wq-group-mode="rows"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(restoredPane.locator('[data-wq-group-row="rmdmattingly/clawnsole#290"]')).toHaveCount(0);
+  await expect(restoredPane.locator('.wq-row')).toHaveCount(4);
+
+  await restoredPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await restoredPane.locator('[data-wq-queue-custom]').fill(lowQueue);
+  await restoredPane.locator('[data-wq-queue-custom]').press('Enter');
+  await expect(restoredPane.locator('[data-wq-group-mode="auto"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(restoredPane.locator('[data-wq-group-row]')).toHaveCount(0);
+  await expect(restoredPane.locator('.wq-row')).toHaveCount(4);
 });
 
 test('workqueue pane: queue target supports search + recent persistence', async ({ page }) => {
@@ -512,6 +875,130 @@ test('workqueue pane: queue target supports search + recent persistence', async 
   const secondPane = page.locator('[data-pane]').last();
   const secondSelect = secondPane.locator('[data-wq-queue-select]');
   await expect(secondSelect.locator('option', { hasText: '★ qa-hotfix' })).toHaveCount(1);
+});
+
+test('workqueue pane: queue filter and item search are distinct controls', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `item-search-${Date.now()}`;
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  await page.evaluate(async (queueName) => {
+    const post = async (url, body) => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `request failed: ${res.status}`);
+      return data;
+    };
+
+    await post('/api/workqueue/enqueue', {
+      queue: queueName,
+      title: 'Alpha item search target',
+      instructions: 'needle-from-instructions',
+      priority: 1,
+      dedupeKey: `${queueName}:alpha`
+    });
+    await post('/api/workqueue/enqueue', {
+      queue: queueName,
+      title: 'Beta item',
+      instructions: 'not the target',
+      priority: 1,
+      dedupeKey: `${queueName}:beta`
+    });
+    await post('/api/workqueue/enqueue', {
+      queue: 'ops-team',
+      title: 'Ops queue item',
+      instructions: 'different queue',
+      priority: 1,
+      dedupeKey: `${queueName}:ops`
+    });
+  }, queue);
+
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await expect(wqPane.locator('[data-wq-queue-search]')).toHaveAttribute('placeholder', 'Filter queue list...');
+  await expect(wqPane.locator('[data-wq-item-search]')).toHaveAttribute('placeholder', 'Search items...');
+
+  const rows = wqPane.locator('[data-wq-list-body] .wq-row');
+  await expect(rows.filter({ hasText: 'Alpha item search target' })).toBeVisible();
+  await expect(rows.filter({ hasText: 'Beta item' })).toBeVisible();
+
+  await wqPane.locator('[data-wq-queue-search]').fill('ops');
+  await expect(rows.filter({ hasText: 'Alpha item search target' })).toBeVisible();
+  await expect(rows.filter({ hasText: 'Beta item' })).toBeVisible();
+
+  await wqPane.locator('[data-wq-item-search]').fill('needle-from-instructions');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('Alpha item search target');
+
+  await wqPane.locator('[data-wq-item-search]').fill('missing-search-value');
+  await expect(wqPane.locator('[data-wq-empty]')).toContainText('No items match "missing-search-value".');
+  await wqPane.locator('[data-wq-clear-item-search]').click();
+  await expect(rows.filter({ hasText: 'Alpha item search target' })).toBeVisible();
+  await expect(rows.filter({ hasText: 'Beta item' })).toBeVisible();
+
+  await wqPane.locator('[data-wq-item-search]').blur();
+  await wqPane.locator('[data-wq-refresh]').focus();
+  await page.keyboard.press('/');
+  await expect(wqPane.locator('[data-wq-item-search]')).toBeFocused();
+});
+
+test('workqueue pane: enqueue destination is distinct from viewing queue', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  const baseUrl = `http://127.0.0.1:${env.serverPort}`;
+  const seed = await page.request.post(`${baseUrl}/api/workqueue/enqueue`, {
+    data: {
+      queue: 'qa-destination',
+      title: 'seed destination queue',
+      instructions: 'seed',
+      priority: 1
+    }
+  });
+  expect(seed.ok()).toBeTruthy();
+
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('details.wq-enqueue summary').click();
+
+  const viewingQueue = await pane.locator('[data-wq-queue-select]').inputValue();
+  const destinationSearch = pane.locator('[data-wq-enqueue-target-search]');
+  const destinationSelect = pane.locator('[data-wq-enqueue-target-select]');
+
+  await expect(destinationSearch).toBeVisible();
+  await expect(destinationSelect).toHaveAttribute('aria-label', 'Enqueue destination queue');
+  await expect(pane.getByLabel('Enqueue destination', { exact: true }).getByText('Enqueue to')).toBeVisible();
+  await expect(pane.getByText('New items go here; the viewed queue stays separate.')).toBeVisible();
+
+  await destinationSearch.fill('qa-destination');
+  await expect(destinationSelect.locator('option', { hasText: 'qa-destination' })).toHaveCount(1);
+  await destinationSearch.press('Enter');
+
+  await pane.locator('[data-wq-enqueue-title]').fill('destination-confirmation-test');
+  await pane.locator('[data-wq-enqueue-submit]').click();
+
+  await expect(pane.locator('[data-wq-enqueue-status]')).toContainText(/Enqueued to qa-destination:/);
+  await expect(page.getByTestId('toast').last()).toContainText(/Enqueued to qa-destination:/);
+  await expect(pane.locator('[data-wq-queue-select]')).toHaveValue(viewingQueue);
 });
 
 test('workqueue pane: enqueue assignment target supports search, keyboard select, and recents', async ({ page }) => {
@@ -543,6 +1030,40 @@ test('workqueue pane: enqueue assignment target supports search, keyboard select
   const firstRecent = firstPane.locator('[data-wq-claim-agent-list] .wq-agent-picker-option').first();
   await expect(firstRecent).toContainText('Dev-2');
   await expect(firstRecent.locator('.wq-agent-picker-badge')).toHaveText('recent');
+});
+
+test('workqueue pane: viewing queue and enqueue destination are unambiguous', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  const queue = `enqueue-dest-${Date.now()}`;
+
+  await expect(pane.getByText('Viewing queue')).toBeVisible();
+  await expect(pane.locator('[data-wq-queue-select]')).toHaveAttribute('aria-label', 'Viewing queue');
+
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await pane.locator('details.wq-enqueue summary').click();
+  await expect(pane.getByLabel('Enqueue destination', { exact: true }).getByText('Enqueue to')).toBeVisible();
+  await expect(pane.locator('[data-wq-enqueue-destination]')).toHaveText(queue);
+
+  await pane.locator('[data-wq-enqueue-target-search]').fill(queue);
+  await expect(pane.locator('[data-wq-enqueue-target-select]')).toHaveValue(queue);
+
+  await pane.locator('[data-wq-enqueue-title]').fill('Destination clarity item');
+  await pane.locator('[data-wq-enqueue-instructions]').fill('Verify destination copy and toast.');
+  await pane.locator('[data-wq-enqueue-submit]').click();
+
+  await expect(page.getByTestId('toast').last()).toContainText(`Enqueued to ${queue}`);
+  await expect(pane.locator('[data-wq-enqueue-status]')).toContainText('Queued');
 });
 
 test('workqueue pane: scope filter toggles assigned/unassigned/all deterministically', async ({ page }) => {
@@ -588,6 +1109,67 @@ test('workqueue pane: scope filter toggles assigned/unassigned/all deterministic
   await expect(rows).toHaveCount(1);
   await wqPane.locator('[data-wq-scope="unassigned"]').click();
   await expect(rows).toHaveCount(2);
+});
+
+test('workqueue pane: empty state explains hidden rows and offers recovery actions', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  const recoveryLogs = [];
+  page.on('console', (msg) => {
+    const text = msg.text();
+    if (text.includes('workqueue_recovery')) recoveryLogs.push(text);
+  });
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const queue = `empty-recovery-${Date.now()}`;
+  await page.evaluate(async ({ queue }) => {
+    const post = async (url, body) => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error(`${url} failed: ${res.status}`);
+      const data = await res.json();
+      if (!data?.ok) throw new Error(`${url} failed: ${data?.error || 'not ok'}`);
+      return data;
+    };
+
+    const created = await post('/api/workqueue/enqueue', { queue, title: 'done recovery row', instructions: 'x', priority: 1 });
+    await post('/api/workqueue/update', { itemId: created.item.id, patch: { status: 'done' } });
+  }, { queue });
+
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await wqPane.locator('[data-wq-refresh]').click();
+
+  const empty = wqPane.locator('[data-wq-empty]');
+  await expect(empty).toBeVisible();
+  await expect(empty.locator('[data-wq-empty-reason]')).toContainText('0 visible of 1 total');
+  await expect(empty.locator('[data-wq-empty-reason]')).toContainText('status=');
+
+  const clearStatus = empty.locator('[data-wq-empty-action="clear-status"]');
+  await clearStatus.focus();
+  await expect(clearStatus).toBeFocused();
+  await clearStatus.click();
+  await expect(wqPane.locator('[data-wq-list-body] .wq-row')).toHaveCount(1);
+  await expect.poll(() => recoveryLogs.some((line) => line.includes('clear-status'))).toBe(true);
+
+  await wqPane.locator('[data-wq-scope="assigned"]').click();
+  await expect(empty).toBeVisible();
+  await expect(empty.locator('[data-wq-empty-reason]')).toContainText('scope=assigned');
+
+  await empty.locator('[data-wq-empty-action="show-all"]').click();
+  await expect(wqPane.locator('[data-wq-list-body] .wq-row')).toHaveCount(1);
+  await expect(wqPane.locator('[data-wq-scope="all"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => recoveryLogs.some((line) => line.includes('show-all'))).toBe(true);
 });
 
 test('workqueue pane: source chips + clawnsole preset filter items without reload', async ({ page }) => {
@@ -646,12 +1228,9 @@ test('workqueue pane: normalizes mixed legacy issue title prefixes', async ({ pa
   await pane.locator('[data-wq-queue-custom]').fill(queue);
   await pane.locator('[data-wq-queue-custom]').press('Enter');
 
-  await expect(pane.locator('.wq-row')).toHaveCount(3);
-  await expect(pane.locator('.wq-row .wq-col.title')).toHaveText([
-    '[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles',
-    '[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles',
-    '[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles'
-  ]);
+  await expect(pane.locator('.wq-row')).toHaveCount(1);
+  await expect(pane.locator('.wq-row .wq-col.title')).toContainText('[ISSUE] rmdmattingly/clawnsole#280 - Normalize row titles');
+  await expect(pane.locator('.wq-row .wq-group-count')).toContainText('3 rows');
 });
 
 test('workqueue pane: long table titles stay discoverable on hover and focus', async ({ page }) => {
@@ -739,6 +1318,7 @@ test('workqueue pane: duplicate health summary cleans legacy issue duplicates', 
   await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
   await pane.locator('[data-wq-queue-custom]').fill(queue);
   await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-group-mode="rows"]').click();
   await expect(pane.locator('[data-wq-statusline]')).toContainText('4 item');
 
   const duplicateHealth = pane.locator('[data-wq-duplicate-health]');
@@ -774,6 +1354,7 @@ test('workqueue pane: default rows auto-collapse exact duplicates with count and
   await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
   await pane.locator('[data-wq-queue-custom]').fill(queue);
   await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-group-mode="rows"]').click();
 
   const duplicateRow = pane.locator('[data-wq-duplicate-row]').first();
   await expect(pane.locator('[data-wq-group-mode="rows"]')).toHaveClass(/active/);
@@ -804,6 +1385,7 @@ test('workqueue pane: grouped mode collapses duplicate issue rows and expands ch
   await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
   await pane.locator('[data-wq-queue-custom]').fill(queue);
   await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-group-mode="rows"]').click();
 
   await expect(pane.locator('.wq-row')).toHaveCount(4);
   await pane.locator('[data-wq-group-mode="grouped"]').click();
@@ -829,19 +1411,49 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
 
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
+  const queue = `sticky-scroll-${Date.now()}`;
+  const stateDir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const now = new Date().toISOString();
+  const items = Array.from({ length: 40 }, (_, ix) => ({
+    id: `sticky-${ix}`,
+    queue,
+    title: `sticky header item ${String(ix).padStart(2, '0')}`,
+    instructions: 'fixture item',
+    priority: ix,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: now,
+    updatedAt: now
+  }));
+  fs.writeFileSync(
+    path.join(stateDir, 'work-queues.json'),
+    JSON.stringify({ version: 1, queues: { [queue]: { name: queue, createdAt: now } }, items, assignments: {} }, null, 2)
+  );
+
   await loginAdmin(page, env.serverPort);
   await addPane(page, 'Workqueue pane');
 
   const wqPane = page.locator('[data-pane]').last();
   const toolbar = wqPane.locator('.wq-pane .wq-toolbar');
+  const list = wqPane.locator('.wq-pane .wq-list').first();
+  const listHeader = wqPane.locator('.wq-pane .wq-list-header').first();
   const listBody = wqPane.locator('.wq-pane [data-wq-list-body]').first();
 
   await expect(toolbar).toBeVisible();
+  await expect(list).toBeVisible();
+  await expect(listHeader).toBeVisible();
   await expect(listBody).toHaveCount(1);
 
+  await wqPane.locator('[data-wq-queue-select]').selectOption(queue);
   const itemsResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
   await wqPane.locator('[data-wq-refresh]').click();
   await itemsResP;
+  await expect(wqPane.locator('.wq-row')).toHaveCount(40);
 
   const styles = await toolbar.evaluate((el) => {
     const cs = window.getComputedStyle(el);
@@ -858,11 +1470,34 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
   expect(Number(styles.zIndex)).toBeGreaterThanOrEqual(5);
   expect(styles.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
 
-  const listStyles = await listBody.evaluate((el) => {
+  const listStyles = await list.evaluate((el) => {
     const cs = window.getComputedStyle(el);
     return { overflowY: cs.overflowY };
   });
   expect(['auto', 'scroll']).toContain(listStyles.overflowY);
+
+  const headerStyles = await listHeader.evaluate((el) => {
+    const cs = window.getComputedStyle(el);
+    return {
+      position: cs.position,
+      top: cs.top,
+      zIndex: cs.zIndex,
+      backgroundColor: cs.backgroundColor
+    };
+  });
+  expect(headerStyles.position).toBe('sticky');
+  expect(headerStyles.top).toBe('0px');
+  expect(Number(headerStyles.zIndex)).toBeGreaterThanOrEqual(3);
+  expect(headerStyles.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+
+  const before = await listHeader.boundingBox();
+  await list.evaluate((el) => { el.scrollTop = 260; });
+  await expect.poll(async () => list.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  const after = await listHeader.boundingBox();
+  expect(Math.abs((after?.y || 0) - (before?.y || 0))).toBeLessThanOrEqual(1);
+
+  await listHeader.locator('[data-wq-sort="title"]').click();
+  await expect(listHeader.locator('[data-wq-sort="title"]')).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('workqueue pane: large queues render an initial capped slice and load more incrementally', async ({ page }) => {
@@ -905,6 +1540,36 @@ test('workqueue pane: large queues render an initial capped slice and load more 
   const refreshResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
   await pane.locator('[data-wq-refresh]').click();
   await refreshResP;
+
+  const guard = pane.locator('[data-wq-all-scope-guard]');
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.workqueue.allScopeGuardThreshold', '600'));
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeHidden();
+
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.workqueue.allScopeGuardThreshold', '200'));
+  await pane.locator('[data-wq-scope="assigned"]').click();
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeVisible();
+  await expect(guard).toContainText('Viewing all items (505). Narrow scope?');
+
+  await guard.locator('[data-wq-downscope="assigned"]').click();
+  await expect(pane.locator('[data-wq-scope="assigned"]')).toHaveClass(/active/);
+  await expect(guard).toBeHidden();
+  await expect(pane.locator('.wq-row')).toHaveCount(0);
+
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeVisible();
+  await guard.locator('[data-wq-downscope="unassigned"]').click();
+  await expect(pane.locator('[data-wq-scope="unassigned"]')).toHaveClass(/active/);
+  await expect(guard).toBeHidden();
+
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeVisible();
+  await guard.locator('[data-wq-guard-dismiss]').click();
+  await expect(guard).toBeHidden();
+  await pane.locator('[data-wq-scope="assigned"]').click();
+  await pane.locator('[data-wq-scope="all"]').click();
+  await expect(guard).toBeHidden();
 
   await expect(pane.locator('.wq-row')).toHaveCount(100);
   await expect(pane.locator('[data-wq-load-more]')).toHaveText('Load more (100/505)');
