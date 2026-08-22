@@ -153,6 +153,8 @@ body::before {
   position: relative;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
 }
 
@@ -189,6 +191,65 @@ body::before {
   white-space: nowrap;
   font-size: 12px;
   font-weight: 700;
+}
+
+.shortcut-hint-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  order: 20;
+  flex: 1 1 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(238, 245, 255, 0.82);
+  justify-content: flex-end;
+}
+
+.shortcut-hint-strip[hidden] {
+  display: none !important;
+}
+
+.shortcut-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 0 1 auto;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.shortcut-hint:not(:last-child)::after {
+  content: "";
+  width: 1px;
+  height: 14px;
+  margin-left: 2px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.shortcut-hint__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: rgba(238, 245, 255, 0.66);
+}
+
+.shortcut-hint__keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+
+.shortcut-hint kbd {
+  padding: 2px 5px;
+  border-radius: 5px;
+  font-size: 10px;
 }
 
 .layout-mode-chip {
@@ -4362,6 +4423,10 @@ kbd {
 @media (max-width: 360px) {
   .topbar-actions {
     gap: 6px;
+  }
+
+  .shortcut-hint-strip {
+    display: none;
   }
 
   .channel-switch select {

@@ -29,6 +29,7 @@ test('active pane highlight and topbar chip follow keyboard pane cycling', async
   await addPane(page, 'Timeline pane');
 
   const chip = page.getByTestId('active-pane-chip');
+  const hints = page.getByTestId('shortcut-hint-strip');
   const panes = page.locator('[data-pane]');
   const activePanes = page.locator('[data-pane][data-active-pane="true"]');
 
@@ -44,6 +45,14 @@ test('active pane highlight and topbar chip follow keyboard pane cycling', async
   await expect(secondPane).toHaveAttribute('data-active-pane', 'false');
   await expect(thirdPane).toHaveAttribute('data-active-pane', 'false');
   await expect(chip).toContainText(/Active\s*A Chat · main/);
+  await expect(hints).toBeVisible();
+  await expect(hints).toContainText('Focus Chat composer');
+  await expect(hints).toContainText('Open/focus Workqueue for active Chat pane');
+
+  await firstPane.locator('[data-pane-input]').focus();
+  await expect(hints).toBeHidden();
+  await firstPane.evaluate((el) => el.focus());
+  await expect(hints).toBeVisible();
 
   await page.keyboard.press('Control+Shift+K');
   await expect(activePanes).toHaveCount(1);
@@ -51,6 +60,8 @@ test('active pane highlight and topbar chip follow keyboard pane cycling', async
   await expect(firstPane).toHaveAttribute('data-active-pane', 'false');
   await expect(thirdPane).toHaveAttribute('data-active-pane', 'false');
   await expect(chip).toContainText(/Active\s*B Workqueue · dev-team/);
+  await expect(hints).toContainText('Focus Workqueue item search');
+  await expect(hints).toContainText('Move selected row in Workqueue keyboard mode');
 
   await page.keyboard.press('Control+Shift+K');
   await expect(activePanes).toHaveCount(1);
@@ -58,6 +69,8 @@ test('active pane highlight and topbar chip follow keyboard pane cycling', async
   await expect(firstPane).toHaveAttribute('data-active-pane', 'false');
   await expect(secondPane).toHaveAttribute('data-active-pane', 'false');
   await expect(chip).toContainText(/Active\s*C Timeline ·/);
+  await expect(hints).toContainText('Move Fleet selection down');
+  await expect(hints).toContainText('Open Chat for selected Fleet agent');
 
   await page.reload();
   await expect(page.getByTestId('active-pane-chip')).toContainText(/Active\s*C Timeline ·/);
