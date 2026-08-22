@@ -3080,6 +3080,9 @@ const SHORTCUT_HINTS_BY_PANE_KIND = {
   timeline: ['fleet.next', 'fleet.openChatSelected', 'fleet.openWorkqueueSelected', 'help.shortcuts']
 };
 
+let shortcutHintRenderSuspendedUntil = 0;
+let shortcutHintRenderTimer = null;
+
 const SHORTCUT_STATUS_LABELS = {
   available: 'Available',
   'typing-focus': 'Blocked: typing-focus',
@@ -3189,6 +3192,17 @@ function renderShortcutHintStrip(activePane = activePaneFromState()) {
   const strip = globalElements.shortcutHintStrip;
   if (!strip) return;
 
+  const now = Date.now();
+  if (now < shortcutHintRenderSuspendedUntil) {
+    if (!shortcutHintRenderTimer) {
+      shortcutHintRenderTimer = setTimeout(() => {
+        shortcutHintRenderTimer = null;
+        renderShortcutHintStrip(activePaneFromState());
+      }, shortcutHintRenderSuspendedUntil - now + 10);
+    }
+    return;
+  }
+
   const shouldHide = !uiState.authed || roleState.role !== 'admin' || !activePane || isTypingContext(document.activeElement);
   strip.hidden = shouldHide;
   if (shouldHide) {
@@ -3212,6 +3226,10 @@ function renderShortcutHintStrip(activePane = activePaneFromState()) {
     `;
   }).join('');
   strip.setAttribute('aria-label', `Shortcut hints for ${paneLabel(activePane)} pane`);
+}
+
+function suspendShortcutHintRenderForPointer() {
+  shortcutHintRenderSuspendedUntil = Math.max(shortcutHintRenderSuspendedUntil, Date.now() + 180);
 }
 
 function initShortcutsSearchIndex() {
@@ -13793,6 +13811,7 @@ globalElements.activePaneChip?.addEventListener('click', () => {
   if (idx >= 0) focusPaneIndex(idx, { showHud: true });
 });
 
+document.addEventListener('pointerdown', () => suspendShortcutHintRenderForPointer(), true);
 document.addEventListener('focusin', () => renderShortcutHintStrip(activePaneFromState()));
 document.addEventListener('focusout', () => {
   setTimeout(() => renderShortcutHintStrip(activePaneFromState()), 0);
