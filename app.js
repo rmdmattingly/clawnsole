@@ -6269,6 +6269,7 @@ function renderWorkqueueItems() {
     const col = document.createElement('section');
     col.className = 'wq-board-col';
     col.setAttribute('data-wq-col', colDef.status);
+    col.setAttribute('data-testid', `workqueue-modal-col-${colDef.status}`);
 
     const colItems = Array.isArray(itemsByStatus[colDef.status]) ? itemsByStatus[colDef.status] : [];
 
@@ -6281,6 +6282,7 @@ function renderWorkqueueItems() {
 
     const lane = document.createElement('div');
     lane.className = 'wq-board-lane';
+    lane.setAttribute('data-testid', `workqueue-modal-lane-${colDef.status}`);
 
     // Drag/drop: drop a card to change status.
     lane.addEventListener('dragover', (e) => {
@@ -6305,6 +6307,7 @@ function renderWorkqueueItems() {
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'wq-card';
+      card.setAttribute('data-testid', 'workqueue-modal-card');
       if (it.id && it.id === workqueueState.selectedItemId) card.classList.add('selected');
       if (it.id) card.setAttribute('data-wq-item', it.id);
 
@@ -6385,8 +6388,8 @@ function renderWorkqueueInspect(item) {
   const actions = document.createElement('div');
   actions.className = 'wq-inspect-actions';
   actions.innerHTML = `
-    <button type="button" class="btn" data-wq-action="edit">Edit</button>
-    <button type="button" class="btn danger" data-wq-action="delete">Delete</button>
+    <button type="button" class="btn" data-wq-action="edit" data-testid="workqueue-modal-edit">Edit</button>
+    <button type="button" class="btn danger" data-wq-action="delete" data-testid="workqueue-modal-delete">Delete</button>
   `;
 
   const meta = root.querySelector('.wq-inspect-meta');
@@ -6589,6 +6592,7 @@ async function renderWorkqueuePane(rootEl, { queue = '' } = {}) {
 // In DevTools: window.__debug.renderWorkqueuePane(document.querySelector('#someRoot'), { queue: 'dev-team' })
 window.__debug = window.__debug || {};
 window.__debug.renderWorkqueuePane = renderWorkqueuePane;
+window.__debug.openWorkqueueModal = openWorkqueue;
 window.__debug.refreshAgents = refreshAgents;
 window.__debug.setAgentsLastRefreshedAtMs = (value) => {
   agentsLastRefreshedAtMs = Math.max(0, Number(value) || 0);
