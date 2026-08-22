@@ -39,6 +39,7 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   const modal = page.locator('#shortcutsModal');
+  const trigger = page.getByTestId('shortcuts-btn');
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
 
   // The app focuses the first chat input on load; shortcuts should *not* fire while typing.
@@ -47,6 +48,7 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
 
   await page.keyboard.press('Shift+/');
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe('shortcutsSearchInput');
   await expect(modal).toContainText('Keyboard shortcuts');
   await expect(modal).toContainText('Pane focus/navigation');
   await expect(modal).toContainText('Pane actions');
@@ -60,6 +62,28 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
 
   await page.keyboard.press('Escape');
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
+
+  await trigger.focus();
+  await page.keyboard.press('Enter');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe('shortcutsSearchInput');
+
+  await page.getByTestId('shortcuts-search').fill('workqueue');
+  await expect(modal.locator('.shortcut-group-title', { hasText: 'Workqueue actions' })).toBeVisible();
+  await expect(modal.locator('.shortcut-group-title', { hasText: 'Global' })).toBeHidden();
+
+  await page.getByTestId('shortcuts-search').fill('zzzz');
+  await expect(modal.locator('#shortcutsEmpty')).toBeVisible();
+
+  await page.getByTestId('shortcuts-search').fill('');
+  await modal.locator('[data-shortcuts-filter="fleet"]').click();
+  await expect(modal.locator('.shortcut-group-title', { hasText: 'Pane actions' })).toBeVisible();
+  await expect(modal.locator('[data-shortcuts-filter="fleet"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(modal.locator('.shortcut-group-title', { hasText: 'Workqueue actions' })).toBeHidden();
+
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+  await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe('shortcutsBtn');
 });
 
 test('holding Alt reveals visible pane focus index badges', async ({ page }) => {
