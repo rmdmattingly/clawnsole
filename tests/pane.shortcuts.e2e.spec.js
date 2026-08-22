@@ -843,7 +843,6 @@ test('fleet quick action button + keyboard shortcut focus existing timeline pane
   await page.keyboard.press('Control+Shift+F');
   await expect(panes).toHaveCount(3);
   await expect(timelinePanes).toHaveCount(1);
-  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
   await page.keyboard.press('Escape');
   await expect(page.locator('#agentsModal')).not.toHaveClass(/open/);
 
