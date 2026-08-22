@@ -3256,6 +3256,8 @@ function openShortcuts() {
   openAdminModal(modal, { focusReturn: shortcutsLastFocusedEl });
   startShortcutsStatusUpdates();
   updatePaneShortcutBadges();
+  focusShortcutsSearchInput();
+  window.requestAnimationFrame?.(() => focusShortcutsSearchInput());
   window.setTimeout(() => {
     if (focusShortcutsSearchInput()) return;
     (globalElements.shortcutsDialog || globalElements.shortcutsCloseBtn || modal).focus?.();
