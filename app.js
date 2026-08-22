@@ -5280,8 +5280,11 @@ function openWorkqueueForActiveChatAgent() {
   paneManager.persistAdminPanes();
   paneManager.focusPanePrimary(pane);
   try {
-    const scopeBtn = pane.elements?.thread?.querySelector?.('[data-wq-scope="assigned"]');
-    scopeBtn?.click?.();
+    if (typeof pane.workqueue?.setScope === 'function') pane.workqueue.setScope('assigned');
+    else {
+      const scopeBtn = pane.elements?.thread?.querySelector?.('[data-wq-scope="assigned"]');
+      scopeBtn?.click?.();
+    }
   } catch {
     renderWorkqueuePaneItems(pane);
   }
@@ -5292,10 +5295,15 @@ function openWorkqueueForActiveChatAgent() {
       (queueSelect || pane.elements?.thread)?.focus?.();
     } catch {}
   };
+  try {
+    requestAnimationFrame(() => requestAnimationFrame(focusWorkqueuePane));
+  } catch {}
   setTimeout(focusWorkqueuePane, 0);
   setTimeout(focusWorkqueuePane, 30);
   setTimeout(focusWorkqueuePane, 120);
   setTimeout(focusWorkqueuePane, 300);
+  setTimeout(focusWorkqueuePane, 750);
+  setTimeout(focusWorkqueuePane, 1500);
   showToast(`Workqueue scoped to ${agentId}`, { kind: 'info', timeoutMs: 1600 });
   return pane;
 }
@@ -6377,6 +6385,7 @@ function renderWorkqueueItems() {
     const col = document.createElement('section');
     col.className = 'wq-board-col';
     col.setAttribute('data-wq-col', colDef.status);
+    col.setAttribute('data-testid', `workqueue-board-col-${colDef.status}`);
 
     const colItems = Array.isArray(itemsByStatus[colDef.status]) ? itemsByStatus[colDef.status] : [];
 
@@ -6413,6 +6422,7 @@ function renderWorkqueueItems() {
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'wq-card';
+      card.setAttribute('data-testid', 'workqueue-card');
       if (it.id && it.id === workqueueState.selectedItemId) card.classList.add('selected');
       if (it.id) card.setAttribute('data-wq-item', it.id);
 
@@ -6493,8 +6503,8 @@ function renderWorkqueueInspect(item) {
   const actions = document.createElement('div');
   actions.className = 'wq-inspect-actions';
   actions.innerHTML = `
-    <button type="button" class="btn" data-wq-action="edit">Edit</button>
-    <button type="button" class="btn danger" data-wq-action="delete">Delete</button>
+    <button type="button" class="btn" data-wq-action="edit" data-testid="workqueue-inspect-edit">Edit</button>
+    <button type="button" class="btn danger" data-wq-action="delete" data-testid="workqueue-inspect-delete">Delete</button>
   `;
 
   const meta = root.querySelector('.wq-inspect-meta');

@@ -158,6 +158,106 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(instructions);
 });
 
+test('pane: workqueue golden path covers filters, board transition, edit, and delete', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue').click();
+
+  const wqPane = page.locator('[data-pane]').last();
+  await expect(wqPane).toHaveAttribute('data-pane-kind', 'workqueue');
+  await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
+  await expect(wqPane.locator('[data-wq-status]')).toBeVisible();
+
+  await page.evaluate(() => openWorkqueue());
+  const modal = page.getByTestId('workqueue-modal');
+  await expect(modal).toHaveClass(/open/);
+  await expect(page.getByTestId('workqueue-modal-queue-select')).toBeVisible();
+  await expect(page.getByTestId('workqueue-modal-status-filters')).toBeVisible();
+
+  const runId = String(Date.now());
+  const title = `pw-e2e-wq-board-${runId}`;
+  const editedTitle = `${title}-edited`;
+  const instructions = `board instructions ${runId}`;
+  const editedInstructions = `edited board instructions ${runId}`;
+
+  await page.getByTestId('workqueue-modal-queue-select').selectOption('dev-team');
+  await page.getByTestId('workqueue-modal-enqueue-title').fill(title);
+  await page.getByTestId('workqueue-modal-enqueue-priority').fill('51');
+  await page.getByTestId('workqueue-modal-enqueue-instructions').fill(instructions);
+
+  const enqueueResP = page.waitForResponse(
+    (res) => res.url().includes('/api/workqueue/enqueue') && res.request().method() === 'POST',
+    { timeout: 15000 }
+  );
+  await page.getByTestId('workqueue-modal-enqueue-submit').click();
+  const enqueueRes = await enqueueResP;
+  expect(enqueueRes.ok()).toBeTruthy();
+  const enqueueData = await enqueueRes.json();
+  const itemId = enqueueData.item?.id;
+  expect(itemId).toBeTruthy();
+
+  const itemCard = page.locator(`[data-wq-item="${itemId}"]`);
+  await expect(itemCard).toContainText(title);
+  await expect(page.getByTestId('workqueue-board-col-ready').locator(`[data-wq-item="${itemId}"]`)).toHaveCount(1);
+
+  const transitionResP = page.waitForResponse(
+    (res) => res.url().includes('/api/workqueue/update') && res.request().method() === 'POST',
+    { timeout: 15000 }
+  );
+  await page.evaluate((id) => {
+    const card = document.querySelector(`[data-wq-item="${id}"]`);
+    const lane = document.querySelector('[data-wq-col="in_progress"] .wq-board-lane');
+    if (!card || !lane) throw new Error('missing board card or target lane');
+    const dataTransfer = new DataTransfer();
+    card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }));
+    lane.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
+    lane.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+  }, itemId);
+  const transitionRes = await transitionResP;
+  expect(transitionRes.ok()).toBeTruthy();
+  await expect(page.getByTestId('workqueue-board-col-in_progress').locator(`[data-wq-item="${itemId}"]`)).toHaveCount(1);
+
+  await page.getByTestId('workqueue-board-col-in_progress').locator(`[data-wq-item="${itemId}"]`).click();
+  await expect(page.getByTestId('workqueue-modal-inspect')).toContainText(title);
+  await expect(page.getByTestId('workqueue-modal-inspect')).toContainText('in_progress');
+
+  const promptValues = [editedTitle, editedInstructions, '52', 'ready'];
+  page.on('dialog', async (dialog) => {
+    const value = promptValues.shift();
+    if (dialog.type() === 'prompt' && value !== undefined) await dialog.accept(value);
+    else await dialog.accept();
+  });
+
+  const editResP = page.waitForResponse(
+    (res) => res.url().includes('/api/workqueue/update') && res.request().method() === 'POST',
+    { timeout: 15000 }
+  );
+  await page.getByTestId('workqueue-inspect-edit').click();
+  const editRes = await editResP;
+  expect(editRes.ok()).toBeTruthy();
+  await expect(page.locator(`[data-wq-item="${itemId}"]`)).toContainText(editedTitle);
+  await expect(page.getByTestId('workqueue-modal-inspect')).toContainText(editedInstructions);
+  await expect(page.getByTestId('workqueue-board-col-ready').locator(`[data-wq-item="${itemId}"]`)).toHaveCount(1);
+
+  const deleteResP = page.waitForResponse(
+    (res) => res.url().includes('/api/workqueue/delete') && res.request().method() === 'POST',
+    { timeout: 15000 }
+  );
+  await page.getByTestId('workqueue-inspect-delete').click();
+  const deleteRes = await deleteResP;
+  expect(deleteRes.ok()).toBeTruthy();
+  await expect(page.locator(`[data-wq-item="${itemId}"]`)).toHaveCount(0);
+});
+
 test('pane: workqueue scope filter toggles deterministic row counts', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
