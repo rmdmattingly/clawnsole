@@ -159,14 +159,14 @@ test('inline shortcut hints follow active pane and hide while typing', async ({ 
 
   await page.locator('[data-pane][data-pane-kind="chat"]').first().click({ position: { x: 18, y: 18 } });
   await expect(strip).toBeVisible();
-  await expect(strip).toHaveAttribute('data-pane-kind', 'chat');
+  await expect(strip).toHaveAttribute('data-shortcut-pane-kind', 'chat');
   await expect(strip).toContainText('Chat');
   await expect(strip).toContainText('Cmd/Ctrl+L');
   await expect(strip).toContainText('Press ?');
 
   await page.locator('[data-pane][data-pane-kind="workqueue"]').first().click({ position: { x: 18, y: 18 } });
   await expect(strip).toBeVisible();
-  await expect(strip).toHaveAttribute('data-pane-kind', 'workqueue');
+  await expect(strip).toHaveAttribute('data-shortcut-pane-kind', 'workqueue');
   await expect(strip).toContainText('Workqueue');
   await expect(strip).toContainText('j/k');
   await expect(strip).toContainText('Enter');
@@ -179,7 +179,7 @@ test('inline shortcut hints follow active pane and hide while typing', async ({ 
   await page.getByRole('button', { name: 'Open fleet pane' }).click();
   await page.locator('[data-pane][data-pane-kind="timeline"]').first().click({ position: { x: 18, y: 18 } });
   await expect(strip).toBeVisible();
-  await expect(strip).toHaveAttribute('data-pane-kind', 'timeline');
+  await expect(strip).toHaveAttribute('data-shortcut-pane-kind', 'timeline');
   await expect(strip).toContainText('Fleet');
   await expect(strip).toContainText('Shift+Enter');
 

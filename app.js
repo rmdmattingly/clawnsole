@@ -542,7 +542,7 @@ function renderShortcutHintStrip(activePane = activePaneFromState()) {
   if (locked || typing || !activePane) {
     root.hidden = true;
     root.innerHTML = '';
-    root.removeAttribute('data-pane-kind');
+    root.removeAttribute('data-shortcut-pane-kind');
     return;
   }
 
@@ -565,11 +565,11 @@ function renderShortcutHintStrip(activePane = activePaneFromState()) {
   if (!hints.length) {
     root.hidden = true;
     root.innerHTML = '';
-    root.removeAttribute('data-pane-kind');
+    root.removeAttribute('data-shortcut-pane-kind');
     return;
   }
 
-  root.dataset.paneKind = kind;
+  root.dataset.shortcutPaneKind = kind;
   root.hidden = false;
   root.innerHTML = `
     <span class="shortcut-hint-strip__context">${escapeHtml(shortcutHintContextLabel(activePane))}</span>
