@@ -515,6 +515,9 @@ test('workqueue: collapseCanonicalIssueDuplicates safely backfills existing dupl
   assert.equal(result.removedCount, 1);
   assert.ok(result.backupFile.endsWith('.json'));
   assert.ok(fs.existsSync(result.backupFile));
+  const backupState = JSON.parse(fs.readFileSync(result.backupFile, 'utf8'));
+  assert.equal(backupState.items.length, 2);
+  assert.equal(backupState.items[0].result, undefined);
   const finalState = loadState(root);
   assert.equal(finalState.items.length, 1);
   assert.equal(finalState.items[0].id, first.id);
