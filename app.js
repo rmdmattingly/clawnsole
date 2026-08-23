@@ -23,6 +23,7 @@ const globalElements = {
   paneManagerBtn: document.getElementById('paneManagerBtn'),
   activePaneChip: document.getElementById('activePaneChip'),
   activePaneChipValue: document.querySelector('[data-active-pane-chip-value]'),
+  shortcutHintStrip: document.getElementById('shortcutHintStrip'),
   layoutModeChip: document.getElementById('layoutModeChip'),
   layoutModeChipValue: document.querySelector('[data-layout-mode-chip-value]'),
   pulseCanvas: document.getElementById('pulseCanvas'),
@@ -3625,6 +3626,71 @@ function activePaneFromState() {
   return panes[0] || null;
 }
 
+function shortcutHintContext(pane) {
+  if (!pane) return 'global';
+  if (pane.kind === 'timeline' && String(pane.cronAgentId || '').trim() === 'all') return 'fleet';
+  return pane.kind || 'chat';
+}
+
+function shortcutHintItem(id, label) {
+  return { keys: shortcutDisplay(id), label };
+}
+
+function shortcutHintsForPane(pane) {
+  const common = [shortcutHintItem('help.shortcuts', 'All shortcuts')];
+  const context = shortcutHintContext(pane);
+  if (context === 'workqueue') {
+    return [
+      shortcutHintItem('workqueue.focusQueueSearch', 'Queue search'),
+      shortcutHintItem('workqueue.focusItemSearch', 'Item search'),
+      shortcutHintItem('workqueue.focusStatusFilter', 'Status filter'),
+      shortcutHintItem('workqueue.open', 'Workqueue modal'),
+      ...common
+    ];
+  }
+  if (context === 'fleet') {
+    return [
+      shortcutHintItem('fleet.next', 'Move selection'),
+      shortcutHintItem('fleet.openChatSelected', 'Open Chat'),
+      shortcutHintItem('fleet.openWorkqueueSelected', 'Open Workqueue'),
+      shortcutHintItem('fleet.openTimelineSelected', 'Open Timeline'),
+      ...common
+    ];
+  }
+  if (context === 'cron' || context === 'timeline') {
+    return [
+      shortcutHintItem('agents.refresh', 'Refresh'),
+      shortcutHintItem('command.palette', 'Commands'),
+      shortcutHintItem('pane.next', 'Next pane'),
+      ...common
+    ];
+  }
+  return [
+    shortcutHintItem('chat.composer', 'Composer'),
+    shortcutHintItem('command.palette', 'Commands'),
+    shortcutHintItem('pane.next', 'Next pane'),
+    shortcutHintItem('workqueue.openForActiveChat', 'Workqueue'),
+    ...common
+  ];
+}
+
+function renderShortcutHintStrip(activePane = activePaneFromState()) {
+  const strip = globalElements.shortcutHintStrip;
+  if (!strip) return;
+  const visible = Boolean(activePane) && uiState.authed && !isTypingContext(document.activeElement);
+  strip.hidden = !visible;
+  strip.dataset.shortcutHintContext = visible ? shortcutHintContext(activePane) : '';
+  if (!visible) {
+    strip.innerHTML = '';
+    return;
+  }
+  strip.innerHTML = shortcutHintsForPane(activePane)
+    .slice(0, 5)
+    .filter((hint) => hint.keys && hint.label)
+    .map((hint) => `<span class="shortcut-hint"><kbd>${escapeHtml(hint.keys)}</kbd><span>${escapeHtml(hint.label)}</span></span>`)
+    .join('');
+}
+
 function renderActivePaneState(activePane = activePaneFromState()) {
   const panes = paneManager?.panes || [];
   const activeKey = String(activePane?.key || '');
@@ -3646,6 +3712,7 @@ function renderActivePaneState(activePane = activePaneFromState()) {
     value.textContent = '';
     chip.title = 'No active pane';
     chip.setAttribute('aria-label', 'No active pane');
+    renderShortcutHintStrip(null);
     return;
   }
 
@@ -3654,6 +3721,7 @@ function renderActivePaneState(activePane = activePaneFromState()) {
   value.textContent = label;
   chip.title = `Focus ${label}`;
   chip.setAttribute('aria-label', `Active pane: ${label}. Click to focus.`);
+  renderShortcutHintStrip(activePane);
   renderLayoutModeChip();
 }
 
@@ -13065,6 +13133,13 @@ function isTypingContext(target) {
   if (editorSurface) return true;
   return false;
 }
+
+function refreshShortcutHintStripSoon() {
+  setTimeout(() => renderShortcutHintStrip(), 0);
+}
+
+document.addEventListener('focusin', refreshShortcutHintStripSoon);
+document.addEventListener('focusout', refreshShortcutHintStripSoon);
 
 function isOverlayElementOpen(el) {
   if (!el) return false;
