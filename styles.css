@@ -197,10 +197,9 @@ body::before {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  order: 20;
-  flex: 1 1 100%;
+  flex: 0 1 420px;
   min-width: 0;
-  max-width: 100%;
+  max-width: min(420px, 34vw);
   overflow: hidden;
   padding: 5px 8px;
   border-radius: 999px;
@@ -4437,6 +4436,12 @@ kbd {
   .status-pill,
   .role-pill {
     padding: 5px 10px;
+  }
+}
+
+@media (max-height: 760px) {
+  .shortcut-hint-strip {
+    display: none;
   }
 }
 

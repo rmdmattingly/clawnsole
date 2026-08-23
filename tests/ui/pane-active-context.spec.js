@@ -24,6 +24,7 @@ test('active pane highlight and topbar chip follow keyboard pane cycling', async
 
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
+  await page.setViewportSize({ width: 1280, height: 900 });
   await loginAdmin(page, env.serverPort);
   await page.evaluate(() => localStorage.setItem('clawnsole.admin.layoutMode', 'custom'));
   await addPane(page, 'Timeline pane');
