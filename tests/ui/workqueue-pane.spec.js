@@ -1172,7 +1172,7 @@ test('workqueue pane: empty state explains hidden rows and offers recovery actio
   await expect.poll(() => recoveryLogs.some((line) => line.includes('show-all'))).toBe(true);
 });
 
-test('workqueue pane: source chips + clawnsole preset filter items without reload', async ({ page }) => {
+test('workqueue pane: source chips + actionable/clawnsole presets filter items without reload and persist', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
 
@@ -1181,35 +1181,65 @@ test('workqueue pane: source chips + clawnsole preset filter items without reloa
   await loginAdmin(page, env.serverPort);
   await addPane(page, 'Workqueue pane');
 
+  const queue = `quick-filters-${Date.now()}`;
   const pane = page.locator('[data-pane]').last();
 
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
   const enqueue = async (title, instructions) => {
-    await page.evaluate(async ({ title, instructions }) => {
+    await page.evaluate(async ({ queue, title, instructions }) => {
       await fetch('/api/workqueue/enqueue', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ queue: 'dev-team', title, instructions, priority: 50 })
+        body: JSON.stringify({ queue, title, instructions, priority: 50 })
       });
-    }, { title, instructions });
+    }, { queue, title, instructions });
   };
 
   await enqueue('[ISSUE] clawnsole issue item', 'https://github.com/rmdmattingly/clawnsole/issues/177');
   await enqueue('[ROUTINE] speechee routine item', 'https://github.com/rmdmattingly/speechee/pull/37');
+  await enqueue('Issue coverage: clawnsole coverage item', 'https://github.com/rmdmattingly/clawnsole/issues/178');
 
   await pane.locator('[data-wq-refresh]').click();
-  await expect(pane.locator('.wq-row')).toHaveCount(2);
+  await expect(pane.locator('.wq-row')).toHaveCount(3);
+
+  await pane.locator('[data-wq-preset-actionable]').click();
+  await expect(pane.locator('[data-wq-preset-actionable]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('.wq-row')).toHaveCount(1);
+  await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
+  await expect(pane.locator('.wq-row', { hasText: 'routine item' })).toHaveCount(0);
+  await expect(pane.locator('.wq-row', { hasText: 'coverage item' })).toHaveCount(0);
+
+  await pane.locator('[data-wq-clear-quick]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(3);
 
   await pane.locator('[data-wq-source="issue"]').click();
   await expect(pane.locator('.wq-row')).toHaveCount(1);
   await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
 
   await pane.locator('[data-wq-clear-quick]').click();
-  await expect(pane.locator('.wq-row')).toHaveCount(2);
+  await expect(pane.locator('.wq-row')).toHaveCount(3);
 
   await pane.locator('[data-wq-preset-clawnsole]').click();
+  await expect(pane.locator('.wq-row')).toHaveCount(2);
+  await expect(pane.locator('.wq-row', { hasText: 'speechee routine item' })).toHaveCount(0);
+
+  await pane.locator('[data-wq-preset-actionable]').click();
   await expect(pane.locator('.wq-row')).toHaveCount(1);
   await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const restoredPane = page.locator('[data-pane]').last();
+  await restoredPane.locator('[data-wq-queue-select]').selectOption(queue);
+  await restoredPane.locator('[data-wq-refresh]').click();
+  await expect(restoredPane.locator('[data-wq-preset-actionable]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(restoredPane.locator('.wq-row')).toHaveCount(1);
+  await expect(restoredPane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
 });
 
 test('workqueue pane: normalizes mixed legacy issue title prefixes', async ({ page }) => {
