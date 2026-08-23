@@ -11,7 +11,10 @@ const {
   saveState,
   transitionItem,
   collapseCanonicalIssueDuplicates,
-  canonicalizeIssueDedupeKey
+  canonicalizeIssueDedupeKey,
+  migrateLegacyIssueDupes,
+  planLegacyIssueDedupeMigration,
+  listItems
 } = require('../../lib/workqueue');
 
 function withFakeNow(ms, fn) {
@@ -517,4 +520,102 @@ test('workqueue: collapseCanonicalIssueDuplicates safely backfills existing dupl
   assert.equal(finalState.items[0].id, first.id);
   assert.equal(finalState.items[0].dedupeKey, 'rmdmattingly/clawnsole#298');
   assert.equal(finalState.items[0].seenCount, 2);
+});
+
+test('workqueue: legacy issue dupe migration picks deterministic survivor and hides merged rows', () => {
+  const root = tempRoot();
+  const state = loadState(root);
+  state.queues['dev-team'] = { name: 'dev-team', createdAt: '2026-01-01T00:00:00.000Z' };
+  state.items = [
+    {
+      id: 'terminal-newest',
+      queue: 'dev-team',
+      title: 'Done duplicate',
+      instructions: 'Ship https://github.com/rmdmattingly/clawnsole/issues/392',
+      priority: 99,
+      status: 'done',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-04T00:00:00.000Z',
+      lastNote: 'already done'
+    },
+    {
+      id: 'ready-older',
+      queue: 'dev-team',
+      title: '[issue] rmdmattingly/clawnsole:392',
+      instructions: 'Ship issue',
+      priority: 10,
+      status: 'ready',
+      createdAt: '2026-01-02T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z'
+    },
+    {
+      id: 'ready-newer',
+      queue: 'dev-team',
+      title: 'Open issue triage: RMDMATTINGLY / CLAWNSOLE #392',
+      instructions: 'Ship issue',
+      priority: 1,
+      status: 'pending',
+      createdAt: '2026-01-03T00:00:00.000Z',
+      updatedAt: '2026-01-03T00:00:00.000Z',
+      lastError: 'old failure'
+    }
+  ];
+  saveState(root, state);
+
+  const plan = planLegacyIssueDedupeMigration(loadState(root), { queues: ['dev-team'] });
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].canonicalKey, 'rmdmattingly/clawnsole#392');
+  assert.equal(plan[0].survivorId, 'ready-newer');
+  assert.deepEqual(plan[0].mergedIds, ['ready-older', 'terminal-newest']);
+
+  const result = migrateLegacyIssueDupes(root, { queues: ['dev-team'] });
+  assert.equal(result.mergedCount, 2);
+  assert.match(result.backupPath, /work-queues\.backup\..+\.json$/);
+  assert.equal(fs.existsSync(result.backupPath), true);
+
+  const migrated = loadState(root);
+  const survivor = migrated.items.find((it) => it.id === 'ready-newer');
+  const merged = migrated.items.filter((it) => it.meta?.mergedInto === 'ready-newer');
+  assert.equal(survivor.dedupeKey, 'rmdmattingly/clawnsole#392');
+  assert.equal(survivor.result.migrationMerged.length, 2);
+  assert.deepEqual(merged.map((it) => it.id).sort(), ['ready-older', 'terminal-newest']);
+  assert.equal(listItems(migrated, { queues: ['dev-team'] }).length, 1);
+  assert.equal(listItems(migrated, { queues: ['dev-team'] })[0].id, 'ready-newer');
+});
+
+test('workqueue: legacy issue dupe migration dry-run does not write backup or mutate state', () => {
+  const root = tempRoot();
+  const state = loadState(root);
+  state.queues.dev = { name: 'dev', createdAt: '2026-01-01T00:00:00.000Z' };
+  state.items = [
+    {
+      id: 'a',
+      queue: 'dev',
+      title: 'rmdmattingly/clawnsole#392',
+      instructions: 'one',
+      priority: 1,
+      status: 'ready',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z'
+    },
+    {
+      id: 'b',
+      queue: 'dev',
+      title: 'rmdmattingly/clawnsole:392',
+      instructions: 'two',
+      priority: 1,
+      status: 'ready',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z'
+    }
+  ];
+  saveState(root, state);
+
+  const before = JSON.stringify(loadState(root));
+  const result = migrateLegacyIssueDupes(root, { queues: ['dev'], dryRun: true });
+
+  assert.equal(result.dryRun, true);
+  assert.equal(result.mergedCount, 1);
+  assert.equal(result.backupPath, null);
+  assert.equal(JSON.stringify(loadState(root)), before);
 });

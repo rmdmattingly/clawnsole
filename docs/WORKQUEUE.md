@@ -72,6 +72,24 @@ clawnsole workqueue claim-next --agent dev-3
 clawnsole workqueue claim-next --agent dev-3 --queues dev-team
 ```
 
+### Merge legacy duplicate issue rows
+
+Issue-backed enqueue now canonicalizes new rows to `owner/repo#issue`, but older queue files may still contain duplicate rows for the same issue. Preview and apply the one-time cleanup with:
+
+```bash
+clawnsole workqueue migrate-legacy-issue-dupes --queue dev-team --dry-run
+clawnsole workqueue migrate-legacy-issue-dupes --queue dev-team
+```
+
+The survivor policy is deterministic per queue and canonical issue key:
+
+1. Prefer non-terminal rows over `done` or `failed` rows.
+2. Prefer the newest `updatedAt`.
+3. Prefer the highest `priority`.
+4. Prefer the lexicographically smallest `id`.
+
+Apply mode writes a timestamped `work-queues.backup.<ts>.json` before changing state unless `--no-backup` is passed. Merged rows are not deleted; they are marked with `meta.mergedInto`, `meta.mergedAt`, and `meta.mergeRunId`, while their useful notes/errors/results are copied into the survivor's `result.migrationMerged[]`. Normal list and claim paths hide merged rows.
+
 ## Examples
 
 ### Single-agent worker (recommended)

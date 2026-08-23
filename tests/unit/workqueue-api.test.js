@@ -6,7 +6,7 @@ const path = require('node:path');
 const http = require('node:http');
 
 const { createClawnsoleServer } = require('../../clawnsole-server');
-const { enqueueItem } = require('../../lib/workqueue');
+const { enqueueItem, loadState, saveState, migrateLegacyIssueDupes } = require('../../lib/workqueue');
 
 function mkTempEnv() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawnsole-wq-api-'));
@@ -110,6 +110,52 @@ test('workqueue API: lists items for admin cookie', async () => {
     assert.equal(res.json?.ok, true);
     assert.ok(Array.isArray(res.json?.items));
     assert.equal(res.json.items.length, 2);
+  } finally {
+    server.close();
+  }
+});
+
+test('workqueue API: item list hides legacy issue rows merged by migration', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  const state = loadState(null);
+  state.queues['dev-team'] = { name: 'dev-team', createdAt: '2026-01-01T00:00:00.000Z' };
+  state.items = [
+    {
+      id: 'issue-392-a',
+      queue: 'dev-team',
+      title: 'rmdmattingly/clawnsole#392',
+      instructions: 'one',
+      priority: 1,
+      status: 'ready',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z'
+    },
+    {
+      id: 'issue-392-b',
+      queue: 'dev-team',
+      title: 'rmdmattingly/clawnsole:392',
+      instructions: 'two',
+      priority: 1,
+      status: 'ready',
+      createdAt: '2026-01-02T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z'
+    }
+  ];
+  saveState(null, state);
+  migrateLegacyIssueDupes(null, { queues: ['dev-team'], backup: false });
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+    const res = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/items?queue=dev-team`, {
+      Cookie: `clawnsole_auth=${cookie}; clawnsole_role=admin`
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json?.items?.length, 1);
+    assert.equal(res.json.items[0].id, 'issue-392-b');
   } finally {
     server.close();
   }
