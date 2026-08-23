@@ -8494,6 +8494,8 @@ const ADMIN_LAYOUT_LOCK_KEY = 'clawnsole.admin.layout.lock.v1';
 const ADMIN_LAYOUT_MODE_KEY = 'clawnsole.admin.layoutMode';
 const ADMIN_DEFAULT_AGENT_KEY = 'clawnsole.admin.agentId';
 const WORKQUEUE_SCOPE_PREF_KEY = 'clawnsole.admin.workqueue.scope.v1';
+const WORKQUEUE_SORT_PREFS_KEY = 'clawnsole.admin.workqueue.sortByQueue.v1';
+const WORKQUEUE_ALLOWED_SORT_KEYS = new Set(['default', 'priority', 'updatedAt', 'createdAt', 'title', 'status', 'attempts', 'claimedBy']);
 
 function normalizeWorkqueueScope(scope) {
   return scope === 'assigned' || scope === 'unassigned' ? scope : 'all';
@@ -8502,6 +8504,47 @@ function normalizeWorkqueueScope(scope) {
 function getDefaultWorkqueueScope() {
   // Low-noise triage default: focus on unassigned work first.
   return normalizeWorkqueueScope(storage.get(WORKQUEUE_SCOPE_PREF_KEY, 'unassigned'));
+}
+
+function normalizeWorkqueueSortKey(sortKey) {
+  const key = String(sortKey || '').trim();
+  return WORKQUEUE_ALLOWED_SORT_KEYS.has(key) ? key : 'default';
+}
+
+function normalizeWorkqueueSortDir(sortDir) {
+  return sortDir === 'asc' ? 'asc' : 'desc';
+}
+
+function getWorkqueueSortPrefs() {
+  try {
+    const raw = storage.get(WORKQUEUE_SORT_PREFS_KEY, '');
+    if (!raw) return {};
+    const parsed = JSON.parse(String(raw));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function getWorkqueueSortPref(queue) {
+  const key = String(queue || 'dev-team').trim() || 'dev-team';
+  const prefs = getWorkqueueSortPrefs();
+  const pref = prefs[key];
+  if (!pref || typeof pref !== 'object') return null;
+  return {
+    sortKey: normalizeWorkqueueSortKey(pref.sortKey),
+    sortDir: normalizeWorkqueueSortDir(pref.sortDir)
+  };
+}
+
+function setWorkqueueSortPref(queue, { sortKey, sortDir }) {
+  const key = String(queue || 'dev-team').trim() || 'dev-team';
+  const prefs = getWorkqueueSortPrefs();
+  prefs[key] = {
+    sortKey: normalizeWorkqueueSortKey(sortKey),
+    sortDir: normalizeWorkqueueSortDir(sortDir)
+  };
+  storage.set(WORKQUEUE_SORT_PREFS_KEY, JSON.stringify(prefs));
 }
 
 function getDefaultWorkqueueScopeForTarget(agentId) {
@@ -10013,17 +10056,21 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     stopBtn: root.querySelector('[data-pane-stop]')
   };
 
+  const initialKind = (() => {
+    const allowed = new Set(['chat', 'workqueue', 'cron', 'timeline']);
+    const k = String(kind || 'chat').trim().toLowerCase();
+    return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
+  })();
+  const initialQueue = (queue || 'dev-team').trim() || 'dev-team';
+  const queueSortPref = initialKind === 'workqueue' ? getWorkqueueSortPref(initialQueue) : null;
+
   const pane = {
     key,
     role,
-    kind: (() => {
-      const allowed = new Set(['chat', 'workqueue', 'cron', 'timeline']);
-      const k = String(kind || 'chat').trim().toLowerCase();
-      return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
-    })(),
+    kind: initialKind,
     agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
     workqueue: {
-      queue: (queue || 'dev-team').trim() || 'dev-team',
+      queue: initialQueue,
       statusFilter: Array.isArray(statusFilter) ? statusFilter : Array.from(WORKQUEUE_ACTIVE_STATUSES),
       scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScopeForTarget(agentId)),
       quickFilters: {
@@ -10040,8 +10087,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       visibleItemIds: [],
       keyboardMode: false,
       renderLimit: WORKQUEUE_PANE_INITIAL_RENDER_LIMIT,
-      sortKey: typeof sortKey === 'string' && sortKey.trim() ? sortKey.trim() : 'priority',
-      sortDir: sortDir === 'asc' ? 'asc' : 'desc'
+      sortKey: normalizeWorkqueueSortKey(sortKey ?? queueSortPref?.sortKey ?? 'priority'),
+      sortDir: normalizeWorkqueueSortDir(sortDir ?? queueSortPref?.sortDir ?? 'desc')
     },
     cronAgentId: typeof cronAgentId === 'string' ? cronAgentId.trim() : '',
     nickname: normalizePaneNickname(nickname),
@@ -10312,6 +10359,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <button type="button" class="wq-sort-btn" data-wq-sort="priority">Priority</button>
             <button type="button" class="wq-sort-btn" data-wq-sort="updatedAt">Updated</button>
             <button type="button" class="wq-sort-btn" data-wq-sort="createdAt">Created</button>
+            <span class="wq-sort-restore hint" data-wq-sort-restore hidden></span>
           </div>
 
           <div class="wq-sort" role="group" aria-label="Workqueue row grouping">
@@ -10445,6 +10493,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
     const searchEl = itemSearchEl;
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
+    const sortRestoreEl = elements.thread.querySelector('[data-wq-sort-restore]');
     const enqueueDestination = elements.thread.querySelector('[data-wq-enqueue-destination]');
     const keyboardModeBtn = elements.thread.querySelector('[data-wq-keyboard-mode]');
     const keyboardHint = elements.thread.querySelector('[data-wq-keyboard-hint]');
@@ -10595,6 +10644,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       paneManager.persistAdminPanes();
     };
 
+    const setSortRestoreCue = (text = '') => {
+      if (!sortRestoreEl) return;
+      const next = String(text || '').trim();
+      sortRestoreEl.hidden = !next;
+      sortRestoreEl.textContent = next;
+    };
+
     const doRefresh = async () => {
       const q = getQueueValue() || 'dev-team';
       pane.workqueue.queue = q;
@@ -10603,6 +10659,16 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       updateEnqueueDestination();
       resetRenderLimit();
       rememberRecentWorkqueueTarget(q);
+
+      const pref = getWorkqueueSortPref(q);
+      if (pref) {
+        pane.workqueue.sortKey = pref.sortKey;
+        pane.workqueue.sortDir = pref.sortDir;
+        setSortRestoreCue(`Restored: ${pref.sortKey}`);
+      } else {
+        setSortRestoreCue('');
+      }
+
       paneSetHeaderTarget(pane, {
         label: 'Queue',
         value: formatWorkqueuePaneQueueLabel(pane),
@@ -10619,6 +10685,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         pane.workqueue.statusFilter = Array.from(statusSet);
         renderStatusMultiSelect();
       }
+      updateSortUi();
       await fetchAndRenderWorkqueueItemsForPane(pane);
       updateQuickFilterUi();
       paneManager.persistAdminPanes();
@@ -10959,13 +11026,15 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     };
 
     const setSort = (key) => {
-      const nextKey = String(key || 'default');
+      const nextKey = normalizeWorkqueueSortKey(key);
       if (pane.workqueue.sortKey === nextKey) {
         pane.workqueue.sortDir = pane.workqueue.sortDir === 'asc' ? 'desc' : 'asc';
       } else {
         pane.workqueue.sortKey = nextKey;
         pane.workqueue.sortDir = nextKey === 'claimedBy' || nextKey === 'title' || nextKey === 'status' ? 'asc' : 'desc';
       }
+      setWorkqueueSortPref(pane.workqueue.queue, { sortKey: pane.workqueue.sortKey, sortDir: pane.workqueue.sortDir });
+      setSortRestoreCue('');
       resetRenderLimit();
       updateSortUi();
       renderWorkqueuePaneItems(pane);
