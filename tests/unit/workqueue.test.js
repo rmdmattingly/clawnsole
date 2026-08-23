@@ -4,7 +4,15 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { enqueueItem, claimNext, loadState, saveState, transitionItem } = require('../../lib/workqueue');
+const {
+  enqueueItem,
+  claimNext,
+  loadState,
+  saveState,
+  transitionItem,
+  collapseCanonicalIssueDuplicates,
+  canonicalizeIssueDedupeKey
+} = require('../../lib/workqueue');
 
 function withFakeNow(ms, fn) {
   const realNow = Date.now;
@@ -255,4 +263,302 @@ test('workqueue: enqueue supports dedupeKey idempotency', () => {
 
   const state = loadState(root);
   assert.equal(state.items.length, 1);
+});
+
+test('workqueue: issue-backed automated enqueue upserts one live item', () => {
+  const root = tempRoot();
+
+  let latest;
+  for (let i = 0; i < 10; i++) {
+    latest = enqueueItem(root, {
+      queue: 'dev-team',
+      title: `Issue coverage pass ${i}`,
+      instructions: `Ship https://github.com/rmdmattingly/clawnsole/issues/392`,
+      priority: i,
+      repo: 'RMDMATTINGLY/CLAWNSOLE',
+      issueNumber: 392,
+      meta: {
+        source: 'hourly-auto-enqueue'
+      }
+    });
+  }
+
+  assert.equal(latest._enqueueAction, 'updated_existing');
+  assert.equal(latest._deduped, true);
+  assert.equal(latest.priority, 9);
+  assert.equal(latest.dedupeKey, 'rmdmattingly/clawnsole#392');
+  assert.equal(latest.meta.repo, 'rmdmattingly/clawnsole');
+  assert.equal(latest.meta.issueNumber, '392');
+
+  const state = loadState(root);
+  assert.equal(state.items.length, 1);
+  assert.equal(state.items[0].title, 'Issue coverage pass 9');
+  assert.equal(state.items[0].priority, 9);
+});
+
+test('workqueue: issue-backed enqueue canonicalizes producer dedupe variants', () => {
+  const root = tempRoot();
+
+  const variants = [
+    {
+      title: 'Colon key producer',
+      instructions: 'Ship queued issue',
+      dedupeKey: 'issue:rmdmattingly/clawnsole:392',
+      priority: 1
+    },
+    {
+      title: 'Hash key producer',
+      instructions: 'Ship queued issue',
+      dedupeKey: 'issue:RMDMATTINGLY/CLAWNSOLE#392',
+      priority: 2
+    },
+    {
+      title: 'Meta key producer',
+      instructions: 'Ship queued issue',
+      priority: 3,
+      meta: { dedupeKey: 'rmdmattingly/clawnsole:392', source: 'coverage' }
+    },
+    {
+      title: 'Open issue triage: RMDMATTINGLY / CLAWNSOLE #392',
+      instructions: 'Ship queued issue',
+      priority: 4
+    },
+    {
+      title: 'Split fields producer',
+      instructions: 'Repo: RMDMATTINGLY / CLAWNSOLE\nIssue: #392\nShip queued issue',
+      priority: 5
+    },
+    {
+      title: 'Meta URL producer',
+      instructions: 'Ship queued issue',
+      priority: 6,
+      meta: { url: 'https://github.com/rmdmattingly/clawnsole/issues/392', source: 'follow-up' }
+    },
+    {
+      title: 'URL producer',
+      instructions: 'Ship https://github.com/rmdmattingly/clawnsole/issues/392',
+      priority: 7
+    },
+    {
+      title: 'Explicit issue producer',
+      instructions: 'Ship queued issue',
+      priority: 8,
+      repo: 'rmdmattingly/clawnsole',
+      issueNumber: 392
+    }
+  ];
+
+  const results = variants.map((input) => enqueueItem(root, { queue: 'dev-team', ...input }));
+  const latest = results.at(-1);
+
+  assert.equal(latest._enqueueAction, 'updated_existing');
+  assert.equal(latest._deduped, true);
+  assert.equal(latest.dedupeKey, 'rmdmattingly/clawnsole#392');
+  assert.equal(latest.title, 'Explicit issue producer');
+  assert.equal(latest.priority, 8);
+
+  const state = loadState(root);
+  assert.equal(state.items.length, 1);
+  assert.equal(state.items[0].dedupeKey, 'rmdmattingly/clawnsole#392');
+  assert.equal(state.items[0].title, 'Explicit issue producer');
+});
+
+test('workqueue: issue-backed canonical dedupe keeps distinct issues separate', () => {
+  const root = tempRoot();
+
+  enqueueItem(root, {
+    queue: 'dev-team',
+    title: 'Issue coverage',
+    instructions: 'Ship https://github.com/rmdmattingly/clawnsole/issues/392',
+    priority: 1
+  });
+  enqueueItem(root, {
+    queue: 'dev-team',
+    title: 'Issue coverage',
+    instructions: 'Ship https://github.com/rmdmattingly/clawnsole/issues/393',
+    priority: 1
+  });
+  enqueueItem(root, {
+    queue: 'dev-team',
+    title: 'Issue coverage',
+    instructions: 'Ship https://github.com/example/clawnsole/issues/392',
+    priority: 1
+  });
+
+  const state = loadState(root);
+  assert.equal(state.items.length, 3);
+  assert.deepEqual(
+    state.items.map((it) => it.dedupeKey).sort(),
+    ['example/clawnsole#392', 'rmdmattingly/clawnsole#392', 'rmdmattingly/clawnsole#393']
+  );
+});
+
+test('workqueue: issue-backed enqueue creates new row when only terminal matches exist', () => {
+  const root = tempRoot();
+
+  const first = enqueueItem(root, {
+    queue: 'dev-team',
+    title: 'Terminal issue task',
+    instructions: 'Done work',
+    priority: 1,
+    repo: 'rmdmattingly/clawnsole',
+    issueNumber: 392
+  });
+
+  const state = loadState(root);
+  state.items[0].status = 'done';
+  saveState(root, state);
+
+  const second = enqueueItem(root, {
+    queue: 'dev-team',
+    title: 'Fresh issue task',
+    instructions: 'New work',
+    priority: 2,
+    repo: 'rmdmattingly/clawnsole',
+    issueNumber: 392
+  });
+
+  assert.notEqual(second.id, first.id);
+  assert.equal(second._enqueueAction, 'created');
+  assert.equal(second.dedupeKey, 'rmdmattingly/clawnsole#392');
+  assert.equal(loadState(root).items.length, 2);
+});
+
+test('workqueue: canonical issue key extracts from meta, URLs, dedupe keys, and titles', () => {
+  assert.equal(
+    canonicalizeIssueDedupeKey({ meta: { repo: 'RmdMattingly/Clawnsole', issueNumber: '298' } }),
+    'rmdmattingly/clawnsole#298'
+  );
+  assert.equal(
+    canonicalizeIssueDedupeKey({ instructions: 'Work https://github.com/rmdmattingly/clawnsole/issues/298 now' }),
+    'rmdmattingly/clawnsole#298'
+  );
+  assert.equal(
+    canonicalizeIssueDedupeKey({ dedupeKey: 'issue:rmdmattingly/clawnsole#298' }),
+    'rmdmattingly/clawnsole#298'
+  );
+  assert.equal(
+    canonicalizeIssueDedupeKey({ title: '[coverage] Open issue rmdmattingly / clawnsole #298 please' }),
+    'rmdmattingly/clawnsole#298'
+  );
+});
+
+test('workqueue: canonical issue dedupe tracks seen count and provenance', () => {
+  const root = tempRoot();
+
+  const first = enqueueItem(root, {
+    queue: 'dev-team',
+    title: '[coverage] Open issue rmdmattingly/clawnsole#298',
+    instructions: 'first source',
+    priority: 10,
+    meta: { source: 'coverage' }
+  });
+
+  const second = enqueueItem(root, {
+    queue: 'dev-team',
+    title: '[Issue] Workqueue dedupe v2',
+    instructions: 'https://github.com/rmdmattingly/clawnsole/issues/298',
+    priority: 50,
+    dedupeKey: 'routine:clawnsole:298',
+    meta: { source: 'routine', repo: 'rmdmattingly/clawnsole', issueNumber: 298 }
+  });
+
+  assert.equal(second.id, first.id);
+  assert.equal(second._deduped, true);
+  assert.equal(second.dedupeKey, 'rmdmattingly/clawnsole#298');
+  assert.equal(second.seenCount, 2);
+
+  const state = loadState(root);
+  assert.equal(state.items.length, 1);
+  assert.equal(state.items[0].meta.source, 'routine');
+  assert.equal(state.items[0].meta.seenCount, 2);
+  assert.equal(state.items[0].meta.provenance.length, 1);
+});
+
+test('workqueue: canonical issue dedupe does not collapse non-issue tasks', () => {
+  const root = tempRoot();
+
+  enqueueItem(root, { queue: 'dev-team', title: 'Routine review', instructions: 'review', priority: 1 });
+  enqueueItem(root, { queue: 'dev-team', title: 'Routine review', instructions: 'review', priority: 1 });
+
+  const state = loadState(root);
+  assert.equal(state.items.length, 2);
+});
+
+test('workqueue: collapseCanonicalIssueDuplicates safely backfills existing duplicate rows', () => {
+  const root = tempRoot();
+  const first = enqueueItem(root, {
+    queue: 'dev-team',
+    title: '[coverage] rmdmattingly/clawnsole#298',
+    instructions: 'first',
+    priority: 1
+  });
+
+  const state = loadState(root);
+  state.items.push({
+    ...first,
+    id: 'duplicate-existing-row',
+    title: 'Open issue',
+    instructions: 'https://github.com/rmdmattingly/clawnsole/issues/298',
+    dedupeKey: 'issue:rmdmattingly/clawnsole#298',
+    createdAt: '2026-01-01T00:00:01.000Z',
+    updatedAt: '2026-01-01T00:00:01.000Z',
+    lastNote: 'legacy note'
+  });
+  saveState(root, state);
+
+  const dryRun = collapseCanonicalIssueDuplicates(root, { queue: 'dev-team', dryRun: true });
+  assert.equal(dryRun.removedCount, 1);
+  assert.equal(loadState(root).items.length, 2);
+
+  const result = collapseCanonicalIssueDuplicates(root, { queue: 'dev-team' });
+  assert.equal(result.removedCount, 1);
+  assert.ok(result.backupFile.endsWith('.json'));
+  assert.ok(fs.existsSync(result.backupFile));
+  const backupState = JSON.parse(fs.readFileSync(result.backupFile, 'utf8'));
+  assert.equal(backupState.items.length, 2);
+  assert.equal(backupState.items[0].result, undefined);
+  const finalState = loadState(root);
+  assert.equal(finalState.items.length, 1);
+  assert.equal(finalState.items[0].id, first.id);
+  assert.equal(finalState.items[0].dedupeKey, 'rmdmattingly/clawnsole#298');
+  assert.equal(finalState.items[0].meta.migrationMergedCount, 1);
+  assert.equal(finalState.items[0].result.migrationMerged[0].id, 'duplicate-existing-row');
+  assert.equal(finalState.items[0].result.migrationMerged[0].lastNote, 'legacy note');
+});
+
+test('workqueue: collapseCanonicalIssueDuplicates uses deterministic survivor policy', () => {
+  const root = tempRoot();
+  const olderActive = enqueueItem(root, {
+    queue: 'dev-team',
+    title: '[issue] rmdmattingly/clawnsole#399 active',
+    instructions: 'active',
+    priority: 1,
+    meta: { repo: 'rmdmattingly/clawnsole', issueNumber: 399 }
+  });
+
+  const state = loadState(root);
+  const active = state.items.find((it) => it.id === olderActive.id);
+  const terminal = {
+    ...active,
+    id: 'newer-terminal-row',
+    title: '[issue] rmdmattingly/clawnsole#399 terminal',
+    instructions: 'terminal',
+    priority: 99
+  };
+  terminal.status = 'done';
+  terminal.updatedAt = '2026-01-03T00:00:00.000Z';
+  active.status = 'ready';
+  active.updatedAt = '2026-01-01T00:00:00.000Z';
+  state.items.push(terminal);
+  saveState(root, state);
+
+  const result = collapseCanonicalIssueDuplicates(root, { queue: 'dev-team' });
+  assert.equal(result.removedCount, 1);
+  assert.equal(result.removed[0].keptId, olderActive.id);
+
+  const finalState = loadState(root);
+  assert.equal(finalState.items.length, 1);
+  assert.equal(finalState.items[0].id, olderActive.id);
+  assert.equal(finalState.items[0].result.migrationMerged[0].id, 'newer-terminal-row');
 });

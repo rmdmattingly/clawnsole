@@ -1,5 +1,47 @@
 const { test, expect } = require('./fixtures');
 
+test('settings: shortcut overrides validate, persist, and update help', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await expect(page.locator('#settingsModal')).toHaveAttribute('aria-hidden', 'false');
+
+  const nextShortcut = page.locator('[data-shortcut-action="pane-next"]');
+  const prevShortcut = page.locator('[data-shortcut-action="pane-previous"]');
+  const managerShortcut = page.locator('[data-shortcut-action="pane-manager"]');
+
+  await expect(page.locator('[data-shortcut-suggestion="pane-manager"]')).toContainText('Use Cmd/Ctrl+Alt/Option+P');
+  await page.locator('[data-shortcut-suggestion="pane-manager"]').click();
+  await expect(managerShortcut).toHaveValue('Cmd/Ctrl+Alt/Option+P');
+
+  await nextShortcut.click();
+  await page.keyboard.press('Control+Alt+Y');
+  await expect(nextShortcut).toHaveValue('Cmd/Ctrl+Alt/Option+Y');
+
+  await prevShortcut.click();
+  await page.keyboard.press('Control+Alt+Y');
+  await page.locator('#shortcutOverridesSave').click();
+  await expect(page.locator('#shortcutOverridesError')).toContainText('conflicts');
+
+  await prevShortcut.click();
+  await page.keyboard.press('Control+Alt+U');
+  await page.locator('#shortcutOverridesSave').click();
+  await expect(page.locator('#shortcutOverridesError')).toBeHidden();
+
+  await page.locator('#settingsCloseBtn').click();
+  await page.getByRole('button', { name: 'Open keyboard shortcuts' }).click();
+  await expect(page.locator('[data-shortcut-help="pane-next"]')).toContainText('Cmd/Ctrl+Alt/Option+Y');
+  await expect(page.locator('[data-shortcut-help="pane-manager"]')).toContainText('Cmd/Ctrl+Alt/Option+P');
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open keyboard shortcuts' }).click();
+  await expect(page.locator('[data-shortcut-help="pane-next"]')).toContainText('Cmd/Ctrl+Alt/Option+Y');
+  await expect(page.locator('[data-shortcut-help="pane-manager"]')).toContainText('Cmd/Ctrl+Alt/Option+P');
+});
+
 test('settings: recurring admin/system prompts list + create + toggle + history filter', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
@@ -42,4 +84,32 @@ test('settings: recurring prompt history error state is shown when runs API fail
 
   await page.locator('#recurringPromptRows [data-rp-action="edit"]').first().click();
   await expect(page.locator('#recurringPromptHistoryEmpty')).toContainText('Failed to load run history.');
+});
+
+test('settings: labeled header controls toggle persists with narrow-width fallback', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  const workqueueLabel = page.locator('#workqueueBtn .btn-label');
+  await expect(workqueueLabel).toBeVisible();
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByLabel('Labeled header controls').uncheck();
+  await expect(page.locator('#topbar')).not.toHaveClass(/labeled-header-controls/);
+  await expect(workqueueLabel).toBeHidden();
+
+  await page.getByLabel('Labeled header controls').check();
+  await expect(page.locator('#topbar')).toHaveClass(/labeled-header-controls/);
+  await expect(workqueueLabel).toBeVisible();
+  await expect(page.locator('#shortcutsBtn .btn-label')).toHaveText('Shortcuts');
+
+  await page.reload();
+  await expect(page.locator('#topbar')).toHaveClass(/labeled-header-controls/);
+  await expect(workqueueLabel).toBeVisible();
+
+  await page.setViewportSize({ width: 800, height: 800 });
+  await expect(workqueueLabel).toBeHidden();
+  await expect(page.locator('#workqueueBtn')).toHaveAttribute('aria-label', 'Open workqueue');
 });
