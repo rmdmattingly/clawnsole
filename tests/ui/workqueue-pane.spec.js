@@ -192,6 +192,45 @@ function seedFilterSummaryWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedActionablePresetWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, patch = {}) => ({
+    id,
+    queue,
+    title: '[issue] rmdmattingly/clawnsole#267 actionable preset visible',
+    instructions: 'Repo: rmdmattingly/clawnsole\nIssue: https://github.com/rmdmattingly/clawnsole/issues/267',
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-60000),
+    updatedAt: iso(-60000),
+    dedupeKey: `actionable-preset-${id}`,
+    ...patch
+  });
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-120000) } },
+    assignments: {},
+    items: [
+      mkItem('actionable-issue', { priority: 80, title: '[issue] rmdmattingly/clawnsole#267 real issue work' }),
+      mkItem('actionable-claimed', { priority: 60, status: 'claimed', claimedBy: 'dev', title: '[issue] rmdmattingly/clawnsole#268 claimed issue work' }),
+      mkItem('actionable-routine', { priority: 90, title: '[routine] hourly queue coverage pass', instructions: 'Routine coverage sweep' }),
+      mkItem('actionable-coverage', { priority: 70, title: 'Issue coverage: clawnsole stale scan', instructions: 'Issue coverage: close duplicate queue rows' }),
+      mkItem('actionable-triager', { priority: 50, title: 'Triager: inspect old issue backlog', instructions: 'Triager: classify low priority rows' }),
+      mkItem('actionable-blocked', { priority: 100, status: 'blocked', title: '[issue] rmdmattingly/clawnsole#269 blocked issue work' })
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 function seedExactDuplicateWorkqueueItems(queue) {
   const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
   fs.mkdirSync(dir, { recursive: true });
@@ -1210,6 +1249,43 @@ test('workqueue pane: source chips + clawnsole preset filter items without reloa
   await pane.locator('[data-wq-preset-clawnsole]').click();
   await expect(pane.locator('.wq-row')).toHaveCount(1);
   await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
+});
+
+test('workqueue pane: actionable preset hides routine coverage noise and keeps issue work', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  const queue = `actionable-preset-${Date.now()}`;
+  seedActionablePresetWorkqueueItems(queue);
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const pane = page.locator('[data-pane]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queue);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-scope="all"]').click();
+  await pane.locator('[data-wq-group-mode="rows"]').click();
+
+  await expect(pane.locator('.wq-row')).toHaveCount(6);
+
+  await pane.locator('[data-wq-preset-actionable]').click();
+  await expect(pane.locator('[data-wq-preset-actionable]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 6 items');
+  await expect(pane.locator('[data-wq-filter-summary]')).toContainText('Preset Actionable only');
+  await expect(pane.locator('.wq-row')).toHaveCount(2);
+  await expect(pane.locator('[data-wq-item="actionable-issue"]')).toContainText('real issue work');
+  await expect(pane.locator('[data-wq-item="actionable-claimed"]')).toContainText('claimed issue work');
+  await expect(pane.locator('[data-wq-item="actionable-routine"]')).toHaveCount(0);
+  await expect(pane.locator('[data-wq-item="actionable-coverage"]')).toHaveCount(0);
+  await expect(pane.locator('[data-wq-item="actionable-triager"]')).toHaveCount(0);
+  await expect(pane.locator('[data-wq-item="actionable-blocked"]')).toHaveCount(0);
+
+  await pane.locator('[data-wq-clear-quick]').click();
+  await expect(pane.locator('[data-wq-preset-actionable]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(pane.locator('.wq-row')).toHaveCount(5);
 });
 
 test('workqueue pane: normalizes mixed legacy issue title prefixes', async ({ page }) => {

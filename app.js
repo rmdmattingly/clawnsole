@@ -6171,6 +6171,7 @@ function handleFleetModalShortcutKeydown(event) {
 
 const WORKQUEUE_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress', 'done', 'failed'];
 const WORKQUEUE_ACTIVE_STATUSES = ['ready', 'pending', 'blocked', 'claimed', 'in_progress'];
+const WORKQUEUE_ACTIONABLE_STATUSES = ['ready', 'pending', 'claimed', 'in_progress'];
 const WORKQUEUE_TERMINAL_STATUSES = ['done', 'failed'];
 const WORKQUEUE_PANE_INITIAL_RENDER_LIMIT = 100;
 const WORKQUEUE_PANE_RENDER_CHUNK_SIZE = 100;
@@ -7001,6 +7002,28 @@ function getWorkqueueItemSource(item) {
   return 'other';
 }
 
+function isWorkqueueRoutineNoise(item) {
+  const meta = item?.meta && typeof item.meta === 'object' ? item.meta : {};
+  const sourceText = [
+    meta.kind,
+    meta.source,
+    meta.type,
+    meta.category,
+    item?.title,
+    item?.dedupeKey,
+    item?.instructions
+  ]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean)
+    .join('\n');
+
+  if (!sourceText) return false;
+  if (getWorkqueueItemSource(item) === 'routine' || getWorkqueueItemSource(item) === 'coordination') return true;
+  return /(^|\n)\s*\[(?:routine|coverage|coordination)\]/i.test(sourceText) ||
+    /(^|\n)\s*(?:issue\s+coverage|coverage\s+pass|triager|coordinator)\s*:/i.test(sourceText) ||
+    /\b(?:routine|coverage|triager|coordinator|coordination)\b/.test(sourceText);
+}
+
 const WORKQUEUE_DUPLICATE_TERMINAL_STATUSES = new Set(['done', 'failed']);
 
 function normalizeWorkqueueIssueRepo(repo) {
@@ -7150,6 +7173,7 @@ function formatWorkqueueHiddenBreakdown(hiddenCounts = {}) {
   const parts = [
     ['status', hiddenCounts.status],
     ['scope', hiddenCounts.scope],
+    ['actionable', hiddenCounts.actionable],
     ['source', hiddenCounts.source],
     ['repo', hiddenCounts.repo],
     ['search', hiddenCounts.search]
@@ -7168,11 +7192,17 @@ function formatWorkqueueVisibleSummary(shown, total, hiddenCounts = {}) {
 
 function getWorkqueueQuickFilterBreakdown(items, quickFilters) {
   let current = Array.isArray(items) ? items.slice() : [];
-  const hidden = { source: 0, repo: 0, search: 0 };
+  const hidden = { actionable: 0, source: 0, repo: 0, search: 0 };
+  const actionableOnly = !!quickFilters?.actionableOnly;
   const sourceSet = new Set(Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((x) => String(x || '').trim()).filter(Boolean) : []);
   const repoSet = new Set(Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((x) => String(x || '').trim()).filter(Boolean) : []);
   const search = String(quickFilters?.search || '').trim().toLowerCase();
 
+  if (actionableOnly) {
+    const next = current.filter((it) => !isWorkqueueRoutineNoise(it));
+    hidden.actionable = current.length - next.length;
+    current = next;
+  }
   if (sourceSet.size) {
     const next = current.filter((it) => sourceSet.has(getWorkqueueItemSource(it)));
     hidden.source = current.length - next.length;
@@ -7200,10 +7230,11 @@ function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount, hid
   const scope = pane.workqueue?.scopeFilter || 'all';
   const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter.map((s) => String(s || '').trim()).filter(Boolean) : [];
   const quick = pane.workqueue?.quickFilters || {};
+  const actionableOnly = !!quick.actionableOnly;
   const sources = Array.isArray(quick.sources) ? quick.sources.map((s) => String(s || '').trim()).filter(Boolean) : [];
   const repos = Array.isArray(quick.repos) ? quick.repos.map((s) => String(s || '').trim()).filter(Boolean) : [];
   const search = String(quick.search || '').trim();
-  const hasFilters = !!queue || !!scope || statuses.length || sources.length || repos.length || !!search;
+  const hasFilters = !!queue || !!scope || statuses.length || actionableOnly || sources.length || repos.length || !!search;
 
   root.innerHTML = '';
   root.hidden = !hasFilters;
@@ -7248,6 +7279,14 @@ function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount, hid
       value: formatWorkqueueStatusLabel(status),
       title: `Remove status filter ${formatWorkqueueStatusLabel(status)}`,
       action: () => pane.workqueue?.applyStatuses?.(statuses.filter((s) => s !== status))
+    });
+  }
+  if (actionableOnly) {
+    addToken({
+      label: 'Preset',
+      value: 'Actionable only',
+      title: 'Disable Actionable only preset',
+      action: () => pane.workqueue?.setActionableOnly?.(false)
     });
   }
   for (const source of sources) {
@@ -7733,6 +7772,7 @@ function renderWorkqueuePaneItems(pane) {
       const emptyReasonParts = [];
       if (hiddenCounts.status > 0) emptyReasonParts.push(`status=${statusLabel}`);
       if (hiddenCounts.scope > 0) emptyReasonParts.push(`scope=${scopeLabel}`);
+      if (hiddenCounts.actionable > 0) emptyReasonParts.push('actionable preset');
       if (hiddenCounts.source > 0) emptyReasonParts.push(`source filter`);
       if (hiddenCounts.repo > 0) emptyReasonParts.push(`repo filter`);
       if (hiddenCounts.search > 0) emptyReasonParts.push(`search`);
@@ -10029,7 +10069,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       quickFilters: {
         sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
         repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : [],
-        search: String(quickFilters?.search || '').trim()
+        search: String(quickFilters?.search || '').trim(),
+        actionableOnly: !!quickFilters?.actionableOnly
       },
       statusCounts: Object.fromEntries(WORKQUEUE_STATUSES.map((s) => [s, 0])),
       items: [],
@@ -10302,6 +10343,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           </div>
 
           <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
+          <button data-wq-preset-actionable class="secondary" type="button">Actionable only</button>
           <button data-wq-clear-quick class="secondary" type="button">Clear filters</button>
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
           <button data-wq-keyboard-mode class="secondary wq-keyboard-toggle" type="button" aria-pressed="false">Keyboard mode</button>
@@ -10442,6 +10484,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const sourceBtns = Array.from(elements.thread.querySelectorAll('[data-wq-source]'));
     const repoChipsEl = elements.thread.querySelector('[data-wq-repo-chips]');
     const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
+    const actionableOnlyBtn = elements.thread.querySelector('[data-wq-preset-actionable]');
     const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
     const searchEl = itemSearchEl;
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
@@ -10488,11 +10531,12 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const sourceSet = new Set(Array.isArray(initQuick.sources) ? initQuick.sources.map((x) => String(x || '').trim()).filter(Boolean) : []);
     const repoSet = new Set(Array.isArray(initQuick.repos) ? initQuick.repos.map((x) => String(x || '').trim()).filter(Boolean) : []);
     let searchQuery = String(initQuick.search || pane.workqueue.itemSearch || '').trim();
+    let actionableOnly = !!initQuick.actionableOnly;
     pane.workqueue.itemSearch = searchQuery;
     if (searchEl) searchEl.value = searchQuery;
 
     const persistQuickFilters = () => {
-      pane.workqueue.quickFilters = { sources: Array.from(sourceSet), repos: Array.from(repoSet), search: searchQuery };
+      pane.workqueue.quickFilters = { sources: Array.from(sourceSet), repos: Array.from(repoSet), search: searchQuery, actionableOnly };
       paneManager.persistAdminPanes();
     };
 
@@ -10530,6 +10574,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         btn.classList.toggle('active', active);
         btn.setAttribute('aria-pressed', active ? 'true' : 'false');
       });
+      actionableOnlyBtn?.classList.toggle('active', actionableOnly);
+      actionableOnlyBtn?.setAttribute('aria-pressed', actionableOnly ? 'true' : 'false');
 
       const repos = Array.from(new Set((Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : []).map(getWorkqueueItemRepo).filter(Boolean))).sort((a, b) => a.localeCompare(b));
       if (repoChipsEl) {
@@ -10562,6 +10608,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       if (searchEl && searchEl.value !== searchQuery) searchEl.value = searchQuery;
       resetRenderLimit();
       persistQuickFilters();
+      renderWorkqueuePaneItems(pane);
+    };
+
+    const setActionableOnly = (enabled) => {
+      actionableOnly = !!enabled;
+      resetRenderLimit();
+      persistQuickFilters();
+      updateQuickFilterUi();
       renderWorkqueuePaneItems(pane);
     };
 
@@ -10692,6 +10746,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     pane.workqueue.applyStatuses = applyStatuses;
     pane.workqueue.setQueue = setQueue;
     pane.workqueue.setQuickSearch = setQuickSearch;
+    pane.workqueue.setActionableOnly = setActionableOnly;
     pane.workqueue.removeQuickFilter = removeQuickFilter;
 
     const applyQueueSearchFilter = () => {
@@ -10889,9 +10944,21 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       renderWorkqueuePaneItems(pane);
     });
 
+    actionableOnlyBtn?.addEventListener('click', async () => {
+      actionableOnly = true;
+      pane.workqueue.sortKey = 'priority';
+      pane.workqueue.sortDir = 'desc';
+      resetRenderLimit();
+      persistQuickFilters();
+      updateQuickFilterUi();
+      updateSortUi();
+      await applyStatuses(WORKQUEUE_ACTIONABLE_STATUSES);
+    });
+
     const clearAllFilters = async () => {
       sourceSet.clear();
       repoSet.clear();
+      actionableOnly = false;
       searchQuery = '';
       pane.workqueue.itemSearch = '';
       if (searchEl) searchEl.value = '';
@@ -10918,6 +10985,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       if (action === 'show-all') {
         sourceSet.clear();
         repoSet.clear();
+        actionableOnly = false;
         searchQuery = '';
         pane.workqueue.itemSearch = '';
         if (searchEl) searchEl.value = '';
@@ -10932,6 +11000,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     clearQuickBtn?.addEventListener('click', () => {
       sourceSet.clear();
       repoSet.clear();
+      actionableOnly = false;
       searchQuery = '';
       pane.workqueue.itemSearch = '';
       if (searchEl) searchEl.value = '';
