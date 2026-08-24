@@ -12187,6 +12187,27 @@ const paneManager = {
       }
     }
 
+    if (normalizedKind === 'workqueue' && this.panes.length >= this.maxPanes) {
+      const existingWorkqueue = this.panes.find((p) => p?.role === 'admin' && p.kind === 'workqueue') || null;
+      if (existingWorkqueue) {
+        existingWorkqueue.agentId = nextAgentId;
+        existingWorkqueue.workqueue = existingWorkqueue.workqueue || {};
+        existingWorkqueue.workqueue.scopeFilter = nextScopeFilter;
+        if (typeof existingWorkqueue.workqueue.setQueue === 'function') {
+          existingWorkqueue.workqueue.setQueue(nextQueue).catch?.(() => {});
+        } else {
+          existingWorkqueue.workqueue.queue = nextQueue;
+        }
+        if (typeof existingWorkqueue.workqueue.setScope === 'function') {
+          existingWorkqueue.workqueue.setScope(nextScopeFilter);
+        }
+        this.persistAdminPanes();
+        this.focusPanePrimary(existingWorkqueue);
+        renderActivePaneState(existingWorkqueue);
+        return existingWorkqueue;
+      }
+    }
+
     if (this.panes.length >= this.maxPanes) return;
 
     if (normalizedKind === 'workqueue') {
