@@ -192,6 +192,46 @@ function seedFilterSummaryWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedActionablePresetWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, patch = {}) => ({
+    id,
+    queue,
+    title: '[issue] rmdmattingly/clawnsole#267 actionable target',
+    instructions: 'Repo: rmdmattingly/clawnsole\nIssue: https://github.com/rmdmattingly/clawnsole/issues/267',
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-60000),
+    updatedAt: iso(-60000),
+    dedupeKey: `actionable-preset-${id}`,
+    meta: { repo: 'rmdmattingly/clawnsole', issueNumber: 267, source: 'issue' },
+    ...patch
+  });
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-120000) } },
+    assignments: {},
+    items: [
+      mkItem('actionable-real-high', { title: '[issue] rmdmattingly/clawnsole#267 real issue high priority', priority: 30 }),
+      mkItem('actionable-real-active', { title: '[issue] rmdmattingly/clawnsole#268 active issue', priority: 20, status: 'in_progress' }),
+      mkItem('actionable-routine', { title: '[routine] PR review sweep', priority: 90, meta: { repo: 'rmdmattingly/clawnsole', source: 'routine' } }),
+      mkItem('actionable-coverage', { title: 'Issue coverage: clawnsole#267', priority: 80, status: 'pending', meta: { repo: 'rmdmattingly/clawnsole', source: 'coverage' } }),
+      mkItem('actionable-triager', { title: 'Triager: clawnsole queue cleanup', priority: 70, status: 'claimed', meta: { repo: 'rmdmattingly/clawnsole', source: 'coordination' } }),
+      mkItem('actionable-blocked', { title: '[issue] rmdmattingly/clawnsole#269 blocked dependency', priority: 99, status: 'blocked' })
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 function seedExactDuplicateWorkqueueItems(queue) {
   const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
   fs.mkdirSync(dir, { recursive: true });
@@ -659,6 +699,51 @@ test('workqueue pane: filter summary chips show counts and remove filters', asyn
   await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 3 items');
   await expect(summary).not.toContainText('Search alternate repo');
   await expect(wqPane.locator('[data-wq-queue-custom]')).toHaveValue(queue);
+});
+
+test('workqueue pane: actionable-only preset hides routine rows and persists', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `actionable-preset-${Date.now()}`;
+  seedActionablePresetWorkqueueItems(queue);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await wqPane.locator('[data-wq-scope="all"]').click();
+  await wqPane.locator('[data-wq-group-mode="rows"]').click();
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 6 items');
+
+  await wqPane.locator('[data-wq-preset-actionable]').click();
+
+  await expect(wqPane.locator('[data-wq-preset-actionable]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 6 items');
+  await expect(wqPane.locator('[data-wq-filter-summary]')).toContainText('Preset Actionable only');
+  await expect(wqPane.locator('[data-wq-list-body]')).toContainText('real issue high priority');
+  await expect(wqPane.locator('[data-wq-list-body]')).toContainText('active issue');
+  await expect(wqPane.locator('[data-wq-list-body]')).not.toContainText('PR review sweep');
+  await expect(wqPane.locator('[data-wq-list-body]')).not.toContainText('Issue coverage:');
+  await expect(wqPane.locator('[data-wq-list-body]')).not.toContainText('Triager:');
+  await expect(wqPane.locator('[data-wq-list-body]')).not.toContainText('blocked dependency');
+
+  await page.reload();
+  const restoredPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await expect(restoredPane.locator('[data-wq-preset-actionable]')).toHaveAttribute('aria-pressed', 'true');
+  await restoredPane.locator('[data-wq-queue-select]').selectOption(queue);
+  await expect(restoredPane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 6 items');
+  await expect(restoredPane.locator('[data-wq-list-body]')).toContainText('real issue high priority');
+  await expect(restoredPane.locator('[data-wq-list-body]')).not.toContainText('PR review sweep');
+
+  await restoredPane.locator('[data-wq-preset-actionable]').click();
+  await expect(restoredPane.locator('[data-wq-preset-actionable]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(restoredPane.locator('[data-wq-statusline]')).toContainText('Showing 5 of 6 items');
 });
 
 test('workqueue pane: default rows collapse exact duplicates with expandable members', async ({ page }) => {
