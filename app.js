@@ -125,6 +125,20 @@ const globalElements = {
   paneTemplate: document.getElementById('paneTemplate')
 };
 
+function shortcutHintStripElement() {
+  const strips = Array.from(document.querySelectorAll('[data-testid="shortcut-hint-strip"], #shortcutHintStrip')).filter(
+    (node) => node instanceof HTMLElement
+  );
+  const primary = globalElements.shortcutHintStrip || strips[0] || null;
+  strips.forEach((node) => {
+    if (node !== primary) node.remove();
+  });
+  if (primary && globalElements.shortcutHintStrip !== primary) {
+    globalElements.shortcutHintStrip = primary;
+  }
+  return primary;
+}
+
 const ADMIN_MODAL_KEYS = [
   'settingsModal',
   'shortcutsModal',
@@ -534,7 +548,7 @@ function isShortcutHintTypingContext(target = document.activeElement) {
 }
 
 function renderShortcutHintStrip(activePane = activePaneFromState()) {
-  const root = globalElements.shortcutHintStrip;
+  const root = shortcutHintStripElement();
   if (!root) return;
 
   const locked = !uiState.authed || roleState.role !== 'admin';
@@ -5372,14 +5386,22 @@ function openWorkqueueForActiveChatAgent() {
 
   const focusWorkqueuePane = () => {
     try {
+      if (!pane.elements?.root?.isConnected) return;
       const queueSelect = pane.elements?.thread?.querySelector?.('[data-wq-queue-select]');
       (queueSelect || pane.elements?.thread)?.focus?.();
     } catch {}
   };
+  try {
+    requestAnimationFrame(() => {
+      focusWorkqueuePane();
+      requestAnimationFrame(focusWorkqueuePane);
+    });
+  } catch {}
   setTimeout(focusWorkqueuePane, 0);
   setTimeout(focusWorkqueuePane, 30);
   setTimeout(focusWorkqueuePane, 120);
   setTimeout(focusWorkqueuePane, 300);
+  setTimeout(focusWorkqueuePane, 700);
   showToast(`Workqueue scoped to ${agentId}`, { kind: 'info', timeoutMs: 1600 });
   return pane;
 }
@@ -12790,7 +12812,7 @@ globalElements.shortcutOverridesSave?.addEventListener('click', () => saveShortc
 globalElements.shortcutOverridesResetAll?.addEventListener('click', () => resetAllShortcutOverrides());
 
 globalElements.shortcutsBtn?.addEventListener('click', () => openShortcuts());
-globalElements.shortcutHintStrip?.addEventListener('pointerdown', (event) => {
+shortcutHintStripElement()?.addEventListener('pointerdown', (event) => {
   const target = event.target instanceof HTMLElement ? event.target.closest('[data-shortcut-hint-all]') : null;
   if (!target) return;
   event.preventDefault();
