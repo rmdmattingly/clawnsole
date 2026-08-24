@@ -3599,6 +3599,7 @@ let paneFocusMruKeys = [];
 let paneMruTraversal = null;
 let paneMruSuppressFocusEvents = false;
 let paneActiveRestoreGuardUntil = 0;
+let lastFocusedPaneKey = '';
 const PANE_SWITCH_SEND_GUARD_MS = 5000;
 const PANE_SWITCH_SEND_GUARD_MESSAGE = 'Pane changed: press Enter again to send';
 
@@ -3621,6 +3622,7 @@ function notePaneFocused(pane) {
   if (!panes.some((entry) => String(entry?.key || '') === key)) return;
   const rememberedKey = rememberedActivePaneKey();
   if (rememberedKey && key !== rememberedKey && Date.now() < paneActiveRestoreGuardUntil) return;
+  lastFocusedPaneKey = key;
   paneMruTraversal = null;
   paneMruOrder();
   paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
@@ -5032,6 +5034,18 @@ function moveCommandPaletteSelection(step) {
   commandPaletteState.selectedIndex = selectable[nextPos];
 }
 
+function selectedCommandPaletteItem() {
+  const exactQuery = String(commandPaletteState.query || '').trim().toLowerCase();
+  if (exactQuery) {
+    const exact = commandPaletteState.items.find((item) =>
+      item?.kind !== 'header' &&
+      String(item?.label || '').trim().toLowerCase() === exactQuery
+    );
+    if (exact) return exact;
+  }
+  return commandPaletteState.filtered[commandPaletteState.selectedIndex];
+}
+
 function composeCommandPaletteDisplayItems(scored, query) {
   const q = String(query || '').trim();
   const groups = new Map();
@@ -5192,7 +5206,7 @@ function openCommandPalette() {
   if (!globalElements.commandPaletteModal) return;
 
   commandPaletteState.open = true;
-  commandPaletteState.originPaneKey = focusedPaneKey() || '';
+  commandPaletteState.originPaneKey = focusedPaneKey() || lastFocusedPaneKey || '';
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
   commandPaletteState.selectedIndex = 0;
@@ -12909,7 +12923,7 @@ globalElements.commandPaletteInput?.addEventListener('keydown', (event) => {
   }
   if (key === 'Enter') {
     event.preventDefault();
-    const item = commandPaletteState.filtered[commandPaletteState.selectedIndex];
+    const item = selectedCommandPaletteItem();
     if (!item || item.kind === 'header') return;
     if (!item.run) return;
     try {
