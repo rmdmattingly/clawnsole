@@ -7124,8 +7124,8 @@ function getWorkqueueGroupIdentity(item) {
   const source = getWorkqueueItemSource(item);
   const issueKey = getWorkqueueIssueKey(item);
   const dedupeKey = getWorkqueueDedupeIdentity(item);
-  if ((source === 'routine' || source === 'coordination') && dedupeKey) return `dedupe:${dedupeKey}`;
   if (issueKey) return `issue:${issueKey}`;
+  if ((source === 'routine' || source === 'coordination') && dedupeKey) return `dedupe:${dedupeKey}`;
   if (dedupeKey) return `dedupe:${dedupeKey}`;
   const titlePrefix = getWorkqueueTitleGroupPrefix(item);
   return titlePrefix ? `title:${titlePrefix}` : '';
