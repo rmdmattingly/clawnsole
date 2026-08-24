@@ -12537,7 +12537,7 @@ const paneManager = {
 
     const closeIfOutside = (event) => {
       if (!state.open) return;
-      if (event.target === anchorEl) return;
+      if (event.target === anchorEl || anchorEl.contains?.(event.target)) return;
       if (state.menuEl.contains(event.target)) return;
       this.closeAddPaneMenu();
     };
@@ -14078,7 +14078,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 document.addEventListener('focusin', () => {
-  renderShortcutHintStrip();
+  setTimeout(() => renderShortcutHintStrip(), 0);
 });
 
 document.addEventListener('focusout', () => {
