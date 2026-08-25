@@ -84,6 +84,8 @@ const globalElements = {
   wqAutoRefreshEnabled: document.getElementById('wqAutoRefreshEnabled'),
   wqAutoRefreshInterval: document.getElementById('wqAutoRefreshInterval'),
   wqRefreshBtn: document.getElementById('wqRefreshBtn'),
+  wqArchiveThreshold: document.getElementById('wqArchiveThreshold'),
+  wqArchiveBtn: document.getElementById('wqArchiveBtn'),
   wqListBody: document.getElementById('wqListBody'),
   wqListEmpty: document.getElementById('wqListEmpty'),
   wqInspectBody: document.getElementById('wqInspectBody'),
@@ -6856,6 +6858,57 @@ async function workqueueDeleteItem(item) {
   }
 }
 
+async function workqueueArchiveTerminalFromUi() {
+  const threshold = Number(globalElements.wqArchiveThreshold?.value || 0);
+  const queue = String(workqueueState.selectedQueue || '').trim();
+  if (!Number.isFinite(threshold) || threshold <= 0) {
+    setWorkqueueActionStatus('Choose an archive threshold.', 'err');
+    return;
+  }
+
+  try {
+    setWorkqueueActionStatus('Previewing archive...');
+    const previewRes = await fetch('/api/workqueue/archive-terminal', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ queue, olderThanDays: threshold, previewOnly: true })
+    });
+    const preview = await previewRes.json().catch(() => null);
+    if (!previewRes.ok || !preview?.ok) throw new Error(preview?.error || String(previewRes.status));
+
+    const count = Number(preview.previewCount || 0);
+    if (count <= 0) {
+      setWorkqueueActionStatus(`No done/failed items older than ${threshold}d.`);
+      return;
+    }
+
+    const scope = queue ? ` in ${queue}` : '';
+    const ok = confirm(`Archive ${count} done/failed item(s) older than ${threshold}d${scope}?`);
+    if (!ok) {
+      setWorkqueueActionStatus('Archive cancelled.');
+      return;
+    }
+
+    setWorkqueueActionStatus('Archiving...');
+    const applyRes = await fetch('/api/workqueue/archive-terminal', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ queue, olderThanDays: threshold, previewOnly: false })
+    });
+    const applied = await applyRes.json().catch(() => null);
+    if (!applyRes.ok || !applied?.ok) throw new Error(applied?.error || String(applyRes.status));
+
+    setWorkqueueActionStatus(`Archived ${Number(applied.archivedCount || 0)} item(s).`);
+    workqueueState.selectedItemId = null;
+    await fetchAndRenderWorkqueueItems();
+    renderWorkqueueInspect(null);
+  } catch (err) {
+    setWorkqueueActionStatus(`Archive failed: ${String(err)}`, 'err');
+  }
+}
+
 // --- Minimal Workqueue Pane (Issue #22c) ---
 // Standalone renderer that can be mounted into any container.
 // Acceptance: renderWorkqueuePane(rootEl, { queue }) exists and can be called via a debug hook.
@@ -13084,6 +13137,7 @@ globalElements.wqRefreshBtn?.addEventListener('click', () => {
   fetchWorkqueueQueues().then(() => fetchAndRenderWorkqueueItems());
 });
 
+globalElements.wqArchiveBtn?.addEventListener('click', () => workqueueArchiveTerminalFromUi());
 globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFromUi());
 globalElements.wqClaimBtn?.addEventListener('click', () => workqueueClaimNextFromUi());
 

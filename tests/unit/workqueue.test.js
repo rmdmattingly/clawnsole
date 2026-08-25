@@ -10,6 +10,7 @@ const {
   loadState,
   saveState,
   transitionItem,
+  archiveTerminalItems,
   collapseCanonicalIssueDuplicates,
   canonicalizeIssueDedupeKey
 } = require('../../lib/workqueue');
@@ -561,4 +562,41 @@ test('workqueue: collapseCanonicalIssueDuplicates uses deterministic survivor po
   assert.equal(finalState.items.length, 1);
   assert.equal(finalState.items[0].id, olderActive.id);
   assert.equal(finalState.items[0].result.migrationMerged[0].id, 'newer-terminal-row');
+});
+
+test('workqueue: archiveTerminalItems filters by threshold and terminal statuses only', () => {
+  withFakeNow(Date.parse('2026-08-25T12:00:00.000Z'), () => {
+    const root = tempRoot();
+
+    const oldDone = enqueueItem(root, { queue: 'dev', title: 'old done', instructions: 'x', priority: 0 });
+    const oldFailed = enqueueItem(root, { queue: 'dev', title: 'old failed', instructions: 'x', priority: 0 });
+    const freshDone = enqueueItem(root, { queue: 'dev', title: 'fresh done', instructions: 'x', priority: 0 });
+    const oldReady = enqueueItem(root, { queue: 'dev', title: 'old ready', instructions: 'x', priority: 0 });
+    const otherQueue = enqueueItem(root, { queue: 'qa', title: 'old qa done', instructions: 'x', priority: 0 });
+
+    const state = loadState(root);
+    for (const item of state.items) {
+      if (item.id === oldDone.id) Object.assign(item, { status: 'done', updatedAt: '2026-08-01T00:00:00.000Z' });
+      if (item.id === oldFailed.id) Object.assign(item, { status: 'failed', updatedAt: '2026-08-01T00:00:00.000Z' });
+      if (item.id === freshDone.id) Object.assign(item, { status: 'done', updatedAt: '2026-08-24T00:00:00.000Z' });
+      if (item.id === oldReady.id) Object.assign(item, { status: 'ready', updatedAt: '2026-08-01T00:00:00.000Z' });
+      if (item.id === otherQueue.id) Object.assign(item, { status: 'done', updatedAt: '2026-08-01T00:00:00.000Z' });
+    }
+    saveState(root, state);
+
+    const preview = archiveTerminalItems(root, { queue: 'dev', olderThanDays: 7, previewOnly: true });
+    assert.equal(preview.previewCount, 2);
+    assert.equal(loadState(root).items.length, 5);
+
+    const applied = archiveTerminalItems(root, { queue: 'dev', olderThanDays: 7, previewOnly: false });
+    assert.equal(applied.archivedCount, 2);
+
+    const next = loadState(root);
+    assert.deepEqual(
+      next.items.map((item) => item.title).sort(),
+      ['fresh done', 'old qa done', 'old ready'].sort()
+    );
+    assert.equal(next.archivedItems.length, 2);
+    assert.ok(next.archivedItems.every((item) => item.archivedAt && item.archivedReason === 'terminal-older-than-7d'));
+  });
 });

@@ -385,6 +385,18 @@
               </div>
             </label>
             <button id="wqRefreshBtn" class="secondary" type="button">Refresh</button>
+            <label class="wq-field">
+              Bulk archive
+              <div class="wq-autorefresh">
+                <select id="wqArchiveThreshold" aria-label="Bulk archive age threshold" data-testid="workqueue-modal-archive-threshold">
+                  <option value="7">7d</option>
+                  <option value="14">14d</option>
+                  <option value="30" selected>30d</option>
+                  <option value="90">90d</option>
+                </select>
+                <button id="wqArchiveBtn" class="secondary" type="button" data-testid="workqueue-modal-archive-submit">Archive</button>
+              </div>
+            </label>
           </div>
 
           <div class="wq-actions" aria-label="Workqueue actions">

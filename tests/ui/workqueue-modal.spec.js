@@ -79,6 +79,8 @@ test('workqueue modal: status filters use human labels and queue-scoped counts',
   await expect(page.getByTestId('wq-modal-filter-chip-search')).toContainText('Search: dev item');
   await page.getByTestId('wq-modal-filter-chip-search').click();
   await expect(page.getByTestId('wq-modal-item-search')).toHaveValue('');
+  await expect(page.getByTestId('workqueue-modal-archive-threshold')).toBeVisible();
+  await expect(page.getByTestId('workqueue-modal-archive-submit')).toBeVisible();
 
   await page.getByTestId('wq-modal-clear-filters').click();
   await expect(queueSelect).toHaveValue('dev-team');
