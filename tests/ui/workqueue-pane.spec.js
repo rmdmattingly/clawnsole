@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 
-const { startTestEnv, loginAdmin, attachConsoleErrorAsserts, addPane } = require('./_helpers');
+const { startTestEnv, loginAdmin, waitForAdminUiReady, attachConsoleErrorAsserts, addPane } = require('./_helpers');
 
 let env;
 
@@ -311,6 +311,54 @@ function seedArchivedToggleWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedSortPreferenceWorkqueueItems(...queues) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const items = queues.flatMap((queue, queueIndex) => [
+    {
+      id: `${queue}-older`,
+      queue,
+      title: `${queue} older item`,
+      instructions: 'fixture item',
+      priority: queueIndex + 1,
+      status: 'ready',
+      claimedBy: '',
+      claimedAt: '',
+      leaseUntil: 0,
+      attempts: 0,
+      lastError: '',
+      createdAt: iso(-120000),
+      updatedAt: iso(-60000)
+    },
+    {
+      id: `${queue}-newer`,
+      queue,
+      title: `${queue} newer item`,
+      instructions: 'fixture item',
+      priority: queueIndex + 2,
+      status: 'ready',
+      claimedBy: '',
+      claimedAt: '',
+      leaseUntil: 0,
+      attempts: 0,
+      lastError: '',
+      createdAt: iso(-60000),
+      updatedAt: iso(-30000)
+    }
+  ]);
+  fs.writeFileSync(
+    path.join(dir, 'work-queues.json'),
+    JSON.stringify({
+      version: 1,
+      queues: Object.fromEntries(queues.map((queue) => [queue, { name: queue, createdAt: iso(-180000) }])),
+      assignments: {},
+      items
+    }, null, 2)
+  );
+}
+
 test('workqueue pane: default agent-targeted layout starts assigned and remains overridable', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -465,6 +513,47 @@ test('workqueue pane: queue switch updates pane identity everywhere', async ({ p
   const managerRow = page.locator('.pane-manager-row[data-pane-kind="workqueue"]').first();
   await expect(managerRow.locator('.pane-manager-kind-label')).toHaveText(`B Workqueue · ${queue}`);
   await expect(managerRow).not.toContainText('main');
+});
+
+test('workqueue pane: sort preference persists across reload and per queue target', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queueA = `sort-pref-a-${Date.now()}`;
+  const queueB = `sort-pref-b-${Date.now()}`;
+  seedSortPreferenceWorkqueueItems(queueA, queueB);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  let pane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queueA);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await pane.locator('[data-wq-sort="updatedAt"]').click();
+  await expect(pane.locator('[data-wq-sort="updatedAt"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-sort-restored]')).toBeVisible();
+
+  await page.reload();
+  await waitForAdminUiReady(page);
+  pane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await expect(pane.locator('[data-wq-sort="updatedAt"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-sort-restored]')).toBeVisible();
+
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queueB);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-sort="createdAt"]').click();
+  await expect(pane.locator('[data-wq-sort="createdAt"]')).toHaveAttribute('aria-pressed', 'true');
+
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queueA);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await expect(pane.locator('[data-wq-sort="updatedAt"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-sort-restored]')).toBeVisible();
 });
 
 function seedKeyboardTriageWorkqueueItems(queue) {
