@@ -59,6 +59,18 @@ test('active pane highlight and topbar chip follow keyboard pane cycling', async
   await expect(secondPane).toHaveAttribute('data-active-pane', 'false');
   await expect(chip).toContainText(/Active\s*C Timeline ·/);
 
+  const activePaneKey = await thirdPane.getAttribute('data-pane-key');
+  expect(activePaneKey).toBeTruthy();
+  await chip.click();
+  const manager = page.getByTestId('pane-manager-modal');
+  await expect(manager).toHaveClass(/open/);
+  const activeRow = manager.locator(`.pane-manager-row[data-pane-key="${activePaneKey}"]`);
+  await expect(activeRow).toHaveAttribute('aria-selected', 'true');
+  await expect(activeRow).toBeFocused();
+  await expect(activeRow).toBeInViewport();
+  await expect(activeRow).toContainText(/C Timeline ·/);
+  await page.keyboard.press('Escape');
+
   await page.reload();
   await expect(page.getByTestId('active-pane-chip')).toContainText(/Active\s*C Timeline ·/);
   await expect(page.locator('[data-pane][data-active-pane="true"]')).toHaveCount(1);

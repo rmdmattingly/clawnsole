@@ -3719,8 +3719,8 @@ function renderActivePaneState(activePane = activePaneFromState()) {
   const label = paneSummaryLabel(activePane);
   chip.hidden = !uiState.authed;
   value.textContent = label;
-  chip.title = `Focus ${label}`;
-  chip.setAttribute('aria-label', `Active pane: ${label}. Click to focus.`);
+  chip.title = `Open Pane Manager for ${label}`;
+  chip.setAttribute('aria-label', `Active pane: ${label}. Click to open Pane Manager.`);
   renderShortcutHintStrip(activePane);
   renderLayoutModeChip();
 }
@@ -4305,6 +4305,7 @@ function renderPaneManager() {
         row.className = 'pane-manager-row';
         row.classList.add(`pane-kind-${pane.kind || 'chat'}`);
         row.setAttribute('role', 'option');
+        row.setAttribute('tabindex', '-1');
         row.dataset.index = String(idx);
         row.dataset.paneKey = String(pane.key || '');
         row.dataset.paneKind = String(pane.kind || 'chat');
@@ -4442,7 +4443,42 @@ function renderPaneManager() {
   });
 }
 
-function openPaneManager({ attentionOnly = false } = {}) {
+function focusPaneManagerRow(paneKey, { focus = false } = {}) {
+  const key = String(paneKey || '');
+  const list = globalElements.paneManagerList;
+  if (!key || !list) return false;
+
+  const row = list.querySelector(`.pane-manager-row[data-pane-key="${CSS.escape(key)}"]`);
+  if (!row) return false;
+
+  paneManagerUiState.selectedIndex = Number(row.dataset.visibleIndex || 0);
+  renderPaneManager();
+
+  const freshRow = list.querySelector(`.pane-manager-row[data-pane-key="${CSS.escape(key)}"]`) || row;
+  try {
+    freshRow.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  } catch {}
+
+  if (focus) {
+    const focusRow = () => {
+      try {
+        freshRow.focus({ preventScroll: true });
+      } catch {
+        try {
+          freshRow.focus();
+        } catch {}
+      }
+    };
+    focusRow();
+    setTimeout(focusRow, 0);
+    setTimeout(focusRow, 30);
+    setTimeout(focusRow, 120);
+  }
+
+  return true;
+}
+
+function openPaneManager({ attentionOnly = false, focusPaneKey = '', focusRow = false, clearFilters = false } = {}) {
   if (roleState.role !== 'admin') return;
   if (!uiState.authed) {
     showLogin('Please sign in to continue.');
@@ -4452,12 +4488,23 @@ function openPaneManager({ attentionOnly = false } = {}) {
 
   paneManagerUiState.open = true;
   paneManagerUiState.selectedIndex = 0;
-  paneManagerUiState.attentionOnly = !!attentionOnly;
-  paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
-  paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
+  paneManagerUiState.attentionOnly = clearFilters ? false : !!attentionOnly;
+  paneManagerUiState.query = clearFilters ? '' : String(globalElements.paneManagerSearch?.value || '').trim();
+  paneManagerUiState.unreadOnly = clearFilters ? false : !!globalElements.paneManagerUnreadOnly?.checked;
+  if (clearFilters) {
+    if (globalElements.paneManagerSearch) globalElements.paneManagerSearch.value = '';
+    if (globalElements.paneManagerUnreadOnly) globalElements.paneManagerUnreadOnly.checked = false;
+  }
+  if (focusPaneKey) {
+    const pane = (paneManager?.panes || []).find((entry) => String(entry?.key || '') === String(focusPaneKey));
+    const kind = String(pane?.kind || '');
+    if (kind) paneManagerUiState.collapsedKinds[kind] = false;
+  }
 
   openAdminModal(globalElements.paneManagerModal);
   renderPaneManager();
+
+  if (focusPaneKey && focusPaneManagerRow(focusPaneKey, { focus: focusRow })) return;
 
   // Focus quick-find for immediate filtering.
   try {
@@ -14210,8 +14257,9 @@ globalElements.addPaneBtn?.addEventListener('click', (event) => {
 
 globalElements.activePaneChip?.addEventListener('click', () => {
   const pane = activePaneFromState();
-  const idx = paneManager?.panes?.indexOf?.(pane) ?? -1;
-  if (idx >= 0) focusPaneIndex(idx, { showHud: true });
+  const key = String(pane?.key || '');
+  if (!key) return;
+  openPaneManager({ focusPaneKey: key, focusRow: true, clearFilters: true });
 });
 
 globalElements.layoutModeChip?.addEventListener('click', () => {
