@@ -2132,6 +2132,10 @@ button.send-btn .btn-icon {
   border-color: rgba(255, 107, 107, 0.34);
 }
 
+.agents-health-chip.busy {
+  border-color: rgba(96, 165, 250, 0.38);
+}
+
 .agents-health-value {
   flex: 0 0 auto;
   font-size: 18px;
@@ -2387,6 +2391,7 @@ button.agents-section-title:hover {
 }
 
 .agents-health-state-chip,
+.agents-attention-reason,
 .agents-age-chip {
   display: inline-block;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -2410,6 +2415,16 @@ button.agents-section-title:hover {
 .agents-health-state-chip[data-health-state="offline_error"] {
   border-color: rgba(255, 93, 116, 0.66);
   background: rgba(255, 93, 116, 0.16);
+}
+
+.agents-health-state-chip[data-health-state="busy"],
+.agents-attention-reason {
+  border-color: rgba(96, 165, 250, 0.5);
+  background: rgba(96, 165, 250, 0.12);
+}
+
+.agents-attention-reason {
+  margin-right: 4px;
 }
 
 .agents-age-chip[data-heartbeat-bucket="fresh"] {

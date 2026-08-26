@@ -1090,8 +1090,14 @@ function heartbeatAgeBucketLabel(bucket) {
 
 function getFleetFilter() {
   const raw = String(storage.get(ADMIN_AGENT_FILTER_KEY, 'all') || 'all').trim();
-  const allowed = new Set(['all', 'active', 'stale', 'offline_error']);
-  return allowed.has(raw) ? raw : 'all';
+  const aliases = {
+    active: 'connected',
+    stale: 'needs_attention',
+    offline_error: 'disconnected'
+  };
+  const key = aliases[raw] || raw;
+  const allowed = new Set(['all', 'needs_attention', 'connected', 'disconnected', 'busy']);
+  return allowed.has(key) ? key : 'all';
 }
 
 function getFleetSort() {
@@ -2012,7 +2018,11 @@ async function fetchAgents() {
         displayName: typeof agent?.displayName === 'string' ? agent.displayName : '',
         emoji: typeof agent?.emoji === 'string' ? agent.emoji : '',
         model: typeof agent?.model === 'string' ? agent.model : '',
-        host: typeof agent?.host === 'string' ? agent.host : ''
+        host: typeof agent?.host === 'string' ? agent.host : '',
+        status: typeof agent?.status === 'string' ? agent.status : '',
+        state: typeof agent?.state === 'string' ? agent.state : '',
+        activity: typeof agent?.activity === 'string' ? agent.activity : '',
+        busy: Boolean(agent?.busy)
       }))
       .filter((agent) => agent.id);
   } catch {
@@ -5680,16 +5690,27 @@ function renderAgentsModalList() {
   const statusSnippetMap = getAgentStatusSnippetMap();
   const baseAgents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
 
-  const classify = (agentId) => {
-    const id = String(agentId || '').trim();
+  const classify = (agentOrId) => {
+    const agent = agentOrId && typeof agentOrId === 'object'
+      ? agentOrId
+      : baseAgents.find((entry) => String(entry?.id || '').trim() === String(agentOrId || '').trim());
+    const id = String(agent?.id || agentOrId || '').trim();
     const ts = Number(lastSeenMap[id]) || 0;
     const ageMs = ts > 0 ? Math.max(0, Date.now() - ts) : Number.POSITIVE_INFINITY;
     const paneState = paneStateMap[id] || 'unknown';
+    const statusSnippet = [
+      statusSnippetMap[id],
+      agent?.status,
+      agent?.state,
+      agent?.activity
+    ].map((value) => String(value || '').trim()).filter(Boolean).join(' ');
+    const busy = Boolean(agent?.busy) || /\b(busy|running|thinking|working|executing|in[_ -]?progress)\b/i.test(statusSnippet);
     const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs, paneState });
-    if (paneState === 'error' || paneState === 'offline') return { bucket: 'offline_error', ageBucket, ts, ageMs };
-    if (!Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket, ts, ageMs };
-    if (ageMs <= activeWindowMs) return { bucket: 'active', ageBucket, ts, ageMs };
-    return { bucket: 'stale', ageBucket, ts, ageMs };
+    if (paneState === 'error' || paneState === 'offline') return { bucket: 'offline_error', ageBucket, ts, ageMs, busy, reason: 'Disconnected' };
+    if (!Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket, ts, ageMs, busy, reason: 'Disconnected' };
+    if (busy) return { bucket: 'busy', ageBucket, ts, ageMs, busy, reason: 'Busy' };
+    if (ageMs <= activeWindowMs) return { bucket: 'active', ageBucket, ts, ageMs, busy, reason: 'Connected' };
+    return { bucket: 'stale', ageBucket, ts, ageMs, busy, reason: `Stale ${formatRelativeAge(ageMs)}` };
   };
 
   const matches = (agent) => {
@@ -5700,6 +5721,10 @@ function renderAgentsModalList() {
     if (search && !haystack.includes(search)) return false;
     if (filterMode === 'all') return true;
     const { bucket } = classify(id);
+    if (filterMode === 'needs_attention') return bucket !== 'active';
+    if (filterMode === 'connected') return bucket === 'active';
+    if (filterMode === 'disconnected') return bucket === 'offline_error';
+    if (filterMode === 'busy') return bucket === 'busy';
     return bucket === filterMode;
   };
 
@@ -5738,8 +5763,9 @@ function renderAgentsModalList() {
     if (bucket === 'active') acc.healthy += 1;
     else acc.needsTriage += 1;
     if (bucket === 'offline_error') acc.disconnected += 1;
+    if (bucket === 'busy') acc.busy += 1;
     return acc;
-  }, { needsTriage: 0, healthy: 0, disconnected: 0 });
+  }, { needsTriage: 0, healthy: 0, disconnected: 0, busy: 0 });
   const healthyCollapseDefault = baseAgents.length > ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD;
   const healthyCollapsed = String(storage.get(ADMIN_AGENT_HEALTHY_COLLAPSED_KEY, healthyCollapseDefault ? '1' : '0')) === '1';
   const visibleAgents = [...pinned, ...needsAttention, ...(healthyCollapsed ? [] : healthy), ...shownSnoozed];
@@ -5754,7 +5780,7 @@ function renderAgentsModalList() {
 
     const chips = [
       {
-        label: 'Needs triage',
+        label: 'Needs attention',
         value: fleetSummary.needsTriage,
         tone: 'attention',
         title: 'Agents outside the active heartbeat window or reporting offline/error.'
@@ -5770,6 +5796,12 @@ function renderAgentsModalList() {
         value: fleetSummary.disconnected,
         tone: 'disconnected',
         title: 'Agents with no heartbeat data or a pane reporting offline/error.'
+      },
+      {
+        label: 'Busy',
+        value: fleetSummary.busy,
+        tone: 'busy',
+        title: 'Agents with a pane status indicating running work.'
       }
     ];
 
@@ -5861,9 +5893,14 @@ function renderAgentsModalList() {
       const triage = classify(id);
       const healthLabel = triage.bucket === 'offline_error'
         ? 'Offline/Error'
+        : triage.bucket === 'busy'
+          ? 'Busy'
         : triage.bucket === 'stale'
           ? 'Stale'
           : 'Healthy';
+      const attentionReasonHtml = visibleColumns.heartbeat
+        ? `<span class="agents-attention-reason" title="Fleet ranking reason">${escapeHtml(triage.reason || healthLabel)}</span>`
+        : '';
       const heatBucketLabel = heartbeatAgeBucketLabel(triage.ageBucket);
       const statusSnippet = String(statusSnippetMap[id] || '').trim();
       const statusSnippetHtml = visibleColumns.status && statusSnippet
@@ -5922,7 +5959,7 @@ function renderAgentsModalList() {
           ${visibleColumns.health ? `<span class="agents-health-state-chip" data-fleet-column="health" data-health-state="${escapeHtml(triage.bucket)}">${escapeHtml(healthLabel)}</span>` : ''}
         </div>
         <div class="agents-row-meta">
-            ${visibleColumns.heartbeat ? `<span class="agents-age-chip" data-fleet-column="heartbeat" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}" title="Heartbeat age: ${escapeHtml(heartbeatAge)} (${escapeHtml(heatBucketLabel)})">${escapeHtml(heartbeatAge)}</span>` : ''}
+            ${attentionReasonHtml}${visibleColumns.heartbeat ? `<span class="agents-age-chip" data-fleet-column="heartbeat" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}" title="Heartbeat age: ${escapeHtml(heartbeatAge)} (${escapeHtml(heatBucketLabel)})">${escapeHtml(heartbeatAge)}</span>` : ''}
             ${visibleColumns.heartbeatDetail ? `<span class="agents-age-label" data-fleet-column="heartbeatDetail">${escapeHtml(heatBucketLabel)}</span>` : ''}${snoozeChipHtml}${statusSnippetHtml}${modelHtml}${hostHtml}
         </div>
         ${rowActionsHtml}

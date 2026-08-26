@@ -273,16 +273,19 @@ test('agents modal shows row health and heartbeat-age chips', async ({ page, cla
   const healthyRow = page.locator('#agentsList .agents-row').filter({ hasText: 'healthy-agent' });
   await expect(healthyRow.locator('.agents-health-state-chip')).toHaveText('Healthy');
   await expect(healthyRow.locator('.agents-health-state-chip')).toHaveAttribute('data-health-state', 'active');
+  await expect(healthyRow.locator('.agents-attention-reason')).toHaveText('Connected');
   await expect(healthyRow.locator('.agents-age-chip')).toHaveText(/\d+s/);
 
   const staleRow = page.locator('#agentsList .agents-row').filter({ hasText: 'stale-agent' });
   await expect(staleRow.locator('.agents-health-state-chip')).toHaveText('Stale');
   await expect(staleRow.locator('.agents-health-state-chip')).toHaveAttribute('data-health-state', 'stale');
+  await expect(staleRow.locator('.agents-attention-reason')).toContainText('Stale');
   await expect(staleRow.locator('.agents-age-chip')).toHaveText(/\d+h/);
 
   const offlineRow = page.locator('#agentsList .agents-row').filter({ hasText: 'offline-agent' });
   await expect(offlineRow.locator('.agents-health-state-chip')).toHaveText('Offline/Error');
   await expect(offlineRow.locator('.agents-health-state-chip')).toHaveAttribute('data-health-state', 'offline_error');
+  await expect(offlineRow.locator('.agents-attention-reason')).toHaveText('Disconnected');
   await expect(offlineRow.locator('.agents-age-chip')).toHaveText('unknown');
 });
 
@@ -658,11 +661,56 @@ test('fleet attention mode sections healthy agents and keeps filters while expan
   await expect(page.getByRole('button', { name: /Healthy \(11\) Hide/ })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(12);
 
-  await page.getByRole('button', { name: 'Offline/Error' }).click();
-  await expect(page.getByRole('button', { name: 'Offline/Error' })).toHaveAttribute('aria-pressed', 'true');
+  const triageFilters = page.getByLabel('Fleet triage filters');
+  await triageFilters.getByRole('button', { name: 'Disconnected', exact: true }).click();
+  await expect(triageFilters.getByRole('button', { name: 'Disconnected', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#agentsList .agents-section-title').first()).toContainText('Needs attention (1)');
   await expect(page.getByRole('button', { name: /Healthy \(0\) Hide/ })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
+});
+
+test('fleet triage chips expose attention connected disconnected and busy presets', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'online-agent', name: 'online-agent', displayName: 'online-agent' },
+    { id: 'stale-agent', name: 'stale-agent', displayName: 'stale-agent' },
+    { id: 'disconnected-agent', name: 'disconnected-agent', displayName: 'disconnected-agent' },
+    { id: 'busy-agent', name: 'busy-agent', displayName: 'busy-agent', status: 'running prompt' }
+  ];
+
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      'online-agent': now,
+      'stale-agent': now - 70 * 60 * 1000,
+      'busy-agent': now
+    }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+
+  const triageFilters = page.getByLabel('Fleet triage filters');
+  await triageFilters.getByRole('button', { name: 'Needs attention', exact: true }).click();
+  await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(3);
+  await expect(page.locator('#agentsList')).not.toContainText('online-agent');
+
+  await triageFilters.getByRole('button', { name: 'Connected', exact: true }).click();
+  await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
+  await expect(page.locator('#agentsList')).toContainText('online-agent');
+
+  await triageFilters.getByRole('button', { name: 'Disconnected', exact: true }).click();
+  await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
+  await expect(page.locator('#agentsList')).toContainText('disconnected-agent');
+
+  await triageFilters.getByRole('button', { name: 'Busy', exact: true }).click();
+  await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
+  await expect(page.locator('#agentsList')).toContainText('busy-agent');
+  await expect(page.locator('#agentsList .agents-row:visible .agents-attention-reason')).toHaveText('Busy');
 });
 
 test('fleet attention shortcut selects first needs-attention row and Enter opens chat', async ({ page, clawnsole }) => {
