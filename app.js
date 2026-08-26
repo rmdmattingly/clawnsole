@@ -3876,9 +3876,72 @@ function togglePanePinned(pane) {
 }
 
 function refreshPaneDraftState(pane) {
+  paneRefreshDraftOrigin(pane);
   renderPaneIdentity(pane);
   renderPaneDraftBadge(pane);
   if (isPaneManagerOpen()) renderPaneManager();
+}
+
+function paneDraftTargetSignature(pane) {
+  if (!pane || pane.kind !== 'chat') return '';
+  return `${String(pane.role || '')}:chat:${normalizeAgentId(pane.agentId || 'main')}`;
+}
+
+function paneCurrentDraftOrigin(pane) {
+  if (!pane || pane.kind !== 'chat') return null;
+  return {
+    paneKey: String(pane.key || ''),
+    targetSignature: paneDraftTargetSignature(pane),
+    targetLabel: paneComposerContextLabel(pane)
+  };
+}
+
+function paneNormalizeDraftOrigin(pane, origin = null) {
+  if (!origin || typeof origin !== 'object') return null;
+  const targetSignature = String(origin.targetSignature || '').trim();
+  const paneKey = String(origin.paneKey || '').trim();
+  if (!targetSignature && !paneKey) return null;
+  return {
+    paneKey,
+    targetSignature,
+    targetLabel: String(origin.targetLabel || '').trim()
+  };
+}
+
+function paneSetDraftOrigin(pane, origin = null) {
+  if (!pane || pane.kind !== 'chat') return;
+  pane.draftOrigin = paneNormalizeDraftOrigin(pane, origin);
+}
+
+function paneRefreshDraftOrigin(pane) {
+  if (!pane || pane.kind !== 'chat') return;
+  if (!paneHasDraftChanges(pane)) {
+    paneSetDraftOrigin(pane, null);
+    return;
+  }
+  if (!pane.draftOrigin) paneSetDraftOrigin(pane, paneCurrentDraftOrigin(pane));
+}
+
+function paneNeedsDraftRetargetConfirm(pane) {
+  if (!pane || pane.kind !== 'chat' || !paneHasDraftChanges(pane)) return false;
+  const origin = paneNormalizeDraftOrigin(pane, pane.draftOrigin);
+  if (!origin) return false;
+  const current = paneCurrentDraftOrigin(pane);
+  if (!current) return false;
+  return Boolean(
+    (origin.paneKey && current.paneKey && origin.paneKey !== current.paneKey) ||
+      (origin.targetSignature && current.targetSignature && origin.targetSignature !== current.targetSignature)
+  );
+}
+
+function paneConfirmDraftRetargetSend(pane) {
+  if (!paneNeedsDraftRetargetConfirm(pane)) return true;
+  const origin = paneNormalizeDraftOrigin(pane, pane.draftOrigin);
+  const fromLabel = origin?.targetLabel || 'another chat pane';
+  const toLabel = paneComposerContextLabel(pane);
+  const ok = window.confirm(`Send this carried draft to ${toLabel}?\n\nIt was started in ${fromLabel}.`);
+  if (ok) paneSetDraftOrigin(pane, paneCurrentDraftOrigin(pane));
+  return ok;
 }
 
 function markPaneUnread(pane, increment = 1, kind = 'chat') {
@@ -9488,6 +9551,9 @@ async function paneSendChat(pane) {
     return;
   }
 
+  paneRefreshDraftOrigin(pane);
+  if (!paneConfirmDraftRetargetSend(pane)) return;
+
   const message = raw;
 
   // Guest mode removed.
@@ -9587,6 +9653,7 @@ async function paneSendChat(pane) {
   panePumpOutbox(pane);
 
   pane.elements.input.value = '';
+  paneSetDraftOrigin(pane, null);
   paneUpdateCommandHints(pane);
   refreshPaneDraftState(pane);
 }
@@ -10065,6 +10132,7 @@ function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true, syncFromP
 
   if (pane.kind === 'chat') {
     renderPaneAgentIdentity(pane);
+    paneSetDraftOrigin(pane, null);
     pane.attachments.files = [];
     paneRenderAttachments(pane);
     paneStopThinking(pane);
@@ -10225,6 +10293,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     activeRunId: null,
     abortState: { active: false, requestedAt: 0, targetRunId: null, timer: null, finished: false, canceledRunIds: new Set() },
     attachments: { files: [] },
+    draftOrigin: null,
     pendingSend: null,
     catchUp: { active: false, attemptsLeft: 0, timer: null },
     outbox: [],
@@ -12239,7 +12308,8 @@ const paneManager = {
       nickname: paneNickname(pane),
       pairedTargetLock: !!pane.pairedTargetLock,
       pinned: paneIsPinned(pane),
-      draftText: kind === 'chat' ? String(pane.elements?.input?.value || '') : ''
+      draftText: kind === 'chat' ? String(pane.elements?.input?.value || '') : '',
+      draftOrigin: kind === 'chat' ? paneNormalizeDraftOrigin(pane, pane.draftOrigin) : null
     };
 
     if (kind === 'workqueue') {
@@ -12296,7 +12366,8 @@ const paneManager = {
       nickname: snapshot.nickname,
       pairedTargetLock: !!snapshot.pairedTargetLock,
       pinned: !!snapshot.pinned,
-      restoreDraftText: kind === 'chat' ? String(snapshot.draftText || '') : ''
+      restoreDraftText: kind === 'chat' ? String(snapshot.draftText || '') : '',
+      restoreDraftOrigin: kind === 'chat' ? paneNormalizeDraftOrigin(null, snapshot.draftOrigin) : null
     };
 
     if (kind === 'workqueue') {
@@ -12440,6 +12511,7 @@ const paneManager = {
     });
     if (typeof options?.restoreDraftText === 'string' && pane.elements?.input) {
       pane.elements.input.value = options.restoreDraftText;
+      paneSetDraftOrigin(pane, options.restoreDraftOrigin || paneCurrentDraftOrigin(pane));
       paneUpdateCommandHints(pane);
     }
     insertCreatedPane(pane);
