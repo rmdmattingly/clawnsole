@@ -1127,6 +1127,40 @@ function createClawnsoleServer(options = {}) {
       return;
     }
 
+    if (req.url === '/api/workqueue/archive-terminal') {
+      if (!requireAuth(req, res)) return;
+      if (req.clawnsoleRole !== 'admin') {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      (async () => {
+        const payload = await readJsonBody(req, res);
+        if (!payload) return;
+
+        try {
+          const { archiveTerminalItems } = require('./lib/workqueue');
+          const result = archiveTerminalItems(null, {
+            queue: String(payload.queue || '').trim(),
+            olderThanDays: payload.olderThanDays,
+            previewOnly: payload.previewOnly !== false
+          });
+          sendJson(res, 200, result);
+        } catch (err) {
+          if (err && err.code === 'INVALID_THRESHOLD') {
+            sendJson(res, 400, { ok: false, error: 'invalid_threshold' });
+            return;
+          }
+          sendJson(res, 500, { ok: false, error: 'workqueue_error' });
+        }
+      })();
+      return;
+    }
+
     if (req.url === '/api/workqueue/assignments') {
       if (!requireAuth(req, res)) return;
       if (req.clawnsoleRole !== 'admin') {

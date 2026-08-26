@@ -84,6 +84,8 @@ const globalElements = {
   wqAutoRefreshEnabled: document.getElementById('wqAutoRefreshEnabled'),
   wqAutoRefreshInterval: document.getElementById('wqAutoRefreshInterval'),
   wqRefreshBtn: document.getElementById('wqRefreshBtn'),
+  wqArchiveThreshold: document.getElementById('wqArchiveThreshold'),
+  wqArchiveBtn: document.getElementById('wqArchiveBtn'),
   wqListBody: document.getElementById('wqListBody'),
   wqListEmpty: document.getElementById('wqListEmpty'),
   wqInspectBody: document.getElementById('wqInspectBody'),
@@ -8246,6 +8248,60 @@ async function workqueueClaimNextFromUi() {
   }
 }
 
+async function workqueueArchiveTerminalFromUi() {
+  if (roleState.role !== 'admin') return;
+
+  const olderThanDays = Number(globalElements.wqArchiveThreshold?.value || 0);
+  const queue = (workqueueState.selectedQueue || '').trim();
+  if (!Number.isFinite(olderThanDays) || olderThanDays <= 0) {
+    setWorkqueueActionStatus('Choose an archive age first.', 'err');
+    return;
+  }
+
+  try {
+    setWorkqueueActionStatus('Previewing archive...');
+    const previewRes = await fetch('/api/workqueue/archive-terminal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ queue, olderThanDays, previewOnly: true })
+    });
+    const preview = await previewRes.json().catch(() => null);
+    if (!previewRes.ok || !preview?.ok) throw new Error(preview?.error || previewRes.status);
+
+    const count = Number(preview.previewCount || 0);
+    if (count <= 0) {
+      setWorkqueueActionStatus(`No done/failed items older than ${olderThanDays}d.`);
+      return;
+    }
+
+    const scope = queue ? ` in ${queue}` : '';
+    const ok = confirm(`Archive ${count} done/failed item(s) older than ${olderThanDays}d${scope}?`);
+    if (!ok) {
+      setWorkqueueActionStatus('Archive cancelled.');
+      return;
+    }
+
+    setWorkqueueActionStatus('Archiving...');
+    const applyRes = await fetch('/api/workqueue/archive-terminal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ queue, olderThanDays, previewOnly: false })
+    });
+    const applied = await applyRes.json().catch(() => null);
+    if (!applyRes.ok || !applied?.ok) throw new Error(applied?.error || applyRes.status);
+
+    const archivedCount = Number(applied.archivedCount || 0);
+    setWorkqueueActionStatus(`Archived ${archivedCount} item(s).`);
+    workqueueState.selectedItemId = null;
+    await fetchAndRenderWorkqueueItems();
+    renderWorkqueueInspect(null);
+  } catch (err) {
+    setWorkqueueActionStatus(`Archive failed: ${String(err)}`, 'err');
+  }
+}
+
 function renderMarkdown(text) {
   if (!text) return '';
   let html = escapeHtml(text);
@@ -13262,6 +13318,9 @@ globalElements.wqAutoRefreshInterval?.addEventListener('change', () => {
 
 globalElements.wqRefreshBtn?.addEventListener('click', () => {
   fetchWorkqueueQueues().then(() => fetchAndRenderWorkqueueItems());
+});
+globalElements.wqArchiveBtn?.addEventListener('click', () => {
+  void workqueueArchiveTerminalFromUi();
 });
 
 globalElements.wqEnqueueBtn?.addEventListener('click', () => workqueueEnqueueFromUi());
