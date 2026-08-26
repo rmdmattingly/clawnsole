@@ -557,6 +557,7 @@ function renderShortcutHintStrip(activePane = activePaneFromState()) {
     root.hidden = true;
     root.innerHTML = '';
     root.removeAttribute('data-shortcut-pane-kind');
+    root.removeAttribute('data-shortcut-hint-context');
     return;
   }
 
@@ -580,10 +581,12 @@ function renderShortcutHintStrip(activePane = activePaneFromState()) {
     root.hidden = true;
     root.innerHTML = '';
     root.removeAttribute('data-shortcut-pane-kind');
+    root.removeAttribute('data-shortcut-hint-context');
     return;
   }
 
-  root.dataset.shortcutPaneKind = kind;
+  root.setAttribute('data-shortcut-pane-kind', kind);
+  root.setAttribute('data-shortcut-hint-context', kind);
   root.hidden = false;
   root.innerHTML = `
     <span class="shortcut-hint-strip__context">${escapeHtml(shortcutHintContextLabel(activePane))}</span>
@@ -5206,7 +5209,7 @@ function openCommandPalette() {
   if (!globalElements.commandPaletteModal) return;
 
   commandPaletteState.open = true;
-  commandPaletteState.originPaneKey = focusedPaneKey() || lastFocusedPaneKey || '';
+  commandPaletteState.originPaneKey = focusedPaneKey() || rememberedActivePaneKey() || lastFocusedPaneKey || '';
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
   commandPaletteState.selectedIndex = 0;
