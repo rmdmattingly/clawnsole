@@ -356,8 +356,27 @@ test('agents modal persists triage query and sort until reset', async ({ page, c
   await page.locator('#agentsSort').selectOption('agent_id_asc');
   await page.getByRole('button', { name: 'Reset agents triage view' }).click();
   await expect(page.locator('#agentsSearch')).toHaveValue('');
-  await expect(page.locator('#agentsSort')).toHaveValue('recent_desc');
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_desc');
   await expect(page.locator('#agentsList .agents-row')).toHaveCount(2);
+});
+
+test('agents modal defaults to attention sort with triage chips and reason badges', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_desc');
+  await expect(page.getByRole('button', { name: 'Needs attention', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connected', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Disconnected', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Busy', exact: true })).toBeVisible();
+  await expect(page.locator('[data-testid="agents-reason-badge"]').first()).toBeVisible();
+
+  await page.getByRole('button', { name: 'Connected', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Connected', exact: true })).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('fleet refresh preserves selected row and falls back when it disappears', async ({ page, clawnsole }) => {
@@ -658,8 +677,8 @@ test('fleet attention mode sections healthy agents and keeps filters while expan
   await expect(page.getByRole('button', { name: /Healthy \(11\) Hide/ })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(12);
 
-  await page.getByRole('button', { name: 'Offline/Error' }).click();
-  await expect(page.getByRole('button', { name: 'Offline/Error' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Disconnected', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Disconnected', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#agentsList .agents-section-title').first()).toContainText('Needs attention (1)');
   await expect(page.getByRole('button', { name: /Healthy \(0\) Hide/ })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
@@ -786,7 +805,7 @@ test('agents modal heartbeat heatmap and stale-first sort are toggleable and res
   await expect(page.locator('#agentsList .agents-row:visible').first()).toContainText('critical-agent');
 
   await page.getByRole('button', { name: 'Reset sort' }).click();
-  await expect(page.locator('#agentsSort')).toHaveValue('recent_desc');
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_desc');
   await expect(page.locator('#agentsSortIndicator')).toHaveText('');
 });
 

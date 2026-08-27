@@ -1090,14 +1090,82 @@ function heartbeatAgeBucketLabel(bucket) {
 
 function getFleetFilter() {
   const raw = String(storage.get(ADMIN_AGENT_FILTER_KEY, 'all') || 'all').trim();
-  const allowed = new Set(['all', 'active', 'stale', 'offline_error']);
-  return allowed.has(raw) ? raw : 'all';
+  const aliases = {
+    active: 'connected',
+    stale: 'needs_attention',
+    offline_error: 'disconnected'
+  };
+  const key = aliases[raw] || raw;
+  const allowed = new Set(['all', 'needs_attention', 'connected', 'disconnected', 'busy']);
+  return allowed.has(key) ? key : 'all';
 }
 
 function getFleetSort() {
-  const raw = String(storage.get(ADMIN_AGENT_SORT_KEY, 'recent_desc') || 'recent_desc').trim();
-  const allowed = new Set(['recent_desc', 'heartbeat_age_desc', 'agent_id_asc']);
-  return allowed.has(raw) ? raw : 'recent_desc';
+  const raw = String(storage.get(ADMIN_AGENT_SORT_KEY, 'attention_desc') || 'attention_desc').trim();
+  const aliases = { recent: 'recent_desc' };
+  const key = aliases[raw] || raw;
+  const allowed = new Set(['attention_desc', 'recent_desc', 'heartbeat_age_desc', 'agent_id_asc']);
+  return allowed.has(key) ? key : 'attention_desc';
+}
+
+function getAgentWorkqueueCounts() {
+  const out = {};
+  const items = Array.isArray(workqueueState?.items) ? workqueueState.items : [];
+  for (const item of items) {
+    const agent = String(item?.claimedBy || '').trim();
+    if (!agent) continue;
+    const status = String(item?.status || '').trim();
+    if (status !== 'claimed' && status !== 'in_progress') continue;
+    out[agent] = (out[agent] || 0) + 1;
+  }
+  return out;
+}
+
+function buildFleetTriage(agentId, { lastSeenMap, paneStateMap, workqueueCounts, activeWindowMs }) {
+  const id = String(agentId || '').trim();
+  const ts = Number(lastSeenMap?.[id]) || 0;
+  const ageMs = ts > 0 ? Math.max(0, Date.now() - ts) : Number.POSITIVE_INFINITY;
+  const paneState = String(paneStateMap?.[id] || 'unknown').trim().toLowerCase();
+  const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs, paneState });
+  const queueCount = Number(workqueueCounts?.[id]) || 0;
+  const disconnected = paneState === 'error' || paneState === 'offline' || !Number.isFinite(ageMs);
+  const stale = !disconnected && ageMs > activeWindowMs;
+  const isBusy = queueCount > 0;
+
+  let bucket = 'active';
+  let attentionScore = 0;
+  let reason = 'Connected';
+
+  if (disconnected) {
+    bucket = 'offline_error';
+    attentionScore = 300;
+    reason = paneState === 'error' ? 'Error' : 'Disconnected';
+  } else if (queueCount >= 5) {
+    bucket = 'active';
+    attentionScore = 220 + Math.min(queueCount, 99);
+    reason = `Queue ${queueCount}`;
+  } else if (stale) {
+    bucket = 'stale';
+    attentionScore = 180;
+    reason = `Stale ${formatRelativeAge(ageMs)}`;
+  } else if (isBusy) {
+    bucket = 'active';
+    attentionScore = 120 + queueCount;
+    reason = `Queue ${queueCount}`;
+  }
+
+  return {
+    bucket,
+    ageBucket,
+    ts,
+    ageMs,
+    queueCount,
+    isBusy,
+    isConnected: bucket === 'active' && !stale && !disconnected,
+    needsAttention: bucket !== 'active' || attentionScore >= 180,
+    attentionScore,
+    reason
+  };
 }
 
 function setFleetFilter(filter) {
@@ -1113,10 +1181,10 @@ function setFleetFilter(filter) {
 function resetAgentsTriageView() {
   storage.remove(ADMIN_AGENT_SEARCH_KEY);
   storage.remove(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY);
-  storage.set(ADMIN_AGENT_SORT_KEY, 'recent_desc');
+  storage.set(ADMIN_AGENT_SORT_KEY, 'attention_desc');
   storage.set(ADMIN_AGENT_FILTER_KEY, 'all');
   if (globalElements.agentsSearch) globalElements.agentsSearch.value = '';
-  if (globalElements.agentsSort) globalElements.agentsSort.value = 'recent_desc';
+  if (globalElements.agentsSort) globalElements.agentsSort.value = 'attention_desc';
   setFleetFilter('all');
   renderAgentsModalList();
   try {
@@ -5290,7 +5358,7 @@ function setFleetHeartbeatSort() {
 
 function resetFleetSort() {
   const previous = String(storage.get(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY, '') || '').trim();
-  const next = previous && previous !== 'heartbeat_age_desc' ? previous : 'recent_desc';
+  const next = previous && previous !== 'heartbeat_age_desc' ? previous : 'attention_desc';
   storage.set(ADMIN_AGENT_SORT_KEY, next);
   storage.remove(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY);
   if (globalElements.agentsSort) globalElements.agentsSort.value = next;
@@ -5678,18 +5746,11 @@ function renderAgentsModalList() {
   const lastSeenMap = getAgentLastSeenMap();
   const paneStateMap = getAgentPaneStateMap();
   const statusSnippetMap = getAgentStatusSnippetMap();
+  const workqueueCounts = getAgentWorkqueueCounts();
   const baseAgents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
 
   const classify = (agentId) => {
-    const id = String(agentId || '').trim();
-    const ts = Number(lastSeenMap[id]) || 0;
-    const ageMs = ts > 0 ? Math.max(0, Date.now() - ts) : Number.POSITIVE_INFINITY;
-    const paneState = paneStateMap[id] || 'unknown';
-    const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs, paneState });
-    if (paneState === 'error' || paneState === 'offline') return { bucket: 'offline_error', ageBucket, ts, ageMs };
-    if (!Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket, ts, ageMs };
-    if (ageMs <= activeWindowMs) return { bucket: 'active', ageBucket, ts, ageMs };
-    return { bucket: 'stale', ageBucket, ts, ageMs };
+    return buildFleetTriage(agentId, { lastSeenMap, paneStateMap, workqueueCounts, activeWindowMs });
   };
 
   const matches = (agent) => {
@@ -5699,8 +5760,12 @@ function renderAgentsModalList() {
     const haystack = `${label} ${id.toLowerCase()} ${snippet}`.trim();
     if (search && !haystack.includes(search)) return false;
     if (filterMode === 'all') return true;
-    const { bucket } = classify(id);
-    return bucket === filterMode;
+    const triage = classify(id);
+    if (filterMode === 'needs_attention') return triage.needsAttention;
+    if (filterMode === 'connected') return triage.isConnected;
+    if (filterMode === 'disconnected') return triage.bucket === 'offline_error';
+    if (filterMode === 'busy') return triage.isBusy;
+    return triage.bucket === filterMode;
   };
 
   const sortAgents = (list) => {
@@ -5715,6 +5780,18 @@ function renderAgentsModalList() {
         const cb = classify(b?.id);
         const da = Number.isFinite(ca.ageMs) ? ca.ageMs : Number.MAX_SAFE_INTEGER;
         const db = Number.isFinite(cb.ageMs) ? cb.ageMs : Number.MAX_SAFE_INTEGER;
+        if (db !== da) return db - da;
+        return formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true }));
+      });
+      return arr;
+    }
+    if (sortMode === 'attention_desc') {
+      arr.sort((a, b) => {
+        const ca = classify(a?.id);
+        const cb = classify(b?.id);
+        if (cb.attentionScore !== ca.attentionScore) return cb.attentionScore - ca.attentionScore;
+        const db = Number.isFinite(cb.ageMs) ? cb.ageMs : Number.MAX_SAFE_INTEGER;
+        const da = Number.isFinite(ca.ageMs) ? ca.ageMs : Number.MAX_SAFE_INTEGER;
         if (db !== da) return db - da;
         return formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true }));
       });
@@ -5865,6 +5942,7 @@ function renderAgentsModalList() {
           ? 'Stale'
           : 'Healthy';
       const heatBucketLabel = heartbeatAgeBucketLabel(triage.ageBucket);
+      const reasonHtml = `<span class="agents-reason-badge" data-testid="agents-reason-badge" title="Rank reason">${escapeHtml(triage.reason)}</span>`;
       const statusSnippet = String(statusSnippetMap[id] || '').trim();
       const statusSnippetHtml = visibleColumns.status && statusSnippet
         ? `<span class="agents-status-snippet" data-fleet-column="status">${escapeHtml(statusSnippet)}</span>`
@@ -5915,7 +5993,7 @@ function renderAgentsModalList() {
       row.innerHTML = `
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
         <div class="agents-row-identity">
-          <div class="agents-row-title">${escapeHtml(label)}</div>
+          <div class="agents-row-title">${escapeHtml(label)} ${reasonHtml}</div>
           ${visibleColumns.id ? `<div class="agents-row-id" data-fleet-column="id">${escapeHtml(id)}</div>` : ''}
         </div>
         <div class="agents-row-health">
@@ -6002,7 +6080,7 @@ function renderAgentsModalList() {
     globalElements.agentsHeartbeatSortBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
   }
   if (globalElements.agentsSortResetBtn) {
-    globalElements.agentsSortResetBtn.disabled = sortMode === 'recent_desc';
+    globalElements.agentsSortResetBtn.disabled = sortMode === 'attention_desc';
   }
   if (globalElements.agentsSortIndicator) {
     globalElements.agentsSortIndicator.textContent =
@@ -13248,7 +13326,7 @@ globalElements.agentsDensityButtons.forEach((btn) => {
 });
 
 globalElements.agentsSort?.addEventListener('change', () => {
-  storage.set(ADMIN_AGENT_SORT_KEY, String(globalElements.agentsSort.value || 'recent_desc'));
+  storage.set(ADMIN_AGENT_SORT_KEY, String(globalElements.agentsSort.value || 'attention_desc'));
   renderAgentsModalList();
 });
 
