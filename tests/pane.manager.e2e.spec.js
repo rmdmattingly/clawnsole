@@ -276,7 +276,7 @@ test('pane manager: status stays in sync with pane header while modal is open', 
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.keyboard.press('Control+P');
+  await page.getByTestId('panes-indicator').click();
   const modal = page.locator('#paneManagerModal');
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
 

@@ -52,6 +52,7 @@
             <span class="active-pane-chip__label">Active</span>
             <span class="active-pane-chip__value" data-active-pane-chip-value></span>
           </button>
+          <div id="shortcutHintStrip" class="shortcut-hint-strip" aria-live="polite" data-testid="shortcut-hint-strip" hidden></div>
           <button
             id="layoutModeChip"
             class="layout-mode-chip"
@@ -112,7 +113,7 @@
             <span class="btn-icon" aria-hidden="true">FL</span>
             <span class="btn-label">Fleet</span>
           </button>
-          <button id="workqueueBtn" class="icon-btn action-btn" type="button" aria-label="Open workqueue" title="Workqueue (g w)" hidden>
+          <button id="workqueueBtn" class="icon-btn action-btn" type="button" aria-label="Open workqueue" title="Workqueue (g w)" data-testid="open-workqueue-modal" hidden>
             <span class="btn-icon" aria-hidden="true">WQ</span>
             <span class="btn-label">Workqueue</span>
           </button>
@@ -300,7 +301,27 @@
             ✕
           </button>
         </div>
-        <div id="shortcutsContent" class="modal-body"></div>
+        <div class="modal-body">
+          <div class="shortcuts-controls" role="search" aria-label="Search keyboard shortcuts">
+            <input
+              id="shortcutsSearchInput"
+              class="shortcuts-search-input"
+              type="search"
+              placeholder="Search keys, actions, or categories"
+              autocomplete="off"
+              data-testid="shortcuts-search"
+            />
+            <div id="shortcutsFilterChips" class="shortcuts-filter-chips" role="toolbar" aria-label="Shortcut category filters">
+              <button class="shortcuts-chip is-active" type="button" data-shortcuts-filter="all" aria-pressed="true">All</button>
+              <button class="shortcuts-chip" type="button" data-shortcuts-filter="global" aria-pressed="false">Global</button>
+              <button class="shortcuts-chip" type="button" data-shortcuts-filter="chat" aria-pressed="false">Chat</button>
+              <button class="shortcuts-chip" type="button" data-shortcuts-filter="workqueue" aria-pressed="false">Workqueue</button>
+              <button class="shortcuts-chip" type="button" data-shortcuts-filter="fleet" aria-pressed="false">Fleet</button>
+            </div>
+          </div>
+          <div id="shortcutsEmpty" class="hint shortcuts-empty" hidden>No shortcuts match your filters.</div>
+          <div id="shortcutsContent"></div>
+        </div>
       </div>
     </div>
 
@@ -325,7 +346,7 @@
       </div>
     </div>
 
-    <div id="workqueueModal" class="modal" aria-hidden="true">
+    <div id="workqueueModal" class="modal" aria-hidden="true" data-testid="workqueue-modal">
       <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="workqueueTitle">
         <div class="modal-header">
           <h2 id="workqueueTitle">Workqueue</h2>
@@ -337,7 +358,11 @@
           <div class="wq-toolbar">
             <label class="wq-field">
               Queue
-              <select id="wqQueueSelect" aria-label="Select workqueue"></select>
+              <select id="wqQueueSelect" aria-label="Select workqueue" data-testid="workqueue-modal-queue"></select>
+            </label>
+            <label class="wq-field wq-item-search-field">
+              Items
+              <input id="wqItemSearch" type="search" placeholder="Search items..." aria-label="Search workqueue items" data-testid="wq-modal-item-search" />
             </label>
             <div class="wq-field">
               Status
@@ -345,7 +370,7 @@
                 <button id="wqShowArchivedBtn" class="secondary wq-archive-toggle" type="button" aria-pressed="false">Show archived</button>
                 <span id="wqArchivedHint" class="hint">Archived done/failed items hidden.</span>
               </div>
-              <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters"></div>
+              <div id="wqStatusFilters" class="wq-status-filters" aria-label="Status filters" data-testid="workqueue-modal-status-filters"></div>
             </div>
             <label class="wq-field">
               Auto-refresh
@@ -360,6 +385,19 @@
               </div>
             </label>
             <button id="wqRefreshBtn" class="secondary" type="button">Refresh</button>
+            <label class="wq-field">
+              Bulk archive
+              <div class="wq-autorefresh">
+                <select id="wqArchiveThreshold" aria-label="Bulk archive age threshold" data-testid="wq-modal-archive-threshold">
+                  <option value="">Choose age</option>
+                  <option value="7">7d</option>
+                  <option value="14">14d</option>
+                  <option value="30">30d</option>
+                  <option value="90">90d</option>
+                </select>
+                <button id="wqArchiveBtn" class="secondary" type="button" data-testid="wq-modal-archive-btn">Archive</button>
+              </div>
+            </label>
           </div>
 
           <div class="wq-actions" aria-label="Workqueue actions">
@@ -369,15 +407,15 @@
                 <div class="wq-action-grid">
                   <label class="wq-action-field">
                     Title
-                    <input id="wqEnqueueTitle" type="text" placeholder="Short title" />
+                    <input id="wqEnqueueTitle" type="text" placeholder="Short title" data-testid="workqueue-modal-enqueue-title" />
                   </label>
                   <label class="wq-action-field">
                     Priority
-                    <input id="wqEnqueuePriority" type="number" value="50" min="0" max="999" />
+                    <input id="wqEnqueuePriority" type="number" value="50" min="0" max="999" data-testid="workqueue-modal-enqueue-priority" />
                   </label>
                   <label class="wq-action-field" style="grid-column: 1 / -1;">
                     Instructions
-                    <textarea id="wqEnqueueInstructions" rows="4" placeholder="What should the worker do?"></textarea>
+                    <textarea id="wqEnqueueInstructions" rows="4" placeholder="What should the worker do?" data-testid="workqueue-modal-enqueue-instructions"></textarea>
                   </label>
                   <label class="wq-action-field" style="grid-column: 1 / -1;">
                     Dedupe Key (optional)
@@ -385,7 +423,7 @@
                   </label>
                 </div>
                 <div class="wq-action-buttons">
-                  <button id="wqEnqueueBtn" class="primary" type="button">Enqueue</button>
+                  <button id="wqEnqueueBtn" class="primary" type="button" data-testid="workqueue-modal-enqueue-submit">Enqueue</button>
                 </div>
               </div>
 
@@ -406,11 +444,12 @@
                 </div>
               </div>
             </div>
-            <div id="wqActionStatus" class="wq-action-status" role="status" aria-live="polite"></div>
+            <div id="wqActionStatus" class="wq-action-status" role="status" aria-live="polite" data-testid="workqueue-modal-action-status"></div>
           </div>
 
           <div class="wq-layout">
             <div class="wq-list" aria-label="Workqueue items">
+              <div id="wqFilterSummary" class="wq-filter-summary" data-testid="wq-modal-filter-summary" hidden></div>
               <div class="wq-list-header" role="group" aria-label="Sort workqueue items">
                 <button type="button" class="wq-list-sort" data-wq-modal-sort="title">Task</button>
                 <button type="button" class="wq-list-sort" data-wq-modal-sort="status">Status</button>
@@ -419,13 +458,13 @@
                 <button type="button" class="wq-list-sort" data-wq-modal-sort="claimedBy">Claimed by</button>
                 <button type="button" class="wq-list-sort" data-wq-modal-sort="leaseUntil">Lease expires</button>
               </div>
-              <div id="wqListBody" class="wq-list-body"></div>
+              <div id="wqListBody" class="wq-list-body" data-testid="workqueue-modal-list"></div>
               <div id="wqListEmpty" class="hint" hidden>No items match.</div>
             </div>
 
             <div class="wq-inspect" aria-label="Inspect workqueue item">
               <div class="wq-inspect-header">Item</div>
-              <div id="wqInspectBody" class="wq-inspect-body">
+              <div id="wqInspectBody" class="wq-inspect-body" data-testid="workqueue-modal-inspect">
                 <div class="hint">Select an item to inspect.</div>
               </div>
             </div>

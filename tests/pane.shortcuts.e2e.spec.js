@@ -39,6 +39,7 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   const modal = page.locator('#shortcutsModal');
+  const trigger = page.getByTestId('shortcuts-btn');
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
 
   // The app focuses the first chat input on load; shortcuts should *not* fire while typing.
@@ -47,6 +48,7 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
 
   await page.keyboard.press('Shift+/');
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe('shortcutsSearchInput');
   await expect(modal).toContainText('Keyboard shortcuts');
   await expect(modal).toContainText('Pane focus/navigation');
   await expect(modal).toContainText('Pane actions');
@@ -60,6 +62,28 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
 
   await page.keyboard.press('Escape');
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
+
+  await trigger.focus();
+  await page.keyboard.press('Enter');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe('shortcutsSearchInput');
+
+  await page.getByTestId('shortcuts-search').fill('workqueue');
+  await expect(modal.locator('.shortcut-group-title', { hasText: 'Workqueue actions' })).toBeVisible();
+  await expect(modal.locator('.shortcut-group-title', { hasText: 'Global' })).toBeHidden();
+
+  await page.getByTestId('shortcuts-search').fill('zzzz');
+  await expect(modal.locator('#shortcutsEmpty')).toBeVisible();
+
+  await page.getByTestId('shortcuts-search').fill('');
+  await modal.locator('[data-shortcuts-filter="fleet"]').click();
+  await expect(modal.locator('.shortcut-group-title', { hasText: 'Pane actions' })).toBeVisible();
+  await expect(modal.locator('[data-shortcuts-filter="fleet"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(modal.locator('.shortcut-group-title', { hasText: 'Workqueue actions' })).toBeHidden();
+
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+  await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe('shortcutsBtn');
 });
 
 test('holding Alt reveals visible pane focus index badges', async ({ page }) => {
@@ -135,12 +159,12 @@ test('shortcuts overlay filters by search text and category chips', async ({ pag
 
   await search.fill('cmd/ctrl+shift+g');
   await expect(modal.locator('[data-shortcut-id="workqueue.openForActiveChat"]')).toBeVisible();
-  await expect(modal.locator('[data-shortcut-id="fleet.open"]')).toHaveCount(0);
+  await expect(modal.locator('[data-shortcut-id="fleet.open"]')).toBeHidden();
 
   await search.fill('');
   await modal.getByRole('button', { name: 'Fleet' }).click();
   await expect(modal.locator('[data-shortcut-id="fleet.open"]')).toBeVisible();
-  await expect(modal.locator('[data-shortcut-id="workqueue.open"]')).toHaveCount(0);
+  await expect(modal.locator('[data-shortcut-id="workqueue.open"]')).toBeHidden();
 
   await search.fill('definitely-no-shortcut');
   await expect(modal).toContainText('No shortcuts match your filters.');
@@ -197,7 +221,7 @@ test('shortcuts overlay stays in sync with registered shortcut catalog', async (
   expect(result.duplicateIds).toEqual([]);
   expect(result.duplicateGlobalDisplays).toEqual([]);
   await expect(modal).toContainText('Fleet actions');
-  await expect(modal).toContainText('Open/focus Fleet pane');
+  await expect(modal).toContainText('Focus Fleet: first needs attention');
   await expect(modal).toContainText('Open Fleet sorted by heartbeat age');
   await expect(modal).toContainText('Open Chat for selected Fleet agent');
   await expect(modal).toContainText('Open Workqueue for selected Fleet agent');
@@ -390,6 +414,39 @@ test('cmd/ctrl+shift+j focuses previous pane with wraparound from unfocused stat
 
   await triggerPrevPaneShortcut();
   await expect.poll(activePaneIndex).toBe(2);
+});
+
+test('topbar shortcut hints follow active pane and typing focus', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const strip = page.getByTestId('shortcut-hint-strip');
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+  await chatInput.focus();
+  await expect(strip).toBeHidden();
+
+  await page.locator('[data-pane]').first().getByTestId('pane-help').focus();
+  await expect(strip).toBeVisible();
+  await expect(strip).toContainText('Composer');
+  await expect(strip).toContainText('All shortcuts');
+
+  await page.evaluate(() => window.focusPaneIndex?.(1));
+  await expect(page.getByTestId('active-pane-chip')).toContainText('B Workqueue');
+  await expect(strip).toContainText('Queue search');
+  await expect(strip).toContainText('Workqueue modal');
+
+  await page.getByLabel('Open fleet pane').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+  await page.locator('[data-pane]').nth(2).getByTestId('pane-help').focus();
+  await expect(strip).toContainText('Move selection');
+  await expect(strip).toContainText('Open Workqueue');
 });
 
 test('cmd/ctrl+alt+j/k cycles chat panes only and keeps typing guard', async ({ page }) => {
@@ -906,6 +963,8 @@ test('fleet quick action button + keyboard shortcut focus existing timeline pane
   await page.keyboard.press('Control+Shift+F');
   await expect(panes).toHaveCount(3);
   await expect(timelinePanes).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#agentsModal')).not.toHaveClass(/open/);
 
   await fleetBtn.click({ modifiers: ['Alt'] });
   await expect(timelinePanes).toHaveCount(2);

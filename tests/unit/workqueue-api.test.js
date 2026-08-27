@@ -340,6 +340,52 @@ test('workqueue API: delete removes item', async () => {
   }
 });
 
+test('workqueue API: bulk archive previews then archives old terminal items only', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  const oldDone = enqueueItem(null, { queue: 'dev-team', title: 'old done', instructions: 'do1', priority: 1 });
+  const oldReady = enqueueItem(null, { queue: 'dev-team', title: 'old ready', instructions: 'do2', priority: 1 });
+  const freshFailed = enqueueItem(null, { queue: 'dev-team', title: 'fresh failed', instructions: 'do3', priority: 1 });
+
+  const { loadState, saveState } = require('../../lib/workqueue');
+  const state = loadState(null);
+  for (const item of state.items) {
+    if (item.id === oldDone.id) Object.assign(item, { status: 'done', updatedAt: '2026-01-01T00:00:00.000Z' });
+    if (item.id === oldReady.id) Object.assign(item, { status: 'ready', updatedAt: '2026-01-01T00:00:00.000Z' });
+    if (item.id === freshFailed.id) Object.assign(item, { status: 'failed', updatedAt: new Date().toISOString() });
+  }
+  saveState(null, state);
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+    const headers = { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' };
+    const url = 'http://127.0.0.1:' + port + '/api/workqueue/archive-terminal';
+
+    const preview = await httpPostJson(url, { queue: 'dev-team', olderThanDays: 30, previewOnly: true }, headers);
+    assert.equal(preview.status, 200);
+    assert.equal(preview.json?.ok, true);
+    assert.equal(preview.json?.previewCount, 1);
+    assert.equal(loadState(null).items.length, 3);
+
+    const applied = await httpPostJson(url, { queue: 'dev-team', olderThanDays: 30, previewOnly: false }, headers);
+    assert.equal(applied.status, 200);
+    assert.equal(applied.json?.ok, true);
+    assert.equal(applied.json?.archivedCount, 1);
+
+    const list = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/items?queue=dev-team`, headers);
+    assert.equal(list.status, 200);
+    assert.deepEqual(
+      list.json.items.map((item) => item.title).sort(),
+      ['fresh failed', 'old ready'].sort()
+    );
+  } finally {
+    server.close();
+  }
+});
+
 test('workqueue API: item endpoint returns one item', async () => {
   const { openclawHome } = mkTempEnv();
   fs.mkdirSync(openclawHome, { recursive: true });

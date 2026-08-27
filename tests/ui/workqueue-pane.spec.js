@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 
-const { startTestEnv, loginAdmin, attachConsoleErrorAsserts, addPane } = require('./_helpers');
+const { startTestEnv, loginAdmin, waitForAdminUiReady, attachConsoleErrorAsserts, addPane } = require('./_helpers');
 
 let env;
 
@@ -192,6 +192,46 @@ function seedFilterSummaryWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedActionablePresetWorkqueueItems(queue) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, patch = {}) => ({
+    id,
+    queue,
+    title: '[issue] rmdmattingly/clawnsole#267 actionable target',
+    instructions: 'Repo: rmdmattingly/clawnsole\nIssue: https://github.com/rmdmattingly/clawnsole/issues/267',
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-60000),
+    updatedAt: iso(-60000),
+    dedupeKey: `actionable-preset-${id}`,
+    meta: { repo: 'rmdmattingly/clawnsole', issueNumber: 267, source: 'issue' },
+    ...patch
+  });
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-120000) } },
+    assignments: {},
+    items: [
+      mkItem('actionable-real-high', { title: '[issue] rmdmattingly/clawnsole#267 real issue high priority', priority: 30 }),
+      mkItem('actionable-real-active', { title: '[issue] rmdmattingly/clawnsole#268 active issue', priority: 20, status: 'in_progress' }),
+      mkItem('actionable-routine', { title: '[routine] PR review sweep', priority: 90, meta: { repo: 'rmdmattingly/clawnsole', source: 'routine' } }),
+      mkItem('actionable-coverage', { title: 'Issue coverage: clawnsole#267', priority: 80, status: 'pending', meta: { repo: 'rmdmattingly/clawnsole', source: 'coverage' } }),
+      mkItem('actionable-triager', { title: 'Triager: clawnsole queue cleanup', priority: 70, status: 'claimed', meta: { repo: 'rmdmattingly/clawnsole', source: 'coordination' } }),
+      mkItem('actionable-blocked', { title: '[issue] rmdmattingly/clawnsole#269 blocked dependency', priority: 99, status: 'blocked' })
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 function seedExactDuplicateWorkqueueItems(queue) {
   const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
   fs.mkdirSync(dir, { recursive: true });
@@ -269,6 +309,54 @@ function seedArchivedToggleWorkqueueItems(queue) {
     ]
   };
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
+function seedSortPreferenceWorkqueueItems(...queues) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const items = queues.flatMap((queue, queueIndex) => [
+    {
+      id: `${queue}-older`,
+      queue,
+      title: `${queue} older item`,
+      instructions: 'fixture item',
+      priority: queueIndex + 1,
+      status: 'ready',
+      claimedBy: '',
+      claimedAt: '',
+      leaseUntil: 0,
+      attempts: 0,
+      lastError: '',
+      createdAt: iso(-120000),
+      updatedAt: iso(-60000)
+    },
+    {
+      id: `${queue}-newer`,
+      queue,
+      title: `${queue} newer item`,
+      instructions: 'fixture item',
+      priority: queueIndex + 2,
+      status: 'ready',
+      claimedBy: '',
+      claimedAt: '',
+      leaseUntil: 0,
+      attempts: 0,
+      lastError: '',
+      createdAt: iso(-60000),
+      updatedAt: iso(-30000)
+    }
+  ]);
+  fs.writeFileSync(
+    path.join(dir, 'work-queues.json'),
+    JSON.stringify({
+      version: 1,
+      queues: Object.fromEntries(queues.map((queue) => [queue, { name: queue, createdAt: iso(-180000) }])),
+      assignments: {},
+      items
+    }, null, 2)
+  );
 }
 
 test('workqueue pane: default agent-targeted layout starts assigned and remains overridable', async ({ page }) => {
@@ -425,6 +513,47 @@ test('workqueue pane: queue switch updates pane identity everywhere', async ({ p
   const managerRow = page.locator('.pane-manager-row[data-pane-kind="workqueue"]').first();
   await expect(managerRow.locator('.pane-manager-kind-label')).toHaveText(`B Workqueue · ${queue}`);
   await expect(managerRow).not.toContainText('main');
+});
+
+test('workqueue pane: sort preference persists across reload and per queue target', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queueA = `sort-pref-a-${Date.now()}`;
+  const queueB = `sort-pref-b-${Date.now()}`;
+  seedSortPreferenceWorkqueueItems(queueA, queueB);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  let pane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queueA);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+
+  await pane.locator('[data-wq-sort="updatedAt"]').click();
+  await expect(pane.locator('[data-wq-sort="updatedAt"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-sort-restored]')).toBeVisible();
+
+  await page.reload();
+  await waitForAdminUiReady(page);
+  pane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await expect(pane.locator('[data-wq-sort="updatedAt"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-sort-restored]')).toBeVisible();
+
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queueB);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await pane.locator('[data-wq-sort="createdAt"]').click();
+  await expect(pane.locator('[data-wq-sort="createdAt"]')).toHaveAttribute('aria-pressed', 'true');
+
+  await pane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await pane.locator('[data-wq-queue-custom]').fill(queueA);
+  await pane.locator('[data-wq-queue-custom]').press('Enter');
+  await expect(pane.locator('[data-wq-sort="updatedAt"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-wq-sort-restored]')).toBeVisible();
 });
 
 function seedKeyboardTriageWorkqueueItems(queue) {
@@ -659,6 +788,51 @@ test('workqueue pane: filter summary chips show counts and remove filters', asyn
   await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 3 items');
   await expect(summary).not.toContainText('Search alternate repo');
   await expect(wqPane.locator('[data-wq-queue-custom]')).toHaveValue(queue);
+});
+
+test('workqueue pane: actionable-only preset hides routine rows and persists', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const queue = `actionable-preset-${Date.now()}`;
+  seedActionablePresetWorkqueueItems(queue);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await wqPane.locator('[data-wq-scope="all"]').click();
+  await wqPane.locator('[data-wq-group-mode="rows"]').click();
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 6 items');
+
+  await wqPane.locator('[data-wq-preset-actionable]').click();
+
+  await expect(wqPane.locator('[data-wq-preset-actionable]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 6 items');
+  await expect(wqPane.locator('[data-wq-filter-summary]')).toContainText('Preset Actionable only');
+  await expect(wqPane.locator('[data-wq-list-body]')).toContainText('real issue high priority');
+  await expect(wqPane.locator('[data-wq-list-body]')).toContainText('active issue');
+  await expect(wqPane.locator('[data-wq-list-body]')).not.toContainText('PR review sweep');
+  await expect(wqPane.locator('[data-wq-list-body]')).not.toContainText('Issue coverage:');
+  await expect(wqPane.locator('[data-wq-list-body]')).not.toContainText('Triager:');
+  await expect(wqPane.locator('[data-wq-list-body]')).not.toContainText('blocked dependency');
+
+  await page.reload();
+  const restoredPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await expect(restoredPane.locator('[data-wq-preset-actionable]')).toHaveAttribute('aria-pressed', 'true');
+  await restoredPane.locator('[data-wq-queue-select]').selectOption(queue);
+  await expect(restoredPane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 6 items');
+  await expect(restoredPane.locator('[data-wq-list-body]')).toContainText('real issue high priority');
+  await expect(restoredPane.locator('[data-wq-list-body]')).not.toContainText('PR review sweep');
+
+  await restoredPane.locator('[data-wq-preset-actionable]').click();
+  await expect(restoredPane.locator('[data-wq-preset-actionable]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(restoredPane.locator('[data-wq-statusline]')).toContainText('Showing 5 of 6 items');
 });
 
 test('workqueue pane: default rows collapse exact duplicates with expandable members', async ({ page }) => {
