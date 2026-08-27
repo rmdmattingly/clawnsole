@@ -1248,7 +1248,8 @@ function showToast(
     testId = 'toast',
     role = '',
     ariaLabel = '',
-    autoFocusAction = false
+    autoFocusAction = false,
+    onEscape = null
   } = {}
 ) {
   if (!globalElements.toastHost) return;
@@ -1327,7 +1328,8 @@ function showToast(
         event.stopPropagation();
         clearTimeout(timer);
         try {
-          if (hasSecondaryAction) onSecondaryAction?.();
+          if (typeof onEscape === 'function') onEscape();
+          else if (hasSecondaryAction) onSecondaryAction?.();
         } catch {}
         remove();
         return;
@@ -3572,6 +3574,104 @@ function paneComposerContextLabel(pane) {
   return `${paneLabel(pane)} · ${paneDisplayTargetLabel(pane) || paneTargetLabel(pane) || 'unknown'}`;
 }
 
+function paneComposerTargetKey(pane) {
+  if (!pane) return '';
+  const kind = normalizePaneKind(pane.kind || 'chat');
+  if (kind === 'chat') return `chat:${normalizeAgentId(pane.agentId || 'main')}`;
+  if (kind === 'workqueue') return `workqueue:${String(pane.workqueue?.queue || 'dev-team').trim() || 'dev-team'}`;
+  if (kind === 'cron' || kind === 'timeline') return `${kind}:${String(pane.cronAgentId || '').trim() || 'gateway'}`;
+  return `${kind}:${paneComposerContextLabel(pane)}`;
+}
+
+function paneDraftSignature(pane) {
+  return [
+    String(pane?.elements?.input?.value || '').trim(),
+    ...(Array.isArray(pane?.attachments?.files) ? pane.attachments.files.map((file) => `${file?.name || ''}:${file?.size || 0}`) : [])
+  ].join('\n');
+}
+
+function paneCurrentDraftOrigin(pane) {
+  if (!pane || pane.kind !== 'chat') return null;
+  return {
+    paneKey: String(pane.key || ''),
+    kind: normalizePaneKind(pane.kind || 'chat'),
+    targetKey: paneComposerTargetKey(pane),
+    label: paneComposerContextLabel(pane),
+    signature: paneDraftSignature(pane)
+  };
+}
+
+function paneClearDraftOrigin(pane) {
+  if (!pane) return;
+  pane.draftOrigin = null;
+  pane.draftRetargetConfirmedFor = '';
+}
+
+function paneRefreshDraftOrigin(pane) {
+  if (!pane || pane.kind !== 'chat') return;
+  if (!paneHasDraftChanges(pane)) {
+    paneClearDraftOrigin(pane);
+    return;
+  }
+  const signature = paneDraftSignature(pane);
+  if (!pane.draftOrigin || String(pane.draftOrigin.signature || '') !== signature) {
+    pane.draftOrigin = paneCurrentDraftOrigin(pane);
+    pane.draftRetargetConfirmedFor = '';
+  }
+}
+
+function paneDraftOriginDiffers(pane) {
+  if (!pane || pane.kind !== 'chat' || !paneHasDraftChanges(pane)) return false;
+  paneRefreshDraftOrigin(pane);
+  const origin = pane.draftOrigin;
+  if (!origin) return false;
+  return String(origin.kind || '') !== normalizePaneKind(pane.kind || 'chat') ||
+    String(origin.targetKey || '') !== paneComposerTargetKey(pane);
+}
+
+function paneFindOriginPane(origin) {
+  if (!origin) return null;
+  const panes = paneManager?.panes || [];
+  const originPaneKey = String(origin.paneKey || '');
+  const byPaneKey = panes.find((entry) => String(entry?.key || '') === originPaneKey);
+  if (byPaneKey) return byPaneKey;
+  const targetKey = String(origin.targetKey || '');
+  return panes.find((entry) => paneComposerTargetKey(entry) === targetKey) || null;
+}
+
+function paneMaybeOfferDraftRetargetConfirm(pane) {
+  if (!isSendConfirmGuardEnabled()) return false;
+  if (!paneDraftOriginDiffers(pane)) return false;
+
+  const current = paneCurrentDraftOrigin(pane);
+  const origin = pane.draftOrigin;
+  const confirmKey = `${current?.targetKey || ''}:${paneDraftSignature(pane)}`;
+  if (pane.draftRetargetConfirmedFor === confirmKey) return false;
+
+  const originLabel = String(origin?.label || 'the origin pane');
+  const currentLabel = String(current?.label || 'the current target');
+  showToast(`Draft started in ${originLabel}. Send to ${currentLabel}?`, {
+    kind: 'error',
+    timeoutMs: 15000,
+    role: 'dialog',
+    ariaLabel: 'Retarget draft confirmation',
+    actionLabel: 'Send to current target',
+    secondaryActionLabel: 'Return to origin pane',
+    testId: 'draft-retarget-confirm-toast',
+    autoFocusAction: true,
+    onAction: () => {
+      pane.draftRetargetConfirmedFor = confirmKey;
+      paneSendChat(pane);
+    },
+    onSecondaryAction: () => {
+      const originPane = paneFindOriginPane(origin);
+      if (originPane) paneManager.focusPanePrimary(originPane);
+    },
+    onEscape: () => {}
+  });
+  return true;
+}
+
 function paneRenderSendGuard(pane) {
   const hint = pane?.elements?.sendConfirmHint;
   const sendBtn = pane?.elements?.sendBtn;
@@ -3876,6 +3976,7 @@ function togglePanePinned(pane) {
 }
 
 function refreshPaneDraftState(pane) {
+  paneRefreshDraftOrigin(pane);
   renderPaneIdentity(pane);
   renderPaneDraftBadge(pane);
   if (isPaneManagerOpen()) renderPaneManager();
@@ -9482,6 +9583,8 @@ async function paneSendChat(pane) {
   const raw = pane.elements.input.value.trim();
   if (!raw) return;
 
+  if (paneMaybeOfferDraftRetargetConfirm(pane)) return;
+
   // During reconnect blips we allow drafting, but block sending.
   // (But we still allow enqueue once connected; for now keep behavior simple.)
   if (!pane.connected || !uiState.authed) {
@@ -10065,6 +10168,9 @@ function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true, syncFromP
 
   if (pane.kind === 'chat') {
     renderPaneAgentIdentity(pane);
+    pane.elements.input.value = '';
+    paneUpdateCommandHints(pane);
+    paneClearDraftOrigin(pane);
     pane.attachments.files = [];
     paneRenderAttachments(pane);
     paneStopThinking(pane);
@@ -10230,6 +10336,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     outbox: [],
     inFlight: null,
     sendGuard: null,
+    draftOrigin: null,
+    draftRetargetConfirmedFor: '',
     chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
     legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
     sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
@@ -11971,6 +12079,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
   elements.sendBtn.addEventListener('click', () => {
     if (elements.sendBtn.disabled) return;
+    if (paneMaybeOfferDraftRetargetConfirm(pane)) return;
     if (paneConsumeSwitchSendGuard(pane)) return;
     paneClearSwitchSendGuard(pane);
     paneSendChat(pane);
@@ -11980,6 +12089,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       if (elements.sendBtn.disabled) return;
+      if (paneMaybeOfferDraftRetargetConfirm(pane)) return;
       if (!event.metaKey && !event.ctrlKey && paneConsumeSwitchSendGuard(pane)) return;
       paneClearSwitchSendGuard(pane);
       paneSendChat(pane);
@@ -12239,7 +12349,8 @@ const paneManager = {
       nickname: paneNickname(pane),
       pairedTargetLock: !!pane.pairedTargetLock,
       pinned: paneIsPinned(pane),
-      draftText: kind === 'chat' ? String(pane.elements?.input?.value || '') : ''
+      draftText: kind === 'chat' ? String(pane.elements?.input?.value || '') : '',
+      draftOrigin: kind === 'chat' && pane.draftOrigin ? { ...pane.draftOrigin } : null
     };
 
     if (kind === 'workqueue') {
@@ -12296,7 +12407,8 @@ const paneManager = {
       nickname: snapshot.nickname,
       pairedTargetLock: !!snapshot.pairedTargetLock,
       pinned: !!snapshot.pinned,
-      restoreDraftText: kind === 'chat' ? String(snapshot.draftText || '') : ''
+      restoreDraftText: kind === 'chat' ? String(snapshot.draftText || '') : '',
+      restoreDraftOrigin: kind === 'chat' && snapshot.draftOrigin ? snapshot.draftOrigin : null
     };
 
     if (kind === 'workqueue') {
@@ -12440,7 +12552,11 @@ const paneManager = {
     });
     if (typeof options?.restoreDraftText === 'string' && pane.elements?.input) {
       pane.elements.input.value = options.restoreDraftText;
+      pane.draftOrigin = options?.restoreDraftOrigin && typeof options.restoreDraftOrigin === 'object'
+        ? { ...options.restoreDraftOrigin, signature: paneDraftSignature(pane) }
+        : null;
       paneUpdateCommandHints(pane);
+      refreshPaneDraftState(pane);
     }
     insertCreatedPane(pane);
     return finishCreatedPane(pane, { connect: true });

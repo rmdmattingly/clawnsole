@@ -1,5 +1,6 @@
 const { test, expect } = require('@playwright/test');
 const fs = require('fs');
+const path = require('path');
 
 const { startTestEnv, loginAdmin, attachConsoleErrorAsserts, addPane } = require('./_helpers');
 
@@ -19,6 +20,19 @@ test.afterEach(async ({ page }) => {
     page.__consoleAsserts.assertNoErrors();
   }
 });
+
+function seedRetargetAgents() {
+  const configPath = path.join(env.tempHome, '.openclaw', 'openclaw.json');
+  const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  cfg.agents = {
+    ...(cfg.agents || {}),
+    list: [
+      { id: 'main', name: 'main' },
+      { id: 'dev', name: 'dev' }
+    ]
+  };
+  fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+}
 
 test('chat pane: send/receive + upload attachment', async ({ page }, testInfo) => {
   test.setTimeout(180000);
@@ -241,6 +255,130 @@ test('chat pane: pane switch send guard can be disabled while context banner rem
   await page.keyboard.press('Enter');
   await expect(secondPane.locator('[data-pane-send-confirm-hint]')).toBeEmpty();
   await expect(secondPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: unguarded send');
+});
+
+test('chat pane: retargeted draft requires explicit send confirmation', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  seedRetargetAgents();
+  await loginAdmin(page, env.serverPort);
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.sendConfirmGuard.enabled', '1'));
+
+  const pane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  const input = pane.locator('[data-pane-input]');
+  const send = pane.locator('[data-pane-send]');
+
+  await expect(send).toBeEnabled({ timeout: 90000 });
+  await input.fill('retarget safety check');
+  await expect(pane.getByTestId('pane-draft-badge')).toBeVisible();
+
+  await page.evaluate(() => {
+    const pane = paneManager.panes.find((entry) => entry.kind === 'chat');
+    pane.agentId = 'dev';
+    renderPaneAgentIdentity(pane);
+    paneSetDestinationStrip(pane);
+  });
+
+  await send.click();
+  const confirm = page.getByRole('dialog', { name: 'Retarget draft confirmation' });
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toContainText('Draft started in Chat · main');
+  await expect(confirm).toContainText('Send to Chat · dev?');
+  await expect(confirm.getByTestId('toast-action')).toBeFocused();
+  await expect(pane.locator('[data-chat-role="user"]')).toHaveCount(0);
+
+  await page.keyboard.press('Escape');
+  await expect(confirm).toHaveCount(0);
+  await expect(pane.locator('[data-chat-role="user"]')).toHaveCount(0);
+
+  await send.click();
+  const secondConfirm = page.getByRole('dialog', { name: 'Retarget draft confirmation' });
+  await expect(secondConfirm.getByTestId('toast-action')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(secondConfirm).toHaveCount(0);
+  await expect(pane.locator('[data-chat-role="user"]').last()).toContainText('retarget safety check');
+  await expect(pane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: retarget safety check');
+});
+
+test('chat pane: retargeted draft can return to origin pane and respects opt out', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  seedRetargetAgents();
+  await loginAdmin(page, env.serverPort);
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.sendConfirmGuard.enabled', '1'));
+  await addPane(page, 'Chat pane');
+
+  const chatPanes = page.locator('[data-pane][data-pane-kind="chat"]');
+  const originPane = chatPanes.first();
+  const targetPane = chatPanes.last();
+
+  await expect(targetPane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+  await targetPane.locator('[data-pane-input]').fill('return to origin check');
+  await page.evaluate(() => {
+    const chats = paneManager.panes.filter((entry) => entry.kind === 'chat');
+    const origin = chats[0];
+    const target = chats[chats.length - 1];
+    target.agentId = 'dev';
+    target.draftOrigin = {
+      paneKey: origin.key,
+      kind: 'chat',
+      targetKey: 'chat:main',
+      label: 'Chat · main',
+      signature: paneDraftSignature(target)
+    };
+    renderPaneAgentIdentity(target);
+    paneSetDestinationStrip(target);
+  });
+
+  await targetPane.locator('[data-pane-send]').click();
+  const confirm = page.getByRole('dialog', { name: 'Retarget draft confirmation' });
+  await expect(confirm).toBeVisible();
+  await confirm.getByTestId('toast-secondary-action').click();
+  await expect(originPane.locator('[data-pane-input]')).toBeFocused();
+  await expect(targetPane.locator('[data-chat-role="user"]')).toHaveCount(0);
+
+  await targetPane.locator('[data-pane-input]').fill('same target send');
+  await page.evaluate(() => {
+    const target = paneManager.panes.filter((entry) => entry.kind === 'chat').at(-1);
+    target.agentId = 'main';
+    target.draftOrigin = {
+      paneKey: target.key,
+      kind: 'chat',
+      targetKey: 'chat:main',
+      label: 'Chat · main',
+      signature: paneDraftSignature(target)
+    };
+    renderPaneAgentIdentity(target);
+    paneSetDestinationStrip(target);
+  });
+  await targetPane.locator('[data-pane-send]').click();
+  await expect(page.getByRole('dialog', { name: 'Retarget draft confirmation' })).toHaveCount(0);
+  await expect(targetPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: same target send');
+
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.sendConfirmGuard.enabled', '0'));
+  await targetPane.locator('[data-pane-input]').fill('opt out retarget send');
+  await page.evaluate(() => {
+    const target = paneManager.panes.filter((entry) => entry.kind === 'chat').at(-1);
+    target.agentId = 'dev';
+    target.draftOrigin = {
+      paneKey: target.key,
+      kind: 'chat',
+      targetKey: 'chat:main',
+      label: 'Chat · main',
+      signature: paneDraftSignature(target)
+    };
+    renderPaneAgentIdentity(target);
+    paneSetDestinationStrip(target);
+  });
+  await targetPane.locator('[data-pane-send]').click();
+  await expect(page.getByRole('dialog', { name: 'Retarget draft confirmation' })).toHaveCount(0);
+  await expect(targetPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: opt out retarget send');
 });
 
 test('chat pane: draft badge appears, persists across pane switches, and clears on send', async ({ page }) => {
