@@ -1936,6 +1936,22 @@ button.send-btn .btn-icon {
   font-size: 12px;
 }
 
+.agents-refresh-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agents-refresh-mode .agents-label {
+  font-size: 12px;
+}
+
+.agents-refresh-mode select {
+  min-height: 26px;
+  padding: 3px 26px 3px 8px;
+  font-size: 12px;
+}
+
 .agents-refresh-paused {
   display: inline-flex;
   align-items: center;

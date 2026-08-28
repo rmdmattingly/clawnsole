@@ -50,6 +50,7 @@ const globalElements = {
   agentsSortIndicator: document.getElementById('agentsSortIndicator'),
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
+  agentsRefreshMode: document.getElementById('agentsRefreshMode'),
   agentsRefreshStateBtn: document.getElementById('agentsRefreshStateBtn'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
@@ -401,6 +402,7 @@ const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
 const ADMIN_AGENT_COLUMNS_KEY = 'clawnsole.admin.agents.columns';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
+const ADMIN_AGENT_REFRESH_MODE_KEY = 'clawnsole.admin.agents.refreshMode';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
 const FLEET_SNOOZE_30M_MS = 30 * 60_000;
 const FLEET_SNOOZE_2H_MS = 2 * 60 * 60_000;
@@ -499,7 +501,8 @@ const KEYBIND_CATALOG = [
   { id: 'fleet.openChatSelected', group: 'Fleet actions', label: 'Open Chat for selected Fleet agent', binding: { key: 'Enter', display: 'Enter' } },
   { id: 'fleet.openWorkqueueSelected', group: 'Fleet actions', label: 'Open Workqueue for selected Fleet agent', binding: { key: 'Enter', shift: true, display: 'Shift+Enter' } },
   { id: 'fleet.openTimelineSelected', group: 'Fleet actions', label: 'Open Timeline for selected Fleet agent', binding: { key: '.', display: '.' } },
-  { id: 'fleet.toggleHeartbeatSort', group: 'Fleet actions', label: 'Toggle Fleet heartbeat age sort', binding: { key: 'h', display: 'H / Shift+H' } }
+  { id: 'fleet.toggleHeartbeatSort', group: 'Fleet actions', label: 'Toggle Fleet heartbeat age sort', binding: { key: 'h', display: 'H / Shift+H' } },
+  { id: 'fleet.refreshNow', group: 'Fleet actions', label: 'Refresh Fleet now', binding: { key: 'r', display: 'R' } }
 ];
 
 function readKeybindOverrides() {
@@ -1141,6 +1144,29 @@ function getFleetDensity() {
   return String(storage.get(ADMIN_AGENT_DENSITY_KEY, 'comfortable') || 'comfortable') === 'compact' ? 'compact' : 'comfortable';
 }
 
+function normalizeFleetRefreshMode(mode) {
+  const value = String(mode || '').trim().toLowerCase();
+  return value === 'slow' || value === 'manual' ? value : 'auto';
+}
+
+function getFleetRefreshMode() {
+  return normalizeFleetRefreshMode(storage.get(ADMIN_AGENT_REFRESH_MODE_KEY, 'auto'));
+}
+
+function syncFleetRefreshModeControl() {
+  if (!globalElements.agentsRefreshMode) return;
+  globalElements.agentsRefreshMode.value = getFleetRefreshMode();
+}
+
+function setFleetRefreshMode(mode) {
+  const next = normalizeFleetRefreshMode(mode);
+  storage.set(ADMIN_AGENT_REFRESH_MODE_KEY, next);
+  syncFleetRefreshModeControl();
+  restartAgentsModalAutoRefresh();
+  renderAgentsLastRefreshed();
+  return next;
+}
+
 function getFleetColumns() {
   const defaults = {};
   FLEET_COLUMN_DEFS.forEach((col) => {
@@ -1385,6 +1411,10 @@ let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
 const FLEET_DEFAULT_STALE_THRESHOLD_MINUTES = 1;
 const FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES = 10;
+const FLEET_REFRESH_INTERVAL_MS = {
+  auto: 10_000,
+  slow: 60_000
+};
 let fleetShowSnoozed = false;
 const fleetRefreshLock = {
   lockedAtMs: 0,
@@ -1522,17 +1552,25 @@ function renderAgentsLastRefreshed() {
 
 function startAgentsModalAutoRefresh() {
   if (agentsModalAutoRefreshInterval) return;
+  const mode = getFleetRefreshMode();
+  if (mode === 'manual') return;
   agentsModalAutoRefreshInterval = setInterval(() => {
     if (!isAgentsModalOpen()) return;
     if (document.hidden) return;
     refreshAgents({ reason: 'fleet_auto_refresh' }).catch(() => {});
-  }, 10_000);
+  }, FLEET_REFRESH_INTERVAL_MS[mode] || FLEET_REFRESH_INTERVAL_MS.auto);
 }
 
 function stopAgentsModalAutoRefresh() {
   if (!agentsModalAutoRefreshInterval) return;
   clearInterval(agentsModalAutoRefreshInterval);
   agentsModalAutoRefreshInterval = null;
+}
+
+function restartAgentsModalAutoRefresh() {
+  stopAgentsModalAutoRefresh();
+  if (!isAgentsModalOpen()) return;
+  startAgentsModalAutoRefresh();
 }
 
 function startAgentsModalFreshnessTicker() {
@@ -1555,6 +1593,7 @@ function stopAgentsModalFreshnessTicker() {
 async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {}) {
   if (roleState.role !== 'admin') return uiState.agents;
   if (!uiState.authed) return uiState.agents;
+  if (reason !== 'manual' && getFleetRefreshMode() === 'manual') return uiState.agents;
   if (reason !== 'manual' && hasFleetRowInteraction()) return deferFleetRefresh(reason);
 
   if (agentRefreshInFlight) return agentRefreshInFlight;
@@ -5211,6 +5250,7 @@ function openAgentsModal() {
     globalElements.agentsActiveMinutes.value = String(Math.max(1, minutes));
   }
   syncFleetDensityControl();
+  syncFleetRefreshModeControl();
   renderFleetColumnPicker();
 
   renderAgentsModalList();
@@ -6159,6 +6199,14 @@ function handleFleetModalShortcutKeydown(event) {
       runFleetSelectedAgent('timeline');
       return true;
     }
+    if (lower === 'r') {
+      event.preventDefault();
+      clearFleetRefreshLock();
+      refreshAgents({ reason: 'manual', showSuccessToast: true }).catch(() => {
+        showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
+      });
+      return true;
+    }
   }
   if (lower === 'h' && !event.metaKey && !event.ctrlKey && !event.altKey) {
     event.preventDefault();
@@ -6986,6 +7034,8 @@ window.__debug.setAgentsLastRefreshedAtMs = (value) => {
   agentsLastRefreshedAtMs = Math.max(0, Number(value) || 0);
   renderAgentsLastRefreshed();
 };
+window.__debug.getFleetRefreshMode = getFleetRefreshMode;
+window.__debug.setFleetRefreshMode = setFleetRefreshMode;
 
 function getWorkqueueItemRepo(item) {
   const repo = String(item?.meta?.repo || '').trim();
@@ -13260,6 +13310,10 @@ globalElements.agentsHeatmapToggle?.addEventListener('change', () => {
 globalElements.agentsHeartbeatSortBtn?.addEventListener('click', () => setFleetHeartbeatSort());
 globalElements.agentsSortResetBtn?.addEventListener('click', () => resetFleetSort());
 globalElements.agentsResetTriageBtn?.addEventListener('click', () => resetAgentsTriageView());
+
+globalElements.agentsRefreshMode?.addEventListener('change', () => {
+  setFleetRefreshMode(globalElements.agentsRefreshMode.value);
+});
 
 globalElements.agentsActiveMinutes?.addEventListener('change', () => {
   const minutes = Math.max(1, Number(globalElements.agentsActiveMinutes.value) || FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES);
