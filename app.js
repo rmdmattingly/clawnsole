@@ -336,7 +336,7 @@ const paneNeedsAttention = __appCore.paneNeedsAttention || ((pane) => {
   return !pane.connected || status === 'error' || status === 'reconnecting' || Number(pane.unreadCount || 0) > 0;
 });
 const deriveGlobalConnectionState = __appCore.deriveGlobalConnectionState || ((state) => {
-  if (!state?.authed) return { state: 'disconnected', meta: 'sign in required' };
+  if (!state?.authed) return { state: 'disconnected', meta: '' };
   const panes = Array.isArray(state?.panes) ? state.panes : [];
   if (panes.length === 0) return { state: 'disconnected', meta: '' };
   const connectedCount = panes.filter((pane) => !!pane?.connected).length;
@@ -2083,6 +2083,7 @@ async function fetchMeta() {
     if (data?.wsUrl) {
       globalElements.wsUrl.value = data.wsUrl;
       uiState.meta = data;
+      if (!uiState.authed && data.adminAuthRequired) roleState.role = 'admin';
       renderAuthSessionUi();
       return data;
     }
@@ -14471,16 +14472,17 @@ document.addEventListener('focusout', () => {
 window.addEventListener('load', () => {
   const loginGuard = setTimeout(() => {
     if (!uiState.authed) {
-      roleState.role = null;
+      roleState.role = uiState.meta?.adminAuthRequired ? 'admin' : null;
       showLogin('Please sign in to continue.');
     }
   }, 800);
 
-  fetchRole()
+  ensureMetaLoaded()
+    .then(() => fetchRole())
     .then(async (role) => {
       clearTimeout(loginGuard);
       if (!role) {
-        roleState.role = null;
+        roleState.role = uiState.meta?.adminAuthRequired ? 'admin' : null;
         showLogin();
         return;
       }

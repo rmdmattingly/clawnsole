@@ -482,6 +482,7 @@ function createClawnsoleServer(options = {}) {
 
     if (req.url.startsWith('/meta')) {
       const wsUrl = gatewayWsUrl();
+      const { adminPassword } = readUiPasswords();
       let gatewayPort = readGatewayPort();
       try {
         const parsed = new URL(wsUrl);
@@ -496,7 +497,8 @@ function createClawnsoleServer(options = {}) {
         wsUrl,
         adminWsUrl: '/admin-ws',
         port: gatewayPort,
-        instance: instance || 'local'
+        instance: instance || 'local',
+        adminAuthRequired: !!adminPassword
       });
       return;
     }

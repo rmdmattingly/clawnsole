@@ -72,6 +72,7 @@ test('login password shows Caps Lock hint only while active and focused', async 
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
   await page.goto(clawnsole.adminUrl);
+  await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
   const password = page.getByTestId('login-password');
   const hint = page.getByTestId('login-caps-hint');
 
