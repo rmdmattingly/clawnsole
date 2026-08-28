@@ -1248,7 +1248,8 @@ function showToast(
     testId = 'toast',
     role = '',
     ariaLabel = '',
-    autoFocusAction = false
+    autoFocusAction = false,
+    escapeTriggersSecondary = true
   } = {}
 ) {
   if (!globalElements.toastHost) return;
@@ -1327,7 +1328,7 @@ function showToast(
         event.stopPropagation();
         clearTimeout(timer);
         try {
-          if (hasSecondaryAction) onSecondaryAction?.();
+          if (escapeTriggersSecondary && hasSecondaryAction) onSecondaryAction?.();
         } catch {}
         remove();
         return;
@@ -3602,6 +3603,70 @@ function paneMarkTypedAfterSwitch(pane) {
   paneRenderSendGuard(pane);
 }
 
+function paneDraftTargetKey(pane) {
+  if (!pane) return '';
+  if (pane.kind === 'chat') return `chat:${pane.role || 'user'}:${normalizeAgentId(pane.agentId || 'main')}`;
+  return `${pane.kind || 'pane'}:${paneTargetLabel(pane) || ''}`;
+}
+
+function paneDraftOriginSnapshot(pane) {
+  return {
+    paneKey: String(pane?.key || ''),
+    paneKind: String(pane?.kind || 'chat'),
+    targetKey: paneDraftTargetKey(pane),
+    targetLabel: paneComposerContextLabel(pane)
+  };
+}
+
+function paneUpdateDraftOrigin(pane) {
+  if (!pane || pane.kind !== 'chat') return;
+  if (!paneHasDraftChanges(pane)) {
+    pane.draftOrigin = null;
+    return;
+  }
+  if (!pane.draftOrigin) pane.draftOrigin = paneDraftOriginSnapshot(pane);
+}
+
+function paneDraftTargetChanged(pane) {
+  if (!pane || pane.kind !== 'chat' || !paneHasDraftChanges(pane)) return false;
+  const origin = pane.draftOrigin;
+  return Boolean(origin?.targetKey && origin.targetKey !== paneDraftTargetKey(pane));
+}
+
+function paneReturnToDraftOrigin(pane) {
+  const origin = pane?.draftOrigin;
+  if (!pane || !origin) return;
+  if (pane.kind === 'chat' && origin.targetKey?.startsWith?.('chat:')) {
+    const agentId = origin.targetKey.split(':').slice(2).join(':') || 'main';
+    paneSetAgent(pane, agentId, { requireDraftConfirm: false });
+  }
+  paneManager.focusPanePrimary(pane);
+}
+
+function paneConfirmDraftTargetBeforeSend(pane, sendFn) {
+  if (!paneDraftTargetChanged(pane) || !isSendConfirmGuardEnabled()) return false;
+  const originLabel = pane.draftOrigin?.targetLabel || 'the draft origin';
+  const currentLabel = paneComposerContextLabel(pane);
+  showToast(`Draft started in ${originLabel}; current target is ${currentLabel}.`, {
+    kind: 'info',
+    timeoutMs: 12000,
+    role: 'dialog',
+    ariaLabel: 'Confirm draft target',
+    testId: 'draft-target-confirm-toast',
+    actionLabel: 'Send to current target',
+    autoFocusAction: true,
+    escapeTriggersSecondary: false,
+    onAction: () => {
+      pane.draftOrigin = paneDraftOriginSnapshot(pane);
+      paneClearSwitchSendGuard(pane);
+      sendFn?.();
+    },
+    secondaryActionLabel: 'Return to origin pane',
+    onSecondaryAction: () => paneReturnToDraftOrigin(pane)
+  });
+  return true;
+}
+
 function forgetFocusedPaneKey(paneKey) {
   const key = String(paneKey || '');
   if (!key) return;
@@ -3876,6 +3941,7 @@ function togglePanePinned(pane) {
 }
 
 function refreshPaneDraftState(pane) {
+  paneUpdateDraftOrigin(pane);
   renderPaneIdentity(pane);
   renderPaneDraftBadge(pane);
   if (isPaneManagerOpen()) renderPaneManager();
@@ -10047,10 +10113,7 @@ function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true, syncFromP
   const previous = pane.agentId;
 
   if (requireDraftConfirm && pane.kind === 'chat' && paneHasDraftChanges(pane)) {
-    const nextAgent = getAgentRecord(next);
-    const nextLabel = formatAgentLabel(nextAgent, { includeId: false }) || next;
-    const ok = window.confirm(`Switch destination to “${nextLabel}”?\n\nYou have an unsent draft/attachment. Switching destination will clear this pane's draft and message history.`);
-    if (!ok) return;
+    paneUpdateDraftOrigin(pane);
   }
 
   pane.agentId = next;
@@ -10065,8 +10128,6 @@ function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true, syncFromP
 
   if (pane.kind === 'chat') {
     renderPaneAgentIdentity(pane);
-    pane.attachments.files = [];
-    paneRenderAttachments(pane);
     paneStopThinking(pane);
     paneClearChatHistory(pane, { wipeStorage: false });
     paneRestoreChatHistory(pane);
@@ -10230,6 +10291,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     outbox: [],
     inFlight: null,
     sendGuard: null,
+    draftOrigin: null,
     chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
     legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
     sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
@@ -11971,6 +12033,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
   elements.sendBtn.addEventListener('click', () => {
     if (elements.sendBtn.disabled) return;
+    if (paneConfirmDraftTargetBeforeSend(pane, () => paneSendChat(pane))) return;
     if (paneConsumeSwitchSendGuard(pane)) return;
     paneClearSwitchSendGuard(pane);
     paneSendChat(pane);
@@ -11980,6 +12043,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       if (elements.sendBtn.disabled) return;
+      if (paneConfirmDraftTargetBeforeSend(pane, () => paneSendChat(pane))) return;
       if (!event.metaKey && !event.ctrlKey && paneConsumeSwitchSendGuard(pane)) return;
       paneClearSwitchSendGuard(pane);
       paneSendChat(pane);
