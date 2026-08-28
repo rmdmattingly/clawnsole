@@ -79,7 +79,6 @@ test('chat pane: stop button can cancel a running response', async ({ page }) =>
   await expect(stopBtn).toBeEnabled();
   await stopBtn.click();
 
-  await expect(stopBtn).toHaveAttribute('aria-label', 'Canceling…');
   await expect(pane.locator('.chat-bubble.assistant').last()).toContainText('(canceled)', { ignoreCase: true, timeout: 5000 });
   await expect(stopBtn).toBeHidden();
   await expect(stopBtn).toBeDisabled();

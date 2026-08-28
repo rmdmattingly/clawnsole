@@ -52,7 +52,6 @@
             <span class="active-pane-chip__label">Active</span>
             <span class="active-pane-chip__value" data-active-pane-chip-value></span>
           </button>
-          <div id="shortcutHintStrip" class="shortcut-hint-strip" aria-live="polite" data-testid="shortcut-hint-strip" hidden></div>
           <button
             id="layoutModeChip"
             class="layout-mode-chip"
@@ -65,6 +64,13 @@
             <span class="layout-mode-chip__label">Layout</span>
             <span class="layout-mode-chip__value" data-layout-mode-chip-value>Custom</span>
           </button>
+          <div
+            id="shortcutHintStrip"
+            class="shortcut-hint-strip"
+            data-testid="shortcut-hint-strip"
+            aria-live="polite"
+            hidden
+          ></div>
           <div id="paneControls" class="pane-controls" hidden>
             <div class="pane-add-wrap">
               <button id="addPaneBtn" class="icon-btn action-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add pane" title="Add Pane (Ctrl/Cmd+Shift+N)" data-testid="add-pane-btn">

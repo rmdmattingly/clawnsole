@@ -23,9 +23,9 @@ const globalElements = {
   paneManagerBtn: document.getElementById('paneManagerBtn'),
   activePaneChip: document.getElementById('activePaneChip'),
   activePaneChipValue: document.querySelector('[data-active-pane-chip-value]'),
-  shortcutHintStrip: document.getElementById('shortcutHintStrip'),
   layoutModeChip: document.getElementById('layoutModeChip'),
   layoutModeChipValue: document.querySelector('[data-layout-mode-chip-value]'),
+  shortcutHintStrip: document.getElementById('shortcutHintStrip'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
   fleetBtn: document.getElementById('fleetBtn'),
@@ -126,6 +126,20 @@ const globalElements = {
   paneGrid: document.getElementById('paneGrid'),
   paneTemplate: document.getElementById('paneTemplate')
 };
+
+function shortcutHintStripElement() {
+  const strips = Array.from(document.querySelectorAll('[data-testid="shortcut-hint-strip"], #shortcutHintStrip')).filter(
+    (node) => node instanceof HTMLElement
+  );
+  const primary = globalElements.shortcutHintStrip || strips[0] || null;
+  strips.forEach((node) => {
+    if (node !== primary) node.remove();
+  });
+  if (primary && globalElements.shortcutHintStrip !== primary) {
+    globalElements.shortcutHintStrip = primary;
+  }
+  return primary;
+}
 
 const ADMIN_MODAL_KEYS = [
   'settingsModal',
@@ -502,6 +516,87 @@ const KEYBIND_CATALOG = [
   { id: 'fleet.toggleHeartbeatSort', group: 'Fleet actions', label: 'Toggle Fleet heartbeat age sort', binding: { key: 'h', display: 'H / Shift+H' } }
 ];
 
+const SHORTCUT_HINTS_BY_PANE_KIND = {
+  chat: ['chat.composer', 'workqueue.openForActiveChat', 'pane.next', 'chat.return'],
+  workqueue: ['workqueue.move', 'workqueue.inspect', 'workqueue.status', 'workqueue.focusItemSearch'],
+  cron: ['pane.next', 'pane.manager', 'command.palette'],
+  timeline: ['fleet.next', 'fleet.openChatSelected', 'fleet.openWorkqueueSelected', 'fleet.toggleHeartbeatSort']
+};
+
+function shortcutHintLabel(id) {
+  const entry = keybindEntry(id);
+  if (!entry) return '';
+  const label = String(entry.label || '')
+    .replace(/\s+\(.*?\)/g, '')
+    .replace(/^Focus\s+/i, '')
+    .replace(/^Open\/focus\s+/i, 'Open ')
+    .replace(/^Open\s+/i, '')
+    .trim();
+  return label || entry.label;
+}
+
+function shortcutHintContextLabel(pane) {
+  const kind = normalizePaneKind(pane?.kind || 'chat');
+  if (kind === 'timeline') return 'Fleet';
+  return paneLabel(pane);
+}
+
+function isShortcutHintTypingContext(target = document.activeElement) {
+  const el = target;
+  if (!(el instanceof Element)) return false;
+  if (el.matches?.('input, textarea, [contenteditable=""], [contenteditable="true"], [role="textbox"]')) return true;
+  if (el.isContentEditable || el.closest?.('[contenteditable="true"], [contenteditable=""], [role="textbox"]')) return true;
+  return false;
+}
+
+function renderShortcutHintStrip(activePane = activePaneFromState()) {
+  const root = shortcutHintStripElement();
+  if (!root) return;
+
+  const locked = !uiState.authed || roleState.role !== 'admin';
+  const typing = isShortcutHintTypingContext();
+  if (locked || typing || !activePane) {
+    root.hidden = true;
+    root.innerHTML = '';
+    root.removeAttribute('data-shortcut-pane-kind');
+    root.removeAttribute('data-shortcut-hint-context');
+    return;
+  }
+
+  const kind = normalizePaneKind(activePane.kind || 'chat');
+  const ids = SHORTCUT_HINTS_BY_PANE_KIND[kind] || SHORTCUT_HINTS_BY_PANE_KIND.chat;
+  const hints = ids
+    .map((id) => {
+      const display = shortcutDisplay(id);
+      const label = shortcutHintLabel(id);
+      if (!display || !label) return '';
+      return `
+        <span class="shortcut-hint" data-shortcut-hint="${escapeHtml(id)}">
+          <span class="shortcut-hint__keys">${renderShortcutKeys(display)}</span>
+          <span class="shortcut-hint__label">${escapeHtml(label)}</span>
+        </span>
+      `;
+    })
+    .filter(Boolean);
+
+  if (!hints.length) {
+    root.hidden = true;
+    root.innerHTML = '';
+    root.removeAttribute('data-shortcut-pane-kind');
+    root.removeAttribute('data-shortcut-hint-context');
+    return;
+  }
+
+  root.setAttribute('data-shortcut-pane-kind', kind);
+  root.setAttribute('data-shortcut-hint-context', kind);
+  root.hidden = false;
+  root.innerHTML = `
+    <span class="shortcut-hint-strip__context">${escapeHtml(shortcutHintContextLabel(activePane))}</span>
+    ${hints.slice(0, 4).join('')}
+    <button class="shortcut-hint-strip__all" type="button" data-shortcut-hint-all aria-label="Press ? for all shortcuts" title="Press ? for all shortcuts">Press ?</button>
+  `;
+}
+
 function readKeybindOverrides() {
   try {
     const parsed = JSON.parse(storage.get(KEYBIND_OVERRIDES_KEY, '{}'));
@@ -538,6 +633,7 @@ function setKeybindOverride(id, binding) {
   writeKeybindOverrides(overrides);
   renderKeyboardSettings();
   renderShortcutsContent();
+  renderShortcutHintStrip();
   return true;
 }
 
@@ -548,6 +644,7 @@ function resetKeybindOverride(id) {
   writeKeybindOverrides(overrides);
   renderKeyboardSettings();
   renderShortcutsContent();
+  renderShortcutHintStrip();
   return true;
 }
 
@@ -3507,6 +3604,7 @@ let paneFocusMruKeys = [];
 let paneMruTraversal = null;
 let paneMruSuppressFocusEvents = false;
 let paneActiveRestoreGuardUntil = 0;
+let lastFocusedPaneKey = '';
 const PANE_SWITCH_SEND_GUARD_MS = 5000;
 const PANE_SWITCH_SEND_GUARD_MESSAGE = 'Pane changed: press Enter again to send';
 
@@ -3529,6 +3627,7 @@ function notePaneFocused(pane) {
   if (!panes.some((entry) => String(entry?.key || '') === key)) return;
   const rememberedKey = rememberedActivePaneKey();
   if (rememberedKey && key !== rememberedKey && Date.now() < paneActiveRestoreGuardUntil) return;
+  lastFocusedPaneKey = key;
   paneMruTraversal = null;
   paneMruOrder();
   paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
@@ -3628,71 +3727,6 @@ function activePaneFromState() {
   return panes[0] || null;
 }
 
-function shortcutHintContext(pane) {
-  if (!pane) return 'global';
-  if (pane.kind === 'timeline' && String(pane.cronAgentId || '').trim() === 'all') return 'fleet';
-  return pane.kind || 'chat';
-}
-
-function shortcutHintItem(id, label) {
-  return { keys: shortcutDisplay(id), label };
-}
-
-function shortcutHintsForPane(pane) {
-  const common = [shortcutHintItem('help.shortcuts', 'All shortcuts')];
-  const context = shortcutHintContext(pane);
-  if (context === 'workqueue') {
-    return [
-      shortcutHintItem('workqueue.focusQueueSearch', 'Queue search'),
-      shortcutHintItem('workqueue.focusItemSearch', 'Item search'),
-      shortcutHintItem('workqueue.focusStatusFilter', 'Status filter'),
-      shortcutHintItem('workqueue.open', 'Workqueue modal'),
-      ...common
-    ];
-  }
-  if (context === 'fleet') {
-    return [
-      shortcutHintItem('fleet.next', 'Move selection'),
-      shortcutHintItem('fleet.openChatSelected', 'Open Chat'),
-      shortcutHintItem('fleet.openWorkqueueSelected', 'Open Workqueue'),
-      shortcutHintItem('fleet.openTimelineSelected', 'Open Timeline'),
-      ...common
-    ];
-  }
-  if (context === 'cron' || context === 'timeline') {
-    return [
-      shortcutHintItem('agents.refresh', 'Refresh'),
-      shortcutHintItem('command.palette', 'Commands'),
-      shortcutHintItem('pane.next', 'Next pane'),
-      ...common
-    ];
-  }
-  return [
-    shortcutHintItem('chat.composer', 'Composer'),
-    shortcutHintItem('command.palette', 'Commands'),
-    shortcutHintItem('pane.next', 'Next pane'),
-    shortcutHintItem('workqueue.openForActiveChat', 'Workqueue'),
-    ...common
-  ];
-}
-
-function renderShortcutHintStrip(activePane = activePaneFromState()) {
-  const strip = globalElements.shortcutHintStrip;
-  if (!strip) return;
-  const visible = Boolean(activePane) && uiState.authed && !isTypingContext(document.activeElement);
-  strip.hidden = !visible;
-  strip.dataset.shortcutHintContext = visible ? shortcutHintContext(activePane) : '';
-  if (!visible) {
-    strip.innerHTML = '';
-    return;
-  }
-  strip.innerHTML = shortcutHintsForPane(activePane)
-    .slice(0, 5)
-    .filter((hint) => hint.keys && hint.label)
-    .map((hint) => `<span class="shortcut-hint"><kbd>${escapeHtml(hint.keys)}</kbd><span>${escapeHtml(hint.label)}</span></span>`)
-    .join('');
-}
-
 function renderActivePaneState(activePane = activePaneFromState()) {
   const panes = paneManager?.panes || [];
   const activeKey = String(activePane?.key || '');
@@ -3725,6 +3759,7 @@ function renderActivePaneState(activePane = activePaneFromState()) {
   chip.setAttribute('aria-label', `Active pane: ${label}. Click to focus.`);
   renderShortcutHintStrip(activePane);
   renderLayoutModeChip();
+  renderShortcutHintStrip(activePane);
 }
 
 function paneIndexByKey(key) {
@@ -5006,6 +5041,18 @@ function moveCommandPaletteSelection(step) {
   commandPaletteState.selectedIndex = selectable[nextPos];
 }
 
+function selectedCommandPaletteItem() {
+  const exactQuery = String(commandPaletteState.query || '').trim().toLowerCase();
+  if (exactQuery) {
+    const exact = commandPaletteState.items.find((item) =>
+      item?.kind !== 'header' &&
+      String(item?.label || '').trim().toLowerCase() === exactQuery
+    );
+    if (exact) return exact;
+  }
+  return commandPaletteState.filtered[commandPaletteState.selectedIndex];
+}
+
 function composeCommandPaletteDisplayItems(scored, query) {
   const q = String(query || '').trim();
   const groups = new Map();
@@ -5166,7 +5213,7 @@ function openCommandPalette() {
   if (!globalElements.commandPaletteModal) return;
 
   commandPaletteState.open = true;
-  commandPaletteState.originPaneKey = focusedPaneKey() || '';
+  commandPaletteState.originPaneKey = focusedPaneKey() || lastFocusedPaneKey || rememberedActivePaneKey() || '';
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
   commandPaletteState.selectedIndex = 0;
@@ -5360,14 +5407,22 @@ function openWorkqueueForActiveChatAgent() {
 
   const focusWorkqueuePane = () => {
     try {
+      if (!pane.elements?.root?.isConnected) return;
       const queueSelect = pane.elements?.thread?.querySelector?.('[data-wq-queue-select]');
       (queueSelect || pane.elements?.thread)?.focus?.();
     } catch {}
   };
+  try {
+    requestAnimationFrame(() => {
+      focusWorkqueuePane();
+      requestAnimationFrame(focusWorkqueuePane);
+    });
+  } catch {}
   setTimeout(focusWorkqueuePane, 0);
   setTimeout(focusWorkqueuePane, 30);
   setTimeout(focusWorkqueuePane, 120);
   setTimeout(focusWorkqueuePane, 300);
+  setTimeout(focusWorkqueuePane, 700);
   showToast(`Workqueue scoped to ${agentId}`, { kind: 'info', timeoutMs: 1600 });
   return pane;
 }
@@ -10629,7 +10684,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const getQueueValue = () => {
       const sel = String(queueSelectEl?.value || '').trim();
       if (sel === '__custom__') return String(queueCustomEl?.value || '').trim();
-      return sel;
+      return sel || String(pane.workqueue?.queue || '').trim();
     };
 
     const updateEnqueueDestination = () => {
@@ -12387,6 +12442,27 @@ const paneManager = {
       }
     }
 
+    if (normalizedKind === 'workqueue' && this.panes.length >= this.maxPanes) {
+      const existingWorkqueue = this.panes.find((p) => p?.role === 'admin' && p.kind === 'workqueue') || null;
+      if (existingWorkqueue) {
+        existingWorkqueue.agentId = nextAgentId;
+        existingWorkqueue.workqueue = existingWorkqueue.workqueue || {};
+        existingWorkqueue.workqueue.scopeFilter = nextScopeFilter;
+        if (typeof existingWorkqueue.workqueue.setQueue === 'function') {
+          existingWorkqueue.workqueue.setQueue(nextQueue).catch?.(() => {});
+        } else {
+          existingWorkqueue.workqueue.queue = nextQueue;
+        }
+        if (typeof existingWorkqueue.workqueue.setScope === 'function') {
+          existingWorkqueue.workqueue.setScope(nextScopeFilter);
+        }
+        this.persistAdminPanes();
+        this.focusPanePrimary(existingWorkqueue);
+        renderActivePaneState(existingWorkqueue);
+        return existingWorkqueue;
+      }
+    }
+
     if (this.panes.length >= this.maxPanes) return;
 
     if (normalizedKind === 'workqueue') {
@@ -12720,8 +12796,9 @@ const paneManager = {
         if (event?.preventDefault) event.preventDefault();
         if (event?.stopPropagation) event.stopPropagation();
 
+        const paneOptions = getOptions();
         this.closeAddPaneMenu();
-        this.addPane(kind, { ...getOptions(), forceNew: !!event?.altKey });
+        this.addPane(kind, { ...paneOptions, forceNew: !!event?.altKey });
 
         queueMicrotask(() => {
           state.menuActionInFlight = false;
@@ -12759,7 +12836,7 @@ const paneManager = {
 
     const closeIfOutside = (event) => {
       if (!state.open) return;
-      if (event.target === anchorEl) return;
+      if (event.target === anchorEl || anchorEl.contains?.(event.target)) return;
       if (state.menuEl.contains(event.target)) return;
       this.closeAddPaneMenu();
     };
@@ -13012,6 +13089,12 @@ globalElements.shortcutOverridesSave?.addEventListener('click', () => saveShortc
 globalElements.shortcutOverridesResetAll?.addEventListener('click', () => resetAllShortcutOverrides());
 
 globalElements.shortcutsBtn?.addEventListener('click', () => openShortcuts());
+shortcutHintStripElement()?.addEventListener('pointerdown', (event) => {
+  const target = event.target instanceof HTMLElement ? event.target.closest('[data-shortcut-hint-all]') : null;
+  if (!target) return;
+  event.preventDefault();
+  openShortcuts();
+});
 globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
 globalElements.shortcutsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.shortcutsModal) closeShortcuts();
@@ -13081,7 +13164,7 @@ globalElements.commandPaletteInput?.addEventListener('keydown', (event) => {
   }
   if (key === 'Enter') {
     event.preventDefault();
-    const item = commandPaletteState.filtered[commandPaletteState.selectedIndex];
+    const item = selectedCommandPaletteItem();
     if (!item || item.kind === 'header') return;
     if (!item.run) return;
     try {
@@ -14301,6 +14384,14 @@ window.addEventListener('online', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   paneManager.connectIfNeeded();
+});
+
+document.addEventListener('focusin', () => {
+  setTimeout(() => renderShortcutHintStrip(), 0);
+});
+
+document.addEventListener('focusout', () => {
+  setTimeout(() => renderShortcutHintStrip(), 0);
 });
 
 window.addEventListener('load', () => {
