@@ -2387,7 +2387,8 @@ button.agents-section-title:hover {
 }
 
 .agents-health-state-chip,
-.agents-age-chip {
+.agents-age-chip,
+.agents-reason-badge {
   display: inline-block;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 999px;
@@ -2412,6 +2413,11 @@ button.agents-section-title:hover {
   background: rgba(255, 93, 116, 0.16);
 }
 
+.agents-health-state-chip[data-health-state="busy"] {
+  border-color: rgba(125, 211, 252, 0.5);
+  background: rgba(125, 211, 252, 0.14);
+}
+
 .agents-age-chip[data-heartbeat-bucket="fresh"] {
   border-color: rgba(86, 211, 100, 0.45);
 }
@@ -2426,6 +2432,12 @@ button.agents-section-title:hover {
 
 .agents-age-chip[data-heartbeat-bucket="critical"] {
   border-color: rgba(255, 93, 116, 0.66);
+}
+
+.agents-reason-badge {
+  border-color: rgba(125, 211, 252, 0.32);
+  background: rgba(125, 211, 252, 0.10);
+  color: #bae6fd;
 }
 
 .agents-age-label {
