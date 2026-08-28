@@ -5209,7 +5209,7 @@ function openCommandPalette() {
   if (!globalElements.commandPaletteModal) return;
 
   commandPaletteState.open = true;
-  commandPaletteState.originPaneKey = focusedPaneKey() || rememberedActivePaneKey() || lastFocusedPaneKey || '';
+  commandPaletteState.originPaneKey = focusedPaneKey() || lastFocusedPaneKey || rememberedActivePaneKey() || '';
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
   commandPaletteState.selectedIndex = 0;
