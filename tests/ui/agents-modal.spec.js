@@ -106,6 +106,45 @@ test('agents modal marks stale fleet data and supports header refresh parity', a
   await expect(page.locator('#agentsList')).toContainText('Gamma (gamma)');
 });
 
+test('agents modal refresh mode supports manual refresh without background updates', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const mode = page.getByLabel('Fleet refresh mode');
+  await expect(mode).toHaveValue('auto');
+  await mode.selectOption('manual');
+  await expect(mode).toHaveValue('manual');
+  await expect
+    .poll(() => page.evaluate(() => window.__debug.getFleetRefreshMode()))
+    .toBe('manual');
+
+  agents = [{ id: 'beta', name: 'Beta', displayName: 'Beta' }];
+  await page.evaluate(() => window.__debug.refreshAgents({ reason: 'fleet_auto_refresh' }));
+  await expect(page.locator('#agentsList')).toContainText('Alpha (alpha)');
+  await expect(page.locator('#agentsList')).not.toContainText('Beta (beta)');
+
+  await page.evaluate(() => window.__debug.setAgentsLastRefreshedAtMs(Date.now() - 70_000));
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Stale');
+
+  await page.keyboard.press('r');
+  await expect(page.locator('#agentsList')).toContainText('Beta (beta)');
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Last updated:');
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.getByLabel('Fleet refresh mode')).toHaveValue('manual');
+});
+
 test('agents modal defers auto-refresh while a fleet row is active, then catches up once', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 

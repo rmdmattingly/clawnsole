@@ -497,6 +497,14 @@
             <div class="agents-refresh-state">
               <span id="agentsLastRefreshed" class="agents-last-refreshed" role="status" aria-live="polite" aria-atomic="true">Last updated: never</span>
               <span id="agentsRefreshPaused" class="agents-refresh-paused" aria-live="polite" hidden></span>
+              <label class="agents-refresh-mode">
+                <span class="agents-label">Refresh</span>
+                <select id="agentsRefreshMode" aria-label="Fleet refresh mode">
+                  <option value="auto">Auto</option>
+                  <option value="slow">Slow</option>
+                  <option value="manual">Manual</option>
+                </select>
+              </label>
               <button id="agentsRefreshStateBtn" type="button" class="secondary agents-refresh-state-btn" aria-label="Refresh Fleet">Refresh</button>
             </div>
             <label class="agents-field">
