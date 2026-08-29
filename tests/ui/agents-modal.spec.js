@@ -748,6 +748,38 @@ test('fleet attention shortcut selects first needs-attention row and Enter opens
     .toContain('attention-agent');
 });
 
+test('fleet attention shortcut treats busy active agents as needing attention', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'healthy-agent', name: 'healthy-agent', displayName: 'healthy-agent' },
+    { id: 'busy-agent', name: 'busy-agent', displayName: 'busy-agent', status: 'in_progress' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      'healthy-agent': now,
+      'busy-agent': now
+    }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.evaluate(() => document.activeElement?.blur?.());
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F', ctrlKey: true, shiftKey: true, bubbles: true }));
+  });
+
+  const selected = page.locator('#agentsList .agents-row[aria-selected="true"]');
+  await expect(selected).toContainText('busy-agent');
+  await expect(selected).toHaveAttribute('data-needs-attention', 'true');
+  await expect(selected).toHaveAttribute('data-health-state', 'busy');
+});
+
 test('fleet attention shortcut falls back to first healthy row and Shift+Enter opens workqueue', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 

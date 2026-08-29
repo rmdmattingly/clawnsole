@@ -5993,8 +5993,8 @@ function renderAgentsModalList() {
       `
         : '';
       row.dataset.heartbeatBucket = triage.ageBucket;
-      row.dataset.healthState = triage.bucket;
-      row.dataset.needsAttention = triage.bucket === 'active' ? 'false' : 'true';
+      row.dataset.healthState = healthState;
+      row.dataset.needsAttention = (triage.bucket !== 'active' || triage.busy) ? 'true' : 'false';
       row.classList.toggle('is-stale', triage.bucket === 'stale' || heartbeatAgeMs > FLEET_DEFAULT_STALE_THRESHOLD_MINUTES * 60_000);
       if (snoozed) row.dataset.snoozed = 'true';
       row.classList.toggle('agents-row-heatmap', heatmapEnabled);
