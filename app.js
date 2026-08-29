@@ -496,7 +496,8 @@ const KEYBIND_CATALOG = [
     risk: { kind: 'browser', reason: 'Reserved by browser reload', alternative: { accel: true, shift: true, key: 'y', display: 'Cmd/Ctrl+Shift+Y' } }
   },
   { id: 'workqueue.open', group: 'Workqueue actions', label: 'Open Workqueue modal', binding: { chord: ['g', 'w'], display: 'g w' } },
-  { id: 'workqueue.openForActiveChat', group: 'Workqueue actions', label: 'Open/focus Workqueue for active Chat pane', binding: { accel: true, shift: true, key: 'g', display: 'Cmd/Ctrl+Shift+G' } },
+  { id: 'pane.togglePaired', group: 'Workqueue actions', label: 'Toggle paired pane (Chat <-> Workqueue)', binding: { accel: true, shift: true, key: 'g', display: 'Cmd/Ctrl+Shift+G' } },
+  { id: 'workqueue.openForActiveChat', group: 'Workqueue actions', label: 'Open/focus Workqueue for active Chat pane', binding: { accel: true, shift: true, alt: true, key: 'g', display: 'Cmd/Ctrl+Shift+Alt+G' } },
   { id: 'workqueue.togglePair', group: 'Workqueue actions', label: 'Toggle paired Chat and Workqueue panes', binding: { accel: true, shift: true, key: 'l', display: 'Cmd/Ctrl+Shift+L' } },
   { id: 'workqueue.move', group: 'Workqueue actions', label: 'Move selected row in Workqueue keyboard mode', binding: { key: 'j/k', display: 'j/k' } },
   { id: 'workqueue.inspect', group: 'Workqueue actions', label: 'Inspect selected Workqueue row in keyboard mode', binding: { key: 'Enter', display: 'Enter' } },
@@ -2500,6 +2501,12 @@ const SHORTCUT_OVERRIDE_ACTIONS = [
     run: () => openTopbarWorkqueueAction()
   },
   {
+    id: 'pane-toggle-paired',
+    label: 'Toggle paired pane',
+    defaultCombo: { accel: true, shift: true, alt: false, key: 'g' },
+    run: () => togglePairedPane()
+  },
+  {
     id: 'fleet-open',
     label: 'Focus Fleet: first needs attention',
     defaultCombo: { accel: true, shift: true, alt: false, key: 'f' },
@@ -2528,6 +2535,11 @@ const SHORTCUT_SAFE_ALTERNATIVES = {
     { accel: true, alt: true, shift: false, key: 'w' },
     { accel: true, shift: true, alt: true, key: 'w' }
   ],
+  'pane-toggle-paired': [
+    { accel: true, shift: true, alt: false, key: 'g' },
+    { accel: true, alt: true, shift: false, key: 'g' },
+    { accel: true, shift: true, alt: true, key: 'g' }
+  ],
   'fleet-open': [
     { accel: true, alt: true, shift: false, key: 'f' },
     { accel: true, alt: true, shift: false, key: 'a' },
@@ -2542,6 +2554,7 @@ function keybindIdToShortcutActionId(id) {
     'pane.prev': 'pane-previous',
     'pane.manager': 'pane-manager',
     'workqueue.open': 'workqueue-open',
+    'pane.togglePaired': 'pane-toggle-paired',
     'fleet.open': 'fleet-open'
   })[String(id || '')] || '';
 }
@@ -4323,6 +4336,7 @@ function getPaneManagerPairedAction(pane) {
 }
 
 function focusOrOpenPairedPaneForPane(pane) {
+  if (!paneSupportsTargetLock(pane)) return null;
   const existing = findPairedPaneForPane(pane);
   if (existing) {
     paneManager.focusPanePrimary(existing);
@@ -4333,6 +4347,70 @@ function focusOrOpenPairedPaneForPane(pane) {
   const options = getPanePairOpenOptions(pane);
   if (!pairedKind || !options) return null;
   return paneManager.addPane(pairedKind, options);
+}
+
+function getActivePaneForPairedToggle() {
+  const originKey = commandPaletteState.open ? String(commandPaletteState.originPaneKey || '') : '';
+  const focusedKey = focusedPaneKey();
+  const candidates = [
+    originKey,
+    focusedKey,
+    ...paneMruOrder()
+  ].filter(Boolean);
+
+  for (const key of candidates) {
+    const pane = (paneManager?.panes || []).find((entry) => String(entry?.key || '') === key);
+    if (paneSupportsTargetLock(pane)) return pane;
+  }
+  return (paneManager?.panes || []).find((pane) => paneSupportsTargetLock(pane)) || null;
+}
+
+function togglePairedPane(sourcePane = null) {
+  if (roleState.role !== 'admin') return false;
+  const pane = sourcePane && paneSupportsTargetLock(sourcePane) ? sourcePane : getActivePaneForPairedToggle();
+  if (!pane) {
+    showToast('No Chat or Workqueue pane to pair.', { kind: 'info', timeoutMs: 2200, testId: 'paired-pane-toast' });
+    return false;
+  }
+
+  const action = getPaneManagerPairedAction(pane);
+  if (!action) {
+    showToast('No valid paired pane for this view.', { kind: 'info', timeoutMs: 2200, testId: 'paired-pane-toast' });
+    return false;
+  }
+  if (action.disabled) {
+    showToast(action.title || 'Pane limit reached.', { kind: 'info', timeoutMs: 2400, testId: 'paired-pane-toast' });
+    return false;
+  }
+
+  const result = focusOrOpenPairedPaneForPane(pane);
+  if (!result) {
+    showToast(`Could not open paired ${action.labelKind}.`, { kind: 'error', timeoutMs: 2600, testId: 'paired-pane-toast' });
+    return false;
+  }
+  renderPaneIdentity(pane);
+  renderPaneIdentity(result);
+  if (isPaneManagerOpen()) renderPaneManager();
+  return true;
+}
+
+function renderPanePairedAction(pane) {
+  const btn = pane?.elements?.pairedBtn;
+  if (!btn) return;
+  const action = getPaneManagerPairedAction(pane);
+  if (!action) {
+    btn.hidden = true;
+    return;
+  }
+
+  btn.hidden = false;
+  btn.disabled = !!action.disabled;
+  btn.textContent = action.text;
+  btn.title = action.title;
+  btn.setAttribute('aria-label', action.title);
+  btn.dataset.pairedKind = action.pairedKind;
+  btn.dataset.pairedState = action.state;
+  btn.dataset.pairedTarget = action.target;
 }
 
 function renderPaneManager() {
@@ -4740,6 +4818,17 @@ function buildCommandPaletteItems() {
   const focusedPane = paneManager.panes.find((p) => p?.key === focusedKey) || paneManager.panes[0] || null;
   if (paneSupportsTargetLock(focusedPane)) {
     const nextLabel = focusedPane.pairedTargetLock ? 'Disable' : 'Enable';
+    const pairedAction = getPaneManagerPairedAction(focusedPane);
+    if (pairedAction) {
+      items.push(withShortcut({
+        id: 'cmd:toggle-paired-pane',
+        label: 'Toggle paired pane (Chat <-> Workqueue)',
+        detail: `${pairedAction.state === 'focus' ? 'Focus' : 'Open'} paired ${pairedAction.labelKind} for ${pairedAction.target}`,
+        paneMeta: commandPalettePaneMeta({ type: pairedAction.labelKind, target: pairedAction.target, mode: pairedAction.state === 'focus' ? 'focus existing' : 'create or focus' }),
+        searchText: 'toggle paired pane chat workqueue switch counterpart',
+        run: () => togglePairedPane(focusedPane)
+      }, shortcutDisplay('pane.togglePaired') || 'Cmd/Ctrl+Shift+G'));
+    }
     items.push(withShortcut({
       id: 'cmd:toggle-target-lock',
       label: `Pane: ${nextLabel} target lock`,
@@ -4944,7 +5033,7 @@ function buildCommandPaletteItems() {
         detail: 'Open/focus a Workqueue pane scoped to the active chat agent',
         run: () => openWorkqueueForActiveChatAgent()
       },
-      '⌘/Ctrl+Shift+G'
+      shortcutDisplay('workqueue.openForActiveChat') || 'Cmd/Ctrl+Shift+Alt+G'
     ),
     withShortcut(
       { id: 'cmd:refresh-agents', label: 'Agents: Refresh', detail: 'Refresh agent list', run: () => globalElements.refreshAgentsBtn?.click?.() },
@@ -5054,9 +5143,9 @@ function buildCommandPaletteItems() {
       enriched.priority = 85;
       return enriched;
     }
-    if (id === 'cmd:open-workqueue' || id === 'cmd:open-workqueue-active-agent') {
+    if (id === 'cmd:open-workqueue' || id === 'cmd:open-workqueue-active-agent' || id === 'cmd:toggle-paired-pane') {
       enriched.group = 'Workqueue';
-      enriched.priority = id === 'cmd:open-workqueue-active-agent' ? 96 : 92;
+      enriched.priority = id === 'cmd:toggle-paired-pane' ? 98 : id === 'cmd:open-workqueue-active-agent' ? 96 : 92;
       return enriched;
     }
     if (id === 'cmd:refresh-agents') {
@@ -9933,6 +10022,7 @@ function renderPaneIdentity(pane) {
     pane.elements.name.textContent = identity;
   }
   renderPanePairCue(pane);
+  renderPanePairedAction(pane);
   renderPanePinState(pane);
   renderActivePaneState();
   if (pane.elements.nicknameBtn) {
@@ -10385,6 +10475,19 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     event.stopPropagation();
     togglePanePinned(pane);
   });
+  if (paneSupportsTargetLock(pane)) {
+    const pairedBtn = document.createElement('button');
+    pairedBtn.type = 'button';
+    pairedBtn.className = 'secondary pane-paired-btn';
+    pairedBtn.dataset.testid = 'pane-paired-action';
+    pairedBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      togglePairedPane(pane);
+    });
+    elements.pairedBtn = pairedBtn;
+    elements.closeBtn?.parentElement?.insertBefore(pairedBtn, elements.closeBtn);
+  }
   renderPaneTargetLockChip(pane);
   renderPanePinState(pane);
 
@@ -13571,7 +13674,7 @@ function isTypingShortcutExempt(event) {
   const key = String(event?.key || '').toLowerCase();
   const override = matchingShortcutOverrideAction(event);
   if (override?.typingExempt) return true;
-  if (matchesKeybind(event, 'workqueue.openForActiveChat')) return true;
+  if (matchesKeybind(event, 'pane.togglePaired') || matchesKeybind(event, 'workqueue.openForActiveChat')) return true;
   return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'p' || key === 'k' || key === 'l');
 }
 
@@ -14015,6 +14118,11 @@ window.addEventListener('keydown', (event) => {
   // Ctrl/Cmd+Shift+Y → focus matching timeline target (Alt/Option adds anyway)
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey;
   if (isAccel && roleState.role === 'admin' && !isAnyOverlayOpen()) {
+    if (matchesKeybind(event, 'pane.togglePaired')) {
+      event.preventDefault();
+      togglePairedPane();
+      return;
+    }
     if (matchesKeybind(event, 'workqueue.openForActiveChat')) {
       event.preventDefault();
       openWorkqueueForActiveChatAgent();
