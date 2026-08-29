@@ -2435,12 +2435,32 @@ button.agents-section-title:hover {
 }
 
 .agents-row-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
+}
+
+.agents-reason-badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 140px;
+  min-height: 20px;
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 179, 71, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 179, 71, 0.1);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .agents-list.compact .agents-row-title {
