@@ -196,6 +196,7 @@ test('pane nicknames: set from header and manager, persist, and feed search surf
   const restoredChat = page.locator('[data-pane][data-pane-kind="chat"]').first();
   await expect(restoredChat.getByTestId('pane-type-label')).toContainText('Queue triage');
 
+  await page.evaluate(() => document.activeElement?.blur?.());
   await page.keyboard.press('ControlOrMeta+K');
   const paletteInput = page.locator('#commandPaletteInput');
   await expect(paletteInput).toBeVisible();

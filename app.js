@@ -701,7 +701,7 @@ function renderShortcutsContent() {
     </div>
   ` : `
     <div class="hint" style="margin-bottom: 10px;">
-      Most shortcuts are disabled while typing in inputs, textareas, selects, or contenteditable fields. Global keys like <kbd>Esc</kbd>, <kbd>${escapeHtml(shortcutDisplay('pane.manager'))}</kbd>, and <kbd>${escapeHtml(shortcutDisplay('command.palette'))}</kbd> still work.
+      Most shortcuts are disabled while typing in inputs, textareas, selects, or contenteditable fields. Global keys like <kbd>Esc</kbd> and <kbd>${escapeHtml(shortcutDisplay('pane.manager'))}</kbd> still work.
     </div>
   `;
   const html = groups.map((group) => `
