@@ -4527,6 +4527,7 @@ function renderPaneManager() {
             if (pairedPane) {
               closePaneManager({ restoreFocus: false });
               paneManager.focusPanePrimary(pairedPane);
+              setTimeout(() => paneManager.focusPanePrimary(pairedPane), 0);
             } else {
               renderPaneManager();
             }
