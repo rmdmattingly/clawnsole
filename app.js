@@ -5613,20 +5613,24 @@ function renderFleetSelectionBar({ classify = null, lastSeenMap = null } = {}) {
   const heartbeatTs = Number(map[id]) || 0;
   const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
   const triage = typeof classify === 'function'
-    ? classify(id)
+    ? classify(agent)
     : (() => {
         const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES);
         const paneState = getAgentPaneStateMap()[id] || 'unknown';
         const ageMs = heartbeatTs > 0 ? Math.max(0, Date.now() - heartbeatTs) : Number.POSITIVE_INFINITY;
         const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs: withinMinutes * 60_000, paneState });
-        if (paneState === 'error' || paneState === 'offline' || !Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket };
-        return { bucket: ageMs <= withinMinutes * 60_000 ? 'active' : 'stale', ageBucket };
+        const busy = isFleetAgentBusy(agent, getAgentStatusSnippetMap()[id]);
+        if (paneState === 'error' || paneState === 'offline' || !Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket, busy };
+        return { bucket: ageMs <= withinMinutes * 60_000 ? 'active' : 'stale', ageBucket, busy };
       })();
   const healthLabel = triage.bucket === 'offline_error'
     ? 'Offline/Error'
     : triage.bucket === 'stale'
       ? 'Stale'
-      : 'Healthy';
+      : triage.busy
+        ? 'Busy'
+        : 'Healthy';
+  const healthState = triage.busy ? 'busy' : triage.bucket;
 
   bar.hidden = false;
   if (String(bar.dataset.agentId || '') !== id) {
@@ -5666,7 +5670,7 @@ function renderFleetSelectionBar({ classify = null, lastSeenMap = null } = {}) {
   if (titleEl) titleEl.textContent = label;
   if (healthEl) {
     healthEl.textContent = healthLabel;
-    healthEl.dataset.healthState = triage.bucket;
+    healthEl.dataset.healthState = healthState;
   }
   if (ageEl) {
     ageEl.textContent = heartbeatAge;

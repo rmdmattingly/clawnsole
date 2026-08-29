@@ -778,6 +778,8 @@ test('fleet attention shortcut treats busy active agents as needing attention', 
   await expect(selected).toContainText('busy-agent');
   await expect(selected).toHaveAttribute('data-needs-attention', 'true');
   await expect(selected).toHaveAttribute('data-health-state', 'busy');
+  await expect(page.locator('#agentsSelectionBar [data-agents-selection-health]')).toHaveText('Busy');
+  await expect(page.locator('#agentsSelectionBar [data-agents-selection-health]')).toHaveAttribute('data-health-state', 'busy');
 });
 
 test('fleet attention shortcut falls back to first healthy row and Shift+Enter opens workqueue', async ({ page, clawnsole }) => {
