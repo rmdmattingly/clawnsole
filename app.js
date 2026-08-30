@@ -125,6 +125,8 @@ const globalElements = {
   addQueuePaneBtn: document.getElementById('addQueuePaneBtn'),
   layoutSelect: document.getElementById('layoutSelect'),
   paneGrid: document.getElementById('paneGrid'),
+  signedOutAdminState: document.getElementById('signedOutAdminState'),
+  signedOutUnlockBtn: document.getElementById('signedOutUnlockBtn'),
   paneTemplate: document.getElementById('paneTemplate')
 };
 
@@ -2429,12 +2431,28 @@ function renderAuthSessionUi() {
   return authUi;
 }
 
+function syncSignedOutAdminShell() {
+  const isAdminRoute = routeRole === 'admin';
+  const showSignedOut = isAdminRoute && !uiState.authed;
+  if (globalElements.signedOutAdminState) {
+    globalElements.signedOutAdminState.hidden = !showSignedOut;
+  }
+  if (globalElements.paneGrid) {
+    globalElements.paneGrid.hidden = showSignedOut;
+  }
+  if (globalElements.paneManagerBtn) {
+    globalElements.paneManagerBtn.hidden = showSignedOut;
+    globalElements.paneManagerBtn.disabled = showSignedOut;
+  }
+}
+
 function setAuthState(authed) {
   uiState.authed = authed;
   const authUi = renderAuthSessionUi();
   updateGlobalStatus();
   updateConnectionControls();
   paneManager.refreshChatEnabled();
+  syncSignedOutAdminShell();
 
   if (authUi.startAgentAutoRefresh) {
     startAgentAutoRefresh();
@@ -2498,6 +2516,8 @@ function setRole(role) {
     globalElements.shortcutsBtn.disabled = !showAdminControls;
     globalElements.shortcutsBtn.style.opacity = visibleOpacity;
   }
+
+  syncSignedOutAdminShell();
 }
 
 function showLogin(message = '') {
@@ -14574,6 +14594,7 @@ globalElements.status?.addEventListener('click', () => {
   paneManager.connectIfNeeded();
 });
 
+globalElements.signedOutUnlockBtn?.addEventListener('click', () => showLogin());
 globalElements.rolePill?.addEventListener('click', () => {
   if (!uiState.authed) {
     closeAuthSessionPopover();

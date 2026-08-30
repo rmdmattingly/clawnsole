@@ -303,10 +303,26 @@ test('deriveAuthOverlayState captures auth/role transition flags', () => {
     logoutOpacity: '1'
   });
 
-  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).startAgentAutoRefresh, false);
-  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).rolePillText, 'Locked');
-  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).showAdminControls, false);
-  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).authActionText, 'Unlock');
+  assert.deepEqual(deriveAuthOverlayState({ authed: false, role: 'admin' }), {
+    isAdmin: true,
+    authState: 'locked',
+    startAgentAutoRefresh: false,
+    stopAgentAutoRefresh: true,
+    rolePillText: 'Locked',
+    rolePillAdmin: false,
+    rolePillLocked: true,
+    rolePillSignedOut: false,
+    rolePillActionLabel: 'Focus password input to unlock session',
+    rolePillTooltip: 'Session context: locked as Admin in local. Click to unlock this session.',
+    authLabel: 'Locked',
+    principalLabel: 'Not signed in',
+    environmentLabel: 'local',
+    showAdminControls: false,
+    authActionText: 'Unlock',
+    authActionLabel: 'Unlock admin',
+    logoutEnabled: true,
+    logoutOpacity: '1'
+  });
   assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest', environment: 'qa' }).rolePillText, 'Signed in - Guest - qa');
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '1');
 });
