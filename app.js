@@ -118,6 +118,8 @@ const globalElements = {
   loginBtn: document.getElementById('loginBtn'),
   loginError: document.getElementById('loginError'),
   logoutBtn: document.getElementById('logoutBtn'),
+  authEmptyState: document.getElementById('authEmptyState'),
+  authEmptyUnlockBtn: document.getElementById('authEmptyUnlockBtn'),
   paneControls: document.getElementById('paneControls'),
   addPaneBtn: document.getElementById('addPaneBtn'),
   layoutLockBtn: document.getElementById('layoutLockBtn'),
@@ -2432,6 +2434,7 @@ function renderAuthSessionUi() {
 function setAuthState(authed) {
   uiState.authed = authed;
   const authUi = renderAuthSessionUi();
+  syncAuthEmptyState();
   updateGlobalStatus();
   updateConnectionControls();
   paneManager.refreshChatEnabled();
@@ -2448,6 +2451,7 @@ function setAuthState(authed) {
 function setRole(role) {
   roleState.role = role;
   const authUi = renderAuthSessionUi();
+  syncAuthEmptyState();
 
   updateAuthAction(authUi);
 
@@ -2497,6 +2501,16 @@ function setRole(role) {
     globalElements.shortcutsBtn.hidden = !showAdminControls;
     globalElements.shortcutsBtn.disabled = !showAdminControls;
     globalElements.shortcutsBtn.style.opacity = visibleOpacity;
+  }
+}
+
+function syncAuthEmptyState() {
+  const signedOut = !uiState.authed;
+  if (globalElements.authEmptyState) {
+    globalElements.authEmptyState.hidden = !signedOut;
+  }
+  if (globalElements.paneGrid) {
+    globalElements.paneGrid.hidden = signedOut;
   }
 }
 
@@ -14649,6 +14663,10 @@ globalElements.logoutBtn?.addEventListener('click', async () => {
   paneManager.disconnectAll({ silent: true });
   roleState.role = null;
   window.location.replace('/');
+});
+
+globalElements.authEmptyUnlockBtn?.addEventListener('click', () => {
+  showLogin();
 });
 
 globalElements.addPaneBtn?.addEventListener('click', (event) => {

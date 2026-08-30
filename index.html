@@ -140,6 +140,14 @@
 
       <main class="chat-page">
         <canvas id="pulseCanvas" class="flux-canvas"></canvas>
+        <section id="authEmptyState" class="auth-empty-state" data-testid="auth-empty-state" aria-labelledby="authEmptyTitle" hidden>
+          <div class="auth-empty-state__content">
+            <p class="auth-empty-state__eyebrow">Admin locked</p>
+            <h2 id="authEmptyTitle">Unlock to access Chat + Workqueue + Fleet</h2>
+            <p>Enter the admin password to load panes, queues, and fleet controls for this session.</p>
+            <button id="authEmptyUnlockBtn" class="primary" type="button" data-testid="auth-empty-unlock">Unlock</button>
+          </div>
+        </section>
         <div id="paneGrid" class="pane-grid" aria-label="Chat panes" data-testid="pane-grid"></div>
 
         <template id="paneTemplate">
