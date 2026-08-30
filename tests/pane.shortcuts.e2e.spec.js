@@ -493,6 +493,7 @@ test('topbar shortcut hints follow active pane and typing focus', async ({ page 
   await expect(page.locator('[data-pane]')).toHaveCount(3);
   await page.locator('[data-pane]').nth(2).click({ position: { x: 18, y: 18 } });
   await page.locator('[data-pane]').nth(2).getByTestId('pane-help').focus();
+  await page.evaluate(() => window.renderShortcutHintStrip?.());
   await expect(strip).toContainText('Move Fleet selection down');
   await expect(strip).toContainText('Workqueue for selected Fleet agent');
 });
@@ -984,6 +985,38 @@ test('ctrl/cmd+shift+g opens or focuses workqueue for active chat agent', async 
   await page.keyboard.press('ControlOrMeta+Shift+G');
   await expect(wqPane).toHaveCount(1);
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
+});
+
+test('global admin shortcuts do not fire while typing in chat input', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const input = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+  const shortcutsModal = page.locator('#shortcutsModal');
+  const workqueueModal = page.locator('#workqueueModal');
+  const commandPaletteModal = page.locator('#commandPaletteModal');
+
+  await input.focus();
+  await expect(input).toBeFocused();
+
+  await page.keyboard.press('Shift+/');
+  await expect(shortcutsModal).toHaveAttribute('aria-hidden', 'true');
+
+  await page.keyboard.type('gw');
+  await expect(workqueueModal).toHaveAttribute('aria-hidden', 'true');
+
+  await page.keyboard.press('ControlOrMeta+K');
+  await expect(commandPaletteModal).toHaveAttribute('aria-hidden', 'true');
+
+  await page.keyboard.press('ControlOrMeta+R');
+  await expect(input).toBeFocused();
 });
 
 test('fleet quick action button + keyboard shortcut focus existing timeline pane without duplicates', async ({ page }) => {
