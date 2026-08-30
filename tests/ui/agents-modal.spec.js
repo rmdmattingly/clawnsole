@@ -325,6 +325,52 @@ test('agents modal shows row health and heartbeat-age chips', async ({ page, cla
   await expect(offlineRow.locator('.agents-age-chip')).toHaveText('unknown');
 });
 
+test('agents modal defaults to attention-first triage chips and reason badges', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'connected-agent', name: 'Connected', displayName: 'Connected' },
+    { id: 'busy-agent', name: 'Busy', displayName: 'Busy', status: 'in_progress' },
+    { id: 'stale-agent', name: 'Stale', displayName: 'Stale' },
+    { id: 'disconnected-agent', name: 'Disconnected', displayName: 'Disconnected' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.removeItem('clawnsole.admin.agents.sort');
+    localStorage.removeItem('clawnsole.admin.agents.filter');
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      'connected-agent': now - 10_000,
+      'busy-agent': now - 12_000,
+      'stale-agent': now - 70 * 60_000
+    }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
+  await expect(page.locator('[data-agents-filter="needs_attention"]')).toHaveText('Needs attention');
+  await expect(page.locator('[data-agents-filter="connected"]')).toHaveText('Connected');
+  await expect(page.locator('[data-agents-filter="disconnected"]')).toHaveText('Disconnected');
+  await expect(page.locator('[data-agents-filter="busy"]')).toHaveText('Busy');
+
+  const rows = page.locator('#agentsList .agents-row:visible');
+  await expect(rows.nth(0)).toContainText('Disconnected');
+  await expect(rows.nth(0).locator('.agents-reason-badge')).toHaveText('Disconnected');
+  await expect(rows.nth(1)).toContainText('Busy');
+  await expect(rows.nth(1).locator('.agents-reason-badge')).toHaveText('Busy');
+  await expect(rows.nth(2)).toContainText('Stale');
+  await expect(rows.nth(2).locator('.agents-reason-badge')).toContainText('Stale');
+
+  await page.locator('[data-agents-filter="connected"]').click();
+  await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
+  await expect(page.locator('#agentsList .agents-row:visible')).toContainText('Connected');
+});
+
 test('agents modal quick filter narrows list and Esc clears it', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
@@ -395,7 +441,7 @@ test('agents modal persists triage query and sort until reset', async ({ page, c
   await page.locator('#agentsSort').selectOption('agent_id_asc');
   await page.getByRole('button', { name: 'Reset agents triage view' }).click();
   await expect(page.locator('#agentsSearch')).toHaveValue('');
-  await expect(page.locator('#agentsSort')).toHaveValue('attention_desc');
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
   await expect(page.locator('#agentsList .agents-row')).toHaveCount(2);
 });
 
@@ -407,7 +453,7 @@ test('agents modal defaults to attention sort with triage chips and reason badge
   await page.getByRole('button', { name: 'Open agents' }).click();
   await expect(page.locator('#agentsModal')).toHaveClass(/open/);
 
-  await expect(page.locator('#agentsSort')).toHaveValue('attention_desc');
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
   await expect(page.getByRole('button', { name: 'Needs attention', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connected', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Disconnected', exact: true })).toBeVisible();
@@ -716,8 +762,8 @@ test('fleet attention mode sections healthy agents and keeps filters while expan
   await expect(page.getByRole('button', { name: /Healthy \(11\) Hide/ })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(12);
 
-  await page.getByRole('button', { name: 'Disconnected', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Disconnected', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('[data-agents-filter="disconnected"]').click();
+  await expect(page.locator('[data-agents-filter="disconnected"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#agentsList .agents-section-title').first()).toContainText('Needs attention (1)');
   await expect(page.getByRole('button', { name: /Healthy \(0\) Hide/ })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
@@ -758,6 +804,40 @@ test('fleet attention shortcut selects first needs-attention row and Enter opens
       )
     )
     .toContain('attention-agent');
+});
+
+test('fleet attention shortcut treats busy active agents as needing attention', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'healthy-agent', name: 'healthy-agent', displayName: 'healthy-agent' },
+    { id: 'busy-agent', name: 'busy-agent', displayName: 'busy-agent', status: 'in_progress' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      'healthy-agent': now,
+      'busy-agent': now
+    }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.evaluate(() => document.activeElement?.blur?.());
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F', ctrlKey: true, shiftKey: true, bubbles: true }));
+  });
+
+  const selected = page.locator('#agentsList .agents-row[aria-selected="true"]');
+  await expect(selected).toContainText('busy-agent');
+  await expect(selected).toHaveAttribute('data-needs-attention', 'true');
+  await expect(selected).toHaveAttribute('data-health-state', 'busy');
+  await expect(page.locator('#agentsSelectionBar [data-agents-selection-health]')).toHaveText('Busy');
+  await expect(page.locator('#agentsSelectionBar [data-agents-selection-health]')).toHaveAttribute('data-health-state', 'busy');
 });
 
 test('fleet attention shortcut falls back to first healthy row and Shift+Enter opens workqueue', async ({ page, clawnsole }) => {
@@ -844,7 +924,7 @@ test('agents modal heartbeat heatmap and stale-first sort are toggleable and res
   await expect(page.locator('#agentsList .agents-row:visible').first()).toContainText('critical-agent');
 
   await page.getByRole('button', { name: 'Reset sort' }).click();
-  await expect(page.locator('#agentsSort')).toHaveValue('attention_desc');
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
   await expect(page.locator('#agentsSortIndicator')).toHaveText('');
 });
 

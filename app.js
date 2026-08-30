@@ -418,6 +418,7 @@ const ADMIN_AGENT_COLUMNS_KEY = 'clawnsole.admin.agents.columns';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
 const ADMIN_AGENT_REFRESH_MODE_KEY = 'clawnsole.admin.agents.refreshMode';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
+const FLEET_DEFAULT_SORT = 'attention_first';
 const FLEET_SNOOZE_30M_MS = 30 * 60_000;
 const FLEET_SNOOZE_2H_MS = 2 * 60 * 60_000;
 const FLEET_COLUMN_DEFS = [
@@ -1200,12 +1201,22 @@ function getFleetFilter() {
   return allowed.has(key) ? key : 'all';
 }
 
+function normalizeFleetFilter(filter) {
+  const key = String(filter || 'all').trim() || 'all';
+  const aliases = {
+    active: 'connected',
+    stale: 'needs_attention',
+    offline_error: 'disconnected'
+  };
+  return aliases[key] || key;
+}
+
 function getFleetSort() {
-  const raw = String(storage.get(ADMIN_AGENT_SORT_KEY, 'attention_desc') || 'attention_desc').trim();
-  const aliases = { recent: 'recent_desc' };
+  const raw = String(storage.get(ADMIN_AGENT_SORT_KEY, FLEET_DEFAULT_SORT) || FLEET_DEFAULT_SORT).trim();
+  const aliases = { recent: 'recent_desc', attention_desc: FLEET_DEFAULT_SORT };
   const key = aliases[raw] || raw;
-  const allowed = new Set(['attention_desc', 'recent_desc', 'heartbeat_age_desc', 'agent_id_asc']);
-  return allowed.has(key) ? key : 'attention_desc';
+  const allowed = new Set([FLEET_DEFAULT_SORT, 'recent_desc', 'heartbeat_age_desc', 'agent_id_asc']);
+  return allowed.has(key) ? key : FLEET_DEFAULT_SORT;
 }
 
 function getAgentWorkqueueCounts() {
@@ -1221,8 +1232,56 @@ function getAgentWorkqueueCounts() {
   return out;
 }
 
-function buildFleetTriage(agentId, { lastSeenMap, paneStateMap, workqueueCounts, activeWindowMs }) {
-  const id = String(agentId || '').trim();
+function isFleetAgentBusy(agent, statusSnippet = '') {
+  const text = [
+    agent?.status,
+    agent?.state,
+    agent?.activity,
+    agent?.currentTask,
+    agent?.task,
+    statusSnippet
+  ].map((value) => String(value || '').toLowerCase()).join(' ');
+  return /\b(busy|running|working|in[_ -]?progress|claimed|active task)\b/.test(text);
+}
+
+function fleetAttentionScore(classification) {
+  if (!classification) return 0;
+  if (classification.bucket === 'offline_error') return 4000;
+  if (classification.busy || classification.isBusy) return 3000;
+  if (classification.bucket === 'stale') {
+    const minutes = Number.isFinite(classification.ageMs) ? Math.floor(classification.ageMs / 60_000) : 999;
+    return 2000 + Math.min(minutes, 999);
+  }
+  return 0;
+}
+
+function fleetReasonBadge(classification) {
+  if (!classification) return 'Connected';
+  if (classification.bucket === 'offline_error') return 'Disconnected';
+  if (classification.busy || classification.isBusy) return 'Busy';
+  if (classification.bucket === 'stale') {
+    if (!Number.isFinite(classification.ageMs)) return 'Stale';
+    return `Stale ${formatRelativeAge(classification.ageMs).replace(/\s+ago$/, '')}`;
+  }
+  return 'Connected';
+}
+
+function fleetFilterMatch(filterMode, classification) {
+  const key = normalizeFleetFilter(filterMode);
+  if (key === 'all') return true;
+  if (key === 'needs_attention') return classification.bucket !== 'active' || classification.busy || classification.isBusy;
+  if (key === 'connected') return classification.bucket === 'active' && !classification.busy && !classification.isBusy;
+  if (key === 'disconnected') return classification.bucket === 'offline_error';
+  if (key === 'busy') return !!(classification.busy || classification.isBusy);
+  return true;
+}
+
+function buildFleetTriage(agent, { lastSeenMap, paneStateMap, statusSnippetMap, workqueueCounts, activeWindowMs, baseAgents = [] }) {
+  const rawAgentId = typeof agent === 'object' && agent ? agent.id : agent;
+  const id = String(rawAgentId || '').trim();
+  const agentRecord = typeof agent === 'object' && agent
+    ? agent
+    : baseAgents.find((entry) => String(entry?.id || '').trim() === id) || { id };
   const ts = Number(lastSeenMap?.[id]) || 0;
   const ageMs = ts > 0 ? Math.max(0, Date.now() - ts) : Number.POSITIVE_INFINITY;
   const paneState = String(paneStateMap?.[id] || 'unknown').trim().toLowerCase();
@@ -1230,7 +1289,7 @@ function buildFleetTriage(agentId, { lastSeenMap, paneStateMap, workqueueCounts,
   const queueCount = Number(workqueueCounts?.[id]) || 0;
   const disconnected = paneState === 'error' || paneState === 'offline' || !Number.isFinite(ageMs);
   const stale = !disconnected && ageMs > activeWindowMs;
-  const isBusy = queueCount > 0;
+  const isBusy = queueCount > 0 || isFleetAgentBusy(agentRecord, statusSnippetMap?.[id]);
 
   let bucket = 'active';
   let attentionScore = 0;
@@ -1238,20 +1297,16 @@ function buildFleetTriage(agentId, { lastSeenMap, paneStateMap, workqueueCounts,
 
   if (disconnected) {
     bucket = 'offline_error';
-    attentionScore = 300;
-    reason = paneState === 'error' ? 'Error' : 'Disconnected';
-  } else if (queueCount >= 5) {
-    bucket = 'active';
-    attentionScore = 220 + Math.min(queueCount, 99);
-    reason = `Queue ${queueCount}`;
+    attentionScore = 4000;
+    reason = 'Disconnected';
+  } else if (isBusy) {
+    attentionScore = 3000 + Math.min(queueCount, 99);
+    reason = 'Busy';
   } else if (stale) {
     bucket = 'stale';
-    attentionScore = 180;
-    reason = `Stale ${formatRelativeAge(ageMs)}`;
-  } else if (isBusy) {
-    bucket = 'active';
-    attentionScore = 120 + queueCount;
-    reason = `Queue ${queueCount}`;
+    const minutes = Number.isFinite(ageMs) ? Math.floor(ageMs / 60_000) : 999;
+    attentionScore = 2000 + Math.min(minutes, 999);
+    reason = Number.isFinite(ageMs) ? `Stale ${formatRelativeAge(ageMs).replace(/\s+ago$/, '')}` : 'Stale';
   }
 
   return {
@@ -1260,16 +1315,17 @@ function buildFleetTriage(agentId, { lastSeenMap, paneStateMap, workqueueCounts,
     ts,
     ageMs,
     queueCount,
+    busy: isBusy,
     isBusy,
     isConnected: bucket === 'active' && !stale && !disconnected,
-    needsAttention: bucket !== 'active' || attentionScore >= 180,
+    needsAttention: bucket !== 'active' || isBusy,
     attentionScore,
     reason
   };
 }
 
 function setFleetFilter(filter) {
-  const key = String(filter || 'all').trim() || 'all';
+  const key = normalizeFleetFilter(filter);
   storage.set(ADMIN_AGENT_FILTER_KEY, key);
   globalElements.agentsFilterButtons.forEach((chip) => {
     const active = (chip.getAttribute('data-agents-filter') || '') === key;
@@ -1281,10 +1337,10 @@ function setFleetFilter(filter) {
 function resetAgentsTriageView() {
   storage.remove(ADMIN_AGENT_SEARCH_KEY);
   storage.remove(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY);
-  storage.set(ADMIN_AGENT_SORT_KEY, 'attention_desc');
+  storage.set(ADMIN_AGENT_SORT_KEY, FLEET_DEFAULT_SORT);
   storage.set(ADMIN_AGENT_FILTER_KEY, 'all');
   if (globalElements.agentsSearch) globalElements.agentsSearch.value = '';
-  if (globalElements.agentsSort) globalElements.agentsSort.value = 'attention_desc';
+  if (globalElements.agentsSort) globalElements.agentsSort.value = FLEET_DEFAULT_SORT;
   setFleetFilter('all');
   renderAgentsModalList();
   try {
@@ -2216,7 +2272,12 @@ async function fetchAgents() {
         displayName: typeof agent?.displayName === 'string' ? agent.displayName : '',
         emoji: typeof agent?.emoji === 'string' ? agent.emoji : '',
         model: typeof agent?.model === 'string' ? agent.model : '',
-        host: typeof agent?.host === 'string' ? agent.host : ''
+        host: typeof agent?.host === 'string' ? agent.host : '',
+        status: typeof agent?.status === 'string' ? agent.status : '',
+        state: typeof agent?.state === 'string' ? agent.state : '',
+        activity: typeof agent?.activity === 'string' ? agent.activity : '',
+        currentTask: typeof agent?.currentTask === 'string' ? agent.currentTask : '',
+        task: typeof agent?.task === 'string' ? agent.task : ''
       }))
       .filter((agent) => agent.id);
   } catch {
@@ -5361,12 +5422,15 @@ function renderCommandPalette() {
 function filterCommandPalette(query) {
   commandPaletteState.query = String(query || '');
   const q = commandPaletteState.query.trim();
+  const qLower = q.toLowerCase();
   const scored = commandPaletteState.items
     .map((item) => {
       const meta = Array.isArray(item.paneMeta) ? item.paneMeta.map((x) => x?.label || '').join(' ') : '';
       const hay = `${item.label || ''} ${item.detail || ''} ${item.searchText || ''} ${meta} ${item.id || ''} ${item.group || ''} ${item.subgroup || ''}`;
       const score = scoreFuzzy(hay, q);
-      const rank = score + Number(item.priority || 0);
+      const label = String(item.label || '').trim().toLowerCase();
+      const exactLabelBoost = qLower && label === qLower ? 10_000 : 0;
+      const rank = score + exactLabelBoost + Number(item.priority || 0);
       return { item, score, rank };
     })
     .filter((x) => x.score > 0)
@@ -5508,7 +5572,7 @@ function setFleetHeartbeatSort() {
 
 function resetFleetSort() {
   const previous = String(storage.get(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY, '') || '').trim();
-  const next = previous && previous !== 'heartbeat_age_desc' ? previous : 'attention_desc';
+  const next = previous && previous !== 'heartbeat_age_desc' ? previous : FLEET_DEFAULT_SORT;
   storage.set(ADMIN_AGENT_SORT_KEY, next);
   storage.remove(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY);
   if (globalElements.agentsSort) globalElements.agentsSort.value = next;
@@ -5778,20 +5842,24 @@ function renderFleetSelectionBar({ classify = null, lastSeenMap = null } = {}) {
   const heartbeatTs = Number(map[id]) || 0;
   const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
   const triage = typeof classify === 'function'
-    ? classify(id)
+    ? classify(agent)
     : (() => {
         const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES);
         const paneState = getAgentPaneStateMap()[id] || 'unknown';
         const ageMs = heartbeatTs > 0 ? Math.max(0, Date.now() - heartbeatTs) : Number.POSITIVE_INFINITY;
         const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs: withinMinutes * 60_000, paneState });
-        if (paneState === 'error' || paneState === 'offline' || !Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket };
-        return { bucket: ageMs <= withinMinutes * 60_000 ? 'active' : 'stale', ageBucket };
+        const busy = isFleetAgentBusy(agent, getAgentStatusSnippetMap()[id]);
+        if (paneState === 'error' || paneState === 'offline' || !Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket, busy };
+        return { bucket: ageMs <= withinMinutes * 60_000 ? 'active' : 'stale', ageBucket, busy };
       })();
   const healthLabel = triage.bucket === 'offline_error'
     ? 'Offline/Error'
     : triage.bucket === 'stale'
       ? 'Stale'
-      : 'Healthy';
+      : triage.busy
+        ? 'Busy'
+        : 'Healthy';
+  const healthState = triage.busy ? 'busy' : triage.bucket;
 
   bar.hidden = false;
   if (String(bar.dataset.agentId || '') !== id) {
@@ -5831,7 +5899,7 @@ function renderFleetSelectionBar({ classify = null, lastSeenMap = null } = {}) {
   if (titleEl) titleEl.textContent = label;
   if (healthEl) {
     healthEl.textContent = healthLabel;
-    healthEl.dataset.healthState = triage.bucket;
+    healthEl.dataset.healthState = healthState;
   }
   if (ageEl) {
     ageEl.textContent = heartbeatAge;
@@ -5907,8 +5975,8 @@ function renderAgentsModalList() {
   const workqueueCounts = getAgentWorkqueueCounts();
   const baseAgents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
 
-  const classify = (agentId) => {
-    return buildFleetTriage(agentId, { lastSeenMap, paneStateMap, workqueueCounts, activeWindowMs });
+  const classify = (agent) => {
+    return buildFleetTriage(agent, { lastSeenMap, paneStateMap, statusSnippetMap, workqueueCounts, activeWindowMs, baseAgents });
   };
 
   const matches = (agent) => {
@@ -5918,24 +5986,17 @@ function renderAgentsModalList() {
     const haystack = `${label} ${id.toLowerCase()} ${snippet}`.trim();
     if (search && !haystack.includes(search)) return false;
     if (filterMode === 'all') return true;
-    const triage = classify(id);
-    if (filterMode === 'needs_attention') return triage.needsAttention;
-    if (filterMode === 'connected') return triage.isConnected;
-    if (filterMode === 'disconnected') return triage.bucket === 'offline_error';
-    if (filterMode === 'busy') return triage.isBusy;
-    return triage.bucket === filterMode;
+    return fleetFilterMatch(filterMode, classify(agent));
   };
 
   const sortAgents = (list) => {
     const arr = (Array.isArray(list) ? list : []).slice();
-    if (sortMode === 'agent_id_asc') {
-      arr.sort((a, b) => String(a?.id || '').localeCompare(String(b?.id || '')));
-      return arr;
-    }
-    if (sortMode === 'heartbeat_age_desc') {
+    if (sortMode === 'attention_first') {
       arr.sort((a, b) => {
-        const ca = classify(a?.id);
-        const cb = classify(b?.id);
+        const ca = classify(a);
+        const cb = classify(b);
+        const ds = fleetAttentionScore(cb) - fleetAttentionScore(ca);
+        if (ds) return ds;
         const da = Number.isFinite(ca.ageMs) ? ca.ageMs : Number.MAX_SAFE_INTEGER;
         const db = Number.isFinite(cb.ageMs) ? cb.ageMs : Number.MAX_SAFE_INTEGER;
         if (db !== da) return db - da;
@@ -5943,7 +6004,22 @@ function renderAgentsModalList() {
       });
       return arr;
     }
-    if (sortMode === 'attention_desc') {
+    if (sortMode === 'agent_id_asc') {
+      arr.sort((a, b) => String(a?.id || '').localeCompare(String(b?.id || '')));
+      return arr;
+    }
+    if (sortMode === 'heartbeat_age_desc') {
+      arr.sort((a, b) => {
+        const ca = classify(a);
+        const cb = classify(b);
+        const da = Number.isFinite(ca.ageMs) ? ca.ageMs : Number.MAX_SAFE_INTEGER;
+        const db = Number.isFinite(cb.ageMs) ? cb.ageMs : Number.MAX_SAFE_INTEGER;
+        if (db !== da) return db - da;
+        return formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true }));
+      });
+      return arr;
+    }
+    if (sortMode === FLEET_DEFAULT_SORT) {
       arr.sort((a, b) => {
         const ca = classify(a?.id);
         const cb = classify(b?.id);
@@ -5966,11 +6042,17 @@ function renderAgentsModalList() {
   const rest = sortAgents(filtered.filter((a) => !pins.has(String(a?.id || '').trim())));
   const shownSnoozed = fleetShowSnoozed ? snoozedMatches : [];
   const ordered = [...pinned, ...rest, ...shownSnoozed];
-  const needsAttention = rest.filter((agent) => classify(agent?.id).bucket !== 'active');
-  const healthy = rest.filter((agent) => classify(agent?.id).bucket === 'active');
+  const needsAttention = rest.filter((agent) => {
+    const c = classify(agent);
+    return c.bucket !== 'active' || c.busy;
+  });
+  const healthy = rest.filter((agent) => {
+    const c = classify(agent);
+    return c.bucket === 'active' && !c.busy;
+  });
   const fleetSummary = baseAgents.reduce((acc, agent) => {
-    const { bucket } = classify(agent?.id);
-    if (bucket === 'active') acc.healthy += 1;
+    const { bucket, busy } = classify(agent);
+    if (bucket === 'active' && !busy) acc.healthy += 1;
     else acc.needsTriage += 1;
     if (bucket === 'offline_error') acc.disconnected += 1;
     return acc;
@@ -6093,12 +6175,15 @@ function renderAgentsModalList() {
       const snoozeChipHtml = snoozed
         ? `<span class="agents-snooze-chip" title="Snoozed until ${escapeHtml(new Date(snoozedUntil).toLocaleTimeString())}">${escapeHtml(`Snoozed ${fmtRemaining(snoozedUntil - Date.now())}`)}</span>`
         : '';
-      const triage = classify(id);
+      const triage = classify(agent);
       const healthLabel = triage.bucket === 'offline_error'
         ? 'Offline/Error'
         : triage.bucket === 'stale'
           ? 'Stale'
-          : 'Healthy';
+          : triage.busy
+            ? 'Busy'
+            : 'Healthy';
+      const healthState = triage.busy ? 'busy' : triage.bucket;
       const heatBucketLabel = heartbeatAgeBucketLabel(triage.ageBucket);
       const reasonHtml = `<span class="agents-reason-badge" data-testid="agents-reason-badge" title="Rank reason">${escapeHtml(triage.reason)}</span>`;
       const statusSnippet = String(statusSnippetMap[id] || '').trim();
@@ -6141,8 +6226,8 @@ function renderAgentsModalList() {
       `
         : '';
       row.dataset.heartbeatBucket = triage.ageBucket;
-      row.dataset.healthState = triage.bucket;
-      row.dataset.needsAttention = triage.bucket === 'active' ? 'false' : 'true';
+      row.dataset.healthState = healthState;
+      row.dataset.needsAttention = (triage.bucket !== 'active' || triage.busy) ? 'true' : 'false';
       row.classList.toggle('is-stale', triage.bucket === 'stale' || heartbeatAgeMs > FLEET_DEFAULT_STALE_THRESHOLD_MINUTES * 60_000);
       if (snoozed) row.dataset.snoozed = 'true';
       row.classList.toggle('agents-row-heatmap', heatmapEnabled);
@@ -6155,7 +6240,7 @@ function renderAgentsModalList() {
           ${visibleColumns.id ? `<div class="agents-row-id" data-fleet-column="id">${escapeHtml(id)}</div>` : ''}
         </div>
         <div class="agents-row-health">
-          ${visibleColumns.health ? `<span class="agents-health-state-chip" data-fleet-column="health" data-health-state="${escapeHtml(triage.bucket)}">${escapeHtml(healthLabel)}</span>` : ''}
+          ${visibleColumns.health ? `<span class="agents-health-state-chip" data-fleet-column="health" data-health-state="${escapeHtml(healthState)}">${escapeHtml(healthLabel)}</span>` : ''}
         </div>
         <div class="agents-row-meta">
             ${visibleColumns.heartbeat ? `<span class="agents-age-chip" data-fleet-column="heartbeat" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}" title="Heartbeat age: ${escapeHtml(heartbeatAge)} (${escapeHtml(heatBucketLabel)})">${escapeHtml(heartbeatAge)}</span>` : ''}
@@ -6238,7 +6323,7 @@ function renderAgentsModalList() {
     globalElements.agentsHeartbeatSortBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
   }
   if (globalElements.agentsSortResetBtn) {
-    globalElements.agentsSortResetBtn.disabled = sortMode === 'attention_desc';
+    globalElements.agentsSortResetBtn.disabled = sortMode === FLEET_DEFAULT_SORT;
   }
   if (globalElements.agentsSortIndicator) {
     globalElements.agentsSortIndicator.textContent =
@@ -13531,7 +13616,7 @@ globalElements.agentsDensityButtons.forEach((btn) => {
 });
 
 globalElements.agentsSort?.addEventListener('change', () => {
-  storage.set(ADMIN_AGENT_SORT_KEY, String(globalElements.agentsSort.value || 'attention_desc'));
+  storage.set(ADMIN_AGENT_SORT_KEY, String(globalElements.agentsSort.value || FLEET_DEFAULT_SORT));
   renderAgentsModalList();
 });
 
