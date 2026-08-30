@@ -3672,6 +3672,25 @@ function paneSummaryLabel(pane) {
   return `${letter} ${type} · ${target}`;
 }
 
+function paneStateChipsMarkup(pane, { prefix = 'pane-state', includeUnreadCount = false } = {}) {
+  const chips = [];
+  const unread = paneUnreadCount(pane);
+  if (unread > 0) {
+    const label = includeUnreadCount ? `${unread} unread` : 'unread';
+    chips.push({ key: 'unread', label, tone: 'unread', title: `${unread} unread` });
+  }
+  if (paneHasDraftChanges(pane)) chips.push({ key: 'draft', label: 'draft', tone: 'draft', title: 'Draft unsent' });
+
+  const state = String(pane?.statusState || (pane?.connected ? 'connected' : 'disconnected')).trim().toLowerCase();
+  if (state === 'disconnected' || state === 'error') {
+    chips.push({ key: 'disconnected', label: 'disconnected', tone: 'disconnected', title: 'Disconnected' });
+  }
+
+  return chips
+    .map((chip) => `<span class="${escapeHtml(prefix)}-chip ${escapeHtml(prefix)}-chip--${escapeHtml(chip.tone)}" data-testid="${escapeHtml(prefix)}-chip-${escapeHtml(chip.key)}" title="${escapeHtml(chip.title)}">${escapeHtml(chip.label)}</span>`)
+    .join('');
+}
+
 function isPaneSwitchHudEnabled() {
   return String(storage.get(PANE_SWITCH_HUD_ENABLED_KEY, '1') || '1') !== '0';
 }
@@ -4586,8 +4605,10 @@ function renderPaneManager() {
         const hasDraft = paneHasDraftChanges(pane);
         const pinned = paneIsPinned(pane);
         const paneIdentity = paneSummaryLabel(pane);
+        const letter = paneHeaderLetter(pane);
         const nickname = paneNickname(pane);
         const pairedAction = getPaneManagerPairedAction(pane);
+        const stateChips = paneStateChipsMarkup(pane, { prefix: 'pane-manager-state', includeUnreadCount: true });
         const rowLabel = `${paneIdentity}${nickname ? `, nickname ${nickname}` : ''}${pinned ? ', pinned' : ''}${unreadCount > 0 ? `, ${unreadCount} unread` : ''}${hasDraft ? ', unsent draft' : ''}`;
         row.setAttribute('aria-label', rowLabel);
 
@@ -4596,6 +4617,7 @@ function renderPaneManager() {
         row.innerHTML = `
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
+              <span class="pane-manager-letter" data-testid="pane-manager-letter" aria-label="${escapeHtml(`Pane ${letter}`)}">${escapeHtml(letter)}</span>
               ${paneTypeBadgeMarkup(pane, { extraClass: 'pane-manager-type-badge', testId: 'pane-manager-type-badge' })}
               ${panePairCueMarkup(pane, { testId: 'pane-manager-pair-cue' })}
               <span class="pane-manager-kind-label">${paneManagerHighlightHtml(paneIdentity, query)}</span>
@@ -4605,6 +4627,7 @@ function renderPaneManager() {
               ${pinned ? '<span class="pane-manager-pinned-badge" data-testid="pane-manager-pinned-badge" title="Pinned pane">Pinned</span>' : ''}
               ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
               ${hasDraft ? '<span class="pane-manager-draft-badge" data-testid="pane-manager-draft-badge" title="Unsent draft">Draft</span>' : ''}
+              <span class="pane-manager-state-chips" data-testid="pane-manager-state-chips">${stateChips}</span>
             </div>
             <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
           </div>
