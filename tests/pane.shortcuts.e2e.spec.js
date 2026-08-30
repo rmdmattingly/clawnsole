@@ -140,6 +140,86 @@ test('shortcuts overlay: status panel shows typing-focus block reason', async ({
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
 });
 
+test('inline shortcut hints follow active pane and hide while typing', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const strip = page.getByTestId('shortcut-hint-strip');
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+
+  await expect(chatInput).toBeFocused();
+  await expect(strip).toBeHidden();
+
+  await page.locator('[data-pane][data-pane-kind="chat"]').first().click({ position: { x: 18, y: 18 } });
+  await expect(strip).toBeVisible();
+  await expect(strip).toHaveAttribute('data-shortcut-pane-kind', 'chat');
+  await expect(strip).toContainText('Chat');
+  await expect(strip).toContainText('Cmd/Ctrl+L');
+  await expect(strip).toContainText('Press ?');
+
+  await page.locator('[data-pane][data-pane-kind="workqueue"]').first().click({ position: { x: 18, y: 18 } });
+  await expect(strip).toBeVisible();
+  await expect(strip).toHaveAttribute('data-shortcut-pane-kind', 'workqueue');
+  await expect(strip).toContainText('Workqueue');
+  await expect(strip).toContainText('j/k');
+  await expect(strip).toContainText('Enter');
+
+  await page.getByTestId('shortcut-hint-strip').getByRole('button', { name: 'Press ? for all shortcuts' }).click();
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'false');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'true');
+
+  await page.getByRole('button', { name: 'Open fleet pane' }).click();
+  await page.locator('[data-pane][data-pane-kind="timeline"]').first().click({ position: { x: 18, y: 18 } });
+  await expect(strip).toBeVisible();
+  await expect(strip).toHaveAttribute('data-shortcut-pane-kind', 'timeline');
+  await expect(strip).toContainText('Fleet');
+  await expect(strip).toContainText('Shift+Enter');
+
+  await chatInput.focus();
+  await expect(strip).toBeHidden();
+});
+
+test('shortcuts overlay filters by search text and category chips', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.click('#shortcutsBtn');
+  const modal = page.locator('#shortcutsModal');
+  const search = page.getByTestId('shortcuts-search');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await expect(search).toBeFocused();
+
+  await search.fill('cmd/ctrl+shift+g');
+  await expect(modal.locator('[data-shortcut-id="workqueue.openForActiveChat"]')).toBeVisible();
+  await expect(modal.locator('[data-shortcut-id="fleet.open"]')).toBeHidden();
+
+  await search.fill('');
+  await modal.getByRole('button', { name: 'Fleet' }).click();
+  await expect(modal.locator('[data-shortcut-id="fleet.open"]')).toBeVisible();
+  await expect(modal.locator('[data-shortcut-id="workqueue.open"]')).toBeHidden();
+
+  await search.fill('definitely-no-shortcut');
+  await expect(modal).toContainText('No shortcuts match your filters.');
+
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+});
+
 test('shortcuts overlay stays in sync with registered shortcut catalog', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
@@ -401,19 +481,20 @@ test('topbar shortcut hints follow active pane and typing focus', async ({ page 
 
   await page.locator('[data-pane]').first().getByTestId('pane-help').focus();
   await expect(strip).toBeVisible();
-  await expect(strip).toContainText('Composer');
-  await expect(strip).toContainText('All shortcuts');
+  await expect(strip).toContainText('Chat composer');
+  await expect(strip).toContainText('Press ?');
 
   await page.evaluate(() => window.focusPaneIndex?.(1));
   await expect(page.getByTestId('active-pane-chip')).toContainText('B Workqueue');
-  await expect(strip).toContainText('Queue search');
-  await expect(strip).toContainText('Workqueue modal');
+  await expect(strip).toContainText('j/k');
+  await expect(strip).toContainText('Enter');
 
   await page.getByLabel('Open fleet pane').click();
   await expect(page.locator('[data-pane]')).toHaveCount(3);
+  await page.locator('[data-pane]').nth(2).click({ position: { x: 18, y: 18 } });
   await page.locator('[data-pane]').nth(2).getByTestId('pane-help').focus();
-  await expect(strip).toContainText('Move selection');
-  await expect(strip).toContainText('Open Workqueue');
+  await expect(strip).toContainText('Move Fleet selection down');
+  await expect(strip).toContainText('Workqueue for selected Fleet agent');
 });
 
 test('cmd/ctrl+alt+j/k cycles chat panes only and keeps typing guard', async ({ page }) => {

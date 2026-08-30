@@ -23,9 +23,9 @@ const globalElements = {
   paneManagerBtn: document.getElementById('paneManagerBtn'),
   activePaneChip: document.getElementById('activePaneChip'),
   activePaneChipValue: document.querySelector('[data-active-pane-chip-value]'),
-  shortcutHintStrip: document.getElementById('shortcutHintStrip'),
   layoutModeChip: document.getElementById('layoutModeChip'),
   layoutModeChipValue: document.querySelector('[data-layout-mode-chip-value]'),
+  shortcutHintStrip: document.getElementById('shortcutHintStrip'),
   pulseCanvas: document.getElementById('pulseCanvas'),
   workqueueBtn: document.getElementById('workqueueBtn'),
   fleetBtn: document.getElementById('fleetBtn'),
@@ -50,6 +50,7 @@ const globalElements = {
   agentsSortIndicator: document.getElementById('agentsSortIndicator'),
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
+  agentsRefreshMode: document.getElementById('agentsRefreshMode'),
   agentsRefreshStateBtn: document.getElementById('agentsRefreshStateBtn'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
@@ -126,6 +127,20 @@ const globalElements = {
   paneGrid: document.getElementById('paneGrid'),
   paneTemplate: document.getElementById('paneTemplate')
 };
+
+function shortcutHintStripElement() {
+  const strips = Array.from(document.querySelectorAll('[data-testid="shortcut-hint-strip"], #shortcutHintStrip')).filter(
+    (node) => node instanceof HTMLElement
+  );
+  const primary = globalElements.shortcutHintStrip || strips[0] || null;
+  strips.forEach((node) => {
+    if (node !== primary) node.remove();
+  });
+  if (primary && globalElements.shortcutHintStrip !== primary) {
+    globalElements.shortcutHintStrip = primary;
+  }
+  return primary;
+}
 
 const ADMIN_MODAL_KEYS = [
   'settingsModal',
@@ -401,6 +416,7 @@ const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
 const ADMIN_AGENT_COLUMNS_KEY = 'clawnsole.admin.agents.columns';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
+const ADMIN_AGENT_REFRESH_MODE_KEY = 'clawnsole.admin.agents.refreshMode';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
 const FLEET_DEFAULT_SORT = 'attention_first';
 const FLEET_SNOOZE_30M_MS = 30 * 60_000;
@@ -500,8 +516,90 @@ const KEYBIND_CATALOG = [
   { id: 'fleet.openChatSelected', group: 'Fleet actions', label: 'Open Chat for selected Fleet agent', binding: { key: 'Enter', display: 'Enter' } },
   { id: 'fleet.openWorkqueueSelected', group: 'Fleet actions', label: 'Open Workqueue for selected Fleet agent', binding: { key: 'Enter', shift: true, display: 'Shift+Enter' } },
   { id: 'fleet.openTimelineSelected', group: 'Fleet actions', label: 'Open Timeline for selected Fleet agent', binding: { key: '.', display: '.' } },
-  { id: 'fleet.toggleHeartbeatSort', group: 'Fleet actions', label: 'Toggle Fleet heartbeat age sort', binding: { key: 'h', display: 'H / Shift+H' } }
+  { id: 'fleet.toggleHeartbeatSort', group: 'Fleet actions', label: 'Toggle Fleet heartbeat age sort', binding: { key: 'h', display: 'H / Shift+H' } },
+  { id: 'fleet.refreshNow', group: 'Fleet actions', label: 'Refresh Fleet now', binding: { key: 'r', display: 'R' } }
 ];
+
+const SHORTCUT_HINTS_BY_PANE_KIND = {
+  chat: ['chat.composer', 'workqueue.openForActiveChat', 'pane.next', 'chat.return'],
+  workqueue: ['workqueue.move', 'workqueue.inspect', 'workqueue.status', 'workqueue.focusItemSearch'],
+  cron: ['pane.next', 'pane.manager', 'command.palette'],
+  timeline: ['fleet.next', 'fleet.openChatSelected', 'fleet.openWorkqueueSelected', 'fleet.toggleHeartbeatSort']
+};
+
+function shortcutHintLabel(id) {
+  const entry = keybindEntry(id);
+  if (!entry) return '';
+  const label = String(entry.label || '')
+    .replace(/\s+\(.*?\)/g, '')
+    .replace(/^Focus\s+/i, '')
+    .replace(/^Open\/focus\s+/i, 'Open ')
+    .replace(/^Open\s+/i, '')
+    .trim();
+  return label || entry.label;
+}
+
+function shortcutHintContextLabel(pane) {
+  const kind = normalizePaneKind(pane?.kind || 'chat');
+  if (kind === 'timeline') return 'Fleet';
+  return paneLabel(pane);
+}
+
+function isShortcutHintTypingContext(target = document.activeElement) {
+  const el = target;
+  if (!(el instanceof Element)) return false;
+  if (el.matches?.('input, textarea, [contenteditable=""], [contenteditable="true"], [role="textbox"]')) return true;
+  if (el.isContentEditable || el.closest?.('[contenteditable="true"], [contenteditable=""], [role="textbox"]')) return true;
+  return false;
+}
+
+function renderShortcutHintStrip(activePane = activePaneFromState()) {
+  const root = shortcutHintStripElement();
+  if (!root) return;
+
+  const locked = !uiState.authed || roleState.role !== 'admin';
+  const typing = isShortcutHintTypingContext();
+  if (locked || typing || !activePane) {
+    root.hidden = true;
+    root.innerHTML = '';
+    root.removeAttribute('data-shortcut-pane-kind');
+    root.removeAttribute('data-shortcut-hint-context');
+    return;
+  }
+
+  const kind = normalizePaneKind(activePane.kind || 'chat');
+  const ids = SHORTCUT_HINTS_BY_PANE_KIND[kind] || SHORTCUT_HINTS_BY_PANE_KIND.chat;
+  const hints = ids
+    .map((id) => {
+      const display = shortcutDisplay(id);
+      const label = shortcutHintLabel(id);
+      if (!display || !label) return '';
+      return `
+        <span class="shortcut-hint" data-shortcut-hint="${escapeHtml(id)}">
+          <span class="shortcut-hint__keys">${renderShortcutKeys(display)}</span>
+          <span class="shortcut-hint__label">${escapeHtml(label)}</span>
+        </span>
+      `;
+    })
+    .filter(Boolean);
+
+  if (!hints.length) {
+    root.hidden = true;
+    root.innerHTML = '';
+    root.removeAttribute('data-shortcut-pane-kind');
+    root.removeAttribute('data-shortcut-hint-context');
+    return;
+  }
+
+  root.setAttribute('data-shortcut-pane-kind', kind);
+  root.setAttribute('data-shortcut-hint-context', kind);
+  root.hidden = false;
+  root.innerHTML = `
+    <span class="shortcut-hint-strip__context">${escapeHtml(shortcutHintContextLabel(activePane))}</span>
+    ${hints.slice(0, 4).join('')}
+    <button class="shortcut-hint-strip__all" type="button" data-shortcut-hint-all aria-label="Press ? for all shortcuts" title="Press ? for all shortcuts">Press ?</button>
+  `;
+}
 
 function readKeybindOverrides() {
   try {
@@ -539,6 +637,7 @@ function setKeybindOverride(id, binding) {
   writeKeybindOverrides(overrides);
   renderKeyboardSettings();
   renderShortcutsContent();
+  renderShortcutHintStrip();
   return true;
 }
 
@@ -549,6 +648,7 @@ function resetKeybindOverride(id) {
   writeKeybindOverrides(overrides);
   renderKeyboardSettings();
   renderShortcutsContent();
+  renderShortcutHintStrip();
   return true;
 }
 
@@ -1091,16 +1191,45 @@ function heartbeatAgeBucketLabel(bucket) {
 
 function getFleetFilter() {
   const raw = String(storage.get(ADMIN_AGENT_FILTER_KEY, 'all') || 'all').trim();
-  const legacy = { active: 'connected', stale: 'needs_attention', offline_error: 'disconnected' };
-  const key = legacy[raw] || raw;
+  const aliases = {
+    active: 'connected',
+    stale: 'needs_attention',
+    offline_error: 'disconnected'
+  };
+  const key = aliases[raw] || raw;
   const allowed = new Set(['all', 'needs_attention', 'connected', 'disconnected', 'busy']);
   return allowed.has(key) ? key : 'all';
 }
 
 function normalizeFleetFilter(filter) {
   const key = String(filter || 'all').trim() || 'all';
-  const legacy = { active: 'connected', stale: 'needs_attention', offline_error: 'disconnected' };
-  return legacy[key] || key;
+  const aliases = {
+    active: 'connected',
+    stale: 'needs_attention',
+    offline_error: 'disconnected'
+  };
+  return aliases[key] || key;
+}
+
+function getFleetSort() {
+  const raw = String(storage.get(ADMIN_AGENT_SORT_KEY, FLEET_DEFAULT_SORT) || FLEET_DEFAULT_SORT).trim();
+  const aliases = { recent: 'recent_desc', attention_desc: FLEET_DEFAULT_SORT };
+  const key = aliases[raw] || raw;
+  const allowed = new Set([FLEET_DEFAULT_SORT, 'recent_desc', 'heartbeat_age_desc', 'agent_id_asc']);
+  return allowed.has(key) ? key : FLEET_DEFAULT_SORT;
+}
+
+function getAgentWorkqueueCounts() {
+  const out = {};
+  const items = Array.isArray(workqueueState?.items) ? workqueueState.items : [];
+  for (const item of items) {
+    const agent = String(item?.claimedBy || '').trim();
+    if (!agent) continue;
+    const status = String(item?.status || '').trim();
+    if (status !== 'claimed' && status !== 'in_progress') continue;
+    out[agent] = (out[agent] || 0) + 1;
+  }
+  return out;
 }
 
 function isFleetAgentBusy(agent, statusSnippet = '') {
@@ -1118,7 +1247,7 @@ function isFleetAgentBusy(agent, statusSnippet = '') {
 function fleetAttentionScore(classification) {
   if (!classification) return 0;
   if (classification.bucket === 'offline_error') return 4000;
-  if (classification.busy) return 3000;
+  if (classification.busy || classification.isBusy) return 3000;
   if (classification.bucket === 'stale') {
     const minutes = Number.isFinite(classification.ageMs) ? Math.floor(classification.ageMs / 60_000) : 999;
     return 2000 + Math.min(minutes, 999);
@@ -1129,7 +1258,7 @@ function fleetAttentionScore(classification) {
 function fleetReasonBadge(classification) {
   if (!classification) return 'Connected';
   if (classification.bucket === 'offline_error') return 'Disconnected';
-  if (classification.busy) return 'Busy';
+  if (classification.busy || classification.isBusy) return 'Busy';
   if (classification.bucket === 'stale') {
     if (!Number.isFinite(classification.ageMs)) return 'Stale';
     return `Stale ${formatRelativeAge(classification.ageMs).replace(/\s+ago$/, '')}`;
@@ -1140,17 +1269,59 @@ function fleetReasonBadge(classification) {
 function fleetFilterMatch(filterMode, classification) {
   const key = normalizeFleetFilter(filterMode);
   if (key === 'all') return true;
-  if (key === 'needs_attention') return classification.bucket !== 'active' || classification.busy;
-  if (key === 'connected') return classification.bucket === 'active' && !classification.busy;
+  if (key === 'needs_attention') return classification.bucket !== 'active' || classification.busy || classification.isBusy;
+  if (key === 'connected') return classification.bucket === 'active' && !classification.busy && !classification.isBusy;
   if (key === 'disconnected') return classification.bucket === 'offline_error';
-  if (key === 'busy') return !!classification.busy;
+  if (key === 'busy') return !!(classification.busy || classification.isBusy);
   return true;
 }
 
-function getFleetSort() {
-  const raw = String(storage.get(ADMIN_AGENT_SORT_KEY, FLEET_DEFAULT_SORT) || FLEET_DEFAULT_SORT).trim();
-  const allowed = new Set(['attention_first', 'recent_desc', 'heartbeat_age_desc', 'agent_id_asc']);
-  return allowed.has(raw) ? raw : FLEET_DEFAULT_SORT;
+function buildFleetTriage(agent, { lastSeenMap, paneStateMap, statusSnippetMap, workqueueCounts, activeWindowMs, baseAgents = [] }) {
+  const rawAgentId = typeof agent === 'object' && agent ? agent.id : agent;
+  const id = String(rawAgentId || '').trim();
+  const agentRecord = typeof agent === 'object' && agent
+    ? agent
+    : baseAgents.find((entry) => String(entry?.id || '').trim() === id) || { id };
+  const ts = Number(lastSeenMap?.[id]) || 0;
+  const ageMs = ts > 0 ? Math.max(0, Date.now() - ts) : Number.POSITIVE_INFINITY;
+  const paneState = String(paneStateMap?.[id] || 'unknown').trim().toLowerCase();
+  const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs, paneState });
+  const queueCount = Number(workqueueCounts?.[id]) || 0;
+  const disconnected = paneState === 'error' || paneState === 'offline' || !Number.isFinite(ageMs);
+  const stale = !disconnected && ageMs > activeWindowMs;
+  const isBusy = queueCount > 0 || isFleetAgentBusy(agentRecord, statusSnippetMap?.[id]);
+
+  let bucket = 'active';
+  let attentionScore = 0;
+  let reason = 'Connected';
+
+  if (disconnected) {
+    bucket = 'offline_error';
+    attentionScore = 4000;
+    reason = 'Disconnected';
+  } else if (isBusy) {
+    attentionScore = 3000 + Math.min(queueCount, 99);
+    reason = 'Busy';
+  } else if (stale) {
+    bucket = 'stale';
+    const minutes = Number.isFinite(ageMs) ? Math.floor(ageMs / 60_000) : 999;
+    attentionScore = 2000 + Math.min(minutes, 999);
+    reason = Number.isFinite(ageMs) ? `Stale ${formatRelativeAge(ageMs).replace(/\s+ago$/, '')}` : 'Stale';
+  }
+
+  return {
+    bucket,
+    ageBucket,
+    ts,
+    ageMs,
+    queueCount,
+    busy: isBusy,
+    isBusy,
+    isConnected: bucket === 'active' && !stale && !disconnected,
+    needsAttention: bucket !== 'active' || isBusy,
+    attentionScore,
+    reason
+  };
 }
 
 function setFleetFilter(filter) {
@@ -1192,6 +1363,29 @@ function getFleetHeatmapEnabled() {
 
 function getFleetDensity() {
   return String(storage.get(ADMIN_AGENT_DENSITY_KEY, 'comfortable') || 'comfortable') === 'compact' ? 'compact' : 'comfortable';
+}
+
+function normalizeFleetRefreshMode(mode) {
+  const value = String(mode || '').trim().toLowerCase();
+  return value === 'slow' || value === 'manual' ? value : 'auto';
+}
+
+function getFleetRefreshMode() {
+  return normalizeFleetRefreshMode(storage.get(ADMIN_AGENT_REFRESH_MODE_KEY, 'auto'));
+}
+
+function syncFleetRefreshModeControl() {
+  if (!globalElements.agentsRefreshMode) return;
+  globalElements.agentsRefreshMode.value = getFleetRefreshMode();
+}
+
+function setFleetRefreshMode(mode) {
+  const next = normalizeFleetRefreshMode(mode);
+  storage.set(ADMIN_AGENT_REFRESH_MODE_KEY, next);
+  syncFleetRefreshModeControl();
+  restartAgentsModalAutoRefresh();
+  renderAgentsLastRefreshed();
+  return next;
 }
 
 function getFleetColumns() {
@@ -1438,6 +1632,10 @@ let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
 const FLEET_DEFAULT_STALE_THRESHOLD_MINUTES = 1;
 const FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES = 10;
+const FLEET_REFRESH_INTERVAL_MS = {
+  auto: 10_000,
+  slow: 60_000
+};
 let fleetShowSnoozed = false;
 const fleetRefreshLock = {
   lockedAtMs: 0,
@@ -1575,17 +1773,25 @@ function renderAgentsLastRefreshed() {
 
 function startAgentsModalAutoRefresh() {
   if (agentsModalAutoRefreshInterval) return;
+  const mode = getFleetRefreshMode();
+  if (mode === 'manual') return;
   agentsModalAutoRefreshInterval = setInterval(() => {
     if (!isAgentsModalOpen()) return;
     if (document.hidden) return;
     refreshAgents({ reason: 'fleet_auto_refresh' }).catch(() => {});
-  }, 10_000);
+  }, FLEET_REFRESH_INTERVAL_MS[mode] || FLEET_REFRESH_INTERVAL_MS.auto);
 }
 
 function stopAgentsModalAutoRefresh() {
   if (!agentsModalAutoRefreshInterval) return;
   clearInterval(agentsModalAutoRefreshInterval);
   agentsModalAutoRefreshInterval = null;
+}
+
+function restartAgentsModalAutoRefresh() {
+  stopAgentsModalAutoRefresh();
+  if (!isAgentsModalOpen()) return;
+  startAgentsModalAutoRefresh();
 }
 
 function startAgentsModalFreshnessTicker() {
@@ -1608,6 +1814,7 @@ function stopAgentsModalFreshnessTicker() {
 async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {}) {
   if (roleState.role !== 'admin') return uiState.agents;
   if (!uiState.authed) return uiState.agents;
+  if (reason !== 'manual' && getFleetRefreshMode() === 'manual') return uiState.agents;
   if (reason !== 'manual' && hasFleetRowInteraction()) return deferFleetRefresh(reason);
 
   if (agentRefreshInFlight) return agentRefreshInFlight;
@@ -3565,6 +3772,7 @@ let paneFocusMruKeys = [];
 let paneMruTraversal = null;
 let paneMruSuppressFocusEvents = false;
 let paneActiveRestoreGuardUntil = 0;
+let lastFocusedPaneKey = '';
 const PANE_SWITCH_SEND_GUARD_MS = 5000;
 const PANE_SWITCH_SEND_GUARD_MESSAGE = 'Pane changed: press Enter again to send';
 
@@ -3587,6 +3795,7 @@ function notePaneFocused(pane) {
   if (!panes.some((entry) => String(entry?.key || '') === key)) return;
   const rememberedKey = rememberedActivePaneKey();
   if (rememberedKey && key !== rememberedKey && Date.now() < paneActiveRestoreGuardUntil) return;
+  lastFocusedPaneKey = key;
   paneMruTraversal = null;
   paneMruOrder();
   paneFocusMruKeys = [key, ...paneFocusMruKeys.filter((entry) => entry !== key)];
@@ -3686,71 +3895,6 @@ function activePaneFromState() {
   return panes[0] || null;
 }
 
-function shortcutHintContext(pane) {
-  if (!pane) return 'global';
-  if (pane.kind === 'timeline' && String(pane.cronAgentId || '').trim() === 'all') return 'fleet';
-  return pane.kind || 'chat';
-}
-
-function shortcutHintItem(id, label) {
-  return { keys: shortcutDisplay(id), label };
-}
-
-function shortcutHintsForPane(pane) {
-  const common = [shortcutHintItem('help.shortcuts', 'All shortcuts')];
-  const context = shortcutHintContext(pane);
-  if (context === 'workqueue') {
-    return [
-      shortcutHintItem('workqueue.focusQueueSearch', 'Queue search'),
-      shortcutHintItem('workqueue.focusItemSearch', 'Item search'),
-      shortcutHintItem('workqueue.focusStatusFilter', 'Status filter'),
-      shortcutHintItem('workqueue.open', 'Workqueue modal'),
-      ...common
-    ];
-  }
-  if (context === 'fleet') {
-    return [
-      shortcutHintItem('fleet.next', 'Move selection'),
-      shortcutHintItem('fleet.openChatSelected', 'Open Chat'),
-      shortcutHintItem('fleet.openWorkqueueSelected', 'Open Workqueue'),
-      shortcutHintItem('fleet.openTimelineSelected', 'Open Timeline'),
-      ...common
-    ];
-  }
-  if (context === 'cron' || context === 'timeline') {
-    return [
-      shortcutHintItem('agents.refresh', 'Refresh'),
-      shortcutHintItem('command.palette', 'Commands'),
-      shortcutHintItem('pane.next', 'Next pane'),
-      ...common
-    ];
-  }
-  return [
-    shortcutHintItem('chat.composer', 'Composer'),
-    shortcutHintItem('command.palette', 'Commands'),
-    shortcutHintItem('pane.next', 'Next pane'),
-    shortcutHintItem('workqueue.openForActiveChat', 'Workqueue'),
-    ...common
-  ];
-}
-
-function renderShortcutHintStrip(activePane = activePaneFromState()) {
-  const strip = globalElements.shortcutHintStrip;
-  if (!strip) return;
-  const visible = Boolean(activePane) && uiState.authed && !isTypingContext(document.activeElement);
-  strip.hidden = !visible;
-  strip.dataset.shortcutHintContext = visible ? shortcutHintContext(activePane) : '';
-  if (!visible) {
-    strip.innerHTML = '';
-    return;
-  }
-  strip.innerHTML = shortcutHintsForPane(activePane)
-    .slice(0, 5)
-    .filter((hint) => hint.keys && hint.label)
-    .map((hint) => `<span class="shortcut-hint"><kbd>${escapeHtml(hint.keys)}</kbd><span>${escapeHtml(hint.label)}</span></span>`)
-    .join('');
-}
-
 function renderActivePaneState(activePane = activePaneFromState()) {
   const panes = paneManager?.panes || [];
   const activeKey = String(activePane?.key || '');
@@ -3783,6 +3927,7 @@ function renderActivePaneState(activePane = activePaneFromState()) {
   chip.setAttribute('aria-label', `Active pane: ${label}. Click to focus.`);
   renderShortcutHintStrip(activePane);
   renderLayoutModeChip();
+  renderShortcutHintStrip(activePane);
 }
 
 function paneIndexByKey(key) {
@@ -3934,9 +4079,72 @@ function togglePanePinned(pane) {
 }
 
 function refreshPaneDraftState(pane) {
+  paneRefreshDraftOrigin(pane);
   renderPaneIdentity(pane);
   renderPaneDraftBadge(pane);
   if (isPaneManagerOpen()) renderPaneManager();
+}
+
+function paneDraftTargetSignature(pane) {
+  if (!pane || pane.kind !== 'chat') return '';
+  return `${String(pane.role || '')}:chat:${normalizeAgentId(pane.agentId || 'main')}`;
+}
+
+function paneCurrentDraftOrigin(pane) {
+  if (!pane || pane.kind !== 'chat') return null;
+  return {
+    paneKey: String(pane.key || ''),
+    targetSignature: paneDraftTargetSignature(pane),
+    targetLabel: paneComposerContextLabel(pane)
+  };
+}
+
+function paneNormalizeDraftOrigin(pane, origin = null) {
+  if (!origin || typeof origin !== 'object') return null;
+  const targetSignature = String(origin.targetSignature || '').trim();
+  const paneKey = String(origin.paneKey || '').trim();
+  if (!targetSignature && !paneKey) return null;
+  return {
+    paneKey,
+    targetSignature,
+    targetLabel: String(origin.targetLabel || '').trim()
+  };
+}
+
+function paneSetDraftOrigin(pane, origin = null) {
+  if (!pane || pane.kind !== 'chat') return;
+  pane.draftOrigin = paneNormalizeDraftOrigin(pane, origin);
+}
+
+function paneRefreshDraftOrigin(pane) {
+  if (!pane || pane.kind !== 'chat') return;
+  if (!paneHasDraftChanges(pane)) {
+    paneSetDraftOrigin(pane, null);
+    return;
+  }
+  if (!pane.draftOrigin) paneSetDraftOrigin(pane, paneCurrentDraftOrigin(pane));
+}
+
+function paneNeedsDraftRetargetConfirm(pane) {
+  if (!pane || pane.kind !== 'chat' || !paneHasDraftChanges(pane)) return false;
+  const origin = paneNormalizeDraftOrigin(pane, pane.draftOrigin);
+  if (!origin) return false;
+  const current = paneCurrentDraftOrigin(pane);
+  if (!current) return false;
+  return Boolean(
+    (origin.paneKey && current.paneKey && origin.paneKey !== current.paneKey) ||
+      (origin.targetSignature && current.targetSignature && origin.targetSignature !== current.targetSignature)
+  );
+}
+
+function paneConfirmDraftRetargetSend(pane) {
+  if (!paneNeedsDraftRetargetConfirm(pane)) return true;
+  const origin = paneNormalizeDraftOrigin(pane, pane.draftOrigin);
+  const fromLabel = origin?.targetLabel || 'another chat pane';
+  const toLabel = paneComposerContextLabel(pane);
+  const ok = window.confirm(`Send this carried draft to ${toLabel}?\n\nIt was started in ${fromLabel}.`);
+  if (ok) paneSetDraftOrigin(pane, paneCurrentDraftOrigin(pane));
+  return ok;
 }
 
 function markPaneUnread(pane, increment = 1, kind = 'chat') {
@@ -5064,6 +5272,18 @@ function moveCommandPaletteSelection(step) {
   commandPaletteState.selectedIndex = selectable[nextPos];
 }
 
+function selectedCommandPaletteItem() {
+  const exactQuery = String(commandPaletteState.query || '').trim().toLowerCase();
+  if (exactQuery) {
+    const exact = commandPaletteState.items.find((item) =>
+      item?.kind !== 'header' &&
+      String(item?.label || '').trim().toLowerCase() === exactQuery
+    );
+    if (exact) return exact;
+  }
+  return commandPaletteState.filtered[commandPaletteState.selectedIndex];
+}
+
 function composeCommandPaletteDisplayItems(scored, query) {
   const q = String(query || '').trim();
   const groups = new Map();
@@ -5227,7 +5447,7 @@ function openCommandPalette() {
   if (!globalElements.commandPaletteModal) return;
 
   commandPaletteState.open = true;
-  commandPaletteState.originPaneKey = focusedPaneKey() || '';
+  commandPaletteState.originPaneKey = focusedPaneKey() || lastFocusedPaneKey || rememberedActivePaneKey() || '';
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
   commandPaletteState.selectedIndex = 0;
@@ -5272,6 +5492,7 @@ function openAgentsModal() {
     globalElements.agentsActiveMinutes.value = String(Math.max(1, minutes));
   }
   syncFleetDensityControl();
+  syncFleetRefreshModeControl();
   renderFleetColumnPicker();
 
   renderAgentsModalList();
@@ -5351,7 +5572,7 @@ function setFleetHeartbeatSort() {
 
 function resetFleetSort() {
   const previous = String(storage.get(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY, '') || '').trim();
-  const next = previous && previous !== 'heartbeat_age_desc' ? previous : 'recent_desc';
+  const next = previous && previous !== 'heartbeat_age_desc' ? previous : FLEET_DEFAULT_SORT;
   storage.set(ADMIN_AGENT_SORT_KEY, next);
   storage.remove(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY);
   if (globalElements.agentsSort) globalElements.agentsSort.value = next;
@@ -5421,14 +5642,22 @@ function openWorkqueueForActiveChatAgent() {
 
   const focusWorkqueuePane = () => {
     try {
+      if (!pane.elements?.root?.isConnected) return;
       const queueSelect = pane.elements?.thread?.querySelector?.('[data-wq-queue-select]');
       (queueSelect || pane.elements?.thread)?.focus?.();
     } catch {}
   };
+  try {
+    requestAnimationFrame(() => {
+      focusWorkqueuePane();
+      requestAnimationFrame(focusWorkqueuePane);
+    });
+  } catch {}
   setTimeout(focusWorkqueuePane, 0);
   setTimeout(focusWorkqueuePane, 30);
   setTimeout(focusWorkqueuePane, 120);
   setTimeout(focusWorkqueuePane, 300);
+  setTimeout(focusWorkqueuePane, 700);
   showToast(`Workqueue scoped to ${agentId}`, { kind: 'info', timeoutMs: 1600 });
   return pane;
 }
@@ -5743,23 +5972,11 @@ function renderAgentsModalList() {
   const lastSeenMap = getAgentLastSeenMap();
   const paneStateMap = getAgentPaneStateMap();
   const statusSnippetMap = getAgentStatusSnippetMap();
+  const workqueueCounts = getAgentWorkqueueCounts();
   const baseAgents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
 
   const classify = (agent) => {
-    const rawAgentId = typeof agent === 'object' && agent ? agent.id : agent;
-    const id = String(rawAgentId || '').trim();
-    const agentRecord = typeof agent === 'object' && agent
-      ? agent
-      : baseAgents.find((entry) => String(entry?.id || '').trim() === id) || { id };
-    const ts = Number(lastSeenMap[id]) || 0;
-    const ageMs = ts > 0 ? Math.max(0, Date.now() - ts) : Number.POSITIVE_INFINITY;
-    const paneState = paneStateMap[id] || 'unknown';
-    const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs, paneState });
-    const busy = isFleetAgentBusy(agentRecord, statusSnippetMap[id]);
-    if (paneState === 'error' || paneState === 'offline') return { bucket: 'offline_error', ageBucket, ts, ageMs, busy };
-    if (!Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket, ts, ageMs, busy };
-    if (ageMs <= activeWindowMs) return { bucket: 'active', ageBucket, ts, ageMs, busy };
-    return { bucket: 'stale', ageBucket, ts, ageMs, busy };
+    return buildFleetTriage(agent, { lastSeenMap, paneStateMap, statusSnippetMap, workqueueCounts, activeWindowMs, baseAgents });
   };
 
   const matches = (agent) => {
@@ -5797,6 +6014,18 @@ function renderAgentsModalList() {
         const cb = classify(b);
         const da = Number.isFinite(ca.ageMs) ? ca.ageMs : Number.MAX_SAFE_INTEGER;
         const db = Number.isFinite(cb.ageMs) ? cb.ageMs : Number.MAX_SAFE_INTEGER;
+        if (db !== da) return db - da;
+        return formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true }));
+      });
+      return arr;
+    }
+    if (sortMode === FLEET_DEFAULT_SORT) {
+      arr.sort((a, b) => {
+        const ca = classify(a?.id);
+        const cb = classify(b?.id);
+        if (cb.attentionScore !== ca.attentionScore) return cb.attentionScore - ca.attentionScore;
+        const db = Number.isFinite(cb.ageMs) ? cb.ageMs : Number.MAX_SAFE_INTEGER;
+        const da = Number.isFinite(ca.ageMs) ? ca.ageMs : Number.MAX_SAFE_INTEGER;
         if (db !== da) return db - da;
         return formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true }));
       });
@@ -5955,8 +6184,8 @@ function renderAgentsModalList() {
             ? 'Busy'
             : 'Healthy';
       const healthState = triage.busy ? 'busy' : triage.bucket;
-      const reasonBadge = fleetReasonBadge(triage);
       const heatBucketLabel = heartbeatAgeBucketLabel(triage.ageBucket);
+      const reasonHtml = `<span class="agents-reason-badge" data-testid="agents-reason-badge" title="Rank reason">${escapeHtml(triage.reason)}</span>`;
       const statusSnippet = String(statusSnippetMap[id] || '').trim();
       const statusSnippetHtml = visibleColumns.status && statusSnippet
         ? `<span class="agents-status-snippet" data-fleet-column="status">${escapeHtml(statusSnippet)}</span>`
@@ -6007,14 +6236,13 @@ function renderAgentsModalList() {
       row.innerHTML = `
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
         <div class="agents-row-identity">
-          <div class="agents-row-title">${escapeHtml(label)}</div>
+          <div class="agents-row-title">${escapeHtml(label)} ${reasonHtml}</div>
           ${visibleColumns.id ? `<div class="agents-row-id" data-fleet-column="id">${escapeHtml(id)}</div>` : ''}
         </div>
         <div class="agents-row-health">
           ${visibleColumns.health ? `<span class="agents-health-state-chip" data-fleet-column="health" data-health-state="${escapeHtml(healthState)}">${escapeHtml(healthLabel)}</span>` : ''}
         </div>
         <div class="agents-row-meta">
-            <span class="agents-reason-badge" title="Attention rank reason">${escapeHtml(reasonBadge)}</span>
             ${visibleColumns.heartbeat ? `<span class="agents-age-chip" data-fleet-column="heartbeat" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}" title="Heartbeat age: ${escapeHtml(heartbeatAge)} (${escapeHtml(heatBucketLabel)})">${escapeHtml(heartbeatAge)}</span>` : ''}
             ${visibleColumns.heartbeatDetail ? `<span class="agents-age-label" data-fleet-column="heartbeatDetail">${escapeHtml(heatBucketLabel)}</span>` : ''}${snoozeChipHtml}${statusSnippetHtml}${modelHtml}${hostHtml}
         </div>
@@ -6250,6 +6478,14 @@ function handleFleetModalShortcutKeydown(event) {
     if (key === '.') {
       event.preventDefault();
       runFleetSelectedAgent('timeline');
+      return true;
+    }
+    if (lower === 'r') {
+      event.preventDefault();
+      clearFleetRefreshLock();
+      refreshAgents({ reason: 'manual', showSuccessToast: true }).catch(() => {
+        showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
+      });
       return true;
     }
   }
@@ -7079,6 +7315,8 @@ window.__debug.setAgentsLastRefreshedAtMs = (value) => {
   agentsLastRefreshedAtMs = Math.max(0, Number(value) || 0);
   renderAgentsLastRefreshed();
 };
+window.__debug.getFleetRefreshMode = getFleetRefreshMode;
+window.__debug.setFleetRefreshMode = setFleetRefreshMode;
 
 function getWorkqueueItemRepo(item) {
   const repo = String(item?.meta?.repo || '').trim();
@@ -9581,6 +9819,9 @@ async function paneSendChat(pane) {
     return;
   }
 
+  paneRefreshDraftOrigin(pane);
+  if (!paneConfirmDraftRetargetSend(pane)) return;
+
   const message = raw;
 
   // Guest mode removed.
@@ -9680,6 +9921,7 @@ async function paneSendChat(pane) {
   panePumpOutbox(pane);
 
   pane.elements.input.value = '';
+  paneSetDraftOrigin(pane, null);
   paneUpdateCommandHints(pane);
   refreshPaneDraftState(pane);
 }
@@ -10158,6 +10400,7 @@ function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true, syncFromP
 
   if (pane.kind === 'chat') {
     renderPaneAgentIdentity(pane);
+    paneSetDraftOrigin(pane, null);
     pane.attachments.files = [];
     paneRenderAttachments(pane);
     paneStopThinking(pane);
@@ -10318,6 +10561,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     activeRunId: null,
     abortState: { active: false, requestedAt: 0, targetRunId: null, timer: null, finished: false, canceledRunIds: new Set() },
     attachments: { files: [] },
+    draftOrigin: null,
     pendingSend: null,
     catchUp: { active: false, attemptsLeft: 0, timer: null },
     outbox: [],
@@ -10722,7 +10966,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const getQueueValue = () => {
       const sel = String(queueSelectEl?.value || '').trim();
       if (sel === '__custom__') return String(queueCustomEl?.value || '').trim();
-      return sel;
+      return sel || String(pane.workqueue?.queue || '').trim();
     };
 
     const updateEnqueueDestination = () => {
@@ -12332,7 +12576,8 @@ const paneManager = {
       nickname: paneNickname(pane),
       pairedTargetLock: !!pane.pairedTargetLock,
       pinned: paneIsPinned(pane),
-      draftText: kind === 'chat' ? String(pane.elements?.input?.value || '') : ''
+      draftText: kind === 'chat' ? String(pane.elements?.input?.value || '') : '',
+      draftOrigin: kind === 'chat' ? paneNormalizeDraftOrigin(pane, pane.draftOrigin) : null
     };
 
     if (kind === 'workqueue') {
@@ -12389,7 +12634,8 @@ const paneManager = {
       nickname: snapshot.nickname,
       pairedTargetLock: !!snapshot.pairedTargetLock,
       pinned: !!snapshot.pinned,
-      restoreDraftText: kind === 'chat' ? String(snapshot.draftText || '') : ''
+      restoreDraftText: kind === 'chat' ? String(snapshot.draftText || '') : '',
+      restoreDraftOrigin: kind === 'chat' ? paneNormalizeDraftOrigin(null, snapshot.draftOrigin) : null
     };
 
     if (kind === 'workqueue') {
@@ -12480,6 +12726,27 @@ const paneManager = {
       }
     }
 
+    if (normalizedKind === 'workqueue' && this.panes.length >= this.maxPanes) {
+      const existingWorkqueue = this.panes.find((p) => p?.role === 'admin' && p.kind === 'workqueue') || null;
+      if (existingWorkqueue) {
+        existingWorkqueue.agentId = nextAgentId;
+        existingWorkqueue.workqueue = existingWorkqueue.workqueue || {};
+        existingWorkqueue.workqueue.scopeFilter = nextScopeFilter;
+        if (typeof existingWorkqueue.workqueue.setQueue === 'function') {
+          existingWorkqueue.workqueue.setQueue(nextQueue).catch?.(() => {});
+        } else {
+          existingWorkqueue.workqueue.queue = nextQueue;
+        }
+        if (typeof existingWorkqueue.workqueue.setScope === 'function') {
+          existingWorkqueue.workqueue.setScope(nextScopeFilter);
+        }
+        this.persistAdminPanes();
+        this.focusPanePrimary(existingWorkqueue);
+        renderActivePaneState(existingWorkqueue);
+        return existingWorkqueue;
+      }
+    }
+
     if (this.panes.length >= this.maxPanes) return;
 
     if (normalizedKind === 'workqueue') {
@@ -12533,6 +12800,7 @@ const paneManager = {
     });
     if (typeof options?.restoreDraftText === 'string' && pane.elements?.input) {
       pane.elements.input.value = options.restoreDraftText;
+      paneSetDraftOrigin(pane, options.restoreDraftOrigin || paneCurrentDraftOrigin(pane));
       paneUpdateCommandHints(pane);
     }
     insertCreatedPane(pane);
@@ -12813,8 +13081,9 @@ const paneManager = {
         if (event?.preventDefault) event.preventDefault();
         if (event?.stopPropagation) event.stopPropagation();
 
+        const paneOptions = getOptions();
         this.closeAddPaneMenu();
-        this.addPane(kind, { ...getOptions(), forceNew: !!event?.altKey });
+        this.addPane(kind, { ...paneOptions, forceNew: !!event?.altKey });
 
         queueMicrotask(() => {
           state.menuActionInFlight = false;
@@ -12852,7 +13121,7 @@ const paneManager = {
 
     const closeIfOutside = (event) => {
       if (!state.open) return;
-      if (event.target === anchorEl) return;
+      if (event.target === anchorEl || anchorEl.contains?.(event.target)) return;
       if (state.menuEl.contains(event.target)) return;
       this.closeAddPaneMenu();
     };
@@ -13105,6 +13374,12 @@ globalElements.shortcutOverridesSave?.addEventListener('click', () => saveShortc
 globalElements.shortcutOverridesResetAll?.addEventListener('click', () => resetAllShortcutOverrides());
 
 globalElements.shortcutsBtn?.addEventListener('click', () => openShortcuts());
+shortcutHintStripElement()?.addEventListener('pointerdown', (event) => {
+  const target = event.target instanceof HTMLElement ? event.target.closest('[data-shortcut-hint-all]') : null;
+  if (!target) return;
+  event.preventDefault();
+  openShortcuts();
+});
 globalElements.shortcutsCloseBtn?.addEventListener('click', () => closeShortcuts());
 globalElements.shortcutsModal?.addEventListener('click', (event) => {
   if (event.target === globalElements.shortcutsModal) closeShortcuts();
@@ -13174,7 +13449,7 @@ globalElements.commandPaletteInput?.addEventListener('keydown', (event) => {
   }
   if (key === 'Enter') {
     event.preventDefault();
-    const item = commandPaletteState.filtered[commandPaletteState.selectedIndex];
+    const item = selectedCommandPaletteItem();
     if (!item || item.kind === 'header') return;
     if (!item.run) return;
     try {
@@ -13341,7 +13616,7 @@ globalElements.agentsDensityButtons.forEach((btn) => {
 });
 
 globalElements.agentsSort?.addEventListener('change', () => {
-  storage.set(ADMIN_AGENT_SORT_KEY, String(globalElements.agentsSort.value || 'recent_desc'));
+  storage.set(ADMIN_AGENT_SORT_KEY, String(globalElements.agentsSort.value || FLEET_DEFAULT_SORT));
   renderAgentsModalList();
 });
 
@@ -13353,6 +13628,10 @@ globalElements.agentsHeatmapToggle?.addEventListener('change', () => {
 globalElements.agentsHeartbeatSortBtn?.addEventListener('click', () => setFleetHeartbeatSort());
 globalElements.agentsSortResetBtn?.addEventListener('click', () => resetFleetSort());
 globalElements.agentsResetTriageBtn?.addEventListener('click', () => resetAgentsTriageView());
+
+globalElements.agentsRefreshMode?.addEventListener('change', () => {
+  setFleetRefreshMode(globalElements.agentsRefreshMode.value);
+});
 
 globalElements.agentsActiveMinutes?.addEventListener('change', () => {
   const minutes = Math.max(1, Number(globalElements.agentsActiveMinutes.value) || FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES);
@@ -14394,6 +14673,14 @@ window.addEventListener('online', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   paneManager.connectIfNeeded();
+});
+
+document.addEventListener('focusin', () => {
+  setTimeout(() => renderShortcutHintStrip(), 0);
+});
+
+document.addEventListener('focusout', () => {
+  setTimeout(() => renderShortcutHintStrip(), 0);
 });
 
 window.addEventListener('load', () => {
