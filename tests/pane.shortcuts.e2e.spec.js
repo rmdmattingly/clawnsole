@@ -140,6 +140,72 @@ test('shortcuts overlay: status panel shows typing-focus block reason', async ({
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
 });
 
+test('paired-pane toggle shortcut focuses an existing counterpart without duplicating panes', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]')).filter((pane) => pane.getClientRects().length > 0);
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  await expect(panes).toHaveCount(2);
+  await expect(panes.first()).toHaveAttribute('data-pane-kind', 'chat');
+  await expect(panes.nth(1)).toHaveAttribute('data-pane-kind', 'workqueue');
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Control+Shift+L');
+  await expect.poll(activePaneIndex).toBe(1);
+  await expect(panes).toHaveCount(2);
+  await expect(page.getByTestId('paired-pane-toggle-toast').last()).toContainText('Focused paired Workqueue pane.');
+
+  await page.keyboard.press('Control+Shift+L');
+  await expect.poll(activePaneIndex).toBe(0);
+  await expect(panes).toHaveCount(2);
+  await expect(page.getByTestId('paired-pane-toggle-toast').last()).toContainText('Focused paired Chat pane.');
+});
+
+test('paired-pane toggle shortcut opens a missing counterpart for the same target', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await seedChatOnlyPaneLayout(page, app.serverPort, { agentId: 'main' });
+
+  const panes = page.locator('[data-pane]');
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]')).filter((pane) => pane.getClientRects().length > 0);
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  await expect(panes).toHaveCount(1);
+  await expect(panes.first()).toHaveAttribute('data-pane-kind', 'chat');
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Control+Shift+L');
+  await expect(panes).toHaveCount(2);
+  await expect(panes.nth(1)).toHaveAttribute('data-pane-kind', 'workqueue');
+  await expect.poll(() => page.evaluate(() => {
+    const panes = JSON.parse(localStorage.getItem('clawnsole.admin.panes.v1') || '[]');
+    return panes?.[1]?.agentId || '';
+  })).toBe('main');
+  await expect.poll(activePaneIndex).toBe(1);
+  await expect(page.getByTestId('paired-pane-toggle-toast').last()).toContainText('Opened paired Workqueue pane.');
+});
+
 test('inline shortcut hints follow active pane and hide while typing', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);

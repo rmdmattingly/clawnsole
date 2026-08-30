@@ -4503,6 +4503,40 @@ function focusOrOpenPairedPaneForPane(pane) {
   return paneManager.addPane(pairedKind, options);
 }
 
+function togglePairedPaneForActivePane() {
+  if (roleState.role !== 'admin') return null;
+
+  const focusedKey = focusedPaneKey() || paneMruOrder()[0] || '';
+  const pane = (paneManager?.panes || []).find((p) => String(p?.key || '') === focusedKey) || null;
+  if (!pane || !getPairedPaneKind(pane) || !getPanePairTarget(pane)) {
+    showToast('No paired Chat or Workqueue pane for this view.', {
+      kind: 'info',
+      timeoutMs: 2200,
+      testId: 'paired-pane-unavailable-toast'
+    });
+    return null;
+  }
+
+  const existing = findPairedPaneForPane(pane);
+  const paired = focusOrOpenPairedPaneForPane(pane);
+  if (!paired) {
+    showToast('Pane limit reached; close a pane to open the pair.', {
+      kind: 'info',
+      timeoutMs: 2200,
+      testId: 'paired-pane-limit-toast'
+    });
+    return null;
+  }
+
+  const action = existing === paired ? 'Focused' : 'Opened';
+  showToast(`${action} paired ${paneLabel(paired)} pane.`, {
+    kind: 'info',
+    timeoutMs: 1600,
+    testId: 'paired-pane-toggle-toast'
+  });
+  return paired;
+}
+
 function renderPaneManager() {
   const panes = paneManager?.panes || [];
   const list = globalElements.paneManagerList;
@@ -4906,6 +4940,16 @@ function buildCommandPaletteItems() {
 
   const focusedKey = focusedPaneKey();
   const focusedPane = paneManager.panes.find((p) => p?.key === focusedKey) || paneManager.panes[0] || null;
+  if (focusedPane && getPairedPaneKind(focusedPane) && getPanePairTarget(focusedPane)) {
+    const pairedAction = getPaneManagerPairedAction(focusedPane);
+    const labelKind = pairedAction?.labelKind || (getPairedPaneKind(focusedPane) === 'workqueue' ? 'Workqueue' : 'Chat');
+    items.push(withShortcut({
+      id: 'cmd:toggle-paired-pane',
+      label: `Pane: Toggle paired ${labelKind}`,
+      detail: pairedAction?.title || `${paneLabel(focusedPane)} · ${paneTargetLabel(focusedPane)}`,
+      run: () => togglePairedPaneForActivePane()
+    }, '⌘/Ctrl+Shift+L'));
+  }
   if (paneSupportsTargetLock(focusedPane)) {
     const nextLabel = focusedPane.pairedTargetLock ? 'Disable' : 'Enable';
     items.push(withShortcut({
@@ -4913,7 +4957,7 @@ function buildCommandPaletteItems() {
       label: `Pane: ${nextLabel} target lock`,
       detail: `${paneLabel(focusedPane)} · ${paneTargetLabel(focusedPane)}`,
       run: () => paneToggleTargetLock(focusedPane)
-    }, '⌘/Ctrl+Shift+L'));
+    }));
   }
 
   // Core open actions for all enabled pane types.
@@ -13789,6 +13833,10 @@ function isTypingShortcutExempt(event) {
   const override = matchingShortcutOverrideAction(event);
   if (override?.typingExempt) return true;
   if (matchesKeybind(event, 'workqueue.openForActiveChat')) return true;
+  if (matchesKeybind(event, 'workqueue.togglePair')) {
+    const target = event?.target;
+    if (target instanceof Element && target.closest?.('[data-pane-kind="workqueue"] select')) return true;
+  }
   return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'p' || key === 'k' || key === 'l');
 }
 
@@ -14237,6 +14285,11 @@ window.addEventListener('keydown', (event) => {
       openWorkqueueForActiveChatAgent();
       return;
     }
+    if (matchesKeybind(event, 'workqueue.togglePair')) {
+      event.preventDefault();
+      togglePairedPaneForActivePane();
+      return;
+    }
     if (matchesKeybindWithOptionalAlt(event, 'triage.return') && !event.altKey) {
       event.preventDefault();
       paneManager.closeAddPaneMenu();
@@ -14417,15 +14470,11 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Cmd/Ctrl+Shift+L toggles paired target lock on focused Chat/Workqueue pane.
+  // Cmd/Ctrl+Shift+L toggles between the active Chat/Workqueue pane and its pair.
   if (matchesKeybind(event, 'workqueue.togglePair')) {
-    const focusedKey = focusedPaneKey();
-    const pane = paneManager.panes.find((p) => p?.key === focusedKey) || paneManager.panes[0] || null;
-    if (paneSupportsTargetLock(pane)) {
-      event.preventDefault();
-      paneToggleTargetLock(pane);
-      return;
-    }
+    event.preventDefault();
+    togglePairedPaneForActivePane();
+    return;
   }
 
   // Cmd/Ctrl+Shift+H opens Agents and sorts by heartbeat age (stale first).
