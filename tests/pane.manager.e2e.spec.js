@@ -299,6 +299,51 @@ test('pane manager: status stays in sync with pane header while modal is open', 
   await expect(chatManagerState).toHaveText('disconnected');
 });
 
+test('pane manager: overflow rows preserve pane identity and state chips', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-chat').click();
+
+  const chatPanes = page.locator('[data-pane][data-pane-kind="chat"]');
+  const firstChat = chatPanes.first();
+  const secondChat = chatPanes.nth(1);
+
+  await firstChat.locator('[data-pane-input]').fill('overflow chip check');
+  await firstChat.locator('[data-pane-send]').click();
+  await secondChat.locator('[data-pane-input]').focus();
+  await expect(firstChat.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: overflow chip check', { timeout: 10000 });
+  await secondChat.locator('[data-pane-input]').fill('unsent overflow draft');
+
+  await page.evaluate(() => document.getElementById('disconnectBtn')?.click());
+  await page.keyboard.press('Control+P');
+
+  const modal = page.locator('#paneManagerModal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  const rows = page.locator('.pane-manager-row');
+  await expect(rows).toHaveCount(3);
+  const firstRow = rows.nth(0);
+  const secondRow = rows.nth(1);
+  await expect(firstRow.getByTestId('pane-manager-type-badge')).toContainText('Chat');
+  await expect(firstRow.locator('.pane-manager-kind-label')).toContainText(/^A Chat ·/);
+  await expect(firstRow.getByTestId('pane-manager-unread-badge')).toHaveText('1 unread');
+  await expect(secondRow.getByTestId('pane-manager-draft-badge')).toHaveText('Draft');
+  await expect(page.getByTestId('pane-manager-disconnected-badge').first()).toHaveText('Disconnected');
+
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+});
+
 test('pane manager: paired action focuses existing counterpart and opens missing counterpart', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);

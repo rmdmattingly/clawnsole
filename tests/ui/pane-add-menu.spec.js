@@ -57,12 +57,14 @@ test('pane add menu: workqueue override is applied before pane opens', async ({ 
 
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
+  await page.addInitScript(() => {
+    localStorage.setItem('clawnsole.admin.layoutMode', 'custom');
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([{ key: 'ptestchat', kind: 'chat', agentId: 'main' }])
+    );
+  });
   await loginAdmin(page, env.serverPort);
-  await page.evaluate(() => localStorage.setItem('clawnsole.admin.layoutMode', 'custom'));
-
-  while (await page.locator('[data-pane]').count() > 1) {
-    await page.locator('[data-pane] button[aria-label="Close pane"]').last().click();
-  }
 
   await page.locator('#addPaneBtn').click();
   const menu = page.locator('[data-testid="pane-add-menu"]');
