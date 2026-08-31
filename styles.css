@@ -1174,6 +1174,17 @@ body.header-labels-off .action-btn .btn-label {
   gap: 10px;
 }
 
+.pane-paired-btn {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 15px;
+  line-height: 1;
+}
+
 .pane-activity-badge {
   display: inline-flex;
   align-items: center;
