@@ -117,6 +117,8 @@ const globalElements = {
   loginCapsHint: document.getElementById('loginCapsHint'),
   loginBtn: document.getElementById('loginBtn'),
   loginError: document.getElementById('loginError'),
+  signedOutState: document.getElementById('signedOutState'),
+  signedOutUnlockBtn: document.getElementById('signedOutUnlockBtn'),
   logoutBtn: document.getElementById('logoutBtn'),
   paneControls: document.getElementById('paneControls'),
   addPaneBtn: document.getElementById('addPaneBtn'),
@@ -2429,9 +2431,22 @@ function renderAuthSessionUi() {
   return authUi;
 }
 
+function renderAdminShellAuthState(authUi = currentAuthUi()) {
+  const signedOut = !authUi.showAdminControls;
+  document.body.classList.toggle('admin-shell-signed-out', signedOut);
+  if (globalElements.signedOutState) {
+    globalElements.signedOutState.hidden = !signedOut;
+  }
+  if (globalElements.paneGrid) {
+    globalElements.paneGrid.hidden = signedOut;
+    globalElements.paneGrid.setAttribute('aria-hidden', signedOut ? 'true' : 'false');
+  }
+}
+
 function setAuthState(authed) {
   uiState.authed = authed;
   const authUi = renderAuthSessionUi();
+  renderAdminShellAuthState(authUi);
   updateGlobalStatus();
   updateConnectionControls();
   paneManager.refreshChatEnabled();
@@ -2448,6 +2463,7 @@ function setAuthState(authed) {
 function setRole(role) {
   roleState.role = role;
   const authUi = renderAuthSessionUi();
+  renderAdminShellAuthState(authUi);
 
   updateAuthAction(authUi);
 
@@ -2514,7 +2530,7 @@ function showLogin(message = '') {
   closeAuthSessionPopover();
   globalElements.settingsBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
-  if (globalElements.shortcutsBtn && roleState.role === 'admin') {
+  if (globalElements.shortcutsBtn) {
     globalElements.shortcutsBtn.hidden = false;
     globalElements.shortcutsBtn.removeAttribute('disabled');
     globalElements.shortcutsBtn.style.opacity = '1';
@@ -14635,6 +14651,11 @@ globalElements.rolePill?.addEventListener('click', () => {
   const nextOpen = popover.hidden;
   popover.hidden = !nextOpen;
   globalElements.rolePill.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+});
+
+globalElements.signedOutUnlockBtn?.addEventListener('click', () => {
+  closeAuthSessionPopover();
+  showLogin('Please sign in to continue.');
 });
 
 globalElements.authSessionPopover?.addEventListener('click', async (event) => {
