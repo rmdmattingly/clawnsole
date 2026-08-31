@@ -11,8 +11,19 @@ test('visiting /admin without auth shows login overlay', async ({ page, clawnsol
   await expect(page.getByTestId('role-pill')).toHaveAttribute('data-auth-state', 'signed_out');
   await expect(page.getByTestId('connection-status')).toBeHidden();
   await expect(page.getByTestId('panes-indicator')).toBeHidden();
+  await expect(page.getByTestId('add-pane-btn')).toBeHidden();
+  await expect(page.getByTestId('pane-grid')).toBeHidden();
+  await expect(page.getByTestId('signed-out-state')).toBeVisible();
+  await expect(page.getByTestId('signed-out-state')).toContainText('Unlock to access Chat + Workqueue + Fleet');
   await expect(page.locator('#logoutBtn')).toContainText('Unlock');
   await expect(page.locator('#logoutBtn')).toBeEnabled();
+
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await clawnsole.waitForAdminUiReady(page);
+  await expect(page.getByTestId('signed-out-state')).toBeHidden();
+  await expect(page.getByTestId('pane-grid')).toBeVisible();
+  await expect(page.getByTestId('add-pane-btn')).toBeVisible();
 });
 
 test('signed-in auth chip shows session details and actions', async ({ page, clawnsole }) => {

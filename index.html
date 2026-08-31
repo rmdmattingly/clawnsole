@@ -140,6 +140,16 @@
 
       <main class="chat-page">
         <canvas id="pulseCanvas" class="flux-canvas"></canvas>
+        <section id="signedOutState" class="signed-out-state" data-testid="signed-out-state" hidden>
+          <div class="signed-out-state__content">
+            <div class="signed-out-state__eyebrow">Admin locked</div>
+            <h2>Unlock to access Chat + Workqueue + Fleet</h2>
+            <p>Enter the admin password to open panes, agents, queue controls, and live session tools.</p>
+            <button id="signedOutUnlockBtn" class="primary signed-out-state__cta" type="button" data-testid="signed-out-unlock">
+              Unlock
+            </button>
+          </div>
+        </section>
         <div id="paneGrid" class="pane-grid" aria-label="Chat panes" data-testid="pane-grid"></div>
 
         <template id="paneTemplate">
@@ -497,6 +507,14 @@
             <div class="agents-refresh-state">
               <span id="agentsLastRefreshed" class="agents-last-refreshed" role="status" aria-live="polite" aria-atomic="true">Last updated: never</span>
               <span id="agentsRefreshPaused" class="agents-refresh-paused" aria-live="polite" hidden></span>
+              <label class="agents-refresh-mode">
+                <span class="agents-label">Refresh</span>
+                <select id="agentsRefreshMode" aria-label="Fleet refresh mode">
+                  <option value="auto">Auto</option>
+                  <option value="slow">Slow</option>
+                  <option value="manual">Manual</option>
+                </select>
+              </label>
               <button id="agentsRefreshStateBtn" type="button" class="secondary agents-refresh-state-btn" aria-label="Refresh Fleet">Refresh</button>
             </div>
             <label class="agents-field">
@@ -508,9 +526,10 @@
               <span class="agents-label">Triage</span>
               <div class="agents-filter-chips" role="group" aria-label="Fleet triage filters">
                 <button type="button" class="agents-chip" data-agents-filter="all" aria-pressed="true">All</button>
-                <button type="button" class="agents-chip" data-agents-filter="active" aria-pressed="false">Active</button>
-                <button type="button" class="agents-chip" data-agents-filter="stale" aria-pressed="false">Stale</button>
-                <button type="button" class="agents-chip" data-agents-filter="offline_error" aria-pressed="false">Offline/Error</button>
+                <button type="button" class="agents-chip" data-agents-filter="needs_attention" aria-pressed="false">Needs attention</button>
+                <button type="button" class="agents-chip" data-agents-filter="connected" aria-pressed="false">Connected</button>
+                <button type="button" class="agents-chip" data-agents-filter="disconnected" aria-pressed="false">Disconnected</button>
+                <button type="button" class="agents-chip" data-agents-filter="busy" aria-pressed="false">Busy</button>
               </div>
             </div>
             <div class="agents-field agents-snooze-controls">
@@ -523,6 +542,7 @@
             <label class="agents-field">
               <span class="agents-label">Sort</span>
               <select id="agentsSort" aria-label="Sort agents">
+                <option value="attention_first">Attention first</option>
                 <option value="recent_desc">Last active (newest first)</option>
                 <option value="heartbeat_age_desc">Heartbeat age (stale first)</option>
                 <option value="agent_id_asc">Agent id (A-Z)</option>
