@@ -4834,7 +4834,7 @@ function renderPaneManager() {
   });
 }
 
-function openPaneManager({ attentionOnly = false } = {}) {
+function openPaneManager({ attentionOnly = false, focusPaneKey = '', resetFilters = false } = {}) {
   if (roleState.role !== 'admin') return;
   if (!uiState.authed) {
     showLogin('Please sign in to continue.');
@@ -4842,14 +4842,38 @@ function openPaneManager({ attentionOnly = false } = {}) {
   }
   if (!globalElements.paneManagerModal) return;
 
+  const targetPaneKey = String(focusPaneKey || '').trim();
+  if (resetFilters) {
+    paneManagerUiState.query = '';
+    paneManagerUiState.unreadOnly = false;
+    if (globalElements.paneManagerSearch) globalElements.paneManagerSearch.value = '';
+    if (globalElements.paneManagerUnreadOnly) globalElements.paneManagerUnreadOnly.checked = false;
+  }
+
   paneManagerUiState.open = true;
-  paneManagerUiState.selectedIndex = 0;
   paneManagerUiState.attentionOnly = !!attentionOnly;
-  paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
-  paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
+  if (!resetFilters) {
+    paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
+    paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
+  }
+  paneManagerUiState.selectedIndex = Math.max(
+    0,
+    (paneManager?.panes || []).findIndex((pane) => String(pane?.key || '') === targetPaneKey)
+  );
 
   openAdminModal(globalElements.paneManagerModal);
   renderPaneManager();
+
+  if (targetPaneKey) {
+    requestAnimationFrame(() => {
+      const row = globalElements.paneManagerList?.querySelector?.(
+        `.pane-manager-row[data-pane-key="${cssEscape(targetPaneKey)}"]`
+      );
+      try {
+        row?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      } catch {}
+    });
+  }
 
   // Focus quick-find for immediate filtering.
   try {
@@ -14805,8 +14829,8 @@ globalElements.addPaneBtn?.addEventListener('click', (event) => {
 
 globalElements.activePaneChip?.addEventListener('click', () => {
   const pane = activePaneFromState();
-  const idx = paneManager?.panes?.indexOf?.(pane) ?? -1;
-  if (idx >= 0) focusPaneIndex(idx, { showHud: true });
+  if (!pane) return;
+  openPaneManager({ focusPaneKey: pane.key, resetFilters: true });
 });
 
 globalElements.layoutModeChip?.addEventListener('click', () => {

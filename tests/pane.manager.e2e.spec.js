@@ -85,6 +85,36 @@ test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane 
   await expect(page.locator('.pane-manager-row .pane-manager-pane-id').first()).toHaveText(/^[a-zA-Z0-9]+$/);
 });
 
+test('admin header: active pane breadcrumb updates and opens selected manager row', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const breadcrumb = page.getByTestId('active-pane-chip');
+  const value = breadcrumb.locator('[data-active-pane-chip-value]');
+  await expect(breadcrumb).toBeVisible();
+  await expect(value).toHaveText(/^A Chat · .+/);
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Control+Shift+L');
+  await expect(value).toHaveText(/^B Workqueue · .+/);
+
+  const activePaneKey = await page.locator('[data-pane][data-active-pane="true"]').evaluate((pane) => pane.dataset.paneKey);
+  await breadcrumb.click();
+
+  const modal = page.getByTestId('pane-manager-modal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  const activeRow = modal.locator(`.pane-manager-row[data-pane-key="${activePaneKey}"]`);
+  await expect(activeRow).toHaveAttribute('aria-selected', 'true');
+  await expect(activeRow.locator('.pane-manager-kind-label')).toHaveText(/^B Workqueue · .+/);
+});
+
 test('pane manager: quick-find filters, highlights, and focuses first match', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
