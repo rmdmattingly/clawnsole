@@ -4616,7 +4616,7 @@ function renderPanePairedAction(pane) {
 
   btn.hidden = false;
   btn.disabled = !!action.disabled;
-  btn.textContent = action.text;
+  btn.textContent = '⇄';
   btn.title = action.title;
   btn.setAttribute('aria-label', action.title);
   btn.dataset.pairedKind = action.pairedKind;
