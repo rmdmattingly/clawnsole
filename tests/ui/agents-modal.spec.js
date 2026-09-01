@@ -70,8 +70,79 @@ test('agents modal shows live refresh freshness indicators', async ({ page, claw
   await page.getByRole('button', { name: 'Open agents' }).click();
   await expect(page.locator('#agentsModal')).toHaveClass(/open/);
 
-  await expect(page.locator('#agentsLastRefreshed')).toContainText('Last refreshed:');
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Last updated:');
   await expect(page.locator('#agentsList .agents-row-meta').first()).toContainText(/\d+[smhd]/);
+});
+
+test('agents modal marks stale fleet data and supports header refresh parity', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({ alpha: Date.now() - 11 * 60_000 }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const row = page.locator('#agentsList .agents-row').filter({ hasText: 'Alpha (alpha)' });
+  await expect(row).toHaveClass(/is-stale/);
+  await expect(row.locator('.agents-health-state-chip')).toHaveText('Stale');
+
+  await page.evaluate(() => window.__debug.setAgentsLastRefreshedAtMs(Date.now() - 70_000));
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Stale');
+
+  agents = [{ id: 'beta', name: 'Beta', displayName: 'Beta' }];
+  await page.getByRole('button', { name: 'Refresh Fleet' }).click();
+  await expect(page.locator('#agentsList')).toContainText('Beta (beta)');
+
+  agents = [{ id: 'gamma', name: 'Gamma', displayName: 'Gamma' }];
+  await page.keyboard.press('r');
+  await expect(page.locator('#agentsList')).toContainText('Gamma (gamma)');
+});
+
+test('agents modal refresh mode supports manual refresh without background updates', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const mode = page.getByLabel('Fleet refresh mode');
+  await expect(mode).toHaveValue('auto');
+  await mode.selectOption('manual');
+  await expect(mode).toHaveValue('manual');
+  await expect
+    .poll(() => page.evaluate(() => window.__debug.getFleetRefreshMode()))
+    .toBe('manual');
+
+  agents = [{ id: 'beta', name: 'Beta', displayName: 'Beta' }];
+  await page.evaluate(() => window.__debug.refreshAgents({ reason: 'fleet_auto_refresh' }));
+  await expect(page.locator('#agentsList')).toContainText('Alpha (alpha)');
+  await expect(page.locator('#agentsList')).not.toContainText('Beta (beta)');
+
+  await page.evaluate(() => window.__debug.setAgentsLastRefreshedAtMs(Date.now() - 70_000));
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Stale');
+
+  await page.keyboard.press('r');
+  await expect(page.locator('#agentsList')).toContainText('Beta (beta)');
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Last updated:');
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.getByLabel('Fleet refresh mode')).toHaveValue('manual');
 });
 
 test('agents modal defers auto-refresh while a fleet row is active, then catches up once', async ({ page, clawnsole }) => {
@@ -174,6 +245,45 @@ test('agents modal shows fleet health summary counts and refreshes them', async 
   await expect(summary.locator('.agents-health-chip.disconnected')).toContainText('0');
 });
 
+test('agents modal snoozes noisy agents and can reveal or clear them', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+
+  const alpha = page.locator('#agentsList .agents-row').filter({ hasText: 'Alpha (alpha)' });
+  await expect(alpha).toBeVisible();
+  await alpha.locator('[data-agent-action="snooze-30m"]').first().click();
+  await expect(page.locator('#agentsList')).not.toContainText('Alpha (alpha)');
+  await expect(page.locator('#agentsSnoozedToggle')).toHaveText('Snoozed (1)');
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+
+  await expect(page.locator('#agentsList')).not.toContainText('Alpha (alpha)');
+  await page.locator('#agentsSnoozedToggle').click();
+  await expect(page.locator('#agentsList .agents-section-title').filter({ hasText: 'Snoozed (1)' })).toBeVisible();
+  await expect(page.locator('#agentsList .agents-row[data-snoozed="true"]')).toContainText('Alpha (alpha)');
+
+  await page.locator('#agentsClearSnoozesBtn').click();
+  await expect(page.locator('#agentsSnoozedToggle')).toBeHidden();
+  await expect(page.locator('#agentsList')).toContainText('Alpha (alpha)');
+});
+
 test('agents modal shows row health and heartbeat-age chips', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
@@ -215,6 +325,52 @@ test('agents modal shows row health and heartbeat-age chips', async ({ page, cla
   await expect(offlineRow.locator('.agents-age-chip')).toHaveText('unknown');
 });
 
+test('agents modal defaults to attention-first triage chips and reason badges', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'connected-agent', name: 'Connected', displayName: 'Connected' },
+    { id: 'busy-agent', name: 'Busy', displayName: 'Busy', status: 'in_progress' },
+    { id: 'stale-agent', name: 'Stale', displayName: 'Stale' },
+    { id: 'disconnected-agent', name: 'Disconnected', displayName: 'Disconnected' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.removeItem('clawnsole.admin.agents.sort');
+    localStorage.removeItem('clawnsole.admin.agents.filter');
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      'connected-agent': now - 10_000,
+      'busy-agent': now - 12_000,
+      'stale-agent': now - 70 * 60_000
+    }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
+  await expect(page.locator('[data-agents-filter="needs_attention"]')).toHaveText('Needs attention');
+  await expect(page.locator('[data-agents-filter="connected"]')).toHaveText('Connected');
+  await expect(page.locator('[data-agents-filter="disconnected"]')).toHaveText('Disconnected');
+  await expect(page.locator('[data-agents-filter="busy"]')).toHaveText('Busy');
+
+  const rows = page.locator('#agentsList .agents-row:visible');
+  await expect(rows.nth(0)).toContainText('Disconnected');
+  await expect(rows.nth(0).locator('.agents-reason-badge')).toHaveText('Disconnected');
+  await expect(rows.nth(1)).toContainText('Busy');
+  await expect(rows.nth(1).locator('.agents-reason-badge')).toHaveText('Busy');
+  await expect(rows.nth(2)).toContainText('Stale');
+  await expect(rows.nth(2).locator('.agents-reason-badge')).toContainText('Stale');
+
+  await page.locator('[data-agents-filter="connected"]').click();
+  await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
+  await expect(page.locator('#agentsList .agents-row:visible')).toContainText('Connected');
+});
+
 test('agents modal quick filter narrows list and Esc clears it', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
@@ -235,6 +391,77 @@ test('agents modal quick filter narrows list and Esc clears it', async ({ page, 
   await expect(search).toBeFocused();
   await expect(search).toHaveValue('');
   await expect(rows).toHaveCount(initialCount);
+});
+
+test('agents modal persists triage query and sort until reset', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const search = page.locator('#agentsSearch');
+  const sort = page.locator('#agentsSort');
+  await search.fill('alpha');
+  await sort.selectOption('agent_id_asc');
+  await expect(page.locator('#agentsList .agents-row')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'Close agents' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(search).toHaveValue('alpha');
+  await expect(sort).toHaveValue('agent_id_asc');
+  await expect(page.locator('#agentsList .agents-row')).toHaveCount(1);
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsSearch')).toHaveValue('alpha');
+  await expect(page.locator('#agentsSort')).toHaveValue('agent_id_asc');
+
+  await page.locator('#agentsSearch').focus();
+  await page.locator('#agentsSearch').press('Escape');
+  await expect(page.locator('#agentsSearch')).toHaveValue('');
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+  await page.locator('#agentsSearch').focus();
+  await page.locator('#agentsSearch').press('Escape');
+  await expect(page.locator('#agentsModal')).not.toHaveClass(/open/);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await page.locator('#agentsSearch').fill('alpha');
+  await page.locator('#agentsSort').selectOption('agent_id_asc');
+  await page.getByRole('button', { name: 'Reset agents triage view' }).click();
+  await expect(page.locator('#agentsSearch')).toHaveValue('');
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
+  await expect(page.locator('#agentsList .agents-row')).toHaveCount(2);
+});
+
+test('agents modal defaults to attention sort with triage chips and reason badges', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
+  await expect(page.getByRole('button', { name: 'Needs attention', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connected', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Disconnected', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Busy', exact: true })).toBeVisible();
+  await expect(page.locator('[data-testid="agents-reason-badge"]').first()).toBeVisible();
+
+  await page.getByRole('button', { name: 'Connected', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Connected', exact: true })).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('fleet refresh preserves selected row and falls back when it disappears', async ({ page, clawnsole }) => {
@@ -326,6 +553,17 @@ test('fleet refresh keeps scroll anchor and keyboard triage selection', async ({
       .evaluateAll((els) => els.map((el) => el.value))
   )).toContain('agent-20');
 
+  await page.waitForTimeout(350);
+  await reopenedRow20.click();
+  await expect(reopenedRow20).toBeFocused();
+  const timelineCountBeforePeriod = await page.locator('[data-pane][data-pane-kind="timeline"]').count();
+  await page.keyboard.press('.');
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(timelineCountBeforePeriod + 1);
+  await expect.poll(async () => (
+    page.locator('[data-pane][data-pane-kind="timeline"] [data-cron-agent]')
+      .evaluateAll((els) => els.map((el) => el.value))
+  )).toContain('agent-20');
+
   const search = page.locator('#agentsSearch');
   await search.fill('agent');
   const selectedAfterFilter = page.locator('#agentsList .agents-row[aria-selected="true"]').first();
@@ -335,6 +573,48 @@ test('fleet refresh keeps scroll anchor and keyboard triage selection', async ({
   await search.press('ArrowDown');
   await expect(search).toHaveValue('agent');
   await expect(page.locator(`#agentsList .agents-row[data-agent-id="${selectedIdAfterFilter}"]`)).toHaveAttribute('aria-selected', 'true');
+});
+
+test('agents modal copies selected fleet agent id with keyboard shortcut', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.addInitScript(() => {
+    window.__copiedText = '';
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text) => {
+          window.__copiedText = String(text);
+        }
+      }
+    });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const alpha = page.locator('#agentsList .agents-row[data-agent-id="alpha"]');
+  const beta = page.locator('#agentsList .agents-row[data-agent-id="beta"]');
+  await alpha.click();
+  await page.keyboard.press('j');
+  await expect(beta).toHaveAttribute('aria-selected', 'true');
+
+  await page.keyboard.press('y');
+  await expect(page.getByTestId('fleet-copy-agent-toast').last()).toContainText('Copied beta');
+  await expect(beta).toBeFocused();
+  await expect.poll(() => page.evaluate(() => window.__copiedText)).toBe('beta');
+
+  await beta.locator('[data-agent-action="copy-id"]').first().click();
+  await expect(page.getByTestId('fleet-copy-agent-toast').last()).toContainText('Copied beta');
 });
 
 test('fleet list keeps header and identity columns visible while scrolling', async ({ page, clawnsole }) => {
@@ -407,6 +687,47 @@ test('fleet list keeps header and identity columns visible while scrolling', asy
   await expect(page.locator('#agentsList .agents-row[data-agent-id="agent-31"]')).toHaveAttribute('aria-selected', 'true');
 });
 
+test('agents modal keeps selected agent summary sticky with keyboard actions', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({ alpha: now, beta: now - 70 * 60 * 1000 }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+
+  const beta = page.locator('#agentsList .agents-row[data-agent-id="beta"]');
+  await beta.click();
+
+  const bar = page.locator('#agentsSelectionBar');
+  await expect(bar).toBeVisible();
+  await expect(bar).toContainText('Beta (beta)');
+  await expect(bar).toContainText('Stale');
+  await expect(bar).toContainText('1h ago');
+
+  const openTimeline = bar.getByRole('button', { name: 'Open Timeline' });
+  await openTimeline.focus();
+  await expect(openTimeline).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+
+  agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.locator('#agentsModalRefreshBtn').click();
+  await expect(bar).toBeVisible();
+  await expect(bar).toContainText('Alpha (alpha)');
+  await expect(bar).not.toContainText('Beta (beta)');
+});
+
 test('fleet attention mode sections healthy agents and keeps filters while expanding', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
@@ -441,11 +762,125 @@ test('fleet attention mode sections healthy agents and keeps filters while expan
   await expect(page.getByRole('button', { name: /Healthy \(11\) Hide/ })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(12);
 
-  await page.getByRole('button', { name: 'Offline/Error' }).click();
-  await expect(page.getByRole('button', { name: 'Offline/Error' })).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('[data-agents-filter="disconnected"]').click();
+  await expect(page.locator('[data-agents-filter="disconnected"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#agentsList .agents-section-title').first()).toContainText('Needs attention (1)');
   await expect(page.getByRole('button', { name: /Healthy \(0\) Hide/ })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
+});
+
+test('fleet attention shortcut selects first needs-attention row and Enter opens chat', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'healthy-agent', name: 'healthy-agent', displayName: 'healthy-agent' },
+    { id: 'attention-agent', name: 'attention-agent', displayName: 'attention-agent' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({ 'healthy-agent': Date.now() }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await expect(page.getByRole('button', { name: 'Refresh agent list' })).not.toHaveAttribute('aria-busy', 'true');
+  await page.evaluate(() => document.activeElement?.blur?.());
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F', ctrlKey: true, shiftKey: true, bubbles: true }));
+  });
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const selected = page.locator('#agentsList .agents-row[aria-selected="true"]');
+  await expect(selected).toContainText('attention-agent');
+
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(async () =>
+      page.locator('[data-pane][data-pane-kind="chat"] [data-pane-agent-select]').evaluateAll((selects) =>
+        selects.map((select) => select.value)
+      )
+    )
+    .toContain('attention-agent');
+});
+
+test('fleet attention shortcut treats busy active agents as needing attention', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'healthy-agent', name: 'healthy-agent', displayName: 'healthy-agent' },
+    { id: 'busy-agent', name: 'busy-agent', displayName: 'busy-agent', status: 'in_progress' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      'healthy-agent': now,
+      'busy-agent': now
+    }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.evaluate(() => document.activeElement?.blur?.());
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F', ctrlKey: true, shiftKey: true, bubbles: true }));
+  });
+
+  const selected = page.locator('#agentsList .agents-row[aria-selected="true"]');
+  await expect(selected).toContainText('busy-agent');
+  await expect(selected).toHaveAttribute('data-needs-attention', 'true');
+  await expect(selected).toHaveAttribute('data-health-state', 'busy');
+  await expect(page.locator('#agentsSelectionBar [data-agents-selection-health]')).toHaveText('Busy');
+  await expect(page.locator('#agentsSelectionBar [data-agents-selection-health]')).toHaveAttribute('data-health-state', 'busy');
+});
+
+test('fleet attention shortcut falls back to first healthy row and Shift+Enter opens workqueue', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha', name: 'alpha', displayName: 'alpha' },
+    { id: 'beta', name: 'beta', displayName: 'beta' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({ alpha: now, beta: now }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await expect(page.getByRole('button', { name: 'Refresh agent list' })).not.toHaveAttribute('aria-busy', 'true');
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({ alpha: now, beta: now }));
+  });
+  await page.evaluate(() => document.activeElement?.blur?.());
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F', ctrlKey: true, shiftKey: true, bubbles: true }));
+  });
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+  await expect(page.getByTestId('toast').last()).toContainText('No attention-needed agents right now.');
+
+  const selected = page.locator('#agentsList .agents-row[aria-selected="true"]');
+  await expect(selected).toContainText('alpha');
+
+  await page.keyboard.press('Shift+Enter');
+  await expect
+    .poll(async () =>
+      page.locator('[data-pane][data-pane-kind="workqueue"] [data-pane-agent-select]').evaluateAll((selects) =>
+        selects.map((select) => select.value)
+      )
+    )
+    .toContain('alpha');
 });
 
 test('agents modal heartbeat heatmap and stale-first sort are toggleable and resettable', async ({ page, clawnsole }) => {
@@ -489,7 +924,7 @@ test('agents modal heartbeat heatmap and stale-first sort are toggleable and res
   await expect(page.locator('#agentsList .agents-row:visible').first()).toContainText('critical-agent');
 
   await page.getByRole('button', { name: 'Reset sort' }).click();
-  await expect(page.locator('#agentsSort')).toHaveValue('recent_desc');
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
   await expect(page.locator('#agentsSortIndicator')).toHaveText('');
 });
 
