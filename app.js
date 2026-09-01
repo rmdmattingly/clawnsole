@@ -1498,7 +1498,8 @@ function showToast(
     testId = 'toast',
     role = '',
     ariaLabel = '',
-    autoFocusAction = false
+    autoFocusAction = false,
+    escapeTriggersSecondary = true
   } = {}
 ) {
   if (!globalElements.toastHost) return;
@@ -1577,7 +1578,7 @@ function showToast(
         event.stopPropagation();
         clearTimeout(timer);
         try {
-          if (hasSecondaryAction) onSecondaryAction?.();
+          if (escapeTriggersSecondary && hasSecondaryAction) onSecondaryAction?.();
         } catch {}
         remove();
         return;
@@ -4166,6 +4167,14 @@ function paneSetDraftOrigin(pane, origin = null) {
   pane.draftOrigin = paneNormalizeDraftOrigin(pane, origin);
 }
 
+function paneReturnToDraftOrigin(pane) {
+  const origin = paneNormalizeDraftOrigin(pane, pane?.draftOrigin);
+  if (!pane || !origin?.targetSignature) return;
+  const [, , agentId = 'main'] = origin.targetSignature.split(':');
+  paneSetAgent(pane, agentId || 'main', { requireDraftConfirm: false });
+  paneManager.focusPanePrimary(pane);
+}
+
 function paneRefreshDraftOrigin(pane) {
   if (!pane || pane.kind !== 'chat') return;
   if (!paneHasDraftChanges(pane)) {
@@ -4187,14 +4196,29 @@ function paneNeedsDraftRetargetConfirm(pane) {
   );
 }
 
-function paneConfirmDraftRetargetSend(pane) {
+function paneConfirmDraftRetargetSend(pane, sendFn) {
   if (!paneNeedsDraftRetargetConfirm(pane)) return true;
   const origin = paneNormalizeDraftOrigin(pane, pane.draftOrigin);
   const fromLabel = origin?.targetLabel || 'another chat pane';
   const toLabel = paneComposerContextLabel(pane);
-  const ok = window.confirm(`Send this carried draft to ${toLabel}?\n\nIt was started in ${fromLabel}.`);
-  if (ok) paneSetDraftOrigin(pane, paneCurrentDraftOrigin(pane));
-  return ok;
+  showToast(`Draft started in ${fromLabel}; current target is ${toLabel}.`, {
+    kind: 'info',
+    timeoutMs: 12000,
+    role: 'dialog',
+    ariaLabel: 'Confirm draft target',
+    testId: 'draft-target-confirm-toast',
+    actionLabel: 'Send to current target',
+    autoFocusAction: true,
+    escapeTriggersSecondary: false,
+    onAction: () => {
+      paneSetDraftOrigin(pane, paneCurrentDraftOrigin(pane));
+      paneClearSwitchSendGuard(pane);
+      sendFn?.();
+    },
+    secondaryActionLabel: 'Return to origin pane',
+    onSecondaryAction: () => paneReturnToDraftOrigin(pane)
+  });
+  return false;
 }
 
 function markPaneUnread(pane, increment = 1, kind = 'chat') {
@@ -9958,7 +9982,7 @@ async function paneSendChat(pane) {
   }
 
   paneRefreshDraftOrigin(pane);
-  if (!paneConfirmDraftRetargetSend(pane)) return;
+  if (!paneConfirmDraftRetargetSend(pane, () => paneSendChat(pane))) return;
 
   const message = raw;
 
@@ -10521,10 +10545,7 @@ function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true, syncFromP
   const previous = pane.agentId;
 
   if (requireDraftConfirm && pane.kind === 'chat' && paneHasDraftChanges(pane)) {
-    const nextAgent = getAgentRecord(next);
-    const nextLabel = formatAgentLabel(nextAgent, { includeId: false }) || next;
-    const ok = window.confirm(`Switch destination to “${nextLabel}”?\n\nYou have an unsent draft/attachment. Switching destination will clear this pane's draft and message history.`);
-    if (!ok) return;
+    paneRefreshDraftOrigin(pane);
   }
 
   pane.agentId = next;
@@ -10539,9 +10560,6 @@ function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true, syncFromP
 
   if (pane.kind === 'chat') {
     renderPaneAgentIdentity(pane);
-    paneSetDraftOrigin(pane, null);
-    pane.attachments.files = [];
-    paneRenderAttachments(pane);
     paneStopThinking(pane);
     paneClearChatHistory(pane, { wipeStorage: false });
     paneRestoreChatHistory(pane);

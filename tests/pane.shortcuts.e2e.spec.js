@@ -574,7 +574,7 @@ test('topbar shortcut hints follow active pane and typing focus', async ({ page 
 
   await page.getByLabel('Open fleet pane').click();
   await expect(page.locator('[data-pane]')).toHaveCount(3);
-  await page.locator('[data-pane]').nth(2).click({ position: { x: 18, y: 18 } });
+  await expect(page.locator('[data-pane]').nth(2).locator('[data-tl-search]')).toBeFocused();
   await page.locator('[data-pane]').nth(2).getByTestId('pane-help').focus();
   await expect(strip).toContainText('Move Fleet selection down');
   await expect(strip).toContainText('Workqueue for selected Fleet agent');
