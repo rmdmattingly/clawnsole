@@ -10,6 +10,7 @@ const {
   loadState,
   saveState,
   transitionItem,
+  archiveTerminalItems,
   collapseCanonicalIssueDuplicates,
   canonicalizeIssueDedupeKey
 } = require('../../lib/workqueue');
@@ -296,6 +297,45 @@ test('workqueue: issue-backed automated enqueue upserts one live item', () => {
   assert.equal(state.items[0].priority, 9);
 });
 
+test('workqueue: archiveTerminalItems previews and archives old terminal items only', () => {
+  withFakeNow(Date.parse('2026-08-25T12:00:00.000Z'), () => {
+    const root = tempRoot();
+
+    const oldDone = enqueueItem(root, { queue: 'dev', title: 'old done', instructions: 'x', priority: 0 });
+    const oldFailed = enqueueItem(root, { queue: 'dev', title: 'old failed', instructions: 'x', priority: 0 });
+    const freshDone = enqueueItem(root, { queue: 'dev', title: 'fresh done', instructions: 'x', priority: 0 });
+    const oldReady = enqueueItem(root, { queue: 'dev', title: 'old ready', instructions: 'x', priority: 0 });
+    const otherQueue = enqueueItem(root, { queue: 'qa', title: 'old qa done', instructions: 'x', priority: 0 });
+
+    const state = loadState(root);
+    for (const item of state.items) {
+      if (item.id === oldDone.id) Object.assign(item, { status: 'done', updatedAt: '2026-08-01T00:00:00.000Z' });
+      if (item.id === oldFailed.id) Object.assign(item, { status: 'failed', updatedAt: '2026-08-01T00:00:00.000Z' });
+      if (item.id === freshDone.id) Object.assign(item, { status: 'done', updatedAt: '2026-08-24T00:00:00.000Z' });
+      if (item.id === oldReady.id) Object.assign(item, { status: 'ready', updatedAt: '2026-08-01T00:00:00.000Z' });
+      if (item.id === otherQueue.id) Object.assign(item, { status: 'done', updatedAt: '2026-08-01T00:00:00.000Z' });
+    }
+    saveState(root, state);
+
+    const preview = archiveTerminalItems(root, { queue: 'dev', olderThanDays: 7, previewOnly: true });
+    assert.equal(preview.previewCount, 2);
+    assert.equal(preview.archivedCount, 0);
+    assert.equal(loadState(root).items.length, 5);
+
+    const applied = archiveTerminalItems(root, { queue: 'dev', olderThanDays: 7, previewOnly: false });
+    assert.equal(applied.previewCount, 2);
+    assert.equal(applied.archivedCount, 2);
+
+    const next = loadState(root);
+    assert.deepEqual(
+      next.items.map((item) => item.title).sort(),
+      ['fresh done', 'old qa done', 'old ready'].sort()
+    );
+    assert.equal(next.archivedItems.length, 2);
+    assert.ok(next.archivedItems.every((item) => item.archivedAt && item.archivedReason === 'terminal-older-than-7d'));
+  });
+});
+
 test('workqueue: issue-backed enqueue canonicalizes producer dedupe variants', () => {
   const root = tempRoot();
 
@@ -502,7 +542,8 @@ test('workqueue: collapseCanonicalIssueDuplicates safely backfills existing dupl
     instructions: 'https://github.com/rmdmattingly/clawnsole/issues/298',
     dedupeKey: 'issue:rmdmattingly/clawnsole#298',
     createdAt: '2026-01-01T00:00:01.000Z',
-    updatedAt: '2026-01-01T00:00:01.000Z'
+    updatedAt: '2026-01-01T00:00:01.000Z',
+    lastNote: 'legacy note'
   });
   saveState(root, state);
 
@@ -512,9 +553,52 @@ test('workqueue: collapseCanonicalIssueDuplicates safely backfills existing dupl
 
   const result = collapseCanonicalIssueDuplicates(root, { queue: 'dev-team' });
   assert.equal(result.removedCount, 1);
+  assert.ok(result.backupFile.endsWith('.json'));
+  assert.ok(fs.existsSync(result.backupFile));
+  const backupState = JSON.parse(fs.readFileSync(result.backupFile, 'utf8'));
+  assert.equal(backupState.items.length, 2);
+  assert.equal(backupState.items[0].result, undefined);
   const finalState = loadState(root);
   assert.equal(finalState.items.length, 1);
   assert.equal(finalState.items[0].id, first.id);
   assert.equal(finalState.items[0].dedupeKey, 'rmdmattingly/clawnsole#298');
-  assert.equal(finalState.items[0].seenCount, 2);
+  assert.equal(finalState.items[0].meta.migrationMergedCount, 1);
+  assert.equal(finalState.items[0].result.migrationMerged[0].id, 'duplicate-existing-row');
+  assert.equal(finalState.items[0].result.migrationMerged[0].lastNote, 'legacy note');
+});
+
+test('workqueue: collapseCanonicalIssueDuplicates uses deterministic survivor policy', () => {
+  const root = tempRoot();
+  const olderActive = enqueueItem(root, {
+    queue: 'dev-team',
+    title: '[issue] rmdmattingly/clawnsole#399 active',
+    instructions: 'active',
+    priority: 1,
+    meta: { repo: 'rmdmattingly/clawnsole', issueNumber: 399 }
+  });
+
+  const state = loadState(root);
+  const active = state.items.find((it) => it.id === olderActive.id);
+  const terminal = {
+    ...active,
+    id: 'newer-terminal-row',
+    title: '[issue] rmdmattingly/clawnsole#399 terminal',
+    instructions: 'terminal',
+    priority: 99
+  };
+  terminal.status = 'done';
+  terminal.updatedAt = '2026-01-03T00:00:00.000Z';
+  active.status = 'ready';
+  active.updatedAt = '2026-01-01T00:00:00.000Z';
+  state.items.push(terminal);
+  saveState(root, state);
+
+  const result = collapseCanonicalIssueDuplicates(root, { queue: 'dev-team' });
+  assert.equal(result.removedCount, 1);
+  assert.equal(result.removed[0].keptId, olderActive.id);
+
+  const finalState = loadState(root);
+  assert.equal(finalState.items.length, 1);
+  assert.equal(finalState.items[0].id, olderActive.id);
+  assert.equal(finalState.items[0].result.migrationMerged[0].id, 'newer-terminal-row');
 });

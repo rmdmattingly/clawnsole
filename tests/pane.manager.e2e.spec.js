@@ -85,6 +85,36 @@ test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane 
   await expect(page.locator('.pane-manager-row .pane-manager-pane-id').first()).toHaveText(/^[a-zA-Z0-9]+$/);
 });
 
+test('admin header: active pane breadcrumb updates and opens selected manager row', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const breadcrumb = page.getByTestId('active-pane-chip');
+  const value = breadcrumb.locator('[data-active-pane-chip-value]');
+  await expect(breadcrumb).toBeVisible();
+  await expect(value).toHaveText(/^A Chat · .+/);
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Control+Shift+L');
+  await expect(value).toHaveText(/^B Workqueue · .+/);
+
+  const activePaneKey = await page.locator('[data-pane][data-active-pane="true"]').evaluate((pane) => pane.dataset.paneKey);
+  await breadcrumb.click();
+
+  const modal = page.getByTestId('pane-manager-modal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  const activeRow = modal.locator(`.pane-manager-row[data-pane-key="${activePaneKey}"]`);
+  await expect(activeRow).toHaveAttribute('aria-selected', 'true');
+  await expect(activeRow.locator('.pane-manager-kind-label')).toHaveText(/^B Workqueue · .+/);
+});
+
 test('pane manager: quick-find filters, highlights, and focuses first match', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
@@ -258,9 +288,10 @@ test('pane manager: unread-only filter toggle', async ({ page }) => {
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   const panesIndicator = page.getByTestId('panes-indicator');
-  await expect(panesIndicator).toHaveText(/panes: \d+\/\d+ connected/i);
+  await expect(panesIndicator).toHaveText(/\d+ connected · \d+ disconnected · \d+ attention/i);
   await expect(panesIndicator).toHaveAttribute('role', 'status');
   await expect(panesIndicator).toHaveAttribute('aria-label', 'Pane connection status');
+  await expect(panesIndicator).toHaveCSS('cursor', 'default');
 
   const managerButton = page.getByTestId('pane-manager-button');
   await expect(managerButton).toHaveText(/Manage panes/);
@@ -286,7 +317,7 @@ test('pane manager: status stays in sync with pane header while modal is open', 
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.keyboard.press('Control+P');
+  await page.getByTestId('pane-manager-button').click();
   const modal = page.locator('#paneManagerModal');
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
 
@@ -307,6 +338,122 @@ test('pane manager: status stays in sync with pane header while modal is open', 
 
   await expect(chatHeaderStatus).toHaveText('disconnected');
   await expect(chatManagerState).toHaveText('disconnected');
+});
+
+test('pane manager: overflow rows preserve pane identity and state chips', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-chat').click();
+
+  const chatPanes = page.locator('[data-pane][data-pane-kind="chat"]');
+  const firstChat = chatPanes.first();
+  const secondChat = chatPanes.nth(1);
+
+  await firstChat.locator('[data-pane-input]').fill('overflow chip check');
+  await firstChat.locator('[data-pane-send]').click();
+  await secondChat.locator('[data-pane-input]').focus();
+  await expect(firstChat.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: overflow chip check', { timeout: 10000 });
+  await secondChat.locator('[data-pane-input]').fill('unsent overflow draft');
+
+  await page.evaluate(() => document.getElementById('disconnectBtn')?.click());
+  await page.keyboard.press('Control+P');
+
+  const modal = page.locator('#paneManagerModal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  const rows = page.locator('.pane-manager-row');
+  await expect(rows).toHaveCount(3);
+  const firstRow = rows.nth(0);
+  const secondRow = rows.nth(1);
+  await expect(firstRow.getByTestId('pane-manager-type-badge')).toContainText('Chat');
+  await expect(firstRow.locator('.pane-manager-kind-label')).toContainText(/^A Chat ·/);
+  await expect(firstRow.getByTestId('pane-manager-unread-badge')).toHaveText('1 unread');
+  await expect(secondRow.getByTestId('pane-manager-draft-badge')).toHaveText('Draft');
+  await expect(page.getByTestId('pane-manager-disconnected-badge').first()).toHaveText('Disconnected');
+
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+});
+
+test('pane manager: paired action focuses existing counterpart and opens missing counterpart', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.keyboard.press('Control+P');
+  const modal = page.locator('#paneManagerModal');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  const chatRow = page.locator('.pane-manager-row', { hasText: 'Chat · main' }).first();
+  await chatRow.evaluate((row) => {
+    const paired = row.querySelector('[data-action="paired"]');
+    paired?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+  const focusedKindAfterFocus = await page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    const pane = panes.find((p) => p === active || (active && p.contains(active)));
+    return pane?.getAttribute('data-pane-kind') || null;
+  });
+  expect(focusedKindAfterFocus).toBe('workqueue');
+
+  // Start the missing-counterpart path from a Workqueue-only stored layout.
+  await page.evaluate(() => {
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([
+        {
+          key: 'ptestwqonly',
+          kind: 'workqueue',
+          agentId: 'main',
+          queue: 'dev-team',
+          statusFilter: ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
+          scopeFilter: 'assigned',
+          sortKey: 'priority',
+          sortDir: 'desc'
+        }
+      ])
+    );
+  });
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.keyboard.press('Control+P');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  // Trigger Paired from Workqueue row; should open Chat and focus it.
+  const workqueueRow = page.locator('.pane-manager-row', { hasText: 'Workqueue' }).first();
+  await workqueueRow.evaluate((row) => {
+    const paired = row.querySelector('[data-action="paired"]');
+    paired?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  const focusedKindAfterOpen = await page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    const active = document.activeElement;
+    const pane = panes.find((p) => p === active || (active && p.contains(active)));
+    return pane?.getAttribute('data-pane-kind') || null;
+  });
+  expect(focusedKindAfterOpen).toBe('chat');
 });
 
 test('pane manager: supports reordering panes', async ({ page }) => {
