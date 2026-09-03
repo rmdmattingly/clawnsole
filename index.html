@@ -31,13 +31,14 @@
         </div>
         <div class="topbar-actions">
           <div class="status compact">
-            <div class="status-pill" id="connectionStatus" data-testid="connection-status">disconnected</div>
+            <div class="status-pill" id="connectionStatus" data-testid="connection-status" hidden>disconnected</div>
             <button
               class="status-meta status-meta-btn"
               id="paneManagerBtn"
               type="button"
               aria-label="Open pane manager"
               data-testid="panes-indicator"
+              hidden
             ></button>
           </div>
           <button
@@ -90,15 +91,17 @@
             id="rolePill"
             type="button"
             data-testid="role-pill"
-            data-auth-state="signed_out"
+            data-auth-state="locked"
             aria-haspopup="dialog"
             aria-expanded="false"
             aria-controls="authSessionPopover"
-            aria-label="Authentication status"
-            title="Session context: signed out. Click to unlock this session."
-          >Signed out</button>
+            aria-label="Authentication status: Locked"
+            aria-disabled="true"
+            tabindex="-1"
+            title="Session context: locked in local. Use the Unlock action to sign in."
+          >Locked</button>
           <div id="authSessionPopover" class="auth-session-popover" data-testid="auth-session-popover" role="dialog" aria-label="Session details" hidden>
-            <div class="auth-session-popover__status" data-auth-session-status>Signed out</div>
+            <div class="auth-session-popover__status" data-auth-session-status>Locked</div>
             <div class="auth-session-popover__principal" data-auth-session-principal>Not signed in</div>
             <div class="auth-session-popover__env" data-auth-session-env>local</div>
             <div class="auth-session-popover__actions">

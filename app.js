@@ -309,28 +309,42 @@ const normalizeAdminDestination = __appCore.normalizeAdminDestination || ((candi
     activePaneKey: typeof value.activePaneKey === 'string' ? value.activePaneKey : ''
   };
 });
-const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => ({
-  isAdmin: String(state?.role || '') === 'admin',
-  authState: !!state?.authed ? 'signed_in' : (String(state?.role || '') === 'admin' ? 'locked' : 'signed_out'),
-  startAgentAutoRefresh: String(state?.role || '') === 'admin' && !!state?.authed,
-  stopAgentAutoRefresh: String(state?.role || '') !== 'admin' || !state?.authed,
-  rolePillText: !!state?.authed ? `Signed in - ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} - ${state?.environment || 'local'}` : (String(state?.role || '') === 'admin' ? 'Locked' : 'Signed out'),
-  rolePillAdmin: String(state?.role || '') === 'admin' && !!state?.authed,
-  rolePillLocked: !state?.authed && String(state?.role || '') === 'admin',
-  rolePillSignedOut: !state?.authed && String(state?.role || '') !== 'admin',
-  rolePillActionLabel: !!state?.authed ? 'Open session details' : 'Focus password input to unlock session',
-  rolePillTooltip: !!state?.authed
-    ? `Session context: signed in as ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} in ${state?.environment || 'local'}. Click for session details.`
-    : `Session context: signed out in ${state?.environment || 'local'}. Click to unlock this session.`,
-  authLabel: !!state?.authed ? 'Signed in' : (String(state?.role || '') === 'admin' ? 'Locked' : 'Signed out'),
-  principalLabel: !!state?.authed ? (String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')) : 'Not signed in',
-  environmentLabel: state?.environment || 'local',
-  showAdminControls: String(state?.role || '') === 'admin' && !!state?.authed,
-  authActionText: !!state?.authed ? 'Logout' : 'Unlock',
-  authActionLabel: !!state?.authed ? 'Log out' : 'Unlock admin',
-  logoutEnabled: true,
-  logoutOpacity: '1'
-}));
+const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => {
+  const effectiveRole = state?.role || (!state?.authed && state?.routeRole === 'admin' ? 'admin' : null);
+  const isAdmin = String(effectiveRole || '') === 'admin';
+  const authState = !!state?.authed ? 'signed_in' : (isAdmin ? 'locked' : 'signed_out');
+  const authLabel = authState === 'signed_in' ? 'Signed in' : authState === 'locked' ? 'Locked' : 'Signed out';
+  const principalLabel = !!state?.authed ? (isAdmin ? 'Admin' : (effectiveRole || 'Guest')) : 'Not signed in';
+  const environmentLabel = state?.environment || 'local';
+  return {
+    isAdmin,
+    authState,
+    startAgentAutoRefresh: isAdmin && !!state?.authed,
+    stopAgentAutoRefresh: !isAdmin || !state?.authed,
+    rolePillText: !!state?.authed ? `${authLabel} - ${principalLabel} - ${environmentLabel}` : authLabel,
+    rolePillAdmin: isAdmin && !!state?.authed,
+    rolePillLocked: authState === 'locked',
+    rolePillSignedOut: authState === 'signed_out',
+    rolePillActionLabel: !!state?.authed
+      ? 'Open session details'
+      : authState === 'locked'
+        ? 'Authentication status: Locked'
+        : 'Focus password input to unlock session',
+    rolePillTooltip: !!state?.authed
+      ? `Session context: signed in as ${principalLabel} in ${environmentLabel}. Click for session details.`
+      : authState === 'locked'
+        ? `Session context: locked in ${environmentLabel}. Use the Unlock action to sign in.`
+        : `Session context: signed out in ${environmentLabel}. Click to unlock this session.`,
+    authLabel,
+    principalLabel,
+    environmentLabel,
+    showAdminControls: isAdmin && !!state?.authed,
+    authActionText: !!state?.authed ? 'Logout' : 'Unlock',
+    authActionLabel: !!state?.authed ? 'Log out' : 'Unlock admin',
+    logoutEnabled: true,
+    logoutOpacity: '1'
+  };
+});
 const paneNeedsAttention = __appCore.paneNeedsAttention || ((pane) => {
   if (!pane) return false;
   const status = String(pane.statusState || '').trim();
@@ -2394,6 +2408,7 @@ function currentAuthUi() {
   return deriveAuthOverlayState({
     authed: uiState.authed,
     role: roleState.role,
+    routeRole,
     environment: uiState.meta?.instance || 'local'
   });
 }
@@ -2415,6 +2430,13 @@ function renderAuthSessionUi() {
     pill.dataset.authState = authUi.authState || 'signed_out';
     pill.setAttribute('aria-label', authUi.rolePillActionLabel || 'Authentication status');
     pill.title = authUi.rolePillTooltip || authUi.rolePillActionLabel || 'Authentication status';
+    if (uiState.authed) {
+      pill.removeAttribute('tabindex');
+      pill.removeAttribute('aria-disabled');
+    } else {
+      pill.tabIndex = -1;
+      pill.setAttribute('aria-disabled', 'true');
+    }
   }
 
   const popover = globalElements.authSessionPopover;
@@ -14830,7 +14852,6 @@ globalElements.status?.addEventListener('click', () => {
 globalElements.rolePill?.addEventListener('click', () => {
   if (!uiState.authed) {
     closeAuthSessionPopover();
-    showLogin('Please sign in to continue.');
     return;
   }
   renderAuthSessionUi();
