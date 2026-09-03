@@ -1500,6 +1500,7 @@ const uiState = {
 };
 
 let toastSeq = 0;
+let loginInFlight = false;
 function showToast(
   message,
   {
@@ -2540,12 +2541,31 @@ function setRole(role) {
   }
 }
 
-function showLogin(message = '') {
+function setLoginSubmitting(submitting) {
+  loginInFlight = Boolean(submitting);
+  if (globalElements.loginBtn) {
+    globalElements.loginBtn.disabled = loginInFlight;
+    globalElements.loginBtn.textContent = loginInFlight ? 'Unlocking...' : 'Unlock';
+    globalElements.loginBtn.setAttribute('aria-busy', loginInFlight ? 'true' : 'false');
+  }
+  if (globalElements.loginPassword) {
+    globalElements.loginPassword.disabled = loginInFlight;
+  }
+}
+
+function focusLoginPassword() {
+  globalElements.loginPassword?.focus();
+  window.requestAnimationFrame?.(() => globalElements.loginPassword?.focus());
+  window.setTimeout?.(() => globalElements.loginPassword?.focus(), 250);
+}
+
+function showLogin(message = '', { clearPassword = true } = {}) {
   captureAdminAuthDestination();
+  setLoginSubmitting(false);
   globalElements.loginOverlay.classList.add('open');
   globalElements.loginOverlay.setAttribute('aria-hidden', 'false');
   globalElements.loginError.textContent = message;
-  globalElements.loginPassword.value = '';
+  if (clearPassword) globalElements.loginPassword.value = '';
   updateLoginCapsHint(false);
 
   // Guest role selection removed.
@@ -2562,13 +2582,11 @@ function showLogin(message = '') {
   globalElements.fleetBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.fleetBtn) globalElements.fleetBtn.style.opacity = '0.5';
 
-  const isTouch = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
-  if (!isTouch) {
-    globalElements.loginPassword.focus();
-  }
+  focusLoginPassword();
 }
 
 function hideLogin() {
+  setLoginSubmitting(false);
   globalElements.loginOverlay.classList.remove('open');
   globalElements.loginOverlay.setAttribute('aria-hidden', 'true');
   globalElements.loginError.textContent = '';
@@ -2591,11 +2609,13 @@ function handleLoginPasswordCapsState(event) {
 }
 
 async function attemptLogin() {
+  if (loginInFlight) return;
   const password = globalElements.loginPassword.value.trim();
   if (!password) {
     showLogin('Password required.');
     return;
   }
+  setLoginSubmitting(true);
   try {
     const res = await fetch('/auth/login', {
       method: 'POST',
@@ -2604,7 +2624,7 @@ async function attemptLogin() {
       credentials: 'include'
     });
     if (!res.ok) {
-      showLogin('Invalid password. Try again.');
+      showLogin('Invalid password. Try again.', { clearPassword: false });
       return;
     }
     await res.json();
@@ -2622,7 +2642,7 @@ async function attemptLogin() {
     }
     window.location.replace(nextHref);
   } catch {
-    showLogin('Login failed. Please retry.');
+    showLogin('Login failed. Please retry.', { clearPassword: false });
   }
 }
 
