@@ -927,6 +927,7 @@ function buildDefaultAdminPanes(defaultAgent = 'main') {
     {
       key: `p${randomId().slice(0, 8)}`,
       kind: 'workqueue',
+      agentId,
       queue: 'dev-team',
       statusFilter: ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
       scopeFilter: getDefaultWorkqueueScopeForTarget(agentId),
@@ -9222,7 +9223,7 @@ function getDefaultWorkqueueScope() {
 }
 
 function getDefaultWorkqueueScopeForTarget(agentId) {
-  const target = typeof agentId === 'string' ? agentId.trim() : '';
+  const target = normalizeAgentId(agentId || 'main');
   return target && target !== 'main' ? 'assigned' : getDefaultWorkqueueScope();
 }
 
@@ -10730,6 +10731,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     stopBtn: root.querySelector('[data-pane-stop]')
   };
 
+  const normalizedPaneAgentId = role === 'admin' ? normalizeAgentId(agentId || 'main') : null;
   const normalizedQueue = (queue || 'dev-team').trim() || 'dev-team';
   const restoredSort = loadWorkqueueSortPreference(normalizedQueue);
   const hasExplicitSort = typeof sortKey === 'string' && sortKey.trim();
@@ -10744,11 +10746,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       const k = String(kind || 'chat').trim().toLowerCase();
       return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
     })(),
-    agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
+    agentId: normalizedPaneAgentId,
     workqueue: {
       queue: normalizedQueue,
       statusFilter: Array.isArray(statusFilter) ? statusFilter : Array.from(WORKQUEUE_ACTIVE_STATUSES),
-      scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScopeForTarget(agentId)),
+      scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScopeForTarget(normalizedPaneAgentId)),
       quickFilters: {
         sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
         repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : [],
