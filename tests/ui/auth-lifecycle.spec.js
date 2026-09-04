@@ -7,10 +7,11 @@ test('visiting /admin without auth shows login overlay', async ({ page, clawnsol
 
   await page.goto(clawnsole.adminUrl);
   await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
-  await expect(page.getByTestId('role-pill')).toHaveText('Locked');
-  await expect(page.getByTestId('role-pill')).toHaveAttribute('data-auth-state', 'locked');
-  await expect(page.getByTestId('role-pill')).toHaveAttribute('aria-disabled', 'true');
-  await expect(page.getByTestId('role-pill')).toHaveAttribute('tabindex', '-1');
+  const chip = page.getByTestId('role-pill');
+  await expect(chip).toHaveText('Locked');
+  await expect(chip).toHaveAttribute('data-auth-state', 'locked');
+  await expect(chip).toHaveAttribute('aria-disabled', 'true');
+  await expect(chip).toHaveAttribute('tabindex', '-1');
   await expect(page.getByTestId('connection-status')).toBeHidden();
   await expect(page.getByTestId('panes-indicator')).toBeHidden();
   await expect(page.getByTestId('add-pane-btn')).toBeHidden();
@@ -19,6 +20,11 @@ test('visiting /admin without auth shows login overlay', async ({ page, clawnsol
   await expect(page.getByTestId('signed-out-state')).toContainText('Unlock to access Chat + Workqueue + Fleet');
   await expect(page.locator('#logoutBtn')).toContainText('Unlock');
   await expect(page.locator('#logoutBtn')).toBeEnabled();
+  await expect(page.locator('#logoutBtn')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Refresh agent list' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Open agents' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Open fleet pane' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Open workqueue' })).toBeHidden();
 
   await page.fill('#loginPassword', 'admin');
   await page.click('#loginBtn');
@@ -75,6 +81,7 @@ test('login password shows Caps Lock hint only while active and focused', async 
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
   await page.goto(clawnsole.adminUrl);
+  await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
   const password = page.getByTestId('login-password');
   const hint = page.getByTestId('login-caps-hint');
 

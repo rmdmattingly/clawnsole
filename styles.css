@@ -30,6 +30,10 @@ html {
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 *:focus-visible {
   outline: 2px solid rgba(127, 209, 185, 0.85);
   outline-offset: 2px;
