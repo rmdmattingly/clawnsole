@@ -25,7 +25,6 @@ test('chat pane: send/receive + upload attachment', async ({ page }, testInfo) =
   test.skip(!!env?.skipReason, env?.skipReason);
 
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
-
   await loginAdmin(page, env.serverPort);
   await addPane(page, 'Chat pane');
 
@@ -242,6 +241,65 @@ test('chat pane: pane switch send guard can be disabled while context banner rem
   await expect(secondPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: unguarded send');
 });
 
+test('chat pane: target change requires draft retarget confirmation before send', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ agents: [{ id: 'main', name: 'main' }, { id: 'dev', name: 'dev' }] })
+    });
+  });
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
+
+  const pane = page.locator('[data-pane][data-pane-kind="chat"]').last();
+  const input = pane.locator('[data-pane-input]');
+
+  await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+  await input.fill('retarget guard');
+  await expect(pane.getByTestId('pane-draft-badge')).toBeVisible();
+
+  const agentSelect = pane.locator('[data-pane-agent-select]');
+  await expect(agentSelect.locator('option[value="dev"]')).toHaveCount(1, { timeout: 15000 });
+  await agentSelect.evaluate((select) => {
+    select.value = 'dev';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect(input).toHaveValue('retarget guard');
+  await expect(pane.locator('[data-pane-destination-strip]')).toContainText(/dev/i);
+
+  await input.focus();
+  await page.keyboard.press('Enter');
+  const confirm = page.getByRole('dialog', { name: 'Confirm draft target' });
+  await expect(confirm).toContainText('Draft started in Chat');
+  await expect(confirm.getByTestId('toast-action')).toBeFocused();
+  await expect(pane.locator('[data-chat-role="user"]')).toHaveCount(0);
+
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('draft-target-confirm-toast')).toHaveCount(0);
+  await expect(pane.locator('[data-chat-role="user"]')).toHaveCount(0);
+
+  await input.focus();
+  await page.keyboard.press('Enter');
+  await page.getByTestId('toast-secondary-action').click();
+  await expect(pane.locator('[data-pane-destination-strip]')).toContainText(/main/i);
+  await expect(input).toBeFocused();
+
+  await agentSelect.evaluate((select) => {
+    select.value = 'dev';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await input.focus();
+  await page.keyboard.press('Enter');
+  await page.getByTestId('draft-target-confirm-toast').last().getByTestId('toast-action').click();
+  await expect(pane.locator('[data-chat-role="user"]').last()).toContainText('retarget guard');
+  await expect(pane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: retarget guard');
+});
+
 test('chat pane: carried draft requires confirmation before sending from a different pane', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -272,20 +330,13 @@ test('chat pane: carried draft requires confirmation before sending from a diffe
   await expect(reopenedPane.locator('[data-pane-input]')).toHaveValue('carried draft check');
   await expect(reopenedPane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
 
-  page.once('dialog', async (dialog) => {
-    expect(dialog.message()).toMatch(/carried draft/i);
-    expect(dialog.message()).toMatch(/started in Chat/i);
-    await dialog.dismiss();
-  });
   await reopenedPane.locator('[data-pane-send]').click();
+  const confirm = page.getByRole('dialog', { name: 'Confirm draft target' });
+  await expect(confirm).toContainText('Draft started in Chat');
   await expect(reopenedPane.locator('[data-chat-role="user"]')).toHaveCount(0);
   await expect(reopenedPane.locator('[data-pane-input]')).toHaveValue('carried draft check');
 
-  page.once('dialog', async (dialog) => {
-    expect(dialog.message()).toMatch(/carried draft/i);
-    await dialog.accept();
-  });
-  await reopenedPane.locator('[data-pane-send]').click();
+  await confirm.getByTestId('toast-action').click();
   await expect(reopenedPane.locator('[data-chat-role="user"]').last()).toContainText('carried draft check');
   await expect(reopenedPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: carried draft check');
 });

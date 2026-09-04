@@ -307,6 +307,16 @@ test('deriveAuthOverlayState captures auth/role transition flags', () => {
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).rolePillText, 'Locked');
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).showAdminControls, false);
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).authActionText, 'Unlock');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).authState, 'locked');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).rolePillText, 'Locked');
+  assert.equal(
+    deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).rolePillTooltip,
+    'Session context: locked in local. Use the Unlock action to sign in.'
+  );
+  assert.equal(
+    deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).rolePillActionLabel,
+    'Authentication status: Locked'
+  );
   assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest', environment: 'qa' }).rolePillText, 'Signed in - Guest - qa');
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '1');
 });

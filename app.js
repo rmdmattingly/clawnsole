@@ -50,6 +50,7 @@ const globalElements = {
   agentsSortIndicator: document.getElementById('agentsSortIndicator'),
   agentsActiveMinutes: document.getElementById('agentsActiveMinutes'),
   agentsLastRefreshed: document.getElementById('agentsLastRefreshed'),
+  agentsRefreshMode: document.getElementById('agentsRefreshMode'),
   agentsRefreshStateBtn: document.getElementById('agentsRefreshStateBtn'),
   agentsList: document.getElementById('agentsList'),
   agentsEmpty: document.getElementById('agentsEmpty'),
@@ -116,6 +117,8 @@ const globalElements = {
   loginCapsHint: document.getElementById('loginCapsHint'),
   loginBtn: document.getElementById('loginBtn'),
   loginError: document.getElementById('loginError'),
+  signedOutState: document.getElementById('signedOutState'),
+  signedOutUnlockBtn: document.getElementById('signedOutUnlockBtn'),
   logoutBtn: document.getElementById('logoutBtn'),
   paneControls: document.getElementById('paneControls'),
   addPaneBtn: document.getElementById('addPaneBtn'),
@@ -306,30 +309,42 @@ const normalizeAdminDestination = __appCore.normalizeAdminDestination || ((candi
     activePaneKey: typeof value.activePaneKey === 'string' ? value.activePaneKey : ''
   };
 });
-const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => ({
-  isAdmin: String(state?.role || '') === 'admin',
-  authState: !!state?.authed ? 'signed_in' : (String(state?.role || '') === 'admin' ? 'locked' : 'signed_out'),
-  startAgentAutoRefresh: String(state?.role || '') === 'admin' && !!state?.authed,
-  stopAgentAutoRefresh: String(state?.role || '') !== 'admin' || !state?.authed,
-  rolePillText: !!state?.authed ? `Signed in - ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} - ${state?.environment || 'local'}` : (String(state?.role || '') === 'admin' ? 'Locked' : 'Signed out'),
-  rolePillAdmin: String(state?.role || '') === 'admin' && !!state?.authed,
-  rolePillLocked: !state?.authed && String(state?.role || '') === 'admin',
-  rolePillSignedOut: !state?.authed && String(state?.role || '') !== 'admin',
-  rolePillActionLabel: !!state?.authed ? 'Open session details' : 'Focus password input to unlock session',
-  rolePillTooltip: !!state?.authed
-    ? `Session context: signed in as ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} in ${state?.environment || 'local'}. Click for session details.`
-    : String(state?.role || '') === 'admin'
-      ? `Session context: locked as Admin in ${state?.environment || 'local'}. Click to unlock this session.`
-      : `Session context: signed out in ${state?.environment || 'local'}. Click to unlock this session.`,
-  authLabel: !!state?.authed ? 'Signed in' : (String(state?.role || '') === 'admin' ? 'Locked' : 'Signed out'),
-  principalLabel: !!state?.authed ? (String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')) : 'Not signed in',
-  environmentLabel: state?.environment || 'local',
-  showAdminControls: String(state?.role || '') === 'admin' && !!state?.authed,
-  authActionText: !!state?.authed ? 'Logout' : 'Unlock',
-  authActionLabel: !!state?.authed ? 'Log out' : 'Unlock admin',
-  logoutEnabled: true,
-  logoutOpacity: '1'
-}));
+const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => {
+  const effectiveRole = state?.role || (!state?.authed && state?.routeRole === 'admin' ? 'admin' : null);
+  const isAdmin = String(effectiveRole || '') === 'admin';
+  const authState = !!state?.authed ? 'signed_in' : (isAdmin ? 'locked' : 'signed_out');
+  const authLabel = authState === 'signed_in' ? 'Signed in' : authState === 'locked' ? 'Locked' : 'Signed out';
+  const principalLabel = !!state?.authed ? (isAdmin ? 'Admin' : (effectiveRole || 'Guest')) : 'Not signed in';
+  const environmentLabel = state?.environment || 'local';
+  return {
+    isAdmin,
+    authState,
+    startAgentAutoRefresh: isAdmin && !!state?.authed,
+    stopAgentAutoRefresh: !isAdmin || !state?.authed,
+    rolePillText: !!state?.authed ? `${authLabel} - ${principalLabel} - ${environmentLabel}` : authLabel,
+    rolePillAdmin: isAdmin && !!state?.authed,
+    rolePillLocked: authState === 'locked',
+    rolePillSignedOut: authState === 'signed_out',
+    rolePillActionLabel: !!state?.authed
+      ? 'Open session details'
+      : authState === 'locked'
+        ? 'Authentication status: Locked'
+        : 'Focus password input to unlock session',
+    rolePillTooltip: !!state?.authed
+      ? `Session context: signed in as ${principalLabel} in ${environmentLabel}. Click for session details.`
+      : authState === 'locked'
+        ? `Session context: locked in ${environmentLabel}. Use the Unlock action to sign in.`
+        : `Session context: signed out in ${environmentLabel}. Click to unlock this session.`,
+    authLabel,
+    principalLabel,
+    environmentLabel,
+    showAdminControls: isAdmin && !!state?.authed,
+    authActionText: !!state?.authed ? 'Logout' : 'Unlock',
+    authActionLabel: !!state?.authed ? 'Log out' : 'Unlock admin',
+    logoutEnabled: true,
+    logoutOpacity: '1'
+  };
+});
 const paneNeedsAttention = __appCore.paneNeedsAttention || ((pane) => {
   if (!pane) return false;
   const status = String(pane.statusState || '').trim();
@@ -417,7 +432,9 @@ const ADMIN_AGENT_ACTIVE_MINUTES_KEY = 'clawnsole.admin.agents.activeMinutes';
 const ADMIN_AGENT_DENSITY_KEY = 'clawnsole.admin.agents.density';
 const ADMIN_AGENT_COLUMNS_KEY = 'clawnsole.admin.agents.columns';
 const ADMIN_AGENT_HEALTHY_COLLAPSED_KEY = 'clawnsole.admin.agents.healthyCollapsed';
+const ADMIN_AGENT_REFRESH_MODE_KEY = 'clawnsole.admin.agents.refreshMode';
 const ADMIN_AGENT_HEALTHY_COLLAPSE_THRESHOLD = 10;
+const FLEET_DEFAULT_SORT = 'attention_first';
 const FLEET_SNOOZE_30M_MS = 30 * 60_000;
 const FLEET_SNOOZE_2H_MS = 2 * 60 * 60_000;
 const FLEET_COLUMN_DEFS = [
@@ -498,7 +515,8 @@ const KEYBIND_CATALOG = [
     risk: { kind: 'browser', reason: 'Reserved by browser reload', alternative: { accel: true, shift: true, key: 'y', display: 'Cmd/Ctrl+Shift+Y' } }
   },
   { id: 'workqueue.open', group: 'Workqueue actions', label: 'Open Workqueue modal', binding: { chord: ['g', 'w'], display: 'g w' } },
-  { id: 'workqueue.openForActiveChat', group: 'Workqueue actions', label: 'Open/focus Workqueue for active Chat pane', binding: { accel: true, shift: true, key: 'g', display: 'Cmd/Ctrl+Shift+G' } },
+  { id: 'pane.togglePaired', group: 'Workqueue actions', label: 'Toggle paired pane (Chat <-> Workqueue)', binding: { accel: true, shift: true, key: 'g', display: 'Cmd/Ctrl+Shift+G' } },
+  { id: 'workqueue.openForActiveChat', group: 'Workqueue actions', label: 'Open/focus Workqueue for active Chat pane', binding: { accel: true, shift: true, alt: true, key: 'g', display: 'Cmd/Ctrl+Shift+Alt+G' } },
   { id: 'workqueue.togglePair', group: 'Workqueue actions', label: 'Toggle paired Chat and Workqueue panes', binding: { accel: true, shift: true, key: 'l', display: 'Cmd/Ctrl+Shift+L' } },
   { id: 'workqueue.move', group: 'Workqueue actions', label: 'Move selected row in Workqueue keyboard mode', binding: { key: 'j/k', display: 'j/k' } },
   { id: 'workqueue.inspect', group: 'Workqueue actions', label: 'Inspect selected Workqueue row in keyboard mode', binding: { key: 'Enter', display: 'Enter' } },
@@ -515,7 +533,8 @@ const KEYBIND_CATALOG = [
   { id: 'fleet.openChatSelected', group: 'Fleet actions', label: 'Open Chat for selected Fleet agent', binding: { key: 'Enter', display: 'Enter' } },
   { id: 'fleet.openWorkqueueSelected', group: 'Fleet actions', label: 'Open Workqueue for selected Fleet agent', binding: { key: 'Enter', shift: true, display: 'Shift+Enter' } },
   { id: 'fleet.openTimelineSelected', group: 'Fleet actions', label: 'Open Timeline for selected Fleet agent', binding: { key: '.', display: '.' } },
-  { id: 'fleet.toggleHeartbeatSort', group: 'Fleet actions', label: 'Toggle Fleet heartbeat age sort', binding: { key: 'h', display: 'H / Shift+H' } }
+  { id: 'fleet.toggleHeartbeatSort', group: 'Fleet actions', label: 'Toggle Fleet heartbeat age sort', binding: { key: 'h', display: 'H / Shift+H' } },
+  { id: 'fleet.refreshNow', group: 'Fleet actions', label: 'Refresh Fleet now', binding: { key: 'r', display: 'R' } }
 ];
 
 const SHORTCUT_HINTS_BY_PANE_KIND = {
@@ -1189,18 +1208,141 @@ function heartbeatAgeBucketLabel(bucket) {
 
 function getFleetFilter() {
   const raw = String(storage.get(ADMIN_AGENT_FILTER_KEY, 'all') || 'all').trim();
-  const allowed = new Set(['all', 'active', 'stale', 'offline_error']);
-  return allowed.has(raw) ? raw : 'all';
+  const aliases = {
+    active: 'connected',
+    stale: 'needs_attention',
+    offline_error: 'disconnected'
+  };
+  const key = aliases[raw] || raw;
+  const allowed = new Set(['all', 'needs_attention', 'connected', 'disconnected', 'busy']);
+  return allowed.has(key) ? key : 'all';
+}
+
+function normalizeFleetFilter(filter) {
+  const key = String(filter || 'all').trim() || 'all';
+  const aliases = {
+    active: 'connected',
+    stale: 'needs_attention',
+    offline_error: 'disconnected'
+  };
+  return aliases[key] || key;
 }
 
 function getFleetSort() {
-  const raw = String(storage.get(ADMIN_AGENT_SORT_KEY, 'recent_desc') || 'recent_desc').trim();
-  const allowed = new Set(['recent_desc', 'heartbeat_age_desc', 'agent_id_asc']);
-  return allowed.has(raw) ? raw : 'recent_desc';
+  const raw = String(storage.get(ADMIN_AGENT_SORT_KEY, FLEET_DEFAULT_SORT) || FLEET_DEFAULT_SORT).trim();
+  const aliases = { recent: 'recent_desc', attention_desc: FLEET_DEFAULT_SORT };
+  const key = aliases[raw] || raw;
+  const allowed = new Set([FLEET_DEFAULT_SORT, 'recent_desc', 'heartbeat_age_desc', 'agent_id_asc']);
+  return allowed.has(key) ? key : FLEET_DEFAULT_SORT;
+}
+
+function getAgentWorkqueueCounts() {
+  const out = {};
+  const items = Array.isArray(workqueueState?.items) ? workqueueState.items : [];
+  for (const item of items) {
+    const agent = String(item?.claimedBy || '').trim();
+    if (!agent) continue;
+    const status = String(item?.status || '').trim();
+    if (status !== 'claimed' && status !== 'in_progress') continue;
+    out[agent] = (out[agent] || 0) + 1;
+  }
+  return out;
+}
+
+function isFleetAgentBusy(agent, statusSnippet = '') {
+  const text = [
+    agent?.status,
+    agent?.state,
+    agent?.activity,
+    agent?.currentTask,
+    agent?.task,
+    statusSnippet
+  ].map((value) => String(value || '').toLowerCase()).join(' ');
+  return /\b(busy|running|working|in[_ -]?progress|claimed|active task)\b/.test(text);
+}
+
+function fleetAttentionScore(classification) {
+  if (!classification) return 0;
+  if (classification.bucket === 'offline_error') return 4000;
+  if (classification.busy || classification.isBusy) return 3000;
+  if (classification.bucket === 'stale') {
+    const minutes = Number.isFinite(classification.ageMs) ? Math.floor(classification.ageMs / 60_000) : 999;
+    return 2000 + Math.min(minutes, 999);
+  }
+  return 0;
+}
+
+function fleetReasonBadge(classification) {
+  if (!classification) return 'Connected';
+  if (classification.bucket === 'offline_error') return 'Disconnected';
+  if (classification.busy || classification.isBusy) return 'Busy';
+  if (classification.bucket === 'stale') {
+    if (!Number.isFinite(classification.ageMs)) return 'Stale';
+    return `Stale ${formatRelativeAge(classification.ageMs).replace(/\s+ago$/, '')}`;
+  }
+  return 'Connected';
+}
+
+function fleetFilterMatch(filterMode, classification) {
+  const key = normalizeFleetFilter(filterMode);
+  if (key === 'all') return true;
+  if (key === 'needs_attention') return classification.bucket !== 'active' || classification.busy || classification.isBusy;
+  if (key === 'connected') return classification.bucket === 'active' && !classification.busy && !classification.isBusy;
+  if (key === 'disconnected') return classification.bucket === 'offline_error';
+  if (key === 'busy') return !!(classification.busy || classification.isBusy);
+  return true;
+}
+
+function buildFleetTriage(agent, { lastSeenMap, paneStateMap, statusSnippetMap, workqueueCounts, activeWindowMs, baseAgents = [] }) {
+  const rawAgentId = typeof agent === 'object' && agent ? agent.id : agent;
+  const id = String(rawAgentId || '').trim();
+  const agentRecord = typeof agent === 'object' && agent
+    ? agent
+    : baseAgents.find((entry) => String(entry?.id || '').trim() === id) || { id };
+  const ts = Number(lastSeenMap?.[id]) || 0;
+  const ageMs = ts > 0 ? Math.max(0, Date.now() - ts) : Number.POSITIVE_INFINITY;
+  const paneState = String(paneStateMap?.[id] || 'unknown').trim().toLowerCase();
+  const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs, paneState });
+  const queueCount = Number(workqueueCounts?.[id]) || 0;
+  const disconnected = paneState === 'error' || paneState === 'offline' || !Number.isFinite(ageMs);
+  const stale = !disconnected && ageMs > activeWindowMs;
+  const isBusy = queueCount > 0 || isFleetAgentBusy(agentRecord, statusSnippetMap?.[id]);
+
+  let bucket = 'active';
+  let attentionScore = 0;
+  let reason = 'Connected';
+
+  if (disconnected) {
+    bucket = 'offline_error';
+    attentionScore = 4000;
+    reason = 'Disconnected';
+  } else if (isBusy) {
+    attentionScore = 3000 + Math.min(queueCount, 99);
+    reason = 'Busy';
+  } else if (stale) {
+    bucket = 'stale';
+    const minutes = Number.isFinite(ageMs) ? Math.floor(ageMs / 60_000) : 999;
+    attentionScore = 2000 + Math.min(minutes, 999);
+    reason = Number.isFinite(ageMs) ? `Stale ${formatRelativeAge(ageMs).replace(/\s+ago$/, '')}` : 'Stale';
+  }
+
+  return {
+    bucket,
+    ageBucket,
+    ts,
+    ageMs,
+    queueCount,
+    busy: isBusy,
+    isBusy,
+    isConnected: bucket === 'active' && !stale && !disconnected,
+    needsAttention: bucket !== 'active' || isBusy,
+    attentionScore,
+    reason
+  };
 }
 
 function setFleetFilter(filter) {
-  const key = String(filter || 'all').trim() || 'all';
+  const key = normalizeFleetFilter(filter);
   storage.set(ADMIN_AGENT_FILTER_KEY, key);
   globalElements.agentsFilterButtons.forEach((chip) => {
     const active = (chip.getAttribute('data-agents-filter') || '') === key;
@@ -1212,10 +1354,10 @@ function setFleetFilter(filter) {
 function resetAgentsTriageView() {
   storage.remove(ADMIN_AGENT_SEARCH_KEY);
   storage.remove(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY);
-  storage.set(ADMIN_AGENT_SORT_KEY, 'recent_desc');
+  storage.set(ADMIN_AGENT_SORT_KEY, FLEET_DEFAULT_SORT);
   storage.set(ADMIN_AGENT_FILTER_KEY, 'all');
   if (globalElements.agentsSearch) globalElements.agentsSearch.value = '';
-  if (globalElements.agentsSort) globalElements.agentsSort.value = 'recent_desc';
+  if (globalElements.agentsSort) globalElements.agentsSort.value = FLEET_DEFAULT_SORT;
   setFleetFilter('all');
   renderAgentsModalList();
   try {
@@ -1238,6 +1380,29 @@ function getFleetHeatmapEnabled() {
 
 function getFleetDensity() {
   return String(storage.get(ADMIN_AGENT_DENSITY_KEY, 'comfortable') || 'comfortable') === 'compact' ? 'compact' : 'comfortable';
+}
+
+function normalizeFleetRefreshMode(mode) {
+  const value = String(mode || '').trim().toLowerCase();
+  return value === 'slow' || value === 'manual' ? value : 'auto';
+}
+
+function getFleetRefreshMode() {
+  return normalizeFleetRefreshMode(storage.get(ADMIN_AGENT_REFRESH_MODE_KEY, 'auto'));
+}
+
+function syncFleetRefreshModeControl() {
+  if (!globalElements.agentsRefreshMode) return;
+  globalElements.agentsRefreshMode.value = getFleetRefreshMode();
+}
+
+function setFleetRefreshMode(mode) {
+  const next = normalizeFleetRefreshMode(mode);
+  storage.set(ADMIN_AGENT_REFRESH_MODE_KEY, next);
+  syncFleetRefreshModeControl();
+  restartAgentsModalAutoRefresh();
+  renderAgentsLastRefreshed();
+  return next;
 }
 
 function getFleetColumns() {
@@ -1335,6 +1500,7 @@ const uiState = {
 };
 
 let toastSeq = 0;
+let loginInFlight = false;
 function showToast(
   message,
   {
@@ -1347,7 +1513,8 @@ function showToast(
     testId = 'toast',
     role = '',
     ariaLabel = '',
-    autoFocusAction = false
+    autoFocusAction = false,
+    escapeTriggersSecondary = true
   } = {}
 ) {
   if (!globalElements.toastHost) return;
@@ -1426,7 +1593,7 @@ function showToast(
         event.stopPropagation();
         clearTimeout(timer);
         try {
-          if (hasSecondaryAction) onSecondaryAction?.();
+          if (escapeTriggersSecondary && hasSecondaryAction) onSecondaryAction?.();
         } catch {}
         remove();
         return;
@@ -1484,6 +1651,10 @@ let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
 const FLEET_DEFAULT_STALE_THRESHOLD_MINUTES = 1;
 const FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES = 10;
+const FLEET_REFRESH_INTERVAL_MS = {
+  auto: 10_000,
+  slow: 60_000
+};
 let fleetShowSnoozed = false;
 const fleetRefreshLock = {
   lockedAtMs: 0,
@@ -1621,17 +1792,25 @@ function renderAgentsLastRefreshed() {
 
 function startAgentsModalAutoRefresh() {
   if (agentsModalAutoRefreshInterval) return;
+  const mode = getFleetRefreshMode();
+  if (mode === 'manual') return;
   agentsModalAutoRefreshInterval = setInterval(() => {
     if (!isAgentsModalOpen()) return;
     if (document.hidden) return;
     refreshAgents({ reason: 'fleet_auto_refresh' }).catch(() => {});
-  }, 10_000);
+  }, FLEET_REFRESH_INTERVAL_MS[mode] || FLEET_REFRESH_INTERVAL_MS.auto);
 }
 
 function stopAgentsModalAutoRefresh() {
   if (!agentsModalAutoRefreshInterval) return;
   clearInterval(agentsModalAutoRefreshInterval);
   agentsModalAutoRefreshInterval = null;
+}
+
+function restartAgentsModalAutoRefresh() {
+  stopAgentsModalAutoRefresh();
+  if (!isAgentsModalOpen()) return;
+  startAgentsModalAutoRefresh();
 }
 
 function startAgentsModalFreshnessTicker() {
@@ -1654,6 +1833,7 @@ function stopAgentsModalFreshnessTicker() {
 async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {}) {
   if (roleState.role !== 'admin') return uiState.agents;
   if (!uiState.authed) return uiState.agents;
+  if (reason !== 'manual' && getFleetRefreshMode() === 'manual') return uiState.agents;
   if (reason !== 'manual' && hasFleetRowInteraction()) return deferFleetRefresh(reason);
 
   if (agentRefreshInFlight) return agentRefreshInFlight;
@@ -2112,7 +2292,12 @@ async function fetchAgents() {
         displayName: typeof agent?.displayName === 'string' ? agent.displayName : '',
         emoji: typeof agent?.emoji === 'string' ? agent.emoji : '',
         model: typeof agent?.model === 'string' ? agent.model : '',
-        host: typeof agent?.host === 'string' ? agent.host : ''
+        host: typeof agent?.host === 'string' ? agent.host : '',
+        status: typeof agent?.status === 'string' ? agent.status : '',
+        state: typeof agent?.state === 'string' ? agent.state : '',
+        activity: typeof agent?.activity === 'string' ? agent.activity : '',
+        currentTask: typeof agent?.currentTask === 'string' ? agent.currentTask : '',
+        task: typeof agent?.task === 'string' ? agent.task : ''
       }))
       .filter((agent) => agent.id);
   } catch {
@@ -2225,6 +2410,7 @@ function currentAuthUi() {
   return deriveAuthOverlayState({
     authed: uiState.authed,
     role: roleState.role,
+    routeRole,
     environment: uiState.meta?.instance || 'local'
   });
 }
@@ -2246,6 +2432,13 @@ function renderAuthSessionUi() {
     pill.dataset.authState = authUi.authState || 'signed_out';
     pill.setAttribute('aria-label', authUi.rolePillActionLabel || 'Authentication status');
     pill.title = authUi.rolePillTooltip || authUi.rolePillActionLabel || 'Authentication status';
+    if (uiState.authed) {
+      pill.removeAttribute('tabindex');
+      pill.removeAttribute('aria-disabled');
+    } else {
+      pill.tabIndex = -1;
+      pill.setAttribute('aria-disabled', 'true');
+    }
   }
 
   const popover = globalElements.authSessionPopover;
@@ -2264,9 +2457,22 @@ function renderAuthSessionUi() {
   return authUi;
 }
 
+function renderAdminShellAuthState(authUi = currentAuthUi()) {
+  const signedOut = !authUi.showAdminControls;
+  document.body.classList.toggle('admin-shell-signed-out', signedOut);
+  if (globalElements.signedOutState) {
+    globalElements.signedOutState.hidden = !signedOut;
+  }
+  if (globalElements.paneGrid) {
+    globalElements.paneGrid.hidden = signedOut;
+    globalElements.paneGrid.setAttribute('aria-hidden', signedOut ? 'true' : 'false');
+  }
+}
+
 function setAuthState(authed) {
   uiState.authed = authed;
   const authUi = renderAuthSessionUi();
+  renderAdminShellAuthState(authUi);
   updateGlobalStatus();
   updateConnectionControls();
   paneManager.refreshChatEnabled();
@@ -2283,6 +2489,7 @@ function setAuthState(authed) {
 function setRole(role) {
   roleState.role = role;
   const authUi = renderAuthSessionUi();
+  renderAdminShellAuthState(authUi);
 
   updateAuthAction(authUi);
 
@@ -2335,12 +2542,31 @@ function setRole(role) {
   }
 }
 
-function showLogin(message = '') {
+function setLoginSubmitting(submitting) {
+  loginInFlight = Boolean(submitting);
+  if (globalElements.loginBtn) {
+    globalElements.loginBtn.disabled = loginInFlight;
+    globalElements.loginBtn.textContent = loginInFlight ? 'Unlocking...' : 'Unlock';
+    globalElements.loginBtn.setAttribute('aria-busy', loginInFlight ? 'true' : 'false');
+  }
+  if (globalElements.loginPassword) {
+    globalElements.loginPassword.disabled = loginInFlight;
+  }
+}
+
+function focusLoginPassword() {
+  globalElements.loginPassword?.focus();
+  window.requestAnimationFrame?.(() => globalElements.loginPassword?.focus());
+  window.setTimeout?.(() => globalElements.loginPassword?.focus(), 250);
+}
+
+function showLogin(message = '', { clearPassword = true } = {}) {
   captureAdminAuthDestination();
+  setLoginSubmitting(false);
   globalElements.loginOverlay.classList.add('open');
   globalElements.loginOverlay.setAttribute('aria-hidden', 'false');
   globalElements.loginError.textContent = message;
-  globalElements.loginPassword.value = '';
+  if (clearPassword) globalElements.loginPassword.value = '';
   updateLoginCapsHint(false);
 
   // Guest role selection removed.
@@ -2349,7 +2575,7 @@ function showLogin(message = '') {
   closeAuthSessionPopover();
   globalElements.settingsBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.settingsBtn) globalElements.settingsBtn.style.opacity = '0.5';
-  if (globalElements.shortcutsBtn && roleState.role === 'admin') {
+  if (globalElements.shortcutsBtn) {
     globalElements.shortcutsBtn.hidden = false;
     globalElements.shortcutsBtn.removeAttribute('disabled');
     globalElements.shortcutsBtn.style.opacity = '1';
@@ -2357,13 +2583,11 @@ function showLogin(message = '') {
   globalElements.fleetBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.fleetBtn) globalElements.fleetBtn.style.opacity = '0.5';
 
-  const isTouch = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
-  if (!isTouch) {
-    globalElements.loginPassword.focus();
-  }
+  focusLoginPassword();
 }
 
 function hideLogin() {
+  setLoginSubmitting(false);
   globalElements.loginOverlay.classList.remove('open');
   globalElements.loginOverlay.setAttribute('aria-hidden', 'true');
   globalElements.loginError.textContent = '';
@@ -2386,11 +2610,13 @@ function handleLoginPasswordCapsState(event) {
 }
 
 async function attemptLogin() {
+  if (loginInFlight) return;
   const password = globalElements.loginPassword.value.trim();
   if (!password) {
     showLogin('Password required.');
     return;
   }
+  setLoginSubmitting(true);
   try {
     const res = await fetch('/auth/login', {
       method: 'POST',
@@ -2399,7 +2625,7 @@ async function attemptLogin() {
       credentials: 'include'
     });
     if (!res.ok) {
-      showLogin('Invalid password. Try again.');
+      showLogin('Invalid password. Try again.', { clearPassword: false });
       return;
     }
     await res.json();
@@ -2417,7 +2643,7 @@ async function attemptLogin() {
     }
     window.location.replace(nextHref);
   } catch {
-    showLogin('Login failed. Please retry.');
+    showLogin('Login failed. Please retry.', { clearPassword: false });
   }
 }
 
@@ -2503,6 +2729,12 @@ const SHORTCUT_OVERRIDE_ACTIONS = [
     run: () => openTopbarWorkqueueAction()
   },
   {
+    id: 'pane-toggle-paired',
+    label: 'Toggle paired pane',
+    defaultCombo: { accel: true, shift: true, alt: false, key: 'g' },
+    run: () => togglePairedPane()
+  },
+  {
     id: 'fleet-open',
     label: 'Focus Fleet: first needs attention',
     defaultCombo: { accel: true, shift: true, alt: false, key: 'f' },
@@ -2531,6 +2763,11 @@ const SHORTCUT_SAFE_ALTERNATIVES = {
     { accel: true, alt: true, shift: false, key: 'w' },
     { accel: true, shift: true, alt: true, key: 'w' }
   ],
+  'pane-toggle-paired': [
+    { accel: true, shift: true, alt: false, key: 'g' },
+    { accel: true, alt: true, shift: false, key: 'g' },
+    { accel: true, shift: true, alt: true, key: 'g' }
+  ],
   'fleet-open': [
     { accel: true, alt: true, shift: false, key: 'f' },
     { accel: true, alt: true, shift: false, key: 'a' },
@@ -2545,6 +2782,7 @@ function keybindIdToShortcutActionId(id) {
     'pane.prev': 'pane-previous',
     'pane.manager': 'pane-manager',
     'workqueue.open': 'workqueue-open',
+    'pane.togglePaired': 'pane-toggle-paired',
     'fleet.open': 'fleet-open'
   })[String(id || '')] || '';
 }
@@ -3181,6 +3419,7 @@ const SHORTCUT_STATUS_LABELS = {
   available: 'Available',
   'typing-focus': 'Blocked: typing-focus',
   'modal-open': 'Blocked: modal-open',
+  'insufficient-pane-count': 'Blocked: insufficient-pane-count',
   'layout-state': 'Blocked: layout-state'
 };
 
@@ -3230,11 +3469,11 @@ function getShortcutRowBlockReason(row) {
   const paneCount = panes.length;
   const chatPaneCount = panes.filter((pane) => pane.kind === 'chat').length;
   const hasUnreadPane = panes.some((pane) => paneUnreadCount(pane) > 0);
-  if (rule === 'multi-pane' && paneCount < 2) return 'layout-state';
-  if (rule === 'multi-chat-pane' && chatPaneCount < 2) return 'layout-state';
+  if (rule === 'multi-pane' && paneCount < 2) return 'insufficient-pane-count';
+  if (rule === 'multi-chat-pane' && chatPaneCount < 2) return 'insufficient-pane-count';
   if (rule === 'unread-pane' && !hasUnreadPane) return 'layout-state';
 
-  if (shortcutsModalIsOpen() && rule !== 'always') return 'modal-open';
+  if (shortcutsModalIsOpen() && rule !== 'always' && rule !== 'modal-only') return 'modal-open';
 
   return '';
 }
@@ -3249,6 +3488,8 @@ function updateShortcutsStatus() {
     const state = reason || 'available';
     chip.textContent = SHORTCUT_STATUS_LABELS[state] || SHORTCUT_STATUS_LABELS.available;
     chip.dataset.state = state;
+    row.dataset.shortcutAvailability = reason ? 'blocked' : 'available';
+    row.dataset.shortcutBlockReason = reason;
   });
 }
 
@@ -3505,6 +3746,24 @@ function paneSummaryLabel(pane) {
   const type = paneLabel(pane);
   const target = paneDisplayTargetLabel(pane);
   return `${letter} ${type} · ${target}`;
+}
+
+function paneManagerStateChipMarkup(pane, { unreadCount = paneUnreadCount(pane), hasDraft = paneHasDraftChanges(pane), state = '' } = {}) {
+  const chips = [];
+  if (unreadCount > 0) {
+    const label = `${unreadCount} unread`;
+    chips.push(`<span class="pane-manager-state-chip pane-manager-unread-badge" data-testid="pane-manager-unread-badge" data-state-chip="unread" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`);
+  }
+  if (hasDraft) {
+    chips.push('<span class="pane-manager-state-chip pane-manager-draft-badge" data-testid="pane-manager-draft-badge" data-state-chip="draft" title="Unsent draft">Draft</span>');
+  }
+  const normalizedState = String(state || '').trim().toLowerCase();
+  if (normalizedState === 'disconnected' || normalizedState === 'error') {
+    const label = normalizedState === 'error' ? 'Error' : 'Disconnected';
+    chips.push(`<span class="pane-manager-state-chip pane-manager-disconnected-badge" data-testid="pane-manager-disconnected-badge" data-state-chip="disconnected" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`);
+  }
+  if (!chips.length) return '';
+  return `<span class="pane-manager-state-chips" aria-hidden="true">${chips.join('')}</span>`;
 }
 
 function isPaneSwitchHudEnabled() {
@@ -3951,6 +4210,14 @@ function paneSetDraftOrigin(pane, origin = null) {
   pane.draftOrigin = paneNormalizeDraftOrigin(pane, origin);
 }
 
+function paneReturnToDraftOrigin(pane) {
+  const origin = paneNormalizeDraftOrigin(pane, pane?.draftOrigin);
+  if (!pane || !origin?.targetSignature) return;
+  const [, , agentId = 'main'] = origin.targetSignature.split(':');
+  paneSetAgent(pane, agentId || 'main', { requireDraftConfirm: false });
+  paneManager.focusPanePrimary(pane);
+}
+
 function paneRefreshDraftOrigin(pane) {
   if (!pane || pane.kind !== 'chat') return;
   if (!paneHasDraftChanges(pane)) {
@@ -3972,14 +4239,29 @@ function paneNeedsDraftRetargetConfirm(pane) {
   );
 }
 
-function paneConfirmDraftRetargetSend(pane) {
+function paneConfirmDraftRetargetSend(pane, sendFn) {
   if (!paneNeedsDraftRetargetConfirm(pane)) return true;
   const origin = paneNormalizeDraftOrigin(pane, pane.draftOrigin);
   const fromLabel = origin?.targetLabel || 'another chat pane';
   const toLabel = paneComposerContextLabel(pane);
-  const ok = window.confirm(`Send this carried draft to ${toLabel}?\n\nIt was started in ${fromLabel}.`);
-  if (ok) paneSetDraftOrigin(pane, paneCurrentDraftOrigin(pane));
-  return ok;
+  showToast(`Draft started in ${fromLabel}; current target is ${toLabel}.`, {
+    kind: 'info',
+    timeoutMs: 12000,
+    role: 'dialog',
+    ariaLabel: 'Confirm draft target',
+    testId: 'draft-target-confirm-toast',
+    actionLabel: 'Send to current target',
+    autoFocusAction: true,
+    escapeTriggersSecondary: false,
+    onAction: () => {
+      paneSetDraftOrigin(pane, paneCurrentDraftOrigin(pane));
+      paneClearSwitchSendGuard(pane);
+      sendFn?.();
+    },
+    secondaryActionLabel: 'Return to origin pane',
+    onSecondaryAction: () => paneReturnToDraftOrigin(pane)
+  });
+  return false;
 }
 
 function markPaneUnread(pane, increment = 1, kind = 'chat') {
@@ -4326,6 +4608,7 @@ function getPaneManagerPairedAction(pane) {
 }
 
 function focusOrOpenPairedPaneForPane(pane) {
+  if (!paneSupportsTargetLock(pane)) return null;
   const existing = findPairedPaneForPane(pane);
   if (existing) {
     paneManager.focusPanePrimary(existing);
@@ -4336,6 +4619,83 @@ function focusOrOpenPairedPaneForPane(pane) {
   const options = getPanePairOpenOptions(pane);
   if (!pairedKind || !options) return null;
   return paneManager.addPane(pairedKind, options);
+}
+
+function getActivePaneForPairedToggle() {
+  const originKey = commandPaletteState.open ? String(commandPaletteState.originPaneKey || '') : '';
+  const focusedKey = focusedPaneKey();
+  const candidates = [
+    originKey,
+    focusedKey,
+    ...paneMruOrder()
+  ].filter(Boolean);
+
+  for (const key of candidates) {
+    const pane = (paneManager?.panes || []).find((entry) => String(entry?.key || '') === key);
+    if (paneSupportsTargetLock(pane)) return pane;
+  }
+  return (paneManager?.panes || []).find((pane) => paneSupportsTargetLock(pane)) || null;
+}
+
+function togglePairedPane(sourcePane = null, { showSuccess = false } = {}) {
+  if (roleState.role !== 'admin') return null;
+  const pane = sourcePane && paneSupportsTargetLock(sourcePane) ? sourcePane : getActivePaneForPairedToggle();
+  if (!pane) {
+    showToast('No Chat or Workqueue pane to pair.', { kind: 'info', timeoutMs: 2200, testId: 'paired-pane-toast' });
+    return null;
+  }
+
+  const action = getPaneManagerPairedAction(pane);
+  if (!action) {
+    showToast('No valid paired pane for this view.', { kind: 'info', timeoutMs: 2200, testId: 'paired-pane-toast' });
+    return null;
+  }
+  if (action.disabled) {
+    showToast(action.title || 'Pane limit reached.', { kind: 'info', timeoutMs: 2400, testId: 'paired-pane-limit-toast' });
+    return null;
+  }
+
+  const existing = findPairedPaneForPane(pane);
+  const result = focusOrOpenPairedPaneForPane(pane);
+  if (!result) {
+    showToast(`Could not open paired ${action.labelKind}.`, { kind: 'error', timeoutMs: 2600, testId: 'paired-pane-limit-toast' });
+    return null;
+  }
+  renderPaneIdentity(pane);
+  renderPaneIdentity(result);
+  if (isPaneManagerOpen()) renderPaneManager();
+  if (showSuccess) {
+    const verb = existing === result ? 'Focused' : 'Opened';
+    showToast(`${verb} paired ${paneLabel(result)} pane.`, {
+      kind: 'info',
+      timeoutMs: 1600,
+      testId: 'paired-pane-toggle-toast'
+    });
+  }
+  return result;
+}
+
+function renderPanePairedAction(pane) {
+  const btn = pane?.elements?.pairedBtn;
+  if (!btn) return;
+  const action = getPaneManagerPairedAction(pane);
+  if (!action) {
+    btn.hidden = true;
+    return;
+  }
+
+  btn.hidden = false;
+  btn.disabled = !!action.disabled;
+  btn.textContent = '⇄';
+  btn.title = action.title;
+  btn.setAttribute('aria-label', action.title);
+  btn.dataset.pairedKind = action.pairedKind;
+  btn.dataset.pairedState = action.state;
+  btn.dataset.pairedTarget = action.target;
+}
+
+function togglePairedPaneForActivePane() {
+  return togglePairedPane(null, { showSuccess: true });
 }
 
 function renderPaneManager() {
@@ -4438,8 +4798,7 @@ function renderPaneManager() {
               <span class="pane-manager-pane-id" title="Internal pane id">${paneManagerHighlightHtml(String(pane?.key || ''), query)}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}
               ${pinned ? '<span class="pane-manager-pinned-badge" data-testid="pane-manager-pinned-badge" title="Pinned pane">Pinned</span>' : ''}
-              ${unreadCount > 0 ? `<span class="pane-manager-unread-badge" data-testid="pane-manager-unread-badge" title="${escapeHtml(`${unreadCount} unread`)}">${escapeHtml(String(unreadCount))}</span>` : ''}
-              ${hasDraft ? '<span class="pane-manager-draft-badge" data-testid="pane-manager-draft-badge" title="Unsent draft">Draft</span>' : ''}
+              ${paneManagerStateChipMarkup(pane, { unreadCount, hasDraft, state })}
             </div>
             <div class="pane-manager-state" data-state="${escapeHtml(state)}">${escapeHtml(state)}</div>
           </div>
@@ -4546,7 +4905,7 @@ function renderPaneManager() {
   });
 }
 
-function openPaneManager({ attentionOnly = false } = {}) {
+function openPaneManager({ attentionOnly = false, focusPaneKey = '', resetFilters = false } = {}) {
   if (roleState.role !== 'admin') return;
   if (!uiState.authed) {
     showLogin('Please sign in to continue.');
@@ -4554,14 +4913,38 @@ function openPaneManager({ attentionOnly = false } = {}) {
   }
   if (!globalElements.paneManagerModal) return;
 
+  const targetPaneKey = String(focusPaneKey || '').trim();
+  if (resetFilters) {
+    paneManagerUiState.query = '';
+    paneManagerUiState.unreadOnly = false;
+    if (globalElements.paneManagerSearch) globalElements.paneManagerSearch.value = '';
+    if (globalElements.paneManagerUnreadOnly) globalElements.paneManagerUnreadOnly.checked = false;
+  }
+
   paneManagerUiState.open = true;
-  paneManagerUiState.selectedIndex = 0;
   paneManagerUiState.attentionOnly = !!attentionOnly;
-  paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
-  paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
+  if (!resetFilters) {
+    paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
+    paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
+  }
+  paneManagerUiState.selectedIndex = Math.max(
+    0,
+    (paneManager?.panes || []).findIndex((pane) => String(pane?.key || '') === targetPaneKey)
+  );
 
   openAdminModal(globalElements.paneManagerModal);
   renderPaneManager();
+
+  if (targetPaneKey) {
+    requestAnimationFrame(() => {
+      const row = globalElements.paneManagerList?.querySelector?.(
+        `.pane-manager-row[data-pane-key="${cssEscape(targetPaneKey)}"]`
+      );
+      try {
+        row?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      } catch {}
+    });
+  }
 
   // Focus quick-find for immediate filtering.
   try {
@@ -4744,12 +5127,23 @@ function buildCommandPaletteItems() {
   const focusedPane = paneManager.panes.find((p) => p?.key === focusedKey) || paneManager.panes[0] || null;
   if (paneSupportsTargetLock(focusedPane)) {
     const nextLabel = focusedPane.pairedTargetLock ? 'Disable' : 'Enable';
+    const pairedAction = getPaneManagerPairedAction(focusedPane);
+    if (pairedAction) {
+      items.push(withShortcut({
+        id: 'cmd:toggle-paired-pane',
+        label: 'Toggle paired pane (Chat <-> Workqueue)',
+        detail: `${pairedAction.state === 'focus' ? 'Focus' : 'Open'} paired ${pairedAction.labelKind} for ${pairedAction.target}`,
+        paneMeta: commandPalettePaneMeta({ type: pairedAction.labelKind, target: pairedAction.target, mode: pairedAction.state === 'focus' ? 'focus existing' : 'create or focus' }),
+        searchText: 'toggle paired pane chat workqueue switch counterpart',
+        run: () => togglePairedPane(focusedPane)
+      }, shortcutDisplay('pane.togglePaired') || 'Cmd/Ctrl+Shift+G'));
+    }
     items.push(withShortcut({
       id: 'cmd:toggle-target-lock',
       label: `Pane: ${nextLabel} target lock`,
       detail: `${paneLabel(focusedPane)} · ${paneTargetLabel(focusedPane)}`,
       run: () => paneToggleTargetLock(focusedPane)
-    }, '⌘/Ctrl+Shift+L'));
+    }));
   }
 
   // Core open actions for all enabled pane types.
@@ -4948,7 +5342,7 @@ function buildCommandPaletteItems() {
         detail: 'Open/focus a Workqueue pane scoped to the active chat agent',
         run: () => openWorkqueueForActiveChatAgent()
       },
-      '⌘/Ctrl+Shift+G'
+      shortcutDisplay('workqueue.openForActiveChat') || 'Cmd/Ctrl+Shift+Alt+G'
     ),
     withShortcut(
       { id: 'cmd:refresh-agents', label: 'Agents: Refresh', detail: 'Refresh agent list', run: () => globalElements.refreshAgentsBtn?.click?.() },
@@ -5058,9 +5452,9 @@ function buildCommandPaletteItems() {
       enriched.priority = 85;
       return enriched;
     }
-    if (id === 'cmd:open-workqueue' || id === 'cmd:open-workqueue-active-agent') {
+    if (id === 'cmd:open-workqueue' || id === 'cmd:open-workqueue-active-agent' || id === 'cmd:toggle-paired-pane') {
       enriched.group = 'Workqueue';
-      enriched.priority = id === 'cmd:open-workqueue-active-agent' ? 96 : 92;
+      enriched.priority = id === 'cmd:toggle-paired-pane' ? 98 : id === 'cmd:open-workqueue-active-agent' ? 96 : 92;
       return enriched;
     }
     if (id === 'cmd:refresh-agents') {
@@ -5258,12 +5652,15 @@ function renderCommandPalette() {
 function filterCommandPalette(query) {
   commandPaletteState.query = String(query || '');
   const q = commandPaletteState.query.trim();
+  const qLower = q.toLowerCase();
   const scored = commandPaletteState.items
     .map((item) => {
       const meta = Array.isArray(item.paneMeta) ? item.paneMeta.map((x) => x?.label || '').join(' ') : '';
       const hay = `${item.label || ''} ${item.detail || ''} ${item.searchText || ''} ${meta} ${item.id || ''} ${item.group || ''} ${item.subgroup || ''}`;
       const score = scoreFuzzy(hay, q);
-      const rank = score + Number(item.priority || 0);
+      const label = String(item.label || '').trim().toLowerCase();
+      const exactLabelBoost = qLower && label === qLower ? 10_000 : 0;
+      const rank = score + exactLabelBoost + Number(item.priority || 0);
       return { item, score, rank };
     })
     .filter((x) => x.score > 0)
@@ -5325,6 +5722,7 @@ function openAgentsModal() {
     globalElements.agentsActiveMinutes.value = String(Math.max(1, minutes));
   }
   syncFleetDensityControl();
+  syncFleetRefreshModeControl();
   renderFleetColumnPicker();
 
   renderAgentsModalList();
@@ -5404,7 +5802,7 @@ function setFleetHeartbeatSort() {
 
 function resetFleetSort() {
   const previous = String(storage.get(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY, '') || '').trim();
-  const next = previous && previous !== 'heartbeat_age_desc' ? previous : 'recent_desc';
+  const next = previous && previous !== 'heartbeat_age_desc' ? previous : FLEET_DEFAULT_SORT;
   storage.set(ADMIN_AGENT_SORT_KEY, next);
   storage.remove(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY);
   if (globalElements.agentsSort) globalElements.agentsSort.value = next;
@@ -5674,20 +6072,24 @@ function renderFleetSelectionBar({ classify = null, lastSeenMap = null } = {}) {
   const heartbeatTs = Number(map[id]) || 0;
   const heartbeatAge = heartbeatTs > 0 ? formatRelativeAge(Date.now() - heartbeatTs) : 'unknown';
   const triage = typeof classify === 'function'
-    ? classify(id)
+    ? classify(agent)
     : (() => {
         const withinMinutes = Math.max(1, Number(globalElements.agentsActiveMinutes?.value) || FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES);
         const paneState = getAgentPaneStateMap()[id] || 'unknown';
         const ageMs = heartbeatTs > 0 ? Math.max(0, Date.now() - heartbeatTs) : Number.POSITIVE_INFINITY;
         const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs: withinMinutes * 60_000, paneState });
-        if (paneState === 'error' || paneState === 'offline' || !Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket };
-        return { bucket: ageMs <= withinMinutes * 60_000 ? 'active' : 'stale', ageBucket };
+        const busy = isFleetAgentBusy(agent, getAgentStatusSnippetMap()[id]);
+        if (paneState === 'error' || paneState === 'offline' || !Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket, busy };
+        return { bucket: ageMs <= withinMinutes * 60_000 ? 'active' : 'stale', ageBucket, busy };
       })();
   const healthLabel = triage.bucket === 'offline_error'
     ? 'Offline/Error'
     : triage.bucket === 'stale'
       ? 'Stale'
-      : 'Healthy';
+      : triage.busy
+        ? 'Busy'
+        : 'Healthy';
+  const healthState = triage.busy ? 'busy' : triage.bucket;
 
   bar.hidden = false;
   if (String(bar.dataset.agentId || '') !== id) {
@@ -5727,7 +6129,7 @@ function renderFleetSelectionBar({ classify = null, lastSeenMap = null } = {}) {
   if (titleEl) titleEl.textContent = label;
   if (healthEl) {
     healthEl.textContent = healthLabel;
-    healthEl.dataset.healthState = triage.bucket;
+    healthEl.dataset.healthState = healthState;
   }
   if (ageEl) {
     ageEl.textContent = heartbeatAge;
@@ -5800,18 +6202,11 @@ function renderAgentsModalList() {
   const lastSeenMap = getAgentLastSeenMap();
   const paneStateMap = getAgentPaneStateMap();
   const statusSnippetMap = getAgentStatusSnippetMap();
+  const workqueueCounts = getAgentWorkqueueCounts();
   const baseAgents = uiState.agents.length > 0 ? uiState.agents : [{ id: 'main', name: 'main', displayName: 'main', emoji: '' }];
 
-  const classify = (agentId) => {
-    const id = String(agentId || '').trim();
-    const ts = Number(lastSeenMap[id]) || 0;
-    const ageMs = ts > 0 ? Math.max(0, Date.now() - ts) : Number.POSITIVE_INFINITY;
-    const paneState = paneStateMap[id] || 'unknown';
-    const ageBucket = heartbeatAgeBucket(ageMs, { activeWindowMs, paneState });
-    if (paneState === 'error' || paneState === 'offline') return { bucket: 'offline_error', ageBucket, ts, ageMs };
-    if (!Number.isFinite(ageMs)) return { bucket: 'offline_error', ageBucket, ts, ageMs };
-    if (ageMs <= activeWindowMs) return { bucket: 'active', ageBucket, ts, ageMs };
-    return { bucket: 'stale', ageBucket, ts, ageMs };
+  const classify = (agent) => {
+    return buildFleetTriage(agent, { lastSeenMap, paneStateMap, statusSnippetMap, workqueueCounts, activeWindowMs, baseAgents });
   };
 
   const matches = (agent) => {
@@ -5821,22 +6216,46 @@ function renderAgentsModalList() {
     const haystack = `${label} ${id.toLowerCase()} ${snippet}`.trim();
     if (search && !haystack.includes(search)) return false;
     if (filterMode === 'all') return true;
-    const { bucket } = classify(id);
-    return bucket === filterMode;
+    return fleetFilterMatch(filterMode, classify(agent));
   };
 
   const sortAgents = (list) => {
     const arr = (Array.isArray(list) ? list : []).slice();
+    if (sortMode === 'attention_first') {
+      arr.sort((a, b) => {
+        const ca = classify(a);
+        const cb = classify(b);
+        const ds = fleetAttentionScore(cb) - fleetAttentionScore(ca);
+        if (ds) return ds;
+        const da = Number.isFinite(ca.ageMs) ? ca.ageMs : Number.MAX_SAFE_INTEGER;
+        const db = Number.isFinite(cb.ageMs) ? cb.ageMs : Number.MAX_SAFE_INTEGER;
+        if (db !== da) return db - da;
+        return formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true }));
+      });
+      return arr;
+    }
     if (sortMode === 'agent_id_asc') {
       arr.sort((a, b) => String(a?.id || '').localeCompare(String(b?.id || '')));
       return arr;
     }
     if (sortMode === 'heartbeat_age_desc') {
       arr.sort((a, b) => {
-        const ca = classify(a?.id);
-        const cb = classify(b?.id);
+        const ca = classify(a);
+        const cb = classify(b);
         const da = Number.isFinite(ca.ageMs) ? ca.ageMs : Number.MAX_SAFE_INTEGER;
         const db = Number.isFinite(cb.ageMs) ? cb.ageMs : Number.MAX_SAFE_INTEGER;
+        if (db !== da) return db - da;
+        return formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true }));
+      });
+      return arr;
+    }
+    if (sortMode === FLEET_DEFAULT_SORT) {
+      arr.sort((a, b) => {
+        const ca = classify(a?.id);
+        const cb = classify(b?.id);
+        if (cb.attentionScore !== ca.attentionScore) return cb.attentionScore - ca.attentionScore;
+        const db = Number.isFinite(cb.ageMs) ? cb.ageMs : Number.MAX_SAFE_INTEGER;
+        const da = Number.isFinite(ca.ageMs) ? ca.ageMs : Number.MAX_SAFE_INTEGER;
         if (db !== da) return db - da;
         return formatAgentLabel(a, { includeId: true }).localeCompare(formatAgentLabel(b, { includeId: true }));
       });
@@ -5853,11 +6272,17 @@ function renderAgentsModalList() {
   const rest = sortAgents(filtered.filter((a) => !pins.has(String(a?.id || '').trim())));
   const shownSnoozed = fleetShowSnoozed ? snoozedMatches : [];
   const ordered = [...pinned, ...rest, ...shownSnoozed];
-  const needsAttention = rest.filter((agent) => classify(agent?.id).bucket !== 'active');
-  const healthy = rest.filter((agent) => classify(agent?.id).bucket === 'active');
+  const needsAttention = rest.filter((agent) => {
+    const c = classify(agent);
+    return c.bucket !== 'active' || c.busy;
+  });
+  const healthy = rest.filter((agent) => {
+    const c = classify(agent);
+    return c.bucket === 'active' && !c.busy;
+  });
   const fleetSummary = baseAgents.reduce((acc, agent) => {
-    const { bucket } = classify(agent?.id);
-    if (bucket === 'active') acc.healthy += 1;
+    const { bucket, busy } = classify(agent);
+    if (bucket === 'active' && !busy) acc.healthy += 1;
     else acc.needsTriage += 1;
     if (bucket === 'offline_error') acc.disconnected += 1;
     return acc;
@@ -5980,13 +6405,17 @@ function renderAgentsModalList() {
       const snoozeChipHtml = snoozed
         ? `<span class="agents-snooze-chip" title="Snoozed until ${escapeHtml(new Date(snoozedUntil).toLocaleTimeString())}">${escapeHtml(`Snoozed ${fmtRemaining(snoozedUntil - Date.now())}`)}</span>`
         : '';
-      const triage = classify(id);
+      const triage = classify(agent);
       const healthLabel = triage.bucket === 'offline_error'
         ? 'Offline/Error'
         : triage.bucket === 'stale'
           ? 'Stale'
-          : 'Healthy';
+          : triage.busy
+            ? 'Busy'
+            : 'Healthy';
+      const healthState = triage.busy ? 'busy' : triage.bucket;
       const heatBucketLabel = heartbeatAgeBucketLabel(triage.ageBucket);
+      const reasonHtml = `<span class="agents-reason-badge" data-testid="agents-reason-badge" title="Rank reason">${escapeHtml(triage.reason)}</span>`;
       const statusSnippet = String(statusSnippetMap[id] || '').trim();
       const statusSnippetHtml = visibleColumns.status && statusSnippet
         ? `<span class="agents-status-snippet" data-fleet-column="status">${escapeHtml(statusSnippet)}</span>`
@@ -6027,8 +6456,8 @@ function renderAgentsModalList() {
       `
         : '';
       row.dataset.heartbeatBucket = triage.ageBucket;
-      row.dataset.healthState = triage.bucket;
-      row.dataset.needsAttention = triage.bucket === 'active' ? 'false' : 'true';
+      row.dataset.healthState = healthState;
+      row.dataset.needsAttention = (triage.bucket !== 'active' || triage.busy) ? 'true' : 'false';
       row.classList.toggle('is-stale', triage.bucket === 'stale' || heartbeatAgeMs > FLEET_DEFAULT_STALE_THRESHOLD_MINUTES * 60_000);
       if (snoozed) row.dataset.snoozed = 'true';
       row.classList.toggle('agents-row-heatmap', heatmapEnabled);
@@ -6037,11 +6466,11 @@ function renderAgentsModalList() {
       row.innerHTML = `
         <button type="button" class="agents-pin" aria-label="${pinnedNow ? 'Unpin agent' : 'Pin agent'}" aria-pressed="${pinnedNow ? 'true' : 'false'}" data-agent-pin="${escapeHtml(id)}">${pinnedNow ? '★' : '☆'}</button>
         <div class="agents-row-identity">
-          <div class="agents-row-title">${escapeHtml(label)}</div>
+          <div class="agents-row-title">${escapeHtml(label)} ${reasonHtml}</div>
           ${visibleColumns.id ? `<div class="agents-row-id" data-fleet-column="id">${escapeHtml(id)}</div>` : ''}
         </div>
         <div class="agents-row-health">
-          ${visibleColumns.health ? `<span class="agents-health-state-chip" data-fleet-column="health" data-health-state="${escapeHtml(triage.bucket)}">${escapeHtml(healthLabel)}</span>` : ''}
+          ${visibleColumns.health ? `<span class="agents-health-state-chip" data-fleet-column="health" data-health-state="${escapeHtml(healthState)}">${escapeHtml(healthLabel)}</span>` : ''}
         </div>
         <div class="agents-row-meta">
             ${visibleColumns.heartbeat ? `<span class="agents-age-chip" data-fleet-column="heartbeat" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}" title="Heartbeat age: ${escapeHtml(heartbeatAge)} (${escapeHtml(heatBucketLabel)})">${escapeHtml(heartbeatAge)}</span>` : ''}
@@ -6124,7 +6553,7 @@ function renderAgentsModalList() {
     globalElements.agentsHeartbeatSortBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
   }
   if (globalElements.agentsSortResetBtn) {
-    globalElements.agentsSortResetBtn.disabled = sortMode === 'recent_desc';
+    globalElements.agentsSortResetBtn.disabled = sortMode === FLEET_DEFAULT_SORT;
   }
   if (globalElements.agentsSortIndicator) {
     globalElements.agentsSortIndicator.textContent =
@@ -6279,6 +6708,14 @@ function handleFleetModalShortcutKeydown(event) {
     if (key === '.') {
       event.preventDefault();
       runFleetSelectedAgent('timeline');
+      return true;
+    }
+    if (lower === 'r') {
+      event.preventDefault();
+      clearFleetRefreshLock();
+      refreshAgents({ reason: 'manual', showSuccessToast: true }).catch(() => {
+        showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
+      });
       return true;
     }
   }
@@ -7108,6 +7545,8 @@ window.__debug.setAgentsLastRefreshedAtMs = (value) => {
   agentsLastRefreshedAtMs = Math.max(0, Number(value) || 0);
   renderAgentsLastRefreshed();
 };
+window.__debug.getFleetRefreshMode = getFleetRefreshMode;
+window.__debug.setFleetRefreshMode = setFleetRefreshMode;
 
 function getWorkqueueItemRepo(item) {
   const repo = String(item?.meta?.repo || '').trim();
@@ -9611,7 +10050,7 @@ async function paneSendChat(pane) {
   }
 
   paneRefreshDraftOrigin(pane);
-  if (!paneConfirmDraftRetargetSend(pane)) return;
+  if (!paneConfirmDraftRetargetSend(pane, () => paneSendChat(pane))) return;
 
   const message = raw;
 
@@ -9937,6 +10376,7 @@ function renderPaneIdentity(pane) {
     pane.elements.name.textContent = identity;
   }
   renderPanePairCue(pane);
+  renderPanePairedAction(pane);
   renderPanePinState(pane);
   renderActivePaneState();
   if (pane.elements.nicknameBtn) {
@@ -10173,10 +10613,7 @@ function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true, syncFromP
   const previous = pane.agentId;
 
   if (requireDraftConfirm && pane.kind === 'chat' && paneHasDraftChanges(pane)) {
-    const nextAgent = getAgentRecord(next);
-    const nextLabel = formatAgentLabel(nextAgent, { includeId: false }) || next;
-    const ok = window.confirm(`Switch destination to “${nextLabel}”?\n\nYou have an unsent draft/attachment. Switching destination will clear this pane's draft and message history.`);
-    if (!ok) return;
+    paneRefreshDraftOrigin(pane);
   }
 
   pane.agentId = next;
@@ -10191,9 +10628,6 @@ function paneSetAgent(pane, nextAgentId, { requireDraftConfirm = true, syncFromP
 
   if (pane.kind === 'chat') {
     renderPaneAgentIdentity(pane);
-    paneSetDraftOrigin(pane, null);
-    pane.attachments.files = [];
-    paneRenderAttachments(pane);
     paneStopThinking(pane);
     paneClearChatHistory(pane, { wipeStorage: false });
     paneRestoreChatHistory(pane);
@@ -10358,6 +10792,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     outbox: [],
     inFlight: null,
     sendGuard: null,
+    draftOrigin: null,
+    draftRetargetConfirmedFor: '',
     chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
     legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
     sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
@@ -10389,6 +10825,19 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     event.stopPropagation();
     togglePanePinned(pane);
   });
+  if (paneSupportsTargetLock(pane)) {
+    const pairedBtn = document.createElement('button');
+    pairedBtn.type = 'button';
+    pairedBtn.className = 'secondary pane-paired-btn';
+    pairedBtn.dataset.testid = 'pane-paired-action';
+    pairedBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      togglePairedPane(pane);
+    });
+    elements.pairedBtn = pairedBtn;
+    elements.closeBtn?.parentElement?.insertBefore(pairedBtn, elements.closeBtn);
+  }
   renderPaneTargetLockChip(pane);
   renderPanePinState(pane);
 
@@ -10597,6 +11046,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
           <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
           <button data-wq-preset-actionable class="secondary" type="button" aria-pressed="false">Actionable only</button>
+          <button data-wq-preset-triage class="secondary" type="button" aria-pressed="false">Triage mode</button>
+          <span class="wq-pill" data-wq-triage-chip data-testid="wq-triage-chip" hidden>Triage mode active</span>
           <button data-wq-clear-quick class="secondary" type="button">Clear filters</button>
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
           <button data-wq-keyboard-mode class="secondary wq-keyboard-toggle" type="button" aria-pressed="false">Keyboard mode</button>
@@ -10739,6 +11190,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const repoChipsEl = elements.thread.querySelector('[data-wq-repo-chips]');
     const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
     const actionableOnlyBtn = elements.thread.querySelector('[data-wq-preset-actionable]');
+    const triageModeBtn = elements.thread.querySelector('[data-wq-preset-triage]');
+    const triageModeChip = elements.thread.querySelector('[data-wq-triage-chip]');
     const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
     const searchEl = itemSearchEl;
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
@@ -10747,6 +11200,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const keyboardHint = elements.thread.querySelector('[data-wq-keyboard-hint]');
 
     const DEFAULT_STATUSES = WORKQUEUE_ACTIVE_STATUSES;
+    const TRIAGE_STATUSES = ['ready', 'pending'];
 
     const statusSet = new Set(
       (Array.isArray(pane.workqueue?.statusFilter) && pane.workqueue.statusFilter.length ? pane.workqueue.statusFilter : DEFAULT_STATUSES)
@@ -10820,6 +11274,29 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     });
 
     renderKeyboardMode();
+
+    const isTriageModeActive = () => {
+      const queue = String(pane.workqueue?.queue || '').trim();
+      const scope = normalizeWorkqueueScope(pane.workqueue?.scopeFilter || 'all');
+      const statuses = Array.isArray(pane.workqueue?.statusFilter)
+        ? pane.workqueue.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
+        : [];
+      return queue === 'dev-team'
+        && scope === 'unassigned'
+        && statuses.length === TRIAGE_STATUSES.length
+        && TRIAGE_STATUSES.every((status) => statuses.includes(status))
+        && String(pane.workqueue?.sortKey || '') === 'priority'
+        && String(pane.workqueue?.sortDir || '') === 'desc';
+    };
+
+    const updateTriagePresetUi = () => {
+      const active = isTriageModeActive();
+      if (triageModeBtn) {
+        triageModeBtn.classList.toggle('active', active);
+        triageModeBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      }
+      if (triageModeChip) triageModeChip.hidden = !active;
+    };
 
     const updateQuickFilterUi = () => {
       sourceBtns.forEach((btn) => {
@@ -10900,6 +11377,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       if (closeMenu) statusDetailsEl?.removeAttribute('open');
       await fetchAndRenderWorkqueueItemsForPane(pane);
       updateQuickFilterUi();
+      updateTriagePresetUi();
       paneManager.persistAdminPanes();
     };
 
@@ -10944,6 +11422,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       }
       await fetchAndRenderWorkqueueItemsForPane(pane);
       updateQuickFilterUi();
+      updateTriagePresetUi();
       paneManager.persistAdminPanes();
     };
 
@@ -11180,6 +11659,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       if (typeof pane.workqueue.renderStatusMultiSelect === 'function') pane.workqueue.renderStatusMultiSelect();
       updateScopeUi();
       renderWorkqueuePaneItems(pane);
+      updateTriagePresetUi();
       paneManager.persistAdminPanes();
     };
     pane.workqueue.setScope = setScope;
@@ -11211,6 +11691,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       persistQuickFilters();
       updateQuickFilterUi();
       renderWorkqueuePaneItems(pane);
+      updateTriagePresetUi();
     });
 
     actionableOnlyBtn?.addEventListener('click', () => {
@@ -11330,6 +11811,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       resetRenderLimit();
       updateSortUi();
       renderWorkqueuePaneItems(pane);
+      updateTriagePresetUi();
       paneManager.persistAdminPanes();
     };
 
@@ -11337,6 +11819,39 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       btn.addEventListener('click', () => setSort(btn.getAttribute('data-wq-sort')));
     });
     updateSortUi();
+    updateTriagePresetUi();
+
+    triageModeBtn?.addEventListener('click', async () => {
+      pane.workqueue.queue = 'dev-team';
+      pane.workqueue.scopeFilter = 'unassigned';
+      pane.workqueue.sortKey = 'priority';
+      pane.workqueue.sortDir = 'desc';
+      statusSet.clear();
+      for (const status of TRIAGE_STATUSES) statusSet.add(status);
+      pane.workqueue.statusFilter = Array.from(statusSet);
+      resetRenderLimit();
+
+      await populateQueueSelect();
+      if (queueSelectEl) {
+        const existing = Array.from(queueSelectEl.options || []).find((opt) => String(opt.value) === 'dev-team');
+        if (existing) {
+          queueSelectEl.value = 'dev-team';
+          if (queueCustomEl) queueCustomEl.hidden = true;
+        } else {
+          queueSelectEl.value = '__custom__';
+          if (queueCustomEl) {
+            queueCustomEl.hidden = false;
+            queueCustomEl.value = 'dev-team';
+          }
+        }
+      }
+
+      renderStatusMultiSelect();
+      updateScopeUi();
+      updateSortUi();
+      await doRefresh();
+      updateTriagePresetUi();
+    });
 
     const groupModeBtns = Array.from(elements.thread.querySelectorAll('[data-wq-group-mode]'));
     const updateGroupModeUi = () => {
@@ -12593,6 +13108,7 @@ const paneManager = {
       pane.elements.input.value = options.restoreDraftText;
       paneSetDraftOrigin(pane, options.restoreDraftOrigin || paneCurrentDraftOrigin(pane));
       paneUpdateCommandHints(pane);
+      refreshPaneDraftState(pane);
     }
     insertCreatedPane(pane);
     return finishCreatedPane(pane, { connect: true });
@@ -13407,7 +13923,7 @@ globalElements.agentsDensityButtons.forEach((btn) => {
 });
 
 globalElements.agentsSort?.addEventListener('change', () => {
-  storage.set(ADMIN_AGENT_SORT_KEY, String(globalElements.agentsSort.value || 'recent_desc'));
+  storage.set(ADMIN_AGENT_SORT_KEY, String(globalElements.agentsSort.value || FLEET_DEFAULT_SORT));
   renderAgentsModalList();
 });
 
@@ -13419,6 +13935,10 @@ globalElements.agentsHeatmapToggle?.addEventListener('change', () => {
 globalElements.agentsHeartbeatSortBtn?.addEventListener('click', () => setFleetHeartbeatSort());
 globalElements.agentsSortResetBtn?.addEventListener('click', () => resetFleetSort());
 globalElements.agentsResetTriageBtn?.addEventListener('click', () => resetAgentsTriageView());
+
+globalElements.agentsRefreshMode?.addEventListener('change', () => {
+  setFleetRefreshMode(globalElements.agentsRefreshMode.value);
+});
 
 globalElements.agentsActiveMinutes?.addEventListener('change', () => {
   const minutes = Math.max(1, Number(globalElements.agentsActiveMinutes.value) || FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES);
@@ -13545,12 +14065,12 @@ function isOverlayElementOpen(el) {
   return el.getAttribute?.('aria-hidden') === 'false';
 }
 
-function isAnyOverlayOpen() {
+function isAnyOverlayOpen({ ignoreShortcuts = false } = {}) {
   return !!(
     isOverlayElementOpen(globalElements.commandPaletteModal) ||
     isOverlayElementOpen(globalElements.paneManagerModal) ||
     isOverlayElementOpen(globalElements.agentsModal) ||
-    isOverlayElementOpen(globalElements.shortcutsModal) ||
+    (!ignoreShortcuts && isOverlayElementOpen(globalElements.shortcutsModal)) ||
     isOverlayElementOpen(globalElements.settingsModal) ||
     isOverlayElementOpen(globalElements.workqueueModal) ||
     isOverlayElementOpen(globalElements.loginOverlay) ||
@@ -13575,7 +14095,11 @@ function isTypingShortcutExempt(event) {
   const key = String(event?.key || '').toLowerCase();
   const override = matchingShortcutOverrideAction(event);
   if (override?.typingExempt) return true;
-  if (matchesKeybind(event, 'workqueue.openForActiveChat')) return true;
+  if (matchesKeybind(event, 'pane.togglePaired') || matchesKeybind(event, 'workqueue.openForActiveChat')) return true;
+  if (matchesKeybind(event, 'workqueue.togglePair')) {
+    const target = event?.target;
+    if (target instanceof Element && target.closest?.('[data-pane-kind="workqueue"] select')) return true;
+  }
   return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'p' || key === 'k' || key === 'l');
 }
 
@@ -14019,9 +14543,19 @@ window.addEventListener('keydown', (event) => {
   // Ctrl/Cmd+Shift+Y → focus matching timeline target (Alt/Option adds anyway)
   const isAccel = (event.metaKey || event.ctrlKey) && event.shiftKey;
   if (isAccel && roleState.role === 'admin' && !isAnyOverlayOpen()) {
+    if (matchesKeybind(event, 'pane.togglePaired')) {
+      event.preventDefault();
+      togglePairedPane();
+      return;
+    }
     if (matchesKeybind(event, 'workqueue.openForActiveChat')) {
       event.preventDefault();
       openWorkqueueForActiveChatAgent();
+      return;
+    }
+    if (matchesKeybind(event, 'workqueue.togglePair')) {
+      event.preventDefault();
+      togglePairedPaneForActivePane();
       return;
     }
     if (matchesKeybindWithOptionalAlt(event, 'triage.return') && !event.altKey) {
@@ -14204,15 +14738,11 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Cmd/Ctrl+Shift+L toggles paired target lock on focused Chat/Workqueue pane.
+  // Cmd/Ctrl+Shift+L toggles between the active Chat/Workqueue pane and its pair.
   if (matchesKeybind(event, 'workqueue.togglePair')) {
-    const focusedKey = focusedPaneKey();
-    const pane = paneManager.panes.find((p) => p?.key === focusedKey) || paneManager.panes[0] || null;
-    if (paneSupportsTargetLock(pane)) {
-      event.preventDefault();
-      paneToggleTargetLock(pane);
-      return;
-    }
+    event.preventDefault();
+    togglePairedPaneForActivePane();
+    return;
   }
 
   // Cmd/Ctrl+Shift+H opens Agents and sorts by heartbeat age (stale first).
@@ -14347,7 +14877,6 @@ globalElements.status?.addEventListener('click', () => {
 globalElements.rolePill?.addEventListener('click', () => {
   if (!uiState.authed) {
     closeAuthSessionPopover();
-    showLogin('Please sign in to continue.');
     return;
   }
   renderAuthSessionUi();
@@ -14356,6 +14885,11 @@ globalElements.rolePill?.addEventListener('click', () => {
   const nextOpen = popover.hidden;
   popover.hidden = !nextOpen;
   globalElements.rolePill.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+});
+
+globalElements.signedOutUnlockBtn?.addEventListener('click', () => {
+  closeAuthSessionPopover();
+  showLogin('Please sign in to continue.');
 });
 
 globalElements.authSessionPopover?.addEventListener('click', async (event) => {
@@ -14428,8 +14962,8 @@ globalElements.addPaneBtn?.addEventListener('click', (event) => {
 
 globalElements.activePaneChip?.addEventListener('click', () => {
   const pane = activePaneFromState();
-  const idx = paneManager?.panes?.indexOf?.(pane) ?? -1;
-  if (idx >= 0) focusPaneIndex(idx, { showHud: true });
+  if (!pane) return;
+  openPaneManager({ focusPaneKey: pane.key, resetFilters: true });
 });
 
 globalElements.layoutModeChip?.addEventListener('click', () => {

@@ -326,3 +326,65 @@ test('pane: workqueue scope filter toggles deterministic row counts', async ({ p
   await expect(statusLine).toContainText(/Showing 0 of \d+ items .*hidden:.*search \d+/);
   await expect(wqPane.locator('[data-wq-empty]')).toContainText('No items match current filters.');
 });
+
+test('pane: workqueue triage mode preset applies and persists queue scope statuses and sort', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('pw-triage-preset-seeded') === '1') return;
+    sessionStorage.setItem('pw-triage-preset-seeded', '1');
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([
+        {
+          key: 'pw-triage-preset',
+          kind: 'workqueue',
+          queue: 'custom-review',
+          statusFilter: ['claimed', 'in_progress'],
+          scopeFilter: 'assigned',
+          sortKey: 'updatedAt',
+          sortDir: 'asc'
+        }
+      ])
+    );
+  });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  const triageBtn = wqPane.locator('[data-wq-preset-triage]');
+
+  const refreshResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
+  await triageBtn.click();
+  await refreshResP;
+
+  await expect(triageBtn).toHaveAttribute('aria-pressed', 'true');
+  await expect(wqPane.getByTestId('wq-triage-chip')).toBeVisible();
+  await expect(wqPane.locator('[data-wq-queue-select]')).toHaveValue('dev-team');
+  await expect(wqPane.locator('[data-wq-scope="unassigned"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(wqPane.locator('.wq-sort [data-wq-sort="priority"]')).toHaveClass(/active/);
+
+  await wqPane.locator('[data-wq-status-details] > summary').click();
+  const statusOptions = wqPane.locator('[data-wq-status-options]');
+  await expect(statusOptions.getByRole('checkbox', { name: /^Ready \(/ })).toBeChecked();
+  await expect(statusOptions.getByRole('checkbox', { name: /^Pending \(/ })).toBeChecked();
+  await expect(statusOptions.getByRole('checkbox', { name: /^Claimed \(/ })).not.toBeChecked();
+  await expect(statusOptions.getByRole('checkbox', { name: /^In progress \(/ })).not.toBeChecked();
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await expect(page.getByTestId('login-overlay')).toBeHidden();
+
+  const persistedPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await expect(persistedPane.locator('[data-wq-preset-triage]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(persistedPane.getByTestId('wq-triage-chip')).toBeVisible();
+  await expect(persistedPane.locator('[data-wq-queue-select]')).toHaveValue('dev-team');
+  await expect(persistedPane.locator('[data-wq-scope="unassigned"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(persistedPane.locator('.wq-sort [data-wq-sort="priority"]')).toHaveClass(/active/);
+});
