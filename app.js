@@ -10790,6 +10790,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     outbox: [],
     inFlight: null,
     sendGuard: null,
+    draftOrigin: null,
+    draftRetargetConfirmedFor: '',
     chatKey: () => computeChatKey({ role: pane.role, agentId: pane.agentId }),
     legacySessionKey: () => computeLegacySessionKey({ role: pane.role, agentId: pane.agentId }),
     sessionKey: () => computeSessionKey({ role: pane.role, agentId: pane.agentId, paneKey: pane.key }),
@@ -13104,6 +13106,7 @@ const paneManager = {
       pane.elements.input.value = options.restoreDraftText;
       paneSetDraftOrigin(pane, options.restoreDraftOrigin || paneCurrentDraftOrigin(pane));
       paneUpdateCommandHints(pane);
+      refreshPaneDraftState(pane);
     }
     insertCreatedPane(pane);
     return finishCreatedPane(pane, { connect: true });
