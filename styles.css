@@ -524,6 +524,43 @@ body::before {
   text-overflow: ellipsis;
 }
 
+.pane-status-chip {
+  cursor: default;
+}
+
+.pane-manager-topbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(9, 12, 16, 0.58);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pane-manager-topbar-btn:hover,
+.pane-manager-topbar-btn:focus-visible {
+  border-color: rgba(255, 179, 71, 0.42);
+  background: rgba(255, 179, 71, 0.14);
+}
+
+.pane-manager-topbar-btn:focus-visible {
+  outline: 2px solid rgba(255, 179, 71, 0.62);
+  outline-offset: 2px;
+}
+
+.pane-manager-topbar-btn__icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
 .icon-btn {
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(9, 12, 16, 0.6);
@@ -1826,17 +1863,6 @@ button.send-btn .btn-icon {
 }
 
 /* Pane Manager */
-
-.status-meta-btn {
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-}
-
-.status-meta-btn:hover {
-  color: var(--text);
-}
 
 .pane-manager-search-wrap {
   display: flex;

@@ -20,6 +20,7 @@ const globalElements = {
   recurringPromptHistoryRows: document.getElementById('recurringPromptHistoryRows'),
   recurringPromptHistoryEmpty: document.getElementById('recurringPromptHistoryEmpty'),
   status: document.getElementById('connectionStatus'),
+  panesStatusMeta: document.getElementById('panesStatusMeta'),
   paneManagerBtn: document.getElementById('paneManagerBtn'),
   activePaneChip: document.getElementById('activePaneChip'),
   activePaneChipValue: document.querySelector('[data-active-pane-chip-value]'),
@@ -2379,12 +2380,16 @@ function updateGlobalStatus() {
   setStatusPill(globalElements.status, status.state, status.meta);
   if (globalElements.status) globalElements.status.hidden = !uiState.authed;
   renderActivePaneState();
+  if (globalElements.panesStatusMeta) {
+    globalElements.panesStatusMeta.hidden = !uiState.authed || !status.meta;
+    globalElements.panesStatusMeta.textContent = status.meta;
+    globalElements.panesStatusMeta.title = status.meta ? `Pane status: ${status.meta}` : 'Pane status';
+    globalElements.panesStatusMeta.setAttribute('aria-label', 'Pane connection status');
+  }
   if (globalElements.paneManagerBtn) {
-    globalElements.paneManagerBtn.hidden = !uiState.authed || !status.meta;
-    globalElements.paneManagerBtn.textContent = uiState.authed ? status.meta : '';
-    const label = status.ariaLabel ? `Open pane manager. Shift-click to filter panes needing attention. ${status.ariaLabel}` : 'Open pane manager';
-    globalElements.paneManagerBtn.setAttribute('aria-label', label);
-    globalElements.paneManagerBtn.title = status.ariaLabel || status.meta || 'Open pane manager';
+    globalElements.paneManagerBtn.hidden = !uiState.authed;
+    globalElements.paneManagerBtn.setAttribute('aria-label', 'Manage panes');
+    globalElements.paneManagerBtn.title = 'Manage panes (Ctrl/Cmd+P)';
   }
 }
 
