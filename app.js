@@ -310,28 +310,42 @@ const normalizeAdminDestination = __appCore.normalizeAdminDestination || ((candi
     activePaneKey: typeof value.activePaneKey === 'string' ? value.activePaneKey : ''
   };
 });
-const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => ({
-  isAdmin: String(state?.role || '') === 'admin',
-  authState: !!state?.authed ? 'signed_in' : (String(state?.role || '') === 'admin' ? 'locked' : 'signed_out'),
-  startAgentAutoRefresh: String(state?.role || '') === 'admin' && !!state?.authed,
-  stopAgentAutoRefresh: String(state?.role || '') !== 'admin' || !state?.authed,
-  rolePillText: !!state?.authed ? `Signed in - ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} - ${state?.environment || 'local'}` : (String(state?.role || '') === 'admin' ? 'Locked' : 'Signed out'),
-  rolePillAdmin: String(state?.role || '') === 'admin' && !!state?.authed,
-  rolePillLocked: !state?.authed && String(state?.role || '') === 'admin',
-  rolePillSignedOut: !state?.authed && String(state?.role || '') !== 'admin',
-  rolePillActionLabel: !!state?.authed ? 'Open session details' : 'Focus password input to unlock session',
-  rolePillTooltip: !!state?.authed
-    ? `Session context: signed in as ${String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')} in ${state?.environment || 'local'}. Click for session details.`
-    : `Session context: signed out in ${state?.environment || 'local'}. Click to unlock this session.`,
-  authLabel: !!state?.authed ? 'Signed in' : (String(state?.role || '') === 'admin' ? 'Locked' : 'Signed out'),
-  principalLabel: !!state?.authed ? (String(state?.role || '') === 'admin' ? 'Admin' : (state?.role || 'Guest')) : 'Not signed in',
-  environmentLabel: state?.environment || 'local',
-  showAdminControls: String(state?.role || '') === 'admin' && !!state?.authed,
-  authActionText: !!state?.authed ? 'Logout' : 'Unlock',
-  authActionLabel: !!state?.authed ? 'Log out' : 'Unlock admin',
-  logoutEnabled: true,
-  logoutOpacity: '1'
-}));
+const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => {
+  const effectiveRole = state?.role || (!state?.authed && state?.routeRole === 'admin' ? 'admin' : null);
+  const isAdmin = String(effectiveRole || '') === 'admin';
+  const authState = !!state?.authed ? 'signed_in' : (isAdmin ? 'locked' : 'signed_out');
+  const authLabel = authState === 'signed_in' ? 'Signed in' : authState === 'locked' ? 'Locked' : 'Signed out';
+  const principalLabel = !!state?.authed ? (isAdmin ? 'Admin' : (effectiveRole || 'Guest')) : 'Not signed in';
+  const environmentLabel = state?.environment || 'local';
+  return {
+    isAdmin,
+    authState,
+    startAgentAutoRefresh: isAdmin && !!state?.authed,
+    stopAgentAutoRefresh: !isAdmin || !state?.authed,
+    rolePillText: !!state?.authed ? `${authLabel} - ${principalLabel} - ${environmentLabel}` : authLabel,
+    rolePillAdmin: isAdmin && !!state?.authed,
+    rolePillLocked: authState === 'locked',
+    rolePillSignedOut: authState === 'signed_out',
+    rolePillActionLabel: !!state?.authed
+      ? 'Open session details'
+      : authState === 'locked'
+        ? 'Authentication status: Locked'
+        : 'Focus password input to unlock session',
+    rolePillTooltip: !!state?.authed
+      ? `Session context: signed in as ${principalLabel} in ${environmentLabel}. Click for session details.`
+      : authState === 'locked'
+        ? `Session context: locked in ${environmentLabel}. Use the Unlock action to sign in.`
+        : `Session context: signed out in ${environmentLabel}. Click to unlock this session.`,
+    authLabel,
+    principalLabel,
+    environmentLabel,
+    showAdminControls: isAdmin && !!state?.authed,
+    authActionText: !!state?.authed ? 'Logout' : 'Unlock',
+    authActionLabel: !!state?.authed ? 'Log out' : 'Unlock admin',
+    logoutEnabled: true,
+    logoutOpacity: '1'
+  };
+});
 const paneNeedsAttention = __appCore.paneNeedsAttention || ((pane) => {
   if (!pane) return false;
   const status = String(pane.statusState || '').trim();
@@ -1487,6 +1501,7 @@ const uiState = {
 };
 
 let toastSeq = 0;
+let loginInFlight = false;
 function showToast(
   message,
   {
@@ -2399,6 +2414,7 @@ function currentAuthUi() {
   return deriveAuthOverlayState({
     authed: uiState.authed,
     role: roleState.role,
+    routeRole,
     environment: uiState.meta?.instance || 'local'
   });
 }
@@ -2420,6 +2436,13 @@ function renderAuthSessionUi() {
     pill.dataset.authState = authUi.authState || 'signed_out';
     pill.setAttribute('aria-label', authUi.rolePillActionLabel || 'Authentication status');
     pill.title = authUi.rolePillTooltip || authUi.rolePillActionLabel || 'Authentication status';
+    if (uiState.authed) {
+      pill.removeAttribute('tabindex');
+      pill.removeAttribute('aria-disabled');
+    } else {
+      pill.tabIndex = -1;
+      pill.setAttribute('aria-disabled', 'true');
+    }
   }
 
   const popover = globalElements.authSessionPopover;
@@ -2523,12 +2546,31 @@ function setRole(role) {
   }
 }
 
-function showLogin(message = '') {
+function setLoginSubmitting(submitting) {
+  loginInFlight = Boolean(submitting);
+  if (globalElements.loginBtn) {
+    globalElements.loginBtn.disabled = loginInFlight;
+    globalElements.loginBtn.textContent = loginInFlight ? 'Unlocking...' : 'Unlock';
+    globalElements.loginBtn.setAttribute('aria-busy', loginInFlight ? 'true' : 'false');
+  }
+  if (globalElements.loginPassword) {
+    globalElements.loginPassword.disabled = loginInFlight;
+  }
+}
+
+function focusLoginPassword() {
+  globalElements.loginPassword?.focus();
+  window.requestAnimationFrame?.(() => globalElements.loginPassword?.focus());
+  window.setTimeout?.(() => globalElements.loginPassword?.focus(), 250);
+}
+
+function showLogin(message = '', { clearPassword = true } = {}) {
   captureAdminAuthDestination();
+  setLoginSubmitting(false);
   globalElements.loginOverlay.classList.add('open');
   globalElements.loginOverlay.setAttribute('aria-hidden', 'false');
   globalElements.loginError.textContent = message;
-  globalElements.loginPassword.value = '';
+  if (clearPassword) globalElements.loginPassword.value = '';
   updateLoginCapsHint(false);
 
   // Guest role selection removed.
@@ -2545,13 +2587,11 @@ function showLogin(message = '') {
   globalElements.fleetBtn?.setAttribute('disabled', 'disabled');
   if (globalElements.fleetBtn) globalElements.fleetBtn.style.opacity = '0.5';
 
-  const isTouch = window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
-  if (!isTouch) {
-    globalElements.loginPassword.focus();
-  }
+  focusLoginPassword();
 }
 
 function hideLogin() {
+  setLoginSubmitting(false);
   globalElements.loginOverlay.classList.remove('open');
   globalElements.loginOverlay.setAttribute('aria-hidden', 'true');
   globalElements.loginError.textContent = '';
@@ -2574,11 +2614,13 @@ function handleLoginPasswordCapsState(event) {
 }
 
 async function attemptLogin() {
+  if (loginInFlight) return;
   const password = globalElements.loginPassword.value.trim();
   if (!password) {
     showLogin('Password required.');
     return;
   }
+  setLoginSubmitting(true);
   try {
     const res = await fetch('/auth/login', {
       method: 'POST',
@@ -2587,7 +2629,7 @@ async function attemptLogin() {
       credentials: 'include'
     });
     if (!res.ok) {
-      showLogin('Invalid password. Try again.');
+      showLogin('Invalid password. Try again.', { clearPassword: false });
       return;
     }
     await res.json();
@@ -2605,7 +2647,7 @@ async function attemptLogin() {
     }
     window.location.replace(nextHref);
   } catch {
-    showLogin('Login failed. Please retry.');
+    showLogin('Login failed. Please retry.', { clearPassword: false });
   }
 }
 
@@ -11005,6 +11047,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
           <button data-wq-preset-clawnsole class="secondary" type="button">Clawnsole only</button>
           <button data-wq-preset-actionable class="secondary" type="button" aria-pressed="false">Actionable only</button>
+          <button data-wq-preset-triage class="secondary" type="button" aria-pressed="false">Triage mode</button>
+          <span class="wq-pill" data-wq-triage-chip data-testid="wq-triage-chip" hidden>Triage mode active</span>
           <button data-wq-clear-quick class="secondary" type="button">Clear filters</button>
           <button data-wq-refresh class="secondary" type="button">Refresh</button>
           <button data-wq-keyboard-mode class="secondary wq-keyboard-toggle" type="button" aria-pressed="false">Keyboard mode</button>
@@ -11147,6 +11191,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const repoChipsEl = elements.thread.querySelector('[data-wq-repo-chips]');
     const clawnsoleOnlyBtn = elements.thread.querySelector('[data-wq-preset-clawnsole]');
     const actionableOnlyBtn = elements.thread.querySelector('[data-wq-preset-actionable]');
+    const triageModeBtn = elements.thread.querySelector('[data-wq-preset-triage]');
+    const triageModeChip = elements.thread.querySelector('[data-wq-triage-chip]');
     const clearQuickBtn = elements.thread.querySelector('[data-wq-clear-quick]');
     const searchEl = itemSearchEl;
     const refreshBtn = elements.thread.querySelector('[data-wq-refresh]');
@@ -11155,6 +11201,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const keyboardHint = elements.thread.querySelector('[data-wq-keyboard-hint]');
 
     const DEFAULT_STATUSES = WORKQUEUE_ACTIVE_STATUSES;
+    const TRIAGE_STATUSES = ['ready', 'pending'];
 
     const statusSet = new Set(
       (Array.isArray(pane.workqueue?.statusFilter) && pane.workqueue.statusFilter.length ? pane.workqueue.statusFilter : DEFAULT_STATUSES)
@@ -11228,6 +11275,29 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     });
 
     renderKeyboardMode();
+
+    const isTriageModeActive = () => {
+      const queue = String(pane.workqueue?.queue || '').trim();
+      const scope = normalizeWorkqueueScope(pane.workqueue?.scopeFilter || 'all');
+      const statuses = Array.isArray(pane.workqueue?.statusFilter)
+        ? pane.workqueue.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
+        : [];
+      return queue === 'dev-team'
+        && scope === 'unassigned'
+        && statuses.length === TRIAGE_STATUSES.length
+        && TRIAGE_STATUSES.every((status) => statuses.includes(status))
+        && String(pane.workqueue?.sortKey || '') === 'priority'
+        && String(pane.workqueue?.sortDir || '') === 'desc';
+    };
+
+    const updateTriagePresetUi = () => {
+      const active = isTriageModeActive();
+      if (triageModeBtn) {
+        triageModeBtn.classList.toggle('active', active);
+        triageModeBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      }
+      if (triageModeChip) triageModeChip.hidden = !active;
+    };
 
     const updateQuickFilterUi = () => {
       sourceBtns.forEach((btn) => {
@@ -11308,6 +11378,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       if (closeMenu) statusDetailsEl?.removeAttribute('open');
       await fetchAndRenderWorkqueueItemsForPane(pane);
       updateQuickFilterUi();
+      updateTriagePresetUi();
       paneManager.persistAdminPanes();
     };
 
@@ -11352,6 +11423,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       }
       await fetchAndRenderWorkqueueItemsForPane(pane);
       updateQuickFilterUi();
+      updateTriagePresetUi();
       paneManager.persistAdminPanes();
     };
 
@@ -11588,6 +11660,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       if (typeof pane.workqueue.renderStatusMultiSelect === 'function') pane.workqueue.renderStatusMultiSelect();
       updateScopeUi();
       renderWorkqueuePaneItems(pane);
+      updateTriagePresetUi();
       paneManager.persistAdminPanes();
     };
     pane.workqueue.setScope = setScope;
@@ -11619,6 +11692,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       persistQuickFilters();
       updateQuickFilterUi();
       renderWorkqueuePaneItems(pane);
+      updateTriagePresetUi();
     });
 
     actionableOnlyBtn?.addEventListener('click', () => {
@@ -11738,6 +11812,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       resetRenderLimit();
       updateSortUi();
       renderWorkqueuePaneItems(pane);
+      updateTriagePresetUi();
       paneManager.persistAdminPanes();
     };
 
@@ -11745,6 +11820,39 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       btn.addEventListener('click', () => setSort(btn.getAttribute('data-wq-sort')));
     });
     updateSortUi();
+    updateTriagePresetUi();
+
+    triageModeBtn?.addEventListener('click', async () => {
+      pane.workqueue.queue = 'dev-team';
+      pane.workqueue.scopeFilter = 'unassigned';
+      pane.workqueue.sortKey = 'priority';
+      pane.workqueue.sortDir = 'desc';
+      statusSet.clear();
+      for (const status of TRIAGE_STATUSES) statusSet.add(status);
+      pane.workqueue.statusFilter = Array.from(statusSet);
+      resetRenderLimit();
+
+      await populateQueueSelect();
+      if (queueSelectEl) {
+        const existing = Array.from(queueSelectEl.options || []).find((opt) => String(opt.value) === 'dev-team');
+        if (existing) {
+          queueSelectEl.value = 'dev-team';
+          if (queueCustomEl) queueCustomEl.hidden = true;
+        } else {
+          queueSelectEl.value = '__custom__';
+          if (queueCustomEl) {
+            queueCustomEl.hidden = false;
+            queueCustomEl.value = 'dev-team';
+          }
+        }
+      }
+
+      renderStatusMultiSelect();
+      updateScopeUi();
+      updateSortUi();
+      await doRefresh();
+      updateTriagePresetUi();
+    });
 
     const groupModeBtns = Array.from(elements.thread.querySelectorAll('[data-wq-group-mode]'));
     const updateGroupModeUi = () => {
@@ -14769,7 +14877,6 @@ globalElements.status?.addEventListener('click', () => {
 globalElements.rolePill?.addEventListener('click', () => {
   if (!uiState.authed) {
     closeAuthSessionPopover();
-    showLogin('Please sign in to continue.');
     return;
   }
   renderAuthSessionUi();

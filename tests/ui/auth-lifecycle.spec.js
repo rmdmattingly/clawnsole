@@ -7,8 +7,10 @@ test('visiting /admin without auth shows login overlay', async ({ page, clawnsol
 
   await page.goto(clawnsole.adminUrl);
   await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
-  await expect(page.getByTestId('role-pill')).toContainText('Signed out');
-  await expect(page.getByTestId('role-pill')).toHaveAttribute('data-auth-state', 'signed_out');
+  await expect(page.getByTestId('role-pill')).toHaveText('Locked');
+  await expect(page.getByTestId('role-pill')).toHaveAttribute('data-auth-state', 'locked');
+  await expect(page.getByTestId('role-pill')).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByTestId('role-pill')).toHaveAttribute('tabindex', '-1');
   await expect(page.getByTestId('connection-status')).toBeHidden();
   await expect(page.getByTestId('panes-indicator')).toBeHidden();
   await expect(page.getByTestId('add-pane-btn')).toBeHidden();
@@ -76,9 +78,11 @@ test('login password shows Caps Lock hint only while active and focused', async 
   const password = page.getByTestId('login-password');
   const hint = page.getByTestId('login-caps-hint');
 
+  await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
+  await expect(password).toBeVisible();
   await expect(hint).toBeHidden();
+  await password.focus();
   await password.evaluate((node) => {
-    node.focus();
     const event = Object.assign(new Event('keydown', { bubbles: true }), {
       key: 'A',
       getModifierState: (key) => key === 'CapsLock'
@@ -106,6 +110,68 @@ test('login password shows Caps Lock hint only while active and focused', async 
   await expect(hint).toBeVisible();
   await password.evaluate((node) => node.blur());
   await expect(hint).toBeHidden();
+});
+
+test('admin login submits with Enter and keeps focus on failure', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await page.goto(clawnsole.adminUrl);
+  const password = page.getByTestId('login-password');
+  const button = page.getByTestId('login-button');
+
+  await expect(password).toBeFocused();
+  await password.fill('wrong-password');
+  await password.press('Enter');
+
+  await expect(page.getByTestId('login-error')).toContainText('Invalid password');
+  await expect(button).toBeEnabled();
+  await expect(button).toHaveText('Unlock');
+  await expect(password).toBeEnabled();
+  await expect(password).toBeFocused();
+  await expect(password).toHaveValue('wrong-password');
+});
+
+test('admin login shows in-flight state and prevents duplicate submits', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let loginRequests = 0;
+  let releaseLogin;
+  const loginReleased = new Promise((resolve) => {
+    releaseLogin = resolve;
+  });
+  await page.route('**/auth/login', async (route) => {
+    loginRequests += 1;
+    await loginReleased;
+    await route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false })
+    });
+  });
+
+  await page.goto(clawnsole.adminUrl);
+  const password = page.getByTestId('login-password');
+  const button = page.getByTestId('login-button');
+
+  await password.fill('admin');
+  await button.click();
+
+  await expect(button).toBeDisabled();
+  await expect(button).toHaveText('Unlocking...');
+  await expect(button).toHaveAttribute('aria-busy', 'true');
+  await expect(password).toBeDisabled();
+
+  await button.click({ force: true });
+  await password.press('Enter').catch(() => {});
+  await page.waitForTimeout(100);
+  expect(loginRequests).toBe(1);
+
+  releaseLogin();
+  await expect(page.getByTestId('login-error')).toContainText('Invalid password');
+  await expect(button).toBeEnabled();
+  await expect(button).toHaveAttribute('aria-busy', 'false');
+  await expect(password).toBeEnabled();
+  await expect(password).toBeFocused();
 });
 
 test('admin login restores the intended in-app destination', async ({ page, clawnsole }) => {
