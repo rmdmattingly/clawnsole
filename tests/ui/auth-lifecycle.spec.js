@@ -84,34 +84,23 @@ test('login password shows Caps Lock hint only while active and focused', async 
   await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
   const password = page.getByTestId('login-password');
   const hint = page.getByTestId('login-caps-hint');
-
-  await expect(hint).toBeHidden();
-  await password.evaluate((node) => {
+  const dispatchCapsEvent = async (locator, type, active) => locator.evaluate((node, { eventType, capsActive }) => {
     node.focus();
-    const event = Object.assign(new Event('keydown', { bubbles: true }), {
-      key: 'A',
-      getModifierState: (key) => key === 'CapsLock'
+    const event = new KeyboardEvent(eventType, { bubbles: true, key: capsActive ? 'A' : 'a' });
+    Object.defineProperty(event, 'getModifierState', {
+      value: (key) => key === 'CapsLock' && capsActive
     });
     node.dispatchEvent(event);
-  });
+  }, { eventType: type, capsActive: active });
+
+  await expect(hint).toBeHidden();
+  await dispatchCapsEvent(password, 'keydown', true);
   await expect(hint).toBeVisible();
 
-  await password.evaluate((node) => {
-    const event = Object.assign(new Event('keyup', { bubbles: true }), {
-      key: 'a',
-      getModifierState: () => false
-    });
-    node.dispatchEvent(event);
-  });
+  await dispatchCapsEvent(password, 'keyup', false);
   await expect(hint).toBeHidden();
 
-  await password.evaluate((node) => {
-    const event = Object.assign(new Event('keydown', { bubbles: true }), {
-      key: 'A',
-      getModifierState: (key) => key === 'CapsLock'
-    });
-    node.dispatchEvent(event);
-  });
+  await dispatchCapsEvent(password, 'keydown', true);
   await expect(hint).toBeVisible();
   await password.evaluate((node) => node.blur());
   await expect(hint).toBeHidden();

@@ -270,7 +270,7 @@ test('shortcuts overlay filters by search text and category chips', async ({ pag
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
   await expect(search).toBeFocused();
 
-  await search.fill('cmd/ctrl+shift+g');
+  await search.fill('cmd/ctrl+shift+alt+g');
   await expect(modal.locator('[data-shortcut-id="workqueue.openForActiveChat"]')).toBeVisible();
   await expect(modal.locator('[data-shortcut-id="fleet.open"]')).toBeHidden();
 
