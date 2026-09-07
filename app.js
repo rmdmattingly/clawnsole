@@ -9135,7 +9135,8 @@ function getDefaultWorkqueueScope() {
 function getDefaultWorkqueueScopeForTarget(agentId) {
   const rawTarget = typeof agentId === 'string' ? agentId.trim() : '';
   if (!rawTarget) return getDefaultWorkqueueScope();
-  return normalizeAgentId(rawTarget) ? 'assigned' : getDefaultWorkqueueScope();
+  const normalizedTarget = normalizeAgentId(rawTarget);
+  return normalizedTarget && normalizedTarget !== 'main' ? 'assigned' : getDefaultWorkqueueScope();
 }
 
 function computeBaseDeviceLabel() {
