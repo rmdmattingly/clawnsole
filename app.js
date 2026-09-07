@@ -5680,7 +5680,7 @@ function openCommandPalette() {
   if (!globalElements.commandPaletteModal) return;
 
   commandPaletteState.open = true;
-  commandPaletteState.originPaneKey = focusedPaneKey() || lastFocusedPaneKey || rememberedActivePaneKey() || '';
+  commandPaletteState.originPaneKey = focusedPaneKey() || rememberedActivePaneKey() || lastFocusedPaneKey || '';
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
   commandPaletteState.selectedIndex = 0;
