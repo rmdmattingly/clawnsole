@@ -287,7 +287,18 @@ test('pane manager: unread-only filter toggle', async ({ page }) => {
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.getByTestId('panes-indicator').click();
+  const panesIndicator = page.getByTestId('panes-indicator');
+  await expect(panesIndicator).toHaveText(/\d+ connected · \d+ disconnected · \d+ attention/i);
+  await expect(panesIndicator).toHaveAttribute('role', 'status');
+  await expect(panesIndicator).toHaveAttribute('aria-label', 'Pane connection status');
+  await expect(panesIndicator).toHaveCSS('cursor', 'default');
+
+  const managerButton = page.getByTestId('pane-manager-button');
+  await expect(managerButton).toHaveText(/Manage panes/);
+  await expect(managerButton).toHaveAttribute('aria-label', 'Manage panes');
+  await expect(managerButton).toHaveAttribute('title', /Manage panes/);
+
+  await managerButton.click();
   await expect(page.getByTestId('pane-manager-modal')).toHaveAttribute('aria-hidden', 'false');
   await page.locator('.pane-manager-unread-only').click();
   await expect(page.locator('.pane-manager-row')).toHaveCount(0);
@@ -306,7 +317,7 @@ test('pane manager: status stays in sync with pane header while modal is open', 
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.getByTestId('panes-indicator').click();
+  await page.getByTestId('pane-manager-button').click();
   const modal = page.locator('#paneManagerModal');
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
 

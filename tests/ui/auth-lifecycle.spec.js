@@ -78,9 +78,11 @@ test('login password shows Caps Lock hint only while active and focused', async 
   const password = page.getByTestId('login-password');
   const hint = page.getByTestId('login-caps-hint');
 
+  await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
+  await expect(password).toBeVisible();
   await expect(hint).toBeHidden();
+  await password.focus();
   await password.evaluate((node) => {
-    node.focus();
     const event = Object.assign(new Event('keydown', { bubbles: true }), {
       key: 'A',
       getModifierState: (key) => key === 'CapsLock'
