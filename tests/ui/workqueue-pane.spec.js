@@ -936,9 +936,7 @@ test('workqueue pane: direct shortcuts focus queue, item, and status controls wi
   await expect(pane.locator('[data-wq-status-details] summary')).toBeFocused();
   await expect(pane.locator('[data-wq-status-details]')).toHaveAttribute('open', '');
 
-  await page.evaluate(() => {
-    document.querySelector('[data-wq-queue-search]')?.setAttribute('hidden', '');
-  });
+  await pane.locator('[data-wq-queue-search]').evaluate((el) => el.setAttribute('hidden', ''));
   await pane.locator('[data-wq-refresh]').focus();
   await pressAlt('q');
   await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Shortcut target is unavailable');

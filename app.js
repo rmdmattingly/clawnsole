@@ -9133,8 +9133,9 @@ function getDefaultWorkqueueScope() {
 }
 
 function getDefaultWorkqueueScopeForTarget(agentId) {
-  const target = normalizeAgentId(agentId || 'main');
-  return target && target !== 'main' ? 'assigned' : getDefaultWorkqueueScope();
+  const rawTarget = typeof agentId === 'string' ? agentId.trim() : '';
+  if (!rawTarget) return getDefaultWorkqueueScope();
+  return normalizeAgentId(rawTarget) ? 'assigned' : getDefaultWorkqueueScope();
 }
 
 function computeBaseDeviceLabel() {
@@ -10647,7 +10648,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     stopBtn: root.querySelector('[data-pane-stop]')
   };
 
-  const normalizedPaneAgentId = role === 'admin' ? normalizeAgentId(agentId || 'main') : null;
+  const explicitPaneAgentId = typeof agentId === 'string' ? agentId.trim() : '';
+  const normalizedPaneAgentId = role === 'admin' ? normalizeAgentId(explicitPaneAgentId || 'main') : null;
   const normalizedQueue = (queue || 'dev-team').trim() || 'dev-team';
   const restoredSort = loadWorkqueueSortPreference(normalizedQueue);
   const hasExplicitSort = typeof sortKey === 'string' && sortKey.trim();
@@ -10666,7 +10668,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     workqueue: {
       queue: normalizedQueue,
       statusFilter: Array.isArray(statusFilter) ? statusFilter : Array.from(WORKQUEUE_ACTIVE_STATUSES),
-      scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScopeForTarget(normalizedPaneAgentId)),
+      scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScopeForTarget(explicitPaneAgentId)),
       quickFilters: {
         sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
         repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : [],
@@ -14275,7 +14277,7 @@ function getFocusedWorkqueuePane() {
 function isShortcutFocusable(el) {
   if (!el || typeof el.focus !== 'function') return false;
   try {
-    if (el.disabled || el.hidden) return false;
+    if (el.disabled || el.hidden || el.hasAttribute?.('hidden')) return false;
     if (el.getClientRects && el.getClientRects().length === 0) return false;
   } catch {
     return true;
@@ -14304,6 +14306,10 @@ function focusWorkqueueShortcutTarget(target) {
   }
 
   el.focus();
+  if (document.activeElement !== el && !el.contains?.(document.activeElement)) {
+    reportBlockedShortcut('unavailable');
+    return false;
+  }
   if (target === 'status') {
     const details = pane.elements?.thread?.querySelector('[data-wq-status-details]');
     details?.setAttribute('open', '');
