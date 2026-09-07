@@ -665,7 +665,10 @@ test('fleet list keeps header and identity columns visible while scrolling', asy
   expect(stickyHeader.position).toBe('sticky');
   expect(stickyHeader.topDelta).toBeLessThan(2);
 
-  const row = page.locator('#agentsList .agents-row[data-agent-id="agent-30"]');
+  const row = page.locator('#agentsList .agents-row[data-agent-id="agent-30"]', { has: page.locator('.agents-row-meta') });
+  await expect(row).toHaveCount(1);
+  await expect(row.locator('.agents-row-identity')).toBeVisible();
+  await expect(row.locator('.agents-row-meta')).toBeVisible();
   const before = await row.evaluate((el) => ({
     identityLeft: el.querySelector('.agents-row-identity').getBoundingClientRect().left,
     detailsLeft: el.querySelector('.agents-row-meta').getBoundingClientRect().left

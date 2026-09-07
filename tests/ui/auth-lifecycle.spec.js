@@ -84,6 +84,11 @@ test('login password shows Caps Lock hint only while active and focused', async 
   await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
   const password = page.getByTestId('login-password');
   const hint = page.getByTestId('login-caps-hint');
+
+  await expect(page.getByTestId('login-overlay')).toHaveClass(/open/);
+  await expect(password).toBeVisible();
+  await expect(hint).toBeHidden();
+
   const dispatchCapsEvent = async (locator, type, active) => locator.evaluate((node, { eventType, capsActive }) => {
     node.focus();
     const event = new KeyboardEvent(eventType, { bubbles: true, key: capsActive ? 'A' : 'a' });
@@ -93,7 +98,6 @@ test('login password shows Caps Lock hint only while active and focused', async 
     node.dispatchEvent(event);
   }, { eventType: type, capsActive: active });
 
-  await expect(hint).toBeHidden();
   await dispatchCapsEvent(password, 'keydown', true);
   await expect(hint).toBeVisible();
 
