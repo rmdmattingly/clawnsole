@@ -8316,7 +8316,7 @@ function renderWorkqueuePaneItems(pane) {
           <div class="empty-state">
             <div style="font-weight:700; margin-bottom:6px;">No items match current filters. No items match "${escapeHtml(itemSearchQuery)}".</div>
             <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span>${hiddenSummary ? ` · ${escapeHtml(hiddenSummary)}` : ''}</div>
-            <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            <div class="wq-empty-actions">
               <button type="button" class="secondary" data-wq-clear-item-search>Clear search</button>
               <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
             </div>
@@ -8347,7 +8347,7 @@ function renderWorkqueuePaneItems(pane) {
           <div style="font-weight:700; margin-bottom:6px;">${escapeHtml(title)}</div>
           <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
           ${filtersHidingAll ? `<div class="hint" data-wq-empty-reason style="margin-top:6px;">0 visible of <span class="mono">${escapeHtml(String(totalCount))}</span> total${emptyHiddenReason ? `; ${escapeHtml(emptyHiddenReason)}` : ''}.</div>` : ''}
-          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+          <div class="wq-empty-actions">
             ${filterRecoveryActions}
             <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
             <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
@@ -9133,10 +9133,8 @@ function getDefaultWorkqueueScope() {
 }
 
 function getDefaultWorkqueueScopeForTarget(agentId) {
-  const rawTarget = typeof agentId === 'string' ? agentId.trim() : '';
-  if (!rawTarget) return getDefaultWorkqueueScope();
-  const normalizedTarget = normalizeAgentId(rawTarget);
-  return normalizedTarget && normalizedTarget !== 'main' ? 'assigned' : getDefaultWorkqueueScope();
+  const target = normalizeAgentId(agentId);
+  return target ? 'assigned' : getDefaultWorkqueueScope();
 }
 
 function computeBaseDeviceLabel() {

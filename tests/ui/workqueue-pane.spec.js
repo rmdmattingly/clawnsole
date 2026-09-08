@@ -431,6 +431,7 @@ test('workqueue pane: new panes default to non-terminal statuses with archived t
   await loginAdmin(page, env.serverPort);
 
   const defaultPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await defaultPane.locator('[data-wq-scope="all"]').click();
   await defaultPane.locator('[data-wq-queue-select]').selectOption(queue);
   await expect(defaultPane.locator('[data-wq-statusline]')).toContainText('Showing 1 of 3 items');
   await expect(defaultPane.locator('[data-wq-list-body]')).toContainText('archived toggle ready row');

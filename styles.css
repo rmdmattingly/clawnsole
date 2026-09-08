@@ -3679,6 +3679,7 @@ kbd {
 .wq-pane .wq-layout,
 .cron-pane .wq-layout {
   flex: 1;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   padding: 10px;
 }
@@ -3687,6 +3688,7 @@ kbd {
 .cron-pane .wq-list {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   scroll-padding-top: 52px;
@@ -3768,6 +3770,20 @@ kbd {
 [data-wq-empty] {
   position: relative;
   z-index: 4;
+}
+
+.wq-empty-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  max-width: 100%;
+}
+
+.wq-empty-actions button {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: normal;
 }
 
 .wq-list-body {
