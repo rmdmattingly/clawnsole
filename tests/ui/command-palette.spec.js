@@ -180,7 +180,7 @@ test('command palette: opens or focuses Workqueue for active chat agent', async 
     const input = page.locator('#commandPaletteInput');
     await expect(input).toBeVisible();
     await input.fill(query);
-    await page.keyboard.press('Enter');
+    await input.press('Enter');
   };
 
   const chatInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');

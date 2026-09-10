@@ -270,7 +270,7 @@ test('shortcuts overlay filters by search text and category chips', async ({ pag
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
   await expect(search).toBeFocused();
 
-  await search.fill('cmd/ctrl+shift+g');
+  await search.fill('cmd/ctrl+shift+alt+g');
   await expect(modal.locator('[data-shortcut-id="workqueue.openForActiveChat"]')).toBeVisible();
   await expect(modal.locator('[data-shortcut-id="fleet.open"]')).toBeHidden();
 
@@ -432,8 +432,8 @@ test('shortcuts modal restores prior focus on close', async ({ page }) => {
   const openBtn = page.locator('#shortcutsBtn');
   const modal = page.locator('#shortcutsModal');
 
-  await openBtn.focus();
-  await expect(openBtn).toBeFocused();
+  await openBtn.evaluate((button) => button.focus());
+  await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe('shortcutsBtn');
   await openBtn.click();
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
 
