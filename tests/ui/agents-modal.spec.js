@@ -670,17 +670,21 @@ test('fleet list keeps header and identity columns visible while scrolling', asy
   await expect(row.locator('.agents-row-identity')).toBeVisible();
   await expect(row.locator('.agents-row-meta')).toBeVisible();
   const before = await row.evaluate((el) => ({
-    identityLeft: el.querySelector('.agents-row-identity').getBoundingClientRect().left,
-    detailsLeft: el.querySelector('.agents-row-meta').getBoundingClientRect().left
+    identityLeft: el.querySelector('.agents-row-identity')?.getBoundingClientRect().left ?? null,
+    detailsLeft: el.querySelector('.agents-row-meta')?.getBoundingClientRect().left ?? null
   }));
+  expect(before.identityLeft).not.toBeNull();
+  expect(before.detailsLeft).not.toBeNull();
   await list.evaluate((el) => {
     el.scrollLeft = 260;
   });
   const after = await row.evaluate((el) => ({
-    identityLeft: el.querySelector('.agents-row-identity').getBoundingClientRect().left,
-    detailsLeft: el.querySelector('.agents-row-meta').getBoundingClientRect().left,
+    identityLeft: el.querySelector('.agents-row-identity')?.getBoundingClientRect().left ?? null,
+    detailsLeft: el.querySelector('.agents-row-meta')?.getBoundingClientRect().left ?? null,
     scrollLeft: el.closest('#agentsList').scrollLeft
   }));
+  expect(after.identityLeft).not.toBeNull();
+  expect(after.detailsLeft).not.toBeNull();
   expect(after.scrollLeft).toBeGreaterThan(80);
   expect(Math.abs(after.identityLeft - before.identityLeft)).toBeLessThan(2);
   expect(after.detailsLeft).toBeLessThan(before.detailsLeft - 80);

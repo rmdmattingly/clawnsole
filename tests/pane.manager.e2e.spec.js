@@ -396,6 +396,7 @@ test('pane manager: paired action focuses existing counterpart and opens missing
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
+  await page.locator('body').focus();
   await page.keyboard.press('Control+P');
   const modal = page.locator('#paneManagerModal');
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
