@@ -3260,9 +3260,8 @@ kbd {
 }
 
 .wq-pane .wq-toolbar-row {
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
+  flex-wrap: wrap;
+  overflow: visible;
   padding-bottom: 4px;
   scrollbar-gutter: stable;
 }
@@ -3279,7 +3278,12 @@ kbd {
 .wq-pane .wq-sort,
 .wq-pane .wq-control-group,
 .wq-pane .wq-toolbar-row > button {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.wq-pane .wq-field {
+  min-width: min(180px, 100%);
 }
 
 .wq-control-group {
@@ -3770,6 +3774,10 @@ kbd {
 [data-wq-empty] {
   position: relative;
   z-index: 4;
+}
+
+.wq-list:has([data-wq-empty]:not([hidden])) .wq-list-body {
+  flex: 0 0 auto;
 }
 
 .wq-empty-actions {
@@ -4911,7 +4919,7 @@ kbd {
 }
 
 .toast {
-  pointer-events: auto;
+  pointer-events: none;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -4932,6 +4940,7 @@ kbd {
 }
 
 .toast-action {
+  pointer-events: auto;
   flex: 0 0 auto;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
