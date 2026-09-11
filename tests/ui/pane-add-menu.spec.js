@@ -38,7 +38,7 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
   await expect(menu.locator('[data-testid="pane-add-menu-cron"]')).toHaveText(/New Cron pane/);
   await expect(menu.locator('[data-testid="pane-add-menu-timeline"]')).toHaveText(/New Timeline pane/);
   await expect(menu.locator('[data-testid="pane-add-menu-chat"]')).toHaveText(/Chat -> Agent: main/);
-  await expect(menu.locator('[data-testid="pane-add-menu-workqueue"]')).toHaveText(/Workqueue -> Queue: dev-team \/ unassigned/);
+  await expect(menu.locator('[data-testid="pane-add-menu-workqueue"]')).toHaveText(/Workqueue -> Queue: dev-team \/ assigned/);
 
   // Add a workqueue pane and ensure it exists + focus lands on primary control.
   await menu.locator('[data-testid="pane-add-menu-workqueue"]').click();
@@ -49,6 +49,28 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
   const queueSelect = wqPane.locator('[data-wq-queue-select]');
   await expect(queueSelect).toBeVisible();
   await expect(queueSelect).toBeFocused();
+  await expect(wqPane.locator('[data-wq-scope="assigned"]')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('pane add menu: agent-targeted workqueue defaults to assigned despite saved global scope', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await page.addInitScript(() => {
+    localStorage.setItem('clawnsole.admin.workqueue.scope.v1', 'all');
+  });
+
+  await loginAdmin(page, env.serverPort);
+
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await expect(wqPane).toBeVisible();
+  await expect(wqPane.locator('[data-wq-scope="assigned"]')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.locator('#addPaneBtn').click();
+  const menu = page.locator('[data-testid="pane-add-menu"]');
+  await expect(menu).toBeVisible();
+  await expect(menu.locator('[data-testid="pane-add-menu-workqueue"]')).toHaveText(/Workqueue -> Queue: dev-team \/ assigned/);
 });
 
 test('pane add menu: workqueue override is applied before pane opens', async ({ page }) => {

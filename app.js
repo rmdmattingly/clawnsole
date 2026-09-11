@@ -928,6 +928,7 @@ function buildDefaultAdminPanes(defaultAgent = 'main') {
     {
       key: `p${randomId().slice(0, 8)}`,
       kind: 'workqueue',
+      agentId,
       queue: 'dev-team',
       statusFilter: ['ready', 'pending', 'blocked', 'claimed', 'in_progress'],
       scopeFilter: getDefaultWorkqueueScopeForTarget(agentId),
@@ -8412,7 +8413,7 @@ function renderWorkqueuePaneItems(pane) {
           <div class="empty-state">
             <div style="font-weight:700; margin-bottom:6px;">No items match current filters. No items match "${escapeHtml(itemSearchQuery)}".</div>
             <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span>${hiddenSummary ? ` · ${escapeHtml(hiddenSummary)}` : ''}</div>
-            <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            <div class="wq-empty-actions">
               <button type="button" class="secondary" data-wq-clear-item-search>Clear search</button>
               <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
             </div>
@@ -8443,7 +8444,7 @@ function renderWorkqueuePaneItems(pane) {
           <div style="font-weight:700; margin-bottom:6px;">${escapeHtml(title)}</div>
           <div class="hint">Queue: <span class="mono">${escapeHtml(queue)}</span> · Status: <span class="mono">${escapeHtml(statusLabel)}</span> · Scope: <span class="mono">${escapeHtml(scopeLabel)}</span></div>
           ${filtersHidingAll ? `<div class="hint" data-wq-empty-reason style="margin-top:6px;">0 visible of <span class="mono">${escapeHtml(String(totalCount))}</span> total${emptyHiddenReason ? `; ${escapeHtml(emptyHiddenReason)}` : ''}.</div>` : ''}
-          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+          <div class="wq-empty-actions">
             ${filterRecoveryActions}
             <button type="button" class="secondary" data-wq-empty-enqueue>Enqueue item</button>
             <button type="button" class="secondary" data-wq-empty-refresh>Refresh</button>
@@ -8521,9 +8522,10 @@ function renderWorkqueuePaneItems(pane) {
   }
 
   const list = body.closest('.wq-list');
-  let more = list?.querySelector('[data-wq-load-more]');
+  const loadMoreSlot = pane.elements?.thread?.querySelector('[data-wq-load-more-slot]');
+  let more = pane.elements?.thread?.querySelector('[data-wq-load-more]');
   if (more) more.remove();
-  if (rows.length > visibleRows.length && list) {
+  if (rows.length > visibleRows.length && (loadMoreSlot || list)) {
     more = document.createElement('button');
     more.type = 'button';
     more.className = 'secondary wq-load-more';
@@ -8533,7 +8535,7 @@ function renderWorkqueuePaneItems(pane) {
       pane.workqueue.renderLimit = visibleRows.length + WORKQUEUE_PANE_RENDER_CHUNK_SIZE;
       renderWorkqueuePaneItems(pane);
     });
-    list.insertBefore(more, empty || null);
+    (loadMoreSlot || list).appendChild(more);
   }
 
   // Keep inspect in sync if selection vanished.
@@ -9229,8 +9231,8 @@ function getDefaultWorkqueueScope() {
 }
 
 function getDefaultWorkqueueScopeForTarget(agentId) {
-  const target = typeof agentId === 'string' ? agentId.trim() : '';
-  return target && target !== 'main' ? 'assigned' : getDefaultWorkqueueScope();
+  const target = normalizeAgentId(agentId);
+  return target ? 'assigned' : getDefaultWorkqueueScope();
 }
 
 function computeBaseDeviceLabel() {
@@ -10737,6 +10739,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     stopBtn: root.querySelector('[data-pane-stop]')
   };
 
+  const explicitPaneAgentId = typeof agentId === 'string' ? agentId.trim() : '';
+  const normalizedPaneAgentId = role === 'admin' ? normalizeAgentId(explicitPaneAgentId || 'main') : null;
   const normalizedQueue = (queue || 'dev-team').trim() || 'dev-team';
   const restoredSort = loadWorkqueueSortPreference(normalizedQueue);
   const hasExplicitSort = typeof sortKey === 'string' && sortKey.trim();
@@ -10751,11 +10755,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       const k = String(kind || 'chat').trim().toLowerCase();
       return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
     })(),
-    agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
+    agentId: normalizedPaneAgentId,
     workqueue: {
       queue: normalizedQueue,
       statusFilter: Array.isArray(statusFilter) ? statusFilter : Array.from(WORKQUEUE_ACTIVE_STATUSES),
-      scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScopeForTarget(agentId)),
+      scopeFilter: normalizeWorkqueueScope(scopeFilter ?? getDefaultWorkqueueScopeForTarget(explicitPaneAgentId)),
       quickFilters: {
         sources: Array.isArray(quickFilters?.sources) ? quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
         repos: Array.isArray(quickFilters?.repos) ? quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : [],
@@ -11137,6 +11141,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         <div class="hint wq-keyboard-hint" data-wq-keyboard-hint hidden>j/k move, Enter inspect, e edit, 1 ready, 2 in progress, 3 blocked, 4 done</div>
         <div class="wq-filter-summary" data-wq-filter-summary aria-live="polite" hidden></div>
         <div class="wq-duplicate-health" data-wq-duplicate-health aria-live="polite" hidden></div>
+        <div class="wq-load-more-slot" data-wq-load-more-slot></div>
       </div>
 
       <div class="wq-layout">
@@ -14433,7 +14438,7 @@ function getFocusedWorkqueuePane() {
 function isShortcutFocusable(el) {
   if (!el || typeof el.focus !== 'function') return false;
   try {
-    if (el.disabled || el.hidden) return false;
+    if (el.disabled || el.hidden || el.hasAttribute?.('hidden')) return false;
     if (el.getClientRects && el.getClientRects().length === 0) return false;
   } catch {
     return true;
@@ -14462,6 +14467,10 @@ function focusWorkqueueShortcutTarget(target) {
   }
 
   el.focus();
+  if (document.activeElement !== el && !el.contains?.(document.activeElement)) {
+    reportBlockedShortcut('unavailable');
+    return false;
+  }
   if (target === 'status') {
     const details = pane.elements?.thread?.querySelector('[data-wq-status-details]');
     details?.setAttribute('open', '');

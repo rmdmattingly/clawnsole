@@ -431,6 +431,7 @@ test('workqueue pane: new panes default to non-terminal statuses with archived t
   await loginAdmin(page, env.serverPort);
 
   const defaultPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await defaultPane.locator('[data-wq-scope="all"]').click();
   await defaultPane.locator('[data-wq-queue-select]').selectOption(queue);
   await expect(defaultPane.locator('[data-wq-statusline]')).toContainText('Showing 1 of 3 items');
   await expect(defaultPane.locator('[data-wq-list-body]')).toContainText('archived toggle ready row');
@@ -755,7 +756,7 @@ test('workqueue pane: filter summary chips show counts and remove filters', asyn
   seedFilterSummaryWorkqueueItems(queue);
 
   await loginAdmin(page, env.serverPort);
-  await addPane(page, 'Workqueue pane');
+  await addPane(page, 'Workqueue pane', { workqueueScope: 'unassigned' });
 
   const wqPane = page.locator('[data-pane]').last();
   await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
@@ -936,9 +937,7 @@ test('workqueue pane: direct shortcuts focus queue, item, and status controls wi
   await expect(pane.locator('[data-wq-status-details] summary')).toBeFocused();
   await expect(pane.locator('[data-wq-status-details]')).toHaveAttribute('open', '');
 
-  await page.evaluate(() => {
-    document.querySelector('[data-wq-queue-search]')?.setAttribute('hidden', '');
-  });
+  await pane.locator('[data-wq-queue-search]').evaluate((el) => el.setAttribute('hidden', ''));
   await pane.locator('[data-wq-refresh]').focus();
   await pressAlt('q');
   await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Shortcut target is unavailable');
