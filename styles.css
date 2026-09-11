@@ -3243,9 +3243,12 @@ kbd {
 
 .wq-pane .wq-toolbar,
 .cron-pane .wq-toolbar {
+  flex: 0 0 auto;
   position: sticky;
   top: 0;
   z-index: 5;
+  max-height: min(240px, 42%);
+  overflow: auto;
   padding: 10px;
   background: rgba(12, 15, 20, 0.96);
   backdrop-filter: blur(8px);
@@ -3685,15 +3688,18 @@ kbd {
   flex: 1;
   grid-template-columns: minmax(0, 1fr);
   min-height: 0;
+  overflow: hidden;
   padding: 10px;
 }
 
 .wq-pane .wq-list,
 .cron-pane .wq-list {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  max-height: 100%;
   overflow: auto;
   scroll-padding-top: 52px;
   scrollbar-gutter: stable both-edges;
@@ -3769,6 +3775,19 @@ kbd {
   position: relative;
   scroll-margin-top: 52px;
   z-index: 4;
+}
+
+.wq-load-more-slot {
+  display: flex;
+  min-height: 0;
+}
+
+.wq-load-more-slot:empty {
+  display: none;
+}
+
+.wq-load-more-slot .wq-load-more {
+  margin: 8px 0 0;
 }
 
 [data-wq-empty] {

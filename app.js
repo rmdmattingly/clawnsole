@@ -8425,9 +8425,10 @@ function renderWorkqueuePaneItems(pane) {
   }
 
   const list = body.closest('.wq-list');
-  let more = list?.querySelector('[data-wq-load-more]');
+  const loadMoreSlot = pane.elements?.thread?.querySelector('[data-wq-load-more-slot]');
+  let more = pane.elements?.thread?.querySelector('[data-wq-load-more]');
   if (more) more.remove();
-  if (rows.length > visibleRows.length && list) {
+  if (rows.length > visibleRows.length && (loadMoreSlot || list)) {
     more = document.createElement('button');
     more.type = 'button';
     more.className = 'secondary wq-load-more';
@@ -8437,7 +8438,7 @@ function renderWorkqueuePaneItems(pane) {
       pane.workqueue.renderLimit = visibleRows.length + WORKQUEUE_PANE_RENDER_CHUNK_SIZE;
       renderWorkqueuePaneItems(pane);
     });
-    list.insertBefore(more, empty || null);
+    (loadMoreSlot || list).appendChild(more);
   }
 
   // Keep inspect in sync if selection vanished.
@@ -11045,6 +11046,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         <div class="hint wq-keyboard-hint" data-wq-keyboard-hint hidden>j/k move, Enter inspect, e edit, 1 ready, 2 in progress, 3 blocked, 4 done</div>
         <div class="wq-filter-summary" data-wq-filter-summary aria-live="polite" hidden></div>
         <div class="wq-duplicate-health" data-wq-duplicate-health aria-live="polite" hidden></div>
+        <div class="wq-load-more-slot" data-wq-load-more-slot></div>
       </div>
 
       <div class="wq-layout">
