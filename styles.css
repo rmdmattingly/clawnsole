@@ -978,9 +978,10 @@ body.header-labels-off .action-btn .btn-label {
 
 .pane-name-token {
   flex: 0 0 auto;
-  max-width: 100%;
+  max-width: min(100%, 12ch);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pane-name-target {
