@@ -72,6 +72,18 @@ clawnsole workqueue claim-next --agent dev-3
 clawnsole workqueue claim-next --agent dev-3 --queues dev-team
 ```
 
+### Collapse legacy duplicate issue rows
+
+```bash
+clawnsole workqueue collapse-duplicates --queue dev-team --dryRun
+clawnsole workqueue collapse-duplicates --queue dev-team
+```
+
+This maintenance command groups rows by `queue + canonical(repo#issueNumber)`.
+The survivor policy is deterministic: prefer non-terminal rows over terminal rows, then newest `updatedAt`, then highest `priority`, then lexicographically smallest `id`.
+
+Apply mode writes a recoverable backup named `work-queues.backup.<timestamp>.json` beside `work-queues.json` before removing duplicate rows. Merged rows are summarized under the survivor's `result.migrationMerged[]`, and the survivor gets `meta.migrationMergedCount`, `meta.migrationLastRunId`, and `meta.migrationLastMergedAt`.
+
 ## Examples
 
 ### Single-agent worker (recommended)
