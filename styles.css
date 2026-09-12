@@ -3490,7 +3490,7 @@ kbd {
   cursor: pointer;
 }
 
-.wq-filter-token:disabled {
+.wq-filter-token:not(button) {
   cursor: default;
   opacity: 0.82;
 }

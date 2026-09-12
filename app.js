@@ -7825,7 +7825,10 @@ function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount, hid
   const repos = Array.isArray(quick.repos) ? quick.repos.map((s) => String(s || '').trim()).filter(Boolean) : [];
   const search = String(quick.search || '').trim();
   const actionableOnly = !!quick.actionableOnly;
-  const hasFilters = !!queue || !!scope || statuses.length || actionableOnly || sources.length || repos.length || !!search;
+  const statusSet = new Set(statuses);
+  const hasDefaultStatuses = statusSet.size === WORKQUEUE_ACTIVE_STATUSES.length && WORKQUEUE_ACTIVE_STATUSES.every((status) => statusSet.has(status));
+  const hasClearableFilters = scope !== 'all' || !hasDefaultStatuses || actionableOnly || sources.length || repos.length || !!search;
+  const hasFilters = !!queue || !!scope || statuses.length || hasClearableFilters;
 
   root.innerHTML = '';
   root.hidden = !hasFilters;
@@ -7833,19 +7836,19 @@ function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount, hid
 
   const count = document.createElement('span');
   count.className = 'wq-filter-count';
+  count.setAttribute('data-wq-filter-count', '');
   count.textContent = formatWorkqueueVisibleSummary(shownCount, totalCount, hiddenCounts);
   root.appendChild(count);
 
   const addToken = ({ label, value, title, action, removable = true }) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'wq-filter-token';
-    btn.title = title || (removable ? `Remove ${label} filter` : label);
-    btn.setAttribute('aria-label', btn.title);
-    btn.disabled = !removable;
-    btn.innerHTML = `<span class="wq-filter-token-label">${escapeHtml(label)}</span> <span>${escapeHtml(value)}</span>${removable ? ' <span aria-hidden="true">×</span>' : ''}`;
-    if (removable && typeof action === 'function') btn.addEventListener('click', action);
-    root.appendChild(btn);
+    const el = document.createElement(removable ? 'button' : 'span');
+    if (removable) el.type = 'button';
+    el.className = 'wq-filter-token';
+    el.title = title || (removable ? `Remove ${label} filter` : label);
+    el.setAttribute('aria-label', el.title);
+    el.innerHTML = `<span class="wq-filter-token-label">${escapeHtml(label)}</span> <span>${escapeHtml(value)}</span>${removable ? ' <span aria-hidden="true">×</span>' : ''}`;
+    if (removable && typeof action === 'function') el.addEventListener('click', action);
+    root.appendChild(el);
   };
 
   if (queue) {
@@ -7864,13 +7867,22 @@ function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount, hid
     removable: scope !== 'all',
     action: () => pane.workqueue?.setScope?.('all')
   });
-  for (const status of statuses) {
+  if (hasDefaultStatuses) {
     addToken({
-      label: 'Status',
-      value: formatWorkqueueStatusLabel(status),
-      title: `Remove status filter ${formatWorkqueueStatusLabel(status)}`,
-      action: () => pane.workqueue?.applyStatuses?.(statuses.filter((s) => s !== status))
+      label: 'Statuses',
+      value: 'Active',
+      title: 'Showing active statuses',
+      removable: false
     });
+  } else {
+    for (const status of statuses) {
+      addToken({
+        label: 'Status',
+        value: formatWorkqueueStatusLabel(status),
+        title: `Remove status filter ${formatWorkqueueStatusLabel(status)}`,
+        action: () => pane.workqueue?.applyStatuses?.(statuses.filter((s) => s !== status))
+      });
+    }
   }
   if (actionableOnly) {
     addToken({
@@ -7905,14 +7917,16 @@ function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount, hid
     });
   }
 
-  const clear = document.createElement('button');
-  clear.type = 'button';
-  clear.className = 'secondary wq-clear-all-filters';
-  clear.setAttribute('data-wq-clear-all-filters', '');
-  clear.textContent = 'Clear all filters';
-  clear.title = 'Clear status, scope, search, source, and repo filters. Queue target is preserved.';
-  clear.addEventListener('click', () => pane.workqueue?.clearAllFilters?.());
-  root.appendChild(clear);
+  if (hasClearableFilters) {
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'secondary wq-clear-all-filters';
+    clear.setAttribute('data-wq-clear-all-filters', '');
+    clear.textContent = 'Clear all filters';
+    clear.title = 'Clear status, scope, search, source, and repo filters. Queue target is preserved.';
+    clear.addEventListener('click', () => pane.workqueue?.clearAllFilters?.());
+    root.appendChild(clear);
+  }
 }
 
 function formatWorkqueueStatusSummary(items) {
