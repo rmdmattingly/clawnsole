@@ -4,6 +4,14 @@ const { startTestEnv, loginAdmin, attachConsoleErrorAsserts } = require('./_help
 
 let env;
 
+async function seedSingleChatPane(page) {
+  await page.addInitScript(() => {
+    localStorage.setItem('clawnsole.admin.panes.v1', JSON.stringify([
+      { key: 'pw-single-chat', kind: 'chat', agentId: 'main' }
+    ]));
+  });
+}
+
 test.beforeAll(async () => {
   env = await startTestEnv();
 });
@@ -24,10 +32,14 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
 
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
+  await seedSingleChatPane(page);
   await loginAdmin(page, env.serverPort);
 
   const addBtn = page.locator('#addPaneBtn');
   await expect(addBtn).toBeVisible();
+
+  const countBefore = await page.locator('[data-pane]').count();
+  expect(countBefore).toBe(1);
 
   await addBtn.click();
   const menu = page.locator('[data-testid="pane-add-menu"]');
@@ -43,6 +55,7 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
   // Add a workqueue pane and ensure it exists + focus lands on primary control.
   await menu.locator('[data-testid="pane-add-menu-workqueue"]').click();
 
+  await expect(page.locator('[data-pane]')).toHaveCount(countBefore + 1);
   const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
   await expect(wqPane).toBeVisible();
 
