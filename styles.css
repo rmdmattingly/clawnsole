@@ -1963,6 +1963,7 @@ button.send-btn .btn-icon {
   gap: 8px;
   align-items: center;
   min-width: 0;
+  flex-wrap: wrap;
 }
 
 .pane-manager-type-badge {
@@ -1989,6 +1990,12 @@ button.send-btn .btn-icon {
 
 .pane-manager-kind-label {
   font-weight: 600;
+  min-width: 0;
+}
+
+.pane-manager-target-label {
+  color: var(--muted);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

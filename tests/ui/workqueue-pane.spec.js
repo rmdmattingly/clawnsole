@@ -512,7 +512,9 @@ test('workqueue pane: queue switch updates pane identity everywhere', async ({ p
 
   await page.keyboard.press('Control+P');
   const managerRow = page.locator('.pane-manager-row[data-pane-kind="workqueue"]').first();
-  await expect(managerRow.locator('.pane-manager-kind-label')).toHaveText(`B Workqueue · ${queue}`);
+  await expect(managerRow.getByTestId('pane-manager-letter')).toHaveText('B');
+  await expect(managerRow.getByTestId('pane-manager-kind-label')).toHaveText('Workqueue');
+  await expect(managerRow.getByTestId('pane-manager-target-label')).toContainText(queue);
   await expect(managerRow).not.toContainText('main');
 });
 

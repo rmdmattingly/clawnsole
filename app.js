@@ -4787,6 +4787,9 @@ function renderPaneManager() {
         const hasDraft = paneHasDraftChanges(pane);
         const pinned = paneIsPinned(pane);
         const paneIdentity = paneSummaryLabel(pane);
+        const letter = paneHeaderLetter(pane);
+        const type = paneLabel(pane);
+        const target = paneDisplayTargetLabel(pane);
         const nickname = paneNickname(pane);
         const pairedAction = getPaneManagerPairedAction(pane);
         const rowLabel = `${paneIdentity}${nickname ? `, nickname ${nickname}` : ''}${pinned ? ', pinned' : ''}${unreadCount > 0 ? `, ${unreadCount} unread` : ''}${hasDraft ? ', unsent draft' : ''}`;
@@ -4797,9 +4800,11 @@ function renderPaneManager() {
         row.innerHTML = `
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
+              <span class="pane-manager-letter" data-testid="pane-manager-letter" aria-label="${escapeHtml(`Pane ${letter}`)}">${escapeHtml(letter)}</span>
               ${paneTypeBadgeMarkup(pane, { extraClass: 'pane-manager-type-badge', testId: 'pane-manager-type-badge' })}
               ${panePairCueMarkup(pane, { testId: 'pane-manager-pair-cue' })}
-              <span class="pane-manager-kind-label">${paneManagerHighlightHtml(paneIdentity, query)}</span>
+              <span class="pane-manager-kind-label" data-testid="pane-manager-kind-label">${paneManagerHighlightHtml(type, query)}</span>
+              <span class="pane-manager-target-label" data-testid="pane-manager-target-label"><span aria-hidden="true">· </span>${paneManagerHighlightHtml(target, query)}</span>
               ${nickname ? `<span class="pane-manager-nickname" data-testid="pane-manager-nickname" title="${escapeHtml(`Pane nickname: ${nickname}`)}">${paneManagerHighlightHtml(nickname, query)}</span>` : ''}
               <span class="pane-manager-pane-id" title="Internal pane id">${paneManagerHighlightHtml(String(pane?.key || ''), query)}</span>
               ${isDuplicate ? `<span class="pane-manager-duplicate-badge" data-testid="pane-manager-duplicate-badge" title="${escapeHtml(`${duplicateCount} duplicate panes`)}">duplicate</span>` : ''}

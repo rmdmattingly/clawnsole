@@ -80,9 +80,52 @@ test('pane header: identity line uses "[Letter] [Type] · [Target]" across pane 
   await expect(timelinePane.getByTestId('pane-type-label')).toHaveText(/^D Timeline · .+/);
 
   await page.keyboard.press('Control+P');
-  const firstPaneHeaderIdentity = await page.locator('[data-pane]').first().getByTestId('pane-type-label').textContent();
-  await expect(page.locator('.pane-manager-row .pane-manager-kind-label').first()).toHaveText(String(firstPaneHeaderIdentity || '').trim());
+  const firstRow = page.locator('.pane-manager-row').first();
+  await expect(firstRow.getByTestId('pane-manager-letter')).toHaveText(/^A$/);
+  await expect(firstRow.getByTestId('pane-manager-kind-label')).toHaveText('Chat');
+  await expect(firstRow.getByTestId('pane-manager-target-label')).toContainText('main');
+  await expect(firstRow).toContainText('A');
+  await expect(firstRow).toContainText('Chat');
+  await expect(firstRow).toContainText('· main');
   await expect(page.locator('.pane-manager-row .pane-manager-pane-id').first()).toHaveText(/^[a-zA-Z0-9]+$/);
+});
+
+test('pane manager: rows preserve pane identity and state chips in compact list', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]').fill('unsent draft');
+  await page.evaluate(() => {
+    markPaneUnread(paneManager.panes[1], 2, 'workqueue');
+    paneManager.panes.forEach((pane) => {
+      pane.connected = false;
+      pane.statusState = 'disconnected';
+    });
+  });
+
+  await page.keyboard.press('Control+P');
+  const rows = page.locator('.pane-manager-row');
+  await expect(rows).toHaveCount(2);
+
+  const chatRow = rows.filter({ hasText: 'Chat · main' }).first();
+  await expect(chatRow.getByTestId('pane-manager-letter')).toHaveText('A');
+  await expect(chatRow.getByTestId('pane-manager-type-badge')).toContainText('Chat');
+  await expect(chatRow.getByTestId('pane-manager-target-label')).toContainText('main');
+  await expect(chatRow.getByTestId('pane-manager-draft-badge')).toHaveText('Draft');
+  await expect(chatRow.getByTestId('pane-manager-disconnected-badge')).toHaveText('Disconnected');
+
+  const workqueueRow = rows.filter({ hasText: 'Workqueue · dev-team' }).first();
+  await expect(workqueueRow.getByTestId('pane-manager-letter')).toHaveText('B');
+  await expect(workqueueRow.getByTestId('pane-manager-type-badge')).toContainText('Workqueue');
+  await expect(workqueueRow.getByTestId('pane-manager-target-label')).toContainText('dev-team');
+  await expect(workqueueRow.getByTestId('pane-manager-unread-badge')).toHaveText('2 unread');
 });
 
 test('admin header: active pane breadcrumb updates and opens selected manager row', async ({ page }) => {
@@ -112,7 +155,9 @@ test('admin header: active pane breadcrumb updates and opens selected manager ro
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
   const activeRow = modal.locator(`.pane-manager-row[data-pane-key="${activePaneKey}"]`);
   await expect(activeRow).toHaveAttribute('aria-selected', 'true');
-  await expect(activeRow.locator('.pane-manager-kind-label')).toHaveText(/^B Workqueue · .+/);
+  await expect(activeRow.getByTestId('pane-manager-letter')).toHaveText('B');
+  await expect(activeRow.getByTestId('pane-manager-kind-label')).toHaveText('Workqueue');
+  await expect(activeRow.getByTestId('pane-manager-target-label')).toContainText(/.+/);
 });
 
 test('pane manager: quick-find filters, highlights, and focuses first match', async ({ page }) => {
@@ -256,12 +301,16 @@ test('pane manager: shows summary + duplicate badge and supports close others', 
   const rows = page.locator('.pane-manager-row');
   await expect(rows).toHaveCount(3);
 
-  const duplicateRows = page.locator('.pane-manager-row', { hasText: /Chat · main \([12]\)/ });
+  const duplicateRows = page.locator('.pane-manager-row[data-pane-kind="chat"]', {
+    has: page.getByTestId('pane-manager-duplicate-badge')
+  });
   await expect(duplicateRows).toHaveCount(2);
   await expect(page.locator('[data-pane][data-pane-kind="chat"]').nth(0).getByTestId('pane-type-label')).toHaveText(/^A Chat · main \(1\)$/);
   await expect(page.locator('[data-pane][data-pane-kind="chat"]').nth(1).getByTestId('pane-type-label')).toHaveText(/^C Chat · main \(2\)$/);
-  await expect(duplicateRows.nth(0).locator('.pane-manager-kind-label')).toContainText('Chat · main (1)');
-  await expect(duplicateRows.nth(1).locator('.pane-manager-kind-label')).toContainText('Chat · main (2)');
+  await expect(duplicateRows.nth(0).getByTestId('pane-manager-kind-label')).toHaveText('Chat');
+  await expect(duplicateRows.nth(0).getByTestId('pane-manager-target-label')).toContainText('main (1)');
+  await expect(duplicateRows.nth(1).getByTestId('pane-manager-kind-label')).toHaveText('Chat');
+  await expect(duplicateRows.nth(1).getByTestId('pane-manager-target-label')).toContainText('main (2)');
   await expect(duplicateRows.first().getByTestId('pane-manager-duplicate-badge')).toHaveText('duplicate');
 
   const chatRowWithCloseOthers = page.locator('.pane-manager-row', { has: page.getByTestId('pane-manager-close-others') }).first();
@@ -375,7 +424,9 @@ test('pane manager: overflow rows preserve pane identity and state chips', async
   const firstRow = rows.nth(0);
   const secondRow = rows.nth(1);
   await expect(firstRow.getByTestId('pane-manager-type-badge')).toContainText('Chat');
-  await expect(firstRow.locator('.pane-manager-kind-label')).toContainText(/^A Chat ·/);
+  await expect(firstRow.getByTestId('pane-manager-letter')).toHaveText('A');
+  await expect(firstRow.getByTestId('pane-manager-kind-label')).toHaveText('Chat');
+  await expect(firstRow.getByTestId('pane-manager-target-label')).toContainText('main');
   await expect(firstRow.getByTestId('pane-manager-unread-badge')).toHaveText('1 unread');
   await expect(secondRow.getByTestId('pane-manager-draft-badge')).toHaveText('Draft');
   await expect(page.getByTestId('pane-manager-disconnected-badge').first()).toHaveText('Disconnected');
