@@ -301,7 +301,9 @@ test('pane manager: shows summary + duplicate badge and supports close others', 
   const rows = page.locator('.pane-manager-row');
   await expect(rows).toHaveCount(3);
 
-  const duplicateRows = page.locator('.pane-manager-row', { hasText: /Chat · main \([12]\)/ });
+  const duplicateRows = page.locator('.pane-manager-row[data-pane-kind="chat"]', {
+    has: page.getByTestId('pane-manager-duplicate-badge')
+  });
   await expect(duplicateRows).toHaveCount(2);
   await expect(page.locator('[data-pane][data-pane-kind="chat"]').nth(0).getByTestId('pane-type-label')).toHaveText(/^A Chat · main \(1\)$/);
   await expect(page.locator('[data-pane][data-pane-kind="chat"]').nth(1).getByTestId('pane-type-label')).toHaveText(/^C Chat · main \(2\)$/);
