@@ -14822,7 +14822,7 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
-  // 'g' chords jump between common triage surfaces.
+  // 'g' chords jump by visible pane letter first, then between common triage surfaces.
   const now = Date.now();
   if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
     if (key.toLowerCase() === 'g') {
@@ -14833,19 +14833,20 @@ window.addEventListener('keydown', (event) => {
     if (shortcutState.lastGAtMs && now - shortcutState.lastGAtMs < GO_TO_PANE_TIMEOUT_MS && /^[a-z]$/i.test(key)) {
       shortcutState.lastGAtMs = 0;
       event.preventDefault();
-      if (key.toLowerCase() === 't') {
+      const keyLower = key.toLowerCase();
+      if (keyLower === 't') {
         returnToTriageSource();
         return;
       }
-      if (focusPaneByHeaderLetter(key, { showHud: true })) return;
-      if (key.toLowerCase() === 'c') {
+      if (keyLower === 'c') {
         returnToLastActiveChatPane();
         return;
       }
-      if (key.toLowerCase() === 'w') {
+      if (keyLower === 'w') {
         openTopbarWorkqueueAction();
         return;
       }
+      if (focusPaneByHeaderLetter(key, { showHud: true })) return;
       return;
     }
     if (shortcutState.lastGAtMs && now - shortcutState.lastGAtMs >= GO_TO_PANE_TIMEOUT_MS) {
