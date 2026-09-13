@@ -426,6 +426,7 @@ const ADMIN_AGENT_LAST_SEEN_KEY = 'clawnsole.admin.agentLastSeenAtMs';
 const ADMIN_AGENT_SEARCH_KEY = 'clawnsole.admin.agents.search';
 const ADMIN_AGENT_SNOOZES_KEY = 'clawnsole.admin.agentSnoozes.v1';
 const ADMIN_AGENT_FILTER_KEY = 'clawnsole.admin.agents.filter';
+const ADMIN_AGENT_QUERY_KEY = 'clawnsole.admin.agents.query';
 const ADMIN_AGENT_SORT_KEY = 'clawnsole.admin.agents.sort';
 const ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY = 'clawnsole.admin.agents.preHeartbeatSort';
 const ADMIN_AGENT_HEATMAP_KEY = 'clawnsole.admin.agents.heartbeatHeatmap';
@@ -1230,6 +1231,16 @@ function normalizeFleetFilter(filter) {
   return aliases[key] || key;
 }
 
+function getAgentsQuickFilterQuery() {
+  return String(storage.get(ADMIN_AGENT_QUERY_KEY, '') || '');
+}
+
+function setAgentsQuickFilterQuery(query) {
+  const next = String(query || '');
+  if (next) storage.set(ADMIN_AGENT_QUERY_KEY, next);
+  else storage.remove(ADMIN_AGENT_QUERY_KEY);
+}
+
 function getFleetSort() {
   const raw = String(storage.get(ADMIN_AGENT_SORT_KEY, FLEET_DEFAULT_SORT) || FLEET_DEFAULT_SORT).trim();
   const aliases = { recent: 'recent_desc', attention_desc: FLEET_DEFAULT_SORT };
@@ -1354,6 +1365,7 @@ function setFleetFilter(filter) {
 }
 
 function resetAgentsTriageView() {
+  storage.remove(ADMIN_AGENT_QUERY_KEY);
   storage.remove(ADMIN_AGENT_SEARCH_KEY);
   storage.remove(ADMIN_AGENT_PRE_HEARTBEAT_SORT_KEY);
   storage.set(ADMIN_AGENT_SORT_KEY, FLEET_DEFAULT_SORT);
@@ -1369,6 +1381,7 @@ function resetAgentsTriageView() {
 
 function clearAgentsSearch() {
   if (globalElements.agentsSearch) globalElements.agentsSearch.value = '';
+  storage.remove(ADMIN_AGENT_QUERY_KEY);
   storage.remove(ADMIN_AGENT_SEARCH_KEY);
   renderAgentsModalList();
   try {
@@ -5724,9 +5737,9 @@ function openAgentsModal() {
   const filter = getFleetFilter();
   const sort = getFleetSort();
   const heatmapEnabled = getFleetHeatmapEnabled();
-  if (globalElements.agentsSearch) globalElements.agentsSearch.value = String(storage.get(ADMIN_AGENT_SEARCH_KEY, '') || '');
   setFleetFilter(filter);
   if (globalElements.agentsSort) globalElements.agentsSort.value = sort;
+  if (globalElements.agentsSearch) globalElements.agentsSearch.value = getAgentsQuickFilterQuery();
   if (globalElements.agentsHeatmapToggle) globalElements.agentsHeatmapToggle.checked = heatmapEnabled;
   if (globalElements.agentsActiveMinutes) {
     const minutes = Number(storage.get(ADMIN_AGENT_ACTIVE_MINUTES_KEY, String(FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES))) || FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES;
@@ -13861,6 +13874,15 @@ globalElements.agentsModal?.addEventListener('click', (event) => {
   }
 });
 globalElements.agentsModal?.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && String(globalElements.agentsSearch?.value || '')) {
+    event.preventDefault();
+    event.stopPropagation();
+    setAgentsQuickFilterQuery('');
+    if (globalElements.agentsSearch) globalElements.agentsSearch.value = '';
+    renderAgentsModalList();
+    globalElements.agentsSearch?.focus?.();
+    return;
+  }
   if (isTypingContext(event.target)) return;
   if (event.target instanceof Element && event.target.closest('button, a, input, select, textarea, summary')) return;
   const key = String(event.key || '');
@@ -13917,15 +13939,18 @@ globalElements.agentsModal?.addEventListener(
 );
 
 globalElements.agentsSearch?.addEventListener('input', () => {
-  storage.set(ADMIN_AGENT_SEARCH_KEY, String(globalElements.agentsSearch.value || ''));
+  setAgentsQuickFilterQuery(globalElements.agentsSearch.value);
   renderAgentsModalList();
 });
 globalElements.agentsSearch?.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
   event.preventDefault();
   event.stopPropagation();
-  if (!String(globalElements.agentsSearch.value || '')) closeAgentsModal();
-  else clearAgentsSearch();
+  if (!String(globalElements.agentsSearch.value || '')) {
+    closeAgentsModal();
+    return;
+  }
+  clearAgentsSearch();
 });
 
 globalElements.agentsFilterButtons.forEach((btn) => {
@@ -13962,7 +13987,7 @@ globalElements.agentsHeatmapToggle?.addEventListener('change', () => {
 });
 
 globalElements.agentsHeartbeatSortBtn?.addEventListener('click', () => setFleetHeartbeatSort());
-globalElements.agentsSortResetBtn?.addEventListener('click', () => resetFleetSort());
+globalElements.agentsSortResetBtn?.addEventListener('click', () => resetAgentsTriageView());
 globalElements.agentsResetTriageBtn?.addEventListener('click', () => resetAgentsTriageView());
 
 globalElements.agentsRefreshMode?.addEventListener('change', () => {

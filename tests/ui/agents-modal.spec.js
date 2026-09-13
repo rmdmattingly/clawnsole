@@ -738,6 +738,71 @@ test('agents modal keeps selected agent summary sticky with keyboard actions', a
   await expect(bar).not.toContainText('Beta (beta)');
 });
 
+test('agents modal persists triage query and sort across reopen and reload, then resets', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' },
+    { id: 'gamma', name: 'Gamma', displayName: 'Gamma' }
+  ];
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.evaluate(() => {
+    localStorage.removeItem('clawnsole.admin.agents.query');
+    localStorage.removeItem('clawnsole.admin.agents.sort');
+    localStorage.removeItem('clawnsole.admin.agents.preHeartbeatSort');
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      alpha: Date.now(),
+      beta: Date.now(),
+      gamma: Date.now()
+    }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const search = page.locator('#agentsSearch');
+  const rows = page.locator('#agentsList .agents-row:visible');
+  await search.fill('beta');
+  await page.locator('#agentsSort').selectOption('agent_id_asc');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('Beta (beta)');
+
+  await page.getByRole('button', { name: 'Close agents' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(search).toHaveValue('beta');
+  await expect(page.locator('#agentsSort')).toHaveValue('agent_id_asc');
+  await expect(rows).toHaveCount(1);
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(search).toHaveValue('beta');
+  await expect(page.locator('#agentsSort')).toHaveValue('agent_id_asc');
+  await expect(rows).toHaveCount(1);
+
+  await search.press('Escape');
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+  await expect(search).toHaveValue('');
+  await expect(rows).toHaveCount(3);
+
+  await search.fill('beta');
+  await page.locator('#agentsSort').selectOption('heartbeat_age_desc');
+  await page.getByRole('button', { name: 'Reset agents triage view' }).click();
+  await expect(search).toHaveValue('');
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
+  await expect(rows).toHaveCount(3);
+});
+
 test('fleet attention mode sections healthy agents and keeps filters while expanding', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
@@ -933,7 +998,7 @@ test('agents modal heartbeat heatmap and stale-first sort are toggleable and res
   await expect(page.locator('#agentsSortIndicator')).toContainText('Sorted by heartbeat age');
   await expect(page.locator('#agentsList .agents-row:visible').first()).toContainText('critical-agent');
 
-  await page.getByRole('button', { name: 'Reset sort' }).click();
+  await page.getByRole('button', { name: 'Reset agents triage view' }).click();
   await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
   await expect(page.locator('#agentsSortIndicator')).toHaveText('');
 });
