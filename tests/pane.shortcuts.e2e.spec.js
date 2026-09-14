@@ -54,6 +54,14 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await expect(modal).toContainText('Pane actions');
   await expect(modal).toContainText('Workqueue actions');
   await expect(modal).toContainText('disabled while typing');
+  await expect(modal).toContainText('Focus panes 1-9 by visible order');
+
+  const expectedShortcutIds = await page.evaluate(() => window.__clawnsoleShortcutCatalog().map((entry) => entry.id));
+  const renderedShortcutIds = await modal.locator('[data-shortcut-id]').evaluateAll((rows) =>
+    rows.map((row) => row.getAttribute('data-shortcut-id'))
+  );
+  expect(renderedShortcutIds).toEqual(expectedShortcutIds);
+  expect(new Set(renderedShortcutIds).size).toBe(renderedShortcutIds.length);
   await expect(modal).toContainText('workspace only');
   await expect(modal.locator('[data-shortcut-status]').first()).toBeVisible();
   await expect(modal).toContainText('Available');
