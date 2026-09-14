@@ -1664,6 +1664,7 @@ let agentAutoRefreshInterval = null;
 let agentsModalAutoRefreshInterval = null;
 let agentsModalFreshnessTicker = null;
 let agentsLastRefreshedAtMs = 0;
+let agentsLastRefreshFailedAtMs = 0;
 const FLEET_DEFAULT_STALE_THRESHOLD_MINUTES = 1;
 const FLEET_DEFAULT_ACTIVE_WINDOW_MINUTES = 10;
 const FLEET_REFRESH_INTERVAL_MS = {
@@ -1800,7 +1801,7 @@ function renderAgentsLastRefreshed() {
   const ageMs = Date.now() - agentsLastRefreshedAtMs;
   const staleMs = FLEET_DEFAULT_STALE_THRESHOLD_MINUTES * 60_000;
   const age = formatRelativeAge(ageMs);
-  const stale = ageMs > staleMs || fleetRefreshLock.lockedAtMs;
+  const stale = ageMs > staleMs || fleetRefreshLock.lockedAtMs || agentsLastRefreshFailedAtMs > agentsLastRefreshedAtMs;
   globalElements.agentsLastRefreshed.dataset.freshness = stale ? 'stale' : 'fresh';
   globalElements.agentsLastRefreshed.textContent = stale ? `Stale · ${age}` : `Last updated: ${age}`;
 }
@@ -1870,6 +1871,8 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
 
     if (!Array.isArray(next) || next.length === 0) {
       if (prev.length > 0) {
+        agentsLastRefreshFailedAtMs = Date.now();
+        renderAgentsLastRefreshed();
         showToast('Agent refresh failed; showing last-known list.', { kind: 'error', timeoutMs: 3500 });
         return prev;
       }
@@ -1879,6 +1882,7 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
 
     uiState.agents = next;
     agentsLastRefreshedAtMs = Date.now();
+    agentsLastRefreshFailedAtMs = 0;
     renderAgentsLastRefreshed();
 
     // Preserve UI state (selected agent per pane).
@@ -6449,6 +6453,9 @@ function renderAgentsModalList() {
             : 'Healthy';
       const healthState = triage.busy ? 'busy' : triage.bucket;
       const heatBucketLabel = heartbeatAgeBucketLabel(triage.ageBucket);
+      const rowFreshness = heartbeatAgeMs > FLEET_DEFAULT_STALE_THRESHOLD_MINUTES * 60_000 ? 'stale' : 'fresh';
+      const freshnessLabel = rowFreshness === 'stale' ? 'stale telemetry' : 'fresh telemetry';
+      const staleBadgeHtml = rowFreshness === 'stale' ? '<span class="agents-stale-badge">Stale</span>' : '';
       const reasonHtml = `<span class="agents-reason-badge" data-testid="agents-reason-badge" title="Rank reason">${escapeHtml(triage.reason)}</span>`;
       const statusSnippet = String(statusSnippetMap[id] || '').trim();
       const statusSnippetHtml = visibleColumns.status && statusSnippet
@@ -6491,8 +6498,10 @@ function renderAgentsModalList() {
         : '';
       row.dataset.heartbeatBucket = triage.ageBucket;
       row.dataset.healthState = healthState;
+      row.dataset.freshness = rowFreshness;
       row.dataset.needsAttention = (triage.bucket !== 'active' || triage.busy) ? 'true' : 'false';
       row.classList.toggle('is-stale', triage.bucket === 'stale' || heartbeatAgeMs > FLEET_DEFAULT_STALE_THRESHOLD_MINUTES * 60_000);
+      row.setAttribute('aria-label', `${label}, ${freshnessLabel}, heartbeat ${heartbeatAge}`);
       if (snoozed) row.dataset.snoozed = 'true';
       row.classList.toggle('agents-row-heatmap', heatmapEnabled);
       row.classList.toggle('agents-row-no-actions', !visibleColumns.actions);
@@ -6508,7 +6517,7 @@ function renderAgentsModalList() {
         </div>
         <div class="agents-row-meta">
             ${visibleColumns.heartbeat ? `<span class="agents-age-chip" data-fleet-column="heartbeat" data-heartbeat-bucket="${escapeHtml(triage.ageBucket)}" title="Heartbeat age: ${escapeHtml(heartbeatAge)} (${escapeHtml(heatBucketLabel)})">${escapeHtml(heartbeatAge)}</span>` : ''}
-            ${visibleColumns.heartbeatDetail ? `<span class="agents-age-label" data-fleet-column="heartbeatDetail">${escapeHtml(heatBucketLabel)}</span>` : ''}${snoozeChipHtml}${statusSnippetHtml}${modelHtml}${hostHtml}
+            ${visibleColumns.heartbeatDetail ? `<span class="agents-age-label" data-fleet-column="heartbeatDetail">${escapeHtml(heatBucketLabel)}</span>` : ''}${staleBadgeHtml}${snoozeChipHtml}${statusSnippetHtml}${modelHtml}${hostHtml}
         </div>
         ${rowActionsHtml}
       `;
@@ -13923,6 +13932,13 @@ globalElements.agentsModal?.addEventListener('keydown', (event) => {
     if (key === 'Enter') {
       event.preventDefault();
       runFleetSelectedAgent(event.shiftKey ? 'workqueue' : 'chat');
+      return;
+    }
+    if (lower === 'r') {
+      event.preventDefault();
+      refreshAgents({ reason: 'fleet_key_refresh', showSuccessToast: true }).catch(() => {
+        showToast('Agent refresh failed.', { kind: 'error', timeoutMs: 3500 });
+      });
       return;
     }
     if (key === '.') {

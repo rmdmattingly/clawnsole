@@ -2502,6 +2502,10 @@ button.agents-section-title:hover {
   background: rgba(255, 203, 107, 0.05);
 }
 
+.agents-row[data-freshness="stale"] {
+  border-color: rgba(255, 203, 107, 0.32);
+}
+
 .agents-row-no-actions {
   grid-template-columns: var(--agents-pin-col) var(--agents-agent-col) var(--agents-health-col) var(--agents-details-col);
 }
@@ -2696,6 +2700,19 @@ button.agents-section-title:hover {
   border-color: rgba(125, 211, 252, 0.32);
   background: rgba(125, 211, 252, 0.10);
   color: #bae6fd;
+}
+
+.agents-stale-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid rgba(255, 203, 107, 0.42);
+  border-radius: 999px;
+  color: #ffcb6b;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 .agents-age-label {
