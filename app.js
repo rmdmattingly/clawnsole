@@ -5402,6 +5402,16 @@ function buildCommandPaletteItems() {
       'g c'
     ),
     withShortcut(
+      {
+        id: 'cmd:pane-go-to-letter',
+        label: 'Panes: Go to pane by letter',
+        detail: 'Press g, then the visible pane letter A-Z',
+        searchText: 'pane focus go to letter shortcut g then a z visible pane letter',
+        run: () => openShortcuts()
+      },
+      'g then A-Z'
+    ),
+    withShortcut(
       { id: 'cmd:return-triage-source', label: 'Panes: Return to previous triage context', detail: 'Restore the Agents modal row and action that opened Chat or Workqueue', run: () => returnToTriageSource() },
       'Cmd/Ctrl+Shift+B'
     ),
@@ -10398,6 +10408,7 @@ function updatePaneShortcutBadges() {
 
 function renderPaneIdentity(pane) {
   if (!pane?.elements?.name) return;
+  pane.elements.root?.setAttribute?.('data-pane-letter', paneHeaderLetter(pane));
   const letter = paneHeaderLetter(pane);
   const type = paneLabel(pane);
   const target = paneDisplayTargetLabel(pane);
@@ -10951,6 +10962,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           shortcuts: [
             ['Alt/Option+1..9', 'focus panes 1-9 by visible order'],
             ['Cmd/Ctrl+1..9', 'focus panes 1-9 by visible order'],
+            ['g then A-Z', 'focus pane by visible letter'],
             ['Cmd/Ctrl+L', 'focus Chat composer'],
             ['Cmd/Ctrl+Shift+K', 'focus next pane'],
             ['Cmd/Ctrl+Shift+J', 'focus previous pane']
@@ -14824,7 +14836,7 @@ window.addEventListener('keydown', (event) => {
 
   // 'g' chords jump by visible pane letter first, then between common triage surfaces.
   const now = Date.now();
-  if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+  if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !isAnyOverlayOpen()) {
     if (key.toLowerCase() === 'g') {
       shortcutState.lastGAtMs = now;
       event.preventDefault();
