@@ -10445,6 +10445,7 @@ function renderPaneIdentity(pane) {
   }
   const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
   if (activeKey && String(pane.key || '') === activeKey) updateBrowserTitle(pane);
+  if (isPaneManagerOpen()) renderPaneManager();
 }
 
 function paneSetHeaderTarget(pane, { label, value, ariaLabel, onClick } = {}) {
