@@ -4804,6 +4804,7 @@ function renderPaneManager() {
         const unreadCount = paneUnreadCount(pane);
         const hasDraft = paneHasDraftChanges(pane);
         const pinned = paneIsPinned(pane);
+        renderPanePinState(pane);
         const paneIdentity = paneSummaryLabel(pane);
         const letter = paneHeaderLetter(pane);
         const type = paneLabel(pane);
@@ -4852,6 +4853,12 @@ function renderPaneManager() {
           } catch {}
           renderPaneManager();
         });
+        row.querySelector('[data-action="pin"]')?.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          paneManagerUiState.selectedIndex = Number(row.dataset.visibleIndex || 0);
+          togglePanePinned(pane);
+        });
 
         row.addEventListener('mouseenter', () => {
           const nextIndex = Number(row.dataset.visibleIndex || 0);
@@ -4870,6 +4877,10 @@ function renderPaneManager() {
               paneManager.removePane(pane.key, { source: 'manager' });
             } catch {}
             renderPaneManager();
+            return;
+          }
+          if (action === 'pin') {
+            togglePanePinned(pane);
             return;
           }
           if (action === 'move-up') {
@@ -10789,10 +10800,10 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     agentPill: root.querySelector('[data-pane-agent-pill]'),
     status: root.querySelector('[data-pane-status]'),
     draftBadge: root.querySelector('[data-pane-draft-badge]'),
-    pinBtn: root.querySelector('[data-pane-pin]'),
     activityBadge: root.querySelector('[data-pane-activity-badge]'),
     helpDetails: root.querySelector('[data-pane-help]'),
     helpPopover: root.querySelector('[data-pane-help-popover]'),
+    pinBtn: root.querySelector('[data-pane-pin]'),
     closeBtn: root.querySelector('[data-pane-close]'),
     thread: root.querySelector('[data-pane-thread]'),
     scrollDownBtn: root.querySelector('[data-pane-scroll-down]'),
@@ -10857,6 +10868,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     connected: false,
     statusState: 'disconnected',
     statusMeta: '',
+    pinned: !!pinned,
     elements,
     chat: { runs: new Map(), history: [] },
     unreadCount: 0,
@@ -10888,6 +10900,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     elements.root.dataset.paneKey = pane.key;
     elements.root.dataset.paneKind = pane.kind;
     elements.root.dataset.paneAccentKind = pane.kind;
+    elements.root.dataset.panePinned = pane.pinned ? 'true' : 'false';
     elements.root.classList.add(`pane-kind-${pane.kind}`);
   } catch {}
 
@@ -10902,6 +10915,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     promptPaneNickname(pane);
   });
   elements.agentPill?.addEventListener('click', () => paneToggleTargetLock(pane));
+  if (elements.pinBtn) elements.pinBtn.hidden = role !== 'admin';
   elements.pinBtn?.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();

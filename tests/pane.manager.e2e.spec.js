@@ -4,6 +4,15 @@ const { startClawnsoleTestApp } = require('./helpers/pw-app');
 
 let app;
 
+async function openPaneManager(page) {
+  const modal = page.locator('#paneManagerModal');
+  await page.keyboard.press('Control+P');
+  if ((await modal.getAttribute('aria-hidden')) !== 'false') {
+    await page.click('#paneManagerBtn');
+  }
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+}
+
 test.beforeAll(async () => {
   app = await startClawnsoleTestApp();
 });
@@ -491,7 +500,7 @@ test('pane manager: paired action focuses existing counterpart and opens missing
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
 
   // Trigger Paired from Workqueue row; should open Chat and focus it.
-  const workqueueRow = page.locator('.pane-manager-row', { hasText: 'Workqueue' }).first();
+  const workqueueRow = page.locator('.pane-manager-row[data-pane-kind="workqueue"]').first();
   await workqueueRow.evaluate((row) => {
     const paired = row.querySelector('[data-action="paired"]');
     paired?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -582,4 +591,35 @@ test('pane layout lock disables pane reordering controls', async ({ page }) => {
   await page.keyboard.press('Control+P');
   const movableRow = page.locator('.pane-manager-row', { hasText: 'Workqueue' }).first();
   await expect(movableRow.getByTestId('pane-manager-move-down')).toBeDisabled();
+});
+
+test('pane manager: pins panes, blocks keyboard close, and persists pin state', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await openPaneManager(page);
+
+  const workqueueRow = page.locator('.pane-manager-row[data-pane-kind="workqueue"]').first();
+  await workqueueRow.getByTestId('pane-manager-pin').click();
+  await expect(workqueueRow.getByTestId('pane-manager-pin')).toHaveAttribute('aria-pressed', 'true');
+  await expect(workqueueRow.getByTestId('pane-manager-pinned-badge')).toBeVisible();
+
+  await page.keyboard.press('Delete');
+  await expect(page.getByTestId('pane-pinned-keyboard-toast')).toContainText('Unpin it before closing with the keyboard');
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await openPaneManager(page);
+
+  const persistedWorkqueueRow = page.locator('.pane-manager-row[data-pane-kind="workqueue"]').first();
+  await expect(persistedWorkqueueRow.getByTestId('pane-manager-pin')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]').first().getByTestId('pane-pin')).toHaveAttribute('aria-pressed', 'true');
 });
