@@ -5,16 +5,21 @@ const {
   escapeHtml,
   fmtRemaining,
   formatWorkqueueIssueTitle,
+  getWorkqueueIssueKey,
+  summarizeWorkqueueIssueDuplicateDensity,
   summarizeExactWorkqueueDuplicateRows,
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
   normalizeAdminDestination,
+  paneNeedsAttention,
   deriveAuthOverlayState,
   deriveGlobalConnectionState,
   deriveDisconnectButtonState,
   extractChatText,
-  normalizeHistoryEntries
+  normalizeHistoryEntries,
+  getShortcutGroups,
+  getShortcutIds
 } = require('../../lib/app-core.js');
 
 test('escapeHtml escapes html special chars', () => {
@@ -146,6 +151,42 @@ test('sortWorkqueueItems priority sort uses updatedAt desc tie-breaker', () => {
   assert.deepEqual(sorted.map((it) => it.id), ['c', 'b', 'a']);
 });
 
+test('workqueue canonical issue helpers calculate duplicate density', () => {
+  const items = [
+    {
+      id: 'old',
+      title: '[issue] rmdmattingly/clawnsole#320 Old',
+      updatedAt: '2026-03-01T00:00:00Z'
+    },
+    {
+      id: 'new',
+      title: 'Follow-up',
+      instructions: 'Repo: rmdmattingly/clawnsole\nIssue: #320',
+      updatedAt: '2026-03-02T00:00:00Z'
+    },
+    {
+      id: 'other',
+      title: 'Routine sweep',
+      updatedAt: '2026-03-03T00:00:00Z'
+    },
+    {
+      id: 'solo',
+      meta: { repo: 'RMDMATTINGLY/CLAWNSOLE', issueNumber: 321 },
+      title: 'Solo issue',
+      updatedAt: '2026-03-04T00:00:00Z'
+    }
+  ];
+
+  assert.equal(getWorkqueueIssueKey(items[0]), 'rmdmattingly/clawnsole#320');
+  assert.deepEqual(summarizeWorkqueueIssueDuplicateDensity(items), {
+    totalRows: 4,
+    issueRows: 3,
+    duplicateRows: 1,
+    duplicateGroups: 1,
+    density: 0.25
+  });
+});
+
 test('summarizeExactWorkqueueDuplicateRows collapses same dedupe key title and status only', () => {
   const items = [
     {
@@ -242,21 +283,61 @@ test('normalizePaneKind handles aliases safely', () => {
   assert.equal(normalizePaneKind('x'), 'chat');
 });
 
+test('shortcut catalog has stable unique ids and includes fleet shortcuts', () => {
+  const groups = getShortcutGroups();
+  const ids = getShortcutIds();
+  assert.ok(groups.length >= 4);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(ids.includes('fleet.open'));
+  assert.ok(ids.includes('fleet.open-heartbeat-sort'));
+  assert.ok(ids.includes('workqueue.open-active-chat-agent'));
+  assert.ok(
+    groups.some((group) => group.shortcuts.some((shortcut) =>
+      shortcut.id === 'pane.focus.accel-number' &&
+      shortcut.keys.includes('Cmd/Ctrl') &&
+      shortcut.keys.includes('1..9')
+    ))
+  );
+});
+
 test('deriveAuthOverlayState captures auth/role transition flags', () => {
   assert.deepEqual(deriveAuthOverlayState({ authed: true, role: 'admin' }), {
     isAdmin: true,
+    authState: 'signed_in',
     startAgentAutoRefresh: true,
     stopAgentAutoRefresh: false,
-    rolePillText: 'signed in',
+    rolePillText: 'Signed in - Admin - local',
     rolePillAdmin: true,
+    rolePillLocked: false,
+    rolePillSignedOut: false,
+    rolePillActionLabel: 'Open session details',
+    rolePillTooltip: 'Session context: signed in as Admin in local. Click for session details.',
+    authLabel: 'Signed in',
+    principalLabel: 'Admin',
+    environmentLabel: 'local',
     showAdminControls: true,
+    authActionText: 'Logout',
+    authActionLabel: 'Log out',
     logoutEnabled: true,
     logoutOpacity: '1'
   });
 
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).startAgentAutoRefresh, false);
-  assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest' }).rolePillText, 'guest');
-  assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '0.5');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).rolePillText, 'Locked');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).showAdminControls, false);
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).authActionText, 'Unlock');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).authState, 'locked');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).rolePillText, 'Locked');
+  assert.equal(
+    deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).rolePillTooltip,
+    'Session context: locked in local. Use the Unlock action to sign in.'
+  );
+  assert.equal(
+    deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).rolePillActionLabel,
+    'Authentication status: Locked'
+  );
+  assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest', environment: 'qa' }).rolePillText, 'Signed in - Guest - qa');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '1');
 });
 
 test('extractChatText converts attachment/file payloads to markdown links', () => {
@@ -293,7 +374,7 @@ test('normalizeHistoryEntries supports gateway payload variants', () => {
 test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard error transitions', () => {
   assert.deepEqual(deriveGlobalConnectionState({ authed: false, panes: [{ connected: true }] }), {
     state: 'disconnected',
-    meta: 'sign in required'
+    meta: ''
   });
 
   assert.deepEqual(deriveGlobalConnectionState({ authed: true, panes: [] }), {
@@ -309,7 +390,16 @@ test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard err
         { connected: false, statusState: 'reconnecting' }
       ]
     }),
-    { state: 'reconnecting', meta: 'panes: 1/2 connected' }
+    {
+      state: 'reconnecting',
+      meta: '1 connected · 1 disconnected · 1 attention',
+      connectedCount: 1,
+      disconnectedCount: 1,
+      unreadCount: 0,
+      attentionCount: 1,
+      total: 2,
+      ariaLabel: '1 of 2 panes connected; 1 disconnected; 0 unread items; 1 pane needs attention'
+    }
   );
 
   assert.deepEqual(
@@ -320,7 +410,41 @@ test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard err
         { connected: false, statusState: 'error', statusMeta: 'gateway disconnected' }
       ]
     }),
-    { state: 'error', meta: 'auth expired' }
+    {
+      state: 'error',
+      meta: '0 connected · 2 disconnected · 2 attention',
+      connectedCount: 0,
+      disconnectedCount: 2,
+      unreadCount: 0,
+      attentionCount: 2,
+      total: 2,
+      ariaLabel: '0 of 2 panes connected; 2 disconnected; 0 unread items; 2 panes need attention'
+    }
+  );
+});
+
+test('deriveGlobalConnectionState counts unread attention for screen readers', () => {
+  assert.equal(paneNeedsAttention({ connected: true, statusState: 'connected', unreadCount: 0 }), false);
+  assert.equal(paneNeedsAttention({ connected: true, statusState: 'connected', unreadCount: 2 }), true);
+
+  assert.deepEqual(
+    deriveGlobalConnectionState({
+      authed: true,
+      panes: [
+        { connected: true, statusState: 'connected', unreadCount: 2 },
+        { connected: true, statusState: 'connected', unreadCount: 0 }
+      ]
+    }),
+    {
+      state: 'connected',
+      meta: '2 connected · 0 disconnected · 1 attention',
+      connectedCount: 2,
+      disconnectedCount: 0,
+      unreadCount: 2,
+      attentionCount: 1,
+      total: 2,
+      ariaLabel: '2 of 2 panes connected; 0 disconnected; 2 unread items; 1 pane needs attention'
+    }
   );
 });
 
