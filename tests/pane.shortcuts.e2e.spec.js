@@ -63,6 +63,8 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   expect(renderedShortcutIds).toEqual(expectedShortcutIds);
   expect(new Set(renderedShortcutIds).size).toBe(renderedShortcutIds.length);
   await expect(modal).toContainText('workspace only');
+  await expect(modal).toContainText('Focus Fleet: first needs attention');
+  await expect(modal).toContainText('Open Fleet sorted by heartbeat age');
   await expect(modal.locator('[data-shortcut-status]').first()).toBeVisible();
   await expect(modal).toContainText('Available');
   await expect(modal).toContainText('Blocked: modal-open');
@@ -1107,4 +1109,23 @@ test('fleet quick action button + keyboard shortcut focus existing timeline pane
 
   await fleetBtn.click({ modifiers: ['Alt'] });
   await expect(timelinePanes).toHaveCount(2);
+});
+
+test('fleet heartbeat shortcut opens Fleet sorted by heartbeat age', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.click('#connectionStatus');
+
+  await page.keyboard.press('Control+Shift+H');
+
+  const agentsModal = page.locator('#agentsModal');
+  await expect(agentsModal).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('#agentsSort')).toHaveValue('heartbeat_age_desc');
 });
