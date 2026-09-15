@@ -5982,6 +5982,25 @@ function openFleetPane({ forceNew = false } = {}) {
   return pane;
 }
 
+function applyTriageLayoutPreset() {
+  if (roleState.role !== 'admin') return;
+
+  const existingChat = findExistingPane('chat');
+  const chatPane = existingChat || paneManager.addPane('chat');
+  const agentId = normalizeAgentId(chatPane?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
+
+  paneManager.addPane('workqueue', { queue: 'dev-team', agentId });
+  const fleetPane = openFleetPane();
+
+  paneManager.persistAdminPanes();
+  if (uiState.authed) paneManager.connectIfNeeded();
+
+  if (fleetPane) paneManager.focusPanePrimary(fleetPane);
+  else if (chatPane) paneManager.focusPanePrimary(chatPane);
+
+  showToast('Triage preset applied', { kind: 'info', timeoutMs: 1600 });
+}
+
 function focusFleetFirstNeedsAttention() {
   if (roleState.role !== 'admin') return false;
 
@@ -15071,6 +15090,7 @@ globalElements.addQueuePaneBtn?.addEventListener('click', (event) => {
 
 globalElements.triageLayoutPresetBtn?.addEventListener('click', (event) => {
   event?.preventDefault?.();
+  closeSettings();
   applyTriageLayoutPreset();
 });
 
