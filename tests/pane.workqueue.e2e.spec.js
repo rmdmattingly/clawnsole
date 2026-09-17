@@ -35,6 +35,7 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   await expect(paneGrid).toHaveAttribute('aria-label', 'Chat panes');
 
   await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue-scope').selectOption('all');
   await page.getByTestId('pane-add-menu-workqueue').click();
   await expect(paneGrid).toHaveAttribute('aria-label', 'Panes');
 
@@ -115,6 +116,7 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue-scope').selectOption('all');
   await page.getByTestId('pane-add-menu-workqueue').click();
 
   const wqPane = page.locator('[data-pane]').last();
@@ -158,7 +160,7 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(instructions);
 });
 
-test('pane: workqueue golden path covers filters, board transition, edit, and delete', async ({ page }) => {
+test('workqueue modal: golden path covers filters, kanban status, edit, and delete', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
 
@@ -169,93 +171,90 @@ test('pane: workqueue golden path covers filters, board transition, edit, and de
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.getByTestId('add-pane-btn').click();
-  await page.getByTestId('pane-add-menu-workqueue').click();
+  const runId = String(Date.now());
+  const title = `pw-e2e-modal-wq-${runId}`;
+  const instructions = `modal golden-path instructions ${runId}`;
 
-  const wqPane = page.locator('[data-pane]').last();
-  await expect(wqPane).toHaveAttribute('data-pane-kind', 'workqueue');
-  await expect(wqPane.locator('[data-wq-queue-select]')).toBeVisible();
-  await expect(wqPane.locator('[data-wq-status]')).toBeVisible();
+  const seedRes = await page.request.post(`http://127.0.0.1:${app.serverPort}/api/workqueue/enqueue`, {
+    data: { queue: 'dev-team', title, instructions, priority: 73 }
+  });
+  expect(seedRes.ok()).toBeTruthy();
 
-  await page.evaluate(() => openWorkqueue());
+  await page.evaluate(() => window.__debug.openWorkqueueModal());
   const modal = page.getByTestId('workqueue-modal');
   await expect(modal).toHaveClass(/open/);
-  await expect(page.getByTestId('workqueue-modal-queue-select')).toBeVisible();
-  await expect(page.getByTestId('workqueue-modal-status-filters')).toBeVisible();
+  await expect(page.getByTestId('workqueue-modal-queue')).toBeVisible();
+  await expect(page.getByTestId('workqueue-modal-status-filters')).toContainText('Ready');
+  await expect(page.getByTestId('workqueue-modal-status-filters')).toContainText('In progress');
 
-  const runId = String(Date.now());
-  const title = `pw-e2e-wq-board-${runId}`;
-  const editedTitle = `${title}-edited`;
-  const instructions = `board instructions ${runId}`;
-  const editedInstructions = `edited board instructions ${runId}`;
+  const queue = page.getByTestId('workqueue-modal-queue');
+  await expect(queue.locator('option', { hasText: 'dev-team' })).toHaveCount(1);
+  const itemsResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
+  await queue.selectOption('dev-team');
+  await itemsResP;
 
-  await page.getByTestId('workqueue-modal-queue-select').selectOption('dev-team');
-  await page.getByTestId('workqueue-modal-enqueue-title').fill(title);
-  await page.getByTestId('workqueue-modal-enqueue-priority').fill('51');
-  await page.getByTestId('workqueue-modal-enqueue-instructions').fill(instructions);
+  let card = page.getByTestId('workqueue-modal-card').filter({ hasText: title });
+  await expect(card).toBeVisible();
+  await card.click();
+  await expect(page.getByTestId('workqueue-modal-inspect')).toContainText(title);
+  await expect(page.getByTestId('workqueue-modal-inspect')).toContainText(instructions);
 
-  const enqueueResP = page.waitForResponse(
-    (res) => res.url().includes('/api/workqueue/enqueue') && res.request().method() === 'POST',
-    { timeout: 15000 }
-  );
-  await page.getByTestId('workqueue-modal-enqueue-submit').click();
-  const enqueueRes = await enqueueResP;
-  expect(enqueueRes.ok()).toBeTruthy();
-  const enqueueData = await enqueueRes.json();
-  const itemId = enqueueData.item?.id;
-  expect(itemId).toBeTruthy();
-
-  const itemCard = page.locator(`[data-wq-item="${itemId}"]`);
-  await expect(itemCard).toContainText(title);
-  await expect(page.getByTestId('workqueue-board-col-ready').locator(`[data-wq-item="${itemId}"]`)).toHaveCount(1);
-
-  const transitionResP = page.waitForResponse(
+  const statusResP = page.waitForResponse(
     (res) => res.url().includes('/api/workqueue/update') && res.request().method() === 'POST',
     { timeout: 15000 }
   );
+  const itemId = await card.getAttribute('data-wq-item');
+  expect(itemId).toBeTruthy();
   await page.evaluate((id) => {
-    const card = document.querySelector(`[data-wq-item="${id}"]`);
-    const lane = document.querySelector('[data-wq-col="in_progress"] .wq-board-lane');
-    if (!card || !lane) throw new Error('missing board card or target lane');
+    const cardEl = document.querySelector(`[data-testid="workqueue-modal-card"][data-wq-item="${CSS.escape(id)}"]`);
+    const laneEl = document.querySelector('[data-testid="workqueue-modal-lane-in_progress"]');
+    if (!cardEl || !laneEl) throw new Error('missing workqueue drag/drop targets');
     const dataTransfer = new DataTransfer();
-    card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }));
-    lane.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
-    lane.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+    cardEl.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+    laneEl.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
+    laneEl.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
   }, itemId);
-  const transitionRes = await transitionResP;
-  expect(transitionRes.ok()).toBeTruthy();
-  await expect(page.getByTestId('workqueue-board-col-in_progress').locator(`[data-wq-item="${itemId}"]`)).toHaveCount(1);
-
-  await page.getByTestId('workqueue-board-col-in_progress').locator(`[data-wq-item="${itemId}"]`).click();
-  await expect(page.getByTestId('workqueue-modal-inspect')).toContainText(title);
+  const statusRes = await statusResP;
+  expect(statusRes.ok()).toBeTruthy();
+  card = page.getByTestId('workqueue-modal-lane-in_progress').getByTestId('workqueue-modal-card').filter({ hasText: title });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('in_progress');
+  await card.click();
   await expect(page.getByTestId('workqueue-modal-inspect')).toContainText('in_progress');
 
-  const promptValues = [editedTitle, editedInstructions, '52', 'ready'];
-  page.on('dialog', async (dialog) => {
-    const value = promptValues.shift();
-    if (dialog.type() === 'prompt' && value !== undefined) await dialog.accept(value);
-    else await dialog.accept();
-  });
-
+  const editedTitle = `${title} edited`;
+  const editedInstructions = `${instructions} edited`;
+  const promptAnswers = [editedTitle, editedInstructions, '74', 'ready'];
+  const promptHandler = async (dialog) => {
+    expect(dialog.type()).toBe('prompt');
+    await dialog.accept(promptAnswers.shift());
+  };
+  page.on('dialog', promptHandler);
   const editResP = page.waitForResponse(
     (res) => res.url().includes('/api/workqueue/update') && res.request().method() === 'POST',
     { timeout: 15000 }
   );
-  await page.getByTestId('workqueue-inspect-edit').click();
+  await page.getByTestId('workqueue-modal-edit').click();
   const editRes = await editResP;
+  page.off('dialog', promptHandler);
   expect(editRes.ok()).toBeTruthy();
-  await expect(page.locator(`[data-wq-item="${itemId}"]`)).toContainText(editedTitle);
+  await expect(page.getByTestId('workqueue-modal-inspect')).toContainText(editedTitle);
   await expect(page.getByTestId('workqueue-modal-inspect')).toContainText(editedInstructions);
-  await expect(page.getByTestId('workqueue-board-col-ready').locator(`[data-wq-item="${itemId}"]`)).toHaveCount(1);
+  await expect(page.getByTestId('workqueue-modal-lane-ready').getByTestId('workqueue-modal-card').filter({ hasText: editedTitle })).toBeVisible();
 
+  page.once('dialog', async (dialog) => {
+    expect(dialog.type()).toBe('confirm');
+    await dialog.accept();
+  });
   const deleteResP = page.waitForResponse(
     (res) => res.url().includes('/api/workqueue/delete') && res.request().method() === 'POST',
     { timeout: 15000 }
   );
-  await page.getByTestId('workqueue-inspect-delete').click();
+  await page.getByTestId('workqueue-modal-delete').click();
   const deleteRes = await deleteResP;
   expect(deleteRes.ok()).toBeTruthy();
-  await expect(page.locator(`[data-wq-item="${itemId}"]`)).toHaveCount(0);
+  await expect(page.getByTestId('workqueue-modal-card').filter({ hasText: editedTitle })).toHaveCount(0);
+  await expect(page.getByTestId('workqueue-modal-inspect')).toContainText('Select an item to inspect.');
 });
 
 test('pane: workqueue scope filter toggles deterministic row counts', async ({ page }) => {
@@ -328,4 +327,66 @@ test('pane: workqueue scope filter toggles deterministic row counts', async ({ p
   await expect(rowsWithPrefix()).toHaveCount(0);
   await expect(statusLine).toContainText(/Showing 0 of \d+ items .*hidden:.*search \d+/);
   await expect(wqPane.locator('[data-wq-empty]')).toContainText('No items match current filters.');
+});
+
+test('pane: workqueue triage mode preset applies and persists queue scope statuses and sort', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('pw-triage-preset-seeded') === '1') return;
+    sessionStorage.setItem('pw-triage-preset-seeded', '1');
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([
+        {
+          key: 'pw-triage-preset',
+          kind: 'workqueue',
+          queue: 'custom-review',
+          statusFilter: ['claimed', 'in_progress'],
+          scopeFilter: 'assigned',
+          sortKey: 'updatedAt',
+          sortDir: 'asc'
+        }
+      ])
+    );
+  });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  const triageBtn = wqPane.locator('[data-wq-preset-triage]');
+
+  const refreshResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
+  await triageBtn.click();
+  await refreshResP;
+
+  await expect(triageBtn).toHaveAttribute('aria-pressed', 'true');
+  await expect(wqPane.getByTestId('wq-triage-chip')).toBeVisible();
+  await expect(wqPane.locator('[data-wq-queue-select]')).toHaveValue('dev-team');
+  await expect(wqPane.locator('[data-wq-scope="unassigned"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(wqPane.locator('.wq-sort [data-wq-sort="priority"]')).toHaveClass(/active/);
+
+  await wqPane.locator('[data-wq-status-details] > summary').click();
+  const statusOptions = wqPane.locator('[data-wq-status-options]');
+  await expect(statusOptions.getByRole('checkbox', { name: /^Ready \(/ })).toBeChecked();
+  await expect(statusOptions.getByRole('checkbox', { name: /^Pending \(/ })).toBeChecked();
+  await expect(statusOptions.getByRole('checkbox', { name: /^Claimed \(/ })).not.toBeChecked();
+  await expect(statusOptions.getByRole('checkbox', { name: /^In progress \(/ })).not.toBeChecked();
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await expect(page.getByTestId('login-overlay')).toBeHidden();
+
+  const persistedPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await expect(persistedPane.locator('[data-wq-preset-triage]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(persistedPane.getByTestId('wq-triage-chip')).toBeVisible();
+  await expect(persistedPane.locator('[data-wq-queue-select]')).toHaveValue('dev-team');
+  await expect(persistedPane.locator('[data-wq-scope="unassigned"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(persistedPane.locator('.wq-sort [data-wq-sort="priority"]')).toHaveClass(/active/);
 });

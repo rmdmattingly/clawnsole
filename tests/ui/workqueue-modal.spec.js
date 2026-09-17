@@ -67,6 +67,22 @@ test('workqueue modal: status filters use human labels and queue-scoped counts',
   const queueSelect = page.locator('#wqQueueSelect');
   await queueSelect.selectOption('dev-team');
   await expect(page.locator('#wqStatusFilters .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
+  await expect(page.getByTestId('wq-modal-filter-summary')).toBeVisible();
+  await expect(page.getByTestId('wq-modal-filter-chip-queue')).toContainText('Queue: dev-team');
+  await expect(page.getByTestId('wq-modal-filter-chip-statuses')).toHaveCount(0);
+
+  await page.locator('#wq-status-claimed').uncheck();
+  await expect(page.getByTestId('wq-modal-filter-chip-statuses')).toContainText('Status:');
+  await expect(page.getByTestId('wq-modal-filter-count')).toContainText(/Showing \d+ of \d+ items/);
+
+  await page.getByTestId('wq-modal-item-search').fill('dev item');
+  await expect(page.getByTestId('wq-modal-filter-chip-search')).toContainText('Search: dev item');
+  await page.getByTestId('wq-modal-filter-chip-search').click();
+  await expect(page.getByTestId('wq-modal-item-search')).toHaveValue('');
+
+  await page.getByTestId('wq-modal-clear-filters').click();
+  await expect(queueSelect).toHaveValue('dev-team');
+  await expect(page.getByTestId('wq-modal-filter-chip-statuses')).toHaveCount(0);
 
   await queueSelect.selectOption('qa-team');
   await expect(page.locator('#wqStatusFilters .wq-status-chip', { hasText: 'Ready (2)' })).toHaveCount(1);
@@ -120,4 +136,22 @@ test('workqueue modal: hides archived statuses by default and toggles them expli
   await expect(page.locator('#wqArchivedHint')).toHaveText('Archived done/failed items shown.');
   await expect(page.locator('#wqShowArchivedBtn')).toHaveText('Hide archived');
   await expect(page.locator('#wqShowArchivedBtn')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('workqueue modal: bulk archive requires an age threshold before preview', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  await page.evaluate(() => window.openWorkqueue?.());
+  await expect(page.locator('#workqueueModal')).toHaveClass(/open/);
+
+  await expect(page.getByTestId('wq-modal-archive-threshold')).toBeVisible();
+  await expect(page.getByTestId('wq-modal-archive-btn')).toBeVisible();
+
+  await page.getByTestId('wq-modal-archive-btn').click();
+  await expect(page.getByTestId('workqueue-modal-action-status')).toHaveText('Choose an archive age first.');
 });

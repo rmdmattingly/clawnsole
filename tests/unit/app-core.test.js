@@ -11,13 +11,17 @@ const {
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
+  normalizeWorkqueueScope,
+  deriveDefaultWorkqueueScope,
   normalizeAdminDestination,
   paneNeedsAttention,
   deriveAuthOverlayState,
   deriveGlobalConnectionState,
   deriveDisconnectButtonState,
   extractChatText,
-  normalizeHistoryEntries
+  normalizeHistoryEntries,
+  getShortcutGroups,
+  getShortcutIds
 } = require('../../lib/app-core.js');
 
 test('escapeHtml escapes html special chars', () => {
@@ -281,6 +285,42 @@ test('normalizePaneKind handles aliases safely', () => {
   assert.equal(normalizePaneKind('x'), 'chat');
 });
 
+test('deriveDefaultWorkqueueScope prefers assigned for explicit workqueue agent targets', () => {
+  assert.equal(normalizeWorkqueueScope('assigned'), 'assigned');
+  assert.equal(normalizeWorkqueueScope('UNASSIGNED'), 'unassigned');
+  assert.equal(normalizeWorkqueueScope('unknown'), 'all');
+
+  assert.equal(
+    deriveDefaultWorkqueueScope({ explicitAgentId: 'hop', storedDefault: 'unassigned' }),
+    'assigned'
+  );
+  assert.equal(
+    deriveDefaultWorkqueueScope({ explicitAgentId: '', storedDefault: 'unassigned' }),
+    'unassigned'
+  );
+  assert.equal(
+    deriveDefaultWorkqueueScope({ explicitAgentId: 'hop', explicitScope: 'all', storedDefault: 'unassigned' }),
+    'all'
+  );
+});
+
+test('shortcut catalog has stable unique ids and includes fleet shortcuts', () => {
+  const groups = getShortcutGroups();
+  const ids = getShortcutIds();
+  assert.ok(groups.length >= 4);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(ids.includes('fleet.open'));
+  assert.ok(ids.includes('fleet.open-heartbeat-sort'));
+  assert.ok(ids.includes('workqueue.open-active-chat-agent'));
+  assert.ok(
+    groups.some((group) => group.shortcuts.some((shortcut) =>
+      shortcut.id === 'pane.focus.accel-number' &&
+      shortcut.keys.includes('Cmd/Ctrl') &&
+      shortcut.keys.includes('1..9')
+    ))
+  );
+});
+
 test('deriveAuthOverlayState captures auth/role transition flags', () => {
   assert.deepEqual(deriveAuthOverlayState({ authed: true, role: 'admin' }), {
     isAdmin: true,
@@ -307,6 +347,16 @@ test('deriveAuthOverlayState captures auth/role transition flags', () => {
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).rolePillText, 'Locked');
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).showAdminControls, false);
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'admin' }).authActionText, 'Unlock');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).authState, 'locked');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).rolePillText, 'Locked');
+  assert.equal(
+    deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).rolePillTooltip,
+    'Session context: locked in local. Use the Unlock action to sign in.'
+  );
+  assert.equal(
+    deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).rolePillActionLabel,
+    'Authentication status: Locked'
+  );
   assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest', environment: 'qa' }).rolePillText, 'Signed in - Guest - qa');
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '1');
 });
@@ -345,7 +395,7 @@ test('normalizeHistoryEntries supports gateway payload variants', () => {
 test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard error transitions', () => {
   assert.deepEqual(deriveGlobalConnectionState({ authed: false, panes: [{ connected: true }] }), {
     state: 'disconnected',
-    meta: 'sign in required'
+    meta: ''
   });
 
   assert.deepEqual(deriveGlobalConnectionState({ authed: true, panes: [] }), {
