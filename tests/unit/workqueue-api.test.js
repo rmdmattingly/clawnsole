@@ -6,7 +6,7 @@ const path = require('node:path');
 const http = require('node:http');
 
 const { createClawnsoleServer } = require('../../clawnsole-server');
-const { enqueueItem } = require('../../lib/workqueue');
+const { enqueueItem, loadState, saveState } = require('../../lib/workqueue');
 
 function mkTempEnv() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawnsole-wq-api-'));

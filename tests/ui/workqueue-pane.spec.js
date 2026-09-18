@@ -1654,6 +1654,7 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
   const listBody = wqPane.locator('.wq-pane [data-wq-list-body]').first();
 
   await expect(toolbar).toBeVisible();
+  await expect(toolbar.locator('[data-wq-bulk-archive]')).toHaveText('Bulk archive');
   await expect(list).toBeVisible();
   await expect(listHeader).toBeVisible();
   await expect(listBody).toHaveCount(1);
