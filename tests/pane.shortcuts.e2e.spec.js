@@ -185,6 +185,62 @@ test('paired-pane toggle shortcut focuses an existing counterpart without duplic
   await expect(page.getByTestId('paired-pane-toggle-toast').last()).toContainText('Focused paired Chat pane.');
 });
 
+test('settings shortcut overrides persist, validate conflicts, and update help', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.locator('[data-shortcut-action="pane-next"]').click();
+  await page.keyboard.press('ControlOrMeta+Shift+Alt+Y');
+  await expect(page.locator('#shortcutOverridesError')).toBeHidden();
+
+  await page.locator('[data-shortcut-action="pane-previous"]').click();
+  await page.keyboard.press('ControlOrMeta+Shift+Alt+Y');
+  await expect(page.locator('#shortcutOverridesError')).toContainText('conflicts with Focus next pane');
+  await page.locator('[data-shortcut-reset="pane-previous"]').click();
+  await page.locator('#shortcutOverridesSave').click();
+  await page.keyboard.press('Escape');
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]')).filter((pane) => pane.getClientRects().length > 0);
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+  const triggerShortcut = async (key, altKey = false) => page.evaluate(({ nextKey, withAlt }) => {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: nextKey,
+      ctrlKey: true,
+      altKey: withAlt,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    }));
+  }, { nextKey: key, withAlt: altKey });
+
+  await page.click('#connectionStatus');
+  await page.evaluate(() => window.focusPaneIndex?.(0));
+  await triggerShortcut('Y', true);
+  await expect.poll(activePaneIndex).toBe(1);
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  await expect(page.locator('[data-shortcut-help="pane-next"]')).toContainText('Y');
+});
+
 test('paired-pane toggle shortcut opens a missing counterpart for the same target', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
