@@ -4197,6 +4197,7 @@ function togglePanePinned(pane) {
 }
 
 function refreshPaneDraftState(pane) {
+  if (!pane) return;
   paneRefreshDraftOrigin(pane);
   renderPaneIdentity(pane);
   renderPaneDraftBadge(pane);
@@ -4287,7 +4288,6 @@ function paneConfirmDraftRetargetSend(pane, sendFn) {
   });
   return false;
 }
-
 function markPaneUnread(pane, increment = 1, kind = 'chat') {
   if (!pane) return;
   const activeKey = focusedPaneKey();
@@ -11063,6 +11063,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     clearPaneUnread(pane);
   });
   renderPaneActivityBadge(pane);
+  renderPaneDraftBadge(pane);
 
   // WORKQUEUE PANE
   if (pane.role === 'admin' && pane.kind === 'workqueue') {
