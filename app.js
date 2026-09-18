@@ -7849,6 +7849,10 @@ function formatWorkqueueVisibleSummary(shown, total, hiddenCounts = {}) {
   return hidden ? `${base} · ${hidden}` : base;
 }
 
+function workqueueStatusesIncludeArchived(statuses) {
+  return WORKQUEUE_TERMINAL_STATUSES.every((status) => statuses.includes(status));
+}
+
 function getWorkqueueQuickFilterBreakdown(items, quickFilters) {
   let current = Array.isArray(items) ? items.slice() : [];
   const hidden = { actionable: 0, source: 0, repo: 0, search: 0 };
@@ -7888,6 +7892,7 @@ function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount, hid
   const queue = String(pane.workqueue?.queue || '').trim();
   const scope = pane.workqueue?.scopeFilter || 'all';
   const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter.map((s) => String(s || '').trim()).filter(Boolean) : [];
+  const archivedShown = workqueueStatusesIncludeArchived(statuses);
   const quick = pane.workqueue?.quickFilters || {};
   const sources = Array.isArray(quick.sources) ? quick.sources.map((s) => String(s || '').trim()).filter(Boolean) : [];
   const repos = Array.isArray(quick.repos) ? quick.repos.map((s) => String(s || '').trim()).filter(Boolean) : [];
@@ -7907,6 +7912,10 @@ function renderWorkqueueFilterSummaryForPane(pane, { shownCount, totalCount, hid
   count.setAttribute('data-wq-filter-count', '');
   count.textContent = formatWorkqueueVisibleSummary(shownCount, totalCount, hiddenCounts);
   root.appendChild(count);
+  const archived = document.createElement('span');
+  archived.className = archivedShown ? 'wq-archive-state shown' : 'wq-archive-state hidden';
+  archived.textContent = archivedShown ? 'Archived shown' : 'Archived hidden';
+  root.appendChild(archived);
 
   const addToken = ({ label, value, title, action, removable = true }) => {
     const el = document.createElement(removable ? 'button' : 'span');
@@ -11117,6 +11126,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
               </details>
             </div>
           </div>
+          <button data-wq-archived-toggle class="secondary" type="button" aria-pressed="false">Show archived</button>
 
           <div class="wq-scope" role="group" aria-label="Workqueue scope">
             <span class="wq-scope-label">Scope</span>
@@ -11283,6 +11293,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     const statusOptionsEl = elements.thread.querySelector('[data-wq-status-options]');
     const statusDetailsEl = elements.thread.querySelector('[data-wq-status-details]');
     const statusClearBtn = elements.thread.querySelector('[data-wq-status-clear]');
+    const archivedToggleBtn = elements.thread.querySelector('[data-wq-archived-toggle]');
     const archiveHintEl = elements.thread.querySelector('[data-wq-archive-hint]');
     const sourceBtns = Array.from(elements.thread.querySelectorAll('[data-wq-source]'));
     const repoChipsEl = elements.thread.querySelector('[data-wq-repo-chips]');
@@ -11472,6 +11483,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       pane.workqueue.statusFilter = Array.from(statusSet);
       resetRenderLimit();
       renderStatusMultiSelect();
+      renderArchivedToggle();
       if (closeMenu) statusDetailsEl?.removeAttribute('open');
       await fetchAndRenderWorkqueueItemsForPane(pane);
       updateQuickFilterUi();
@@ -11517,6 +11529,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         for (const s of DEFAULT_STATUSES) statusSet.add(s);
         pane.workqueue.statusFilter = Array.from(statusSet);
         renderStatusMultiSelect();
+        renderArchivedToggle();
       }
       await fetchAndRenderWorkqueueItemsForPane(pane);
       updateQuickFilterUi();
@@ -11587,6 +11600,17 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         });
         statusOptionsEl.appendChild(label);
       }
+    };
+    const renderArchivedToggle = () => {
+      if (!archivedToggleBtn) return;
+      const statuses = Array.from(statusSet);
+      const showingArchived = workqueueStatusesIncludeArchived(statuses);
+      archivedToggleBtn.textContent = showingArchived ? 'Hide archived' : 'Show archived';
+      archivedToggleBtn.classList.toggle('active', showingArchived);
+      archivedToggleBtn.setAttribute('aria-pressed', showingArchived ? 'true' : 'false');
+      archivedToggleBtn.title = showingArchived
+        ? 'Hide done and failed workqueue items'
+        : 'Show done and failed workqueue items';
     };
     pane.workqueue.renderStatusMultiSelect = renderStatusMultiSelect;
     pane.workqueue.applyStatuses = applyStatuses;
@@ -11709,6 +11733,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       }
     });
     renderStatusMultiSelect();
+    renderArchivedToggle();
     populateQueueSelect().then(() => {
       renderEnqueueTargetSelect();
       doRefresh();
@@ -11737,6 +11762,16 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
       statusClearBtn?.addEventListener('click', () => applyStatuses([]));
     }
+
+    archivedToggleBtn?.addEventListener('click', () => {
+      const next = new Set(statusSet);
+      if (workqueueStatusesIncludeArchived(Array.from(next))) {
+        for (const status of WORKQUEUE_TERMINAL_STATUSES) next.delete(status);
+      } else {
+        for (const status of WORKQUEUE_TERMINAL_STATUSES) next.add(status);
+      }
+      applyStatuses(Array.from(next));
+    });
 
     // Scope controls (client-side): assignment triage quick filters.
     const scopeBtns = Array.from(elements.thread.querySelectorAll('[data-wq-scope]'));
