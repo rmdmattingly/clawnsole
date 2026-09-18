@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
-const { startTestEnv, loginAdmin, attachConsoleErrorAsserts } = require('./_helpers');
+const { startTestEnv, loginAdmin, waitForAdminUiReady, attachConsoleErrorAsserts } = require('./_helpers');
 
 let env;
 
@@ -31,6 +31,7 @@ async function loginAdminWithChatOnlyPane(page, serverPort, { agentId = 'main' }
   await page.fill('#loginPassword', 'admin');
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await waitForAdminUiReady(page);
 }
 
 test('command palette: keyboard flow can reuse a targeted pane and focus by pane letter', async ({ page }) => {
@@ -168,6 +169,46 @@ test('pane navigation: returns to the last active chat pane from shortcut and co
   await expect(chatInput).toBeFocused();
 });
 
+test('pane navigation: g then visible pane letter focuses pane with no-match and typing guards', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await loginAdmin(page, env.serverPort);
+
+  const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  const chatInput = chatPane.locator('[data-pane-input]');
+  const workqueuePane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+
+  await expect(chatPane).toHaveAttribute('data-pane-letter', 'A');
+  await expect(workqueuePane).toHaveAttribute('data-pane-letter', 'B');
+
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.press('g');
+  await page.keyboard.press('b');
+  await expect(page.getByRole('button', { name: /Active pane: B Workqueue/ })).toBeVisible();
+  await expect.poll(async () => {
+    return page.evaluate(() => {
+      const pane = document.querySelector('[data-pane][data-pane-kind="workqueue"]');
+      return !!(pane && document.activeElement && pane.contains(document.activeElement));
+    });
+  }).toBe(true);
+
+  const addPaneBtn = page.locator('#addPaneBtn');
+  await addPaneBtn.focus();
+  await expect(addPaneBtn).toBeFocused();
+  await page.keyboard.press('g');
+  await page.keyboard.press('z');
+  await expect(addPaneBtn).toBeFocused();
+
+  await chatInput.click();
+  await expect(chatInput).toBeFocused();
+  await chatInput.fill('');
+  await chatInput.type('gb');
+  await expect(chatInput).toBeFocused();
+  await expect(chatInput).toHaveValue('gb');
+});
+
 test('command palette: opens or focuses Workqueue for active chat agent', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -180,7 +221,7 @@ test('command palette: opens or focuses Workqueue for active chat agent', async 
     const input = page.locator('#commandPaletteInput');
     await expect(input).toBeVisible();
     await input.fill(query);
-    await page.keyboard.press('Enter');
+    await input.press('Enter');
   };
 
   const chatInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
@@ -202,5 +243,82 @@ test('command palette: opens or focuses Workqueue for active chat agent', async 
 
   await wqPane.locator('[data-wq-queue-select]').focus();
   await runCommand('workqueue for active chat agent');
-  await expect(page.getByTestId('toast').last()).toContainText('No active chat agent selected');
+  await expect(wqPane).toHaveCount(1);
+  await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
+});
+
+test('layout triage preset reuses panes and preserves chat draft', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await loginAdminWithChatOnlyPane(page, env.serverPort);
+
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
+  await expect(chatInput).toBeVisible();
+  await chatInput.fill('draft stays put');
+  await expect(page.locator('[data-pane]')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await expect(page.locator('#triageLayoutPresetBtn')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await page.keyboard.press('ControlOrMeta+K');
+  const input = page.locator('#commandPaletteInput');
+  await expect(input).toBeVisible();
+  await input.fill('triage preset');
+  const firstHit = page.locator('#commandPaletteList [role="option"]').first();
+  await expect(firstHit).toHaveAttribute('data-command-palette-id', 'cmd:triage-layout-preset');
+  await expect(firstHit.locator('.command-palette-item-label')).toHaveText('Layout: Triage focus');
+  await page.keyboard.press('Enter');
+
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+  await expect(chatInput).toHaveValue('draft stays put');
+
+  await page.keyboard.press('ControlOrMeta+K');
+  await expect(input).toBeVisible();
+  await input.fill('triage preset');
+  await page.keyboard.press('Enter');
+
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+  await expect(chatInput).toHaveValue('draft stays put');
+});
+
+test('triage layout preset reuses panes and preserves chat draft', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await loginAdminWithChatOnlyPane(page, env.serverPort);
+
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"]').first().locator('[data-pane-input]');
+  await expect(chatInput).toBeVisible();
+  await chatInput.fill('draft survives triage preset');
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const settingsModal = page.locator('#settingsModal');
+  await expect(settingsModal).toHaveClass(/open/);
+  await settingsModal.getByTestId('triage-layout-preset-btn').click();
+
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+  await expect(chatInput).toHaveValue('draft survives triage preset');
+
+  await page.keyboard.press('ControlOrMeta+K');
+  const input = page.locator('#commandPaletteInput');
+  await expect(input).toBeVisible();
+  await input.fill('triage preset');
+  await expect(page.locator('#commandPaletteList [role="option"]').first()).toHaveAttribute('data-command-palette-id', 'cmd:triage-layout-preset');
+  await page.keyboard.press('Enter');
+
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="timeline"]')).toHaveCount(1);
+  await expect(chatInput).toHaveValue('draft survives triage preset');
 });

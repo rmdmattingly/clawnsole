@@ -58,9 +58,11 @@ test('pane: timeline renders + shows recent cron run events', async ({ page }) =
   expect(Math.abs(toolbarTop - threadTop)).toBeLessThan(20);
   expect(Math.abs(layoutBottom - threadBottom)).toBeLessThan(20);
 
+  const list = cronPane.locator('.wq-list').first();
   const listBody = cronPane.locator('.wq-list-body').first();
+  await expect(list).toBeVisible();
   await expect(listBody).toBeVisible();
-  const listOverflowY = await listBody.evaluate((el) => getComputedStyle(el).overflowY);
+  const listOverflowY = await list.evaluate((el) => getComputedStyle(el).overflowY);
   expect(listOverflowY).toBe('auto');
 
   // Timeline fetches cron.list then cron.runs; assert at least one event rendered.
