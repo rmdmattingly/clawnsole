@@ -29,6 +29,14 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
   const addBtn = page.locator('#addPaneBtn');
   await expect(addBtn).toBeVisible();
 
+  const panes = page.locator('[data-pane]');
+  while (await panes.count() > 1) {
+    await panes.last().locator('button[aria-label="Close pane"]').click();
+  }
+  await expect(panes).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  const countBefore = await panes.count();
+
   await addBtn.click();
   const menu = page.locator('[data-testid="pane-add-menu"]');
   await expect(menu).toBeVisible();
@@ -43,6 +51,7 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
   // Add a workqueue pane and ensure it exists + focus lands on primary control.
   await menu.locator('[data-testid="pane-add-menu-workqueue"]').click();
 
+  await expect(panes).toHaveCount(countBefore + 1);
   const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
   await expect(wqPane).toBeVisible();
 
