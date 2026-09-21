@@ -5914,8 +5914,11 @@ function openWorkqueueForActiveChatAgent() {
   paneManager.persistAdminPanes();
   paneManager.focusPanePrimary(pane);
   try {
-    const scopeBtn = pane.elements?.thread?.querySelector?.('[data-wq-scope="assigned"]');
-    scopeBtn?.click?.();
+    if (typeof pane.workqueue?.setScope === 'function') pane.workqueue.setScope('assigned');
+    else {
+      const scopeBtn = pane.elements?.thread?.querySelector?.('[data-wq-scope="assigned"]');
+      scopeBtn?.click?.();
+    }
   } catch {
     renderWorkqueuePaneItems(pane);
   }
