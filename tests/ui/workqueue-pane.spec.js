@@ -848,7 +848,6 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
 
   const wqPane = page.locator('[data-pane]').last();
   const toolbar = wqPane.locator('.wq-pane .wq-toolbar');
-  const list = wqPane.locator('.wq-pane .wq-list').first();
   const header = wqPane.locator('.wq-pane .wq-list-header').first();
   const listBody = wqPane.locator('.wq-pane [data-wq-list-body]').first();
 
@@ -876,7 +875,7 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
   expect(Number(styles.zIndex)).toBeGreaterThanOrEqual(5);
   expect(styles.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
 
-  const listStyles = await list.evaluate((el) => {
+  const listStyles = await listBody.evaluate((el) => {
     const cs = window.getComputedStyle(el);
     return { overflowY: cs.overflowY, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
   });
@@ -899,7 +898,7 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
 
   const before = await header.boundingBox();
   expect(before).toBeTruthy();
-  await list.evaluate((el) => { el.scrollTop = 240; });
+  await listBody.evaluate((el) => { el.scrollTop = 240; });
   await page.waitForTimeout(50);
   const after = await header.boundingBox();
   expect(after).toBeTruthy();
