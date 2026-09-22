@@ -610,7 +610,14 @@ test('agents modal copies selected fleet agent id with keyboard shortcut', async
   await alpha.click();
   await page.keyboard.press('j');
   await expect(beta).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#agentsCopySelectedBtn')).toBeEnabled();
+  await expect(page.locator('#agentsCopySelectedBtn')).toHaveAttribute('title', 'Copy beta');
 
+  await page.locator('#agentsCopySelectedBtn').click();
+  await expect(page.getByTestId('fleet-copy-agent-toast').last()).toContainText('Copied beta');
+  await expect.poll(() => page.evaluate(() => window.__copiedText)).toBe('beta');
+
+  await beta.focus();
   await page.keyboard.press('y');
   await expect(page.getByTestId('fleet-copy-agent-toast').last()).toContainText('Copied beta');
   await expect(beta).toBeFocused();
@@ -618,6 +625,10 @@ test('agents modal copies selected fleet agent id with keyboard shortcut', async
 
   await beta.locator('[data-agent-action="copy-id"]').first().click();
   await expect(page.getByTestId('fleet-copy-agent-toast').last()).toContainText('Copied beta');
+
+  await page.locator('#agentsSearch').fill('no matching agent');
+  await expect(page.locator('#agentsCopySelectedBtn')).toBeDisabled();
+  await expect(page.locator('#agentsCopySelectedBtn')).toHaveAttribute('title', 'Select an agent row first');
 });
 
 test('fleet list keeps header and identity columns visible while scrolling', async ({ page, clawnsole }) => {
