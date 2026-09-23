@@ -818,6 +818,8 @@ function matchesKeybind(event, id) {
     const n = Number.parseInt(key, 10);
     return Number.isFinite(n) && n >= 1 && n <= 9;
   }
+  if (/^[a-z]$/i.test(wanted) && String(event?.code || '').toLowerCase() === `key${wanted.toLowerCase()}`) return true;
+  if (/^[0-9]$/.test(wanted) && String(event?.code || '') === `Digit${wanted}`) return true;
   return lower === wanted.toLowerCase() || key === wanted;
 }
 
@@ -14271,17 +14273,21 @@ function reportBlockedShortcut(reason) {
 }
 
 function isTypingContext(target) {
-  const el = target === undefined ? document.activeElement : target;
+  const node = target === undefined ? document.activeElement : target;
+  const el = node && node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
   if (!(el instanceof Element)) return false;
-  if (!el) return false;
   try {
     if (el.hidden || el.disabled) return false;
     if (el.getClientRects && el.getClientRects().length === 0) return false;
   } catch {}
-  const editable = el.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="textbox"]');
-  if (editable) return true;
-  if (el.isContentEditable || el.closest?.('[contenteditable="true"], [contenteditable=""]')) return true;
-  const editorSurface = el.closest?.([
+  const editable = el.closest?.([
+    'input',
+    'textarea',
+    'select',
+    '[contenteditable=""]',
+    '[contenteditable="true"]',
+    '[contenteditable="plaintext-only"]',
+    '[role="textbox"]',
     '.monaco-editor',
     '.cm-editor',
     '.CodeMirror',
@@ -14289,8 +14295,16 @@ function isTypingContext(target) {
     '[data-gramm]',
     '[data-slate-editor="true"]',
     '[data-lexical-editor="true"]'
-  ].join(', '));
-  if (editorSurface) return true;
+  ].join(', ')) || null;
+  if (editable) {
+    if (editable.getAttribute?.('contenteditable') === 'false') return false;
+    try {
+      if (editable.hidden || editable.disabled) return false;
+      if (editable.getClientRects && editable.getClientRects().length === 0) return false;
+    } catch {}
+    return true;
+  }
+  if (el.isContentEditable || el.closest?.('[contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]')) return true;
   return false;
 }
 
@@ -14337,7 +14351,6 @@ function isTypingShortcutExempt(event) {
   const key = String(event?.key || '').toLowerCase();
   const override = matchingShortcutOverrideAction(event);
   if (override?.typingExempt) return true;
-  if (matchesKeybind(event, 'pane.togglePaired') || matchesKeybind(event, 'workqueue.openForActiveChat')) return true;
   if (matchesKeybind(event, 'workqueue.togglePair')) {
     const target = event?.target;
     if (target instanceof Element && target.closest?.('[data-pane-kind="workqueue"] select')) return true;
