@@ -2590,6 +2590,7 @@ function showLogin(message = '', { clearPassword = true } = {}) {
   setLoginSubmitting(false);
   globalElements.loginOverlay.classList.add('open');
   globalElements.loginOverlay.setAttribute('aria-hidden', 'false');
+  globalElements.loginOverlay.removeAttribute('inert');
   globalElements.loginError.textContent = message;
   if (clearPassword) globalElements.loginPassword.value = '';
   updateLoginCapsHint(false);
@@ -2615,6 +2616,7 @@ function hideLogin() {
   setLoginSubmitting(false);
   globalElements.loginOverlay.classList.remove('open');
   globalElements.loginOverlay.setAttribute('aria-hidden', 'true');
+  globalElements.loginOverlay.setAttribute('inert', '');
   globalElements.loginError.textContent = '';
   updateLoginCapsHint(false);
   setAuthState(true);
