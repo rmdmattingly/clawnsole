@@ -6955,6 +6955,7 @@ function renderWorkqueueStatusFilters() {
     const id = `wq-status-${s}`;
     const label = document.createElement('label');
     label.className = 'wq-status-chip';
+    label.setAttribute('data-testid', `wq-modal-status-filter-${s}`);
     const count = Number(workqueueState.statusCounts?.[s] || 0);
     const display = `${formatWorkqueueStatusLabel(s)} (${count})`;
     label.innerHTML = `<input type="checkbox" id="${id}" ${workqueueState.statusFilter.has(s) ? 'checked' : ''} /> <span>${escapeHtml(display)}</span>`;
