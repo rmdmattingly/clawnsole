@@ -35,7 +35,7 @@ test('pane manager: lists panes + focuses via keyboard', async ({ page }) => {
   const panesStatus = page.getByTestId('panes-indicator');
   await expect(panesStatus).toContainText(/\d+ connected · \d+ disconnected · \d+ attention/i);
   await expect(panesStatus).toHaveAttribute('role', 'status');
-  await expect(panesStatus).toHaveAttribute('aria-label', 'Pane connection status');
+  await expect(panesStatus).toHaveAttribute('aria-label', /Pane summary: \d+ of \d+ panes connected/);
   await expect(panesStatus).not.toHaveJSProperty('tagName', 'BUTTON');
 
   const managePanes = page.getByRole('button', { name: 'Manage panes' });
@@ -361,7 +361,7 @@ test('pane manager: unread-only filter toggle', async ({ page }) => {
   const panesIndicator = page.getByTestId('panes-indicator');
   await expect(panesIndicator).toHaveText(/\d+ connected · \d+ disconnected · \d+ attention/i);
   await expect(panesIndicator).toHaveAttribute('role', 'status');
-  await expect(panesIndicator).toHaveAttribute('aria-label', 'Pane connection status');
+  await expect(panesIndicator).toHaveAttribute('aria-label', /Pane summary: \d+ of \d+ panes connected/);
   await expect(panesIndicator).toHaveCSS('cursor', 'default');
 
   const managerButton = page.getByTestId('pane-manager-button');
@@ -375,6 +375,54 @@ test('pane manager: unread-only filter toggle', async ({ page }) => {
   await expect(page.locator('.pane-manager-row')).toHaveCount(0);
 
   await page.keyboard.press('Escape');
+});
+
+test('topbar pane summary tracks attention and opens manager filtered to attention', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const summary = page.getByTestId('panes-indicator');
+  await expect(summary).toContainText(/2 connected · 0 disconnected · 0 attention/, { timeout: 30000 });
+  await expect(summary).toHaveAttribute(
+    'aria-label',
+    /2 of 2 panes connected, 0 disconnected, 0 need attention, 0 with unread activity/
+  );
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-chat').click();
+  await expect(summary).toContainText(/3 connected · 0 disconnected · 0 attention/, { timeout: 30000 });
+
+  const chatPanes = page.locator('[data-pane][data-pane-kind="chat"]');
+  const firstChat = chatPanes.first();
+  const secondChat = chatPanes.nth(1);
+  await firstChat.locator('[data-pane-input]').fill('attention summary');
+  await firstChat.locator('[data-pane-send]').click();
+  await secondChat.locator('[data-pane-input]').focus();
+  await expect(firstChat.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: attention summary', { timeout: 10000 });
+  await expect(summary).toContainText(/3 connected · 0 disconnected · 1 attention/);
+  await expect(summary).toHaveAttribute(
+    'aria-label',
+    /3 of 3 panes connected, 0 disconnected, 1 need attention, 1 with unread activity/
+  );
+
+  await summary.click();
+  await expect(page.getByTestId('pane-manager-modal')).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('.pane-manager-row')).toHaveCount(1);
+  await expect(page.locator('.pane-manager-row').first()).toContainText('Chat · main');
+
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => document.getElementById('disconnectBtn')?.click());
+  await expect(summary).toContainText(/1 connected · 2 disconnected · 2 attention/, { timeout: 30000 });
+
+  await summary.click();
+  await expect(page.locator('.pane-manager-row')).toHaveCount(2);
 });
 
 test('pane manager: status stays in sync with pane header while modal is open', async ({ page }) => {

@@ -17,6 +17,7 @@ const {
   paneNeedsAttention,
   deriveAuthOverlayState,
   deriveGlobalConnectionState,
+  derivePaneAttentionSummary,
   deriveDisconnectButtonState,
   extractChatText,
   normalizeHistoryEntries,
@@ -465,6 +466,38 @@ test('deriveGlobalConnectionState counts unread attention for screen readers', (
       attentionCount: 1,
       total: 2,
       ariaLabel: '2 of 2 panes connected; 0 disconnected; 2 unread items; 1 pane needs attention'
+    }
+  );
+});
+
+test('derivePaneAttentionSummary counts connected, disconnected, unread, and attention panes', () => {
+  assert.deepEqual(derivePaneAttentionSummary({ authed: false, panes: [{ connected: true, unreadCount: 1 }] }), {
+    connectedCount: 0,
+    disconnectedCount: 0,
+    unreadCount: 0,
+    attentionCount: 0,
+    total: 0,
+    text: '0 connected · 0 disconnected · 0 attention',
+    ariaLabel: 'Pane summary: 0 of 0 panes connected, 0 disconnected, 0 need attention, 0 with unread activity'
+  });
+
+  assert.deepEqual(
+    derivePaneAttentionSummary({
+      authed: true,
+      panes: [
+        { connected: true, statusState: 'connected', unreadCount: 0 },
+        { connected: false, statusState: 'disconnected', unreadCount: 0 },
+        { connected: true, statusState: 'connected', unreadCount: 2 }
+      ]
+    }),
+    {
+      connectedCount: 2,
+      disconnectedCount: 1,
+      unreadCount: 1,
+      attentionCount: 2,
+      total: 3,
+      text: '2 connected · 1 disconnected · 2 attention',
+      ariaLabel: 'Pane summary: 2 of 3 panes connected, 1 disconnected, 2 need attention, 1 with unread activity'
     }
   );
 });

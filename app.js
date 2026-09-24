@@ -372,6 +372,40 @@ const deriveGlobalConnectionState = __appCore.deriveGlobalConnectionState || ((s
   const ariaLabel = `${connectedCount} of ${total} panes connected; ${disconnectedCount} disconnected; ${unreadCount} unread ${unreadCount === 1 ? 'item' : 'items'}; ${attentionCount} ${attentionCount === 1 ? 'pane needs' : 'panes need'} attention`;
   return { state: nextState, meta, connectedCount, disconnectedCount, unreadCount, attentionCount, total, ariaLabel };
 });
+const derivePaneAttentionSummary = __appCore.derivePaneAttentionSummary || ((state) => {
+  const panes = Array.isArray(state?.panes) ? state.panes : [];
+  if (!state?.authed || panes.length === 0) {
+    const total = state?.authed ? panes.length : 0;
+    return {
+      connectedCount: 0,
+      disconnectedCount: 0,
+      unreadCount: 0,
+      attentionCount: 0,
+      total,
+      text: panes.length === 0 ? '' : '0 connected · 0 disconnected · 0 attention',
+      ariaLabel: panes.length === 0
+        ? 'Pane summary: no panes'
+        : 'Pane summary: 0 of 0 panes connected, 0 disconnected, 0 need attention, 0 with unread activity'
+    };
+  }
+  const connectedCount = panes.filter((pane) => !!pane?.connected).length;
+  const disconnectedCount = panes.filter((pane) => !pane?.connected).length;
+  const unreadCount = panes.filter((pane) => Math.max(0, Number(pane?.unreadCount || 0)) > 0).length;
+  const attentionCount = panes.filter((pane) => {
+    const stateText = String(pane?.statusState || (pane?.connected ? 'connected' : 'disconnected')).toLowerCase();
+    return Math.max(0, Number(pane?.unreadCount || 0)) > 0 || !pane?.connected || stateText === 'error' || stateText === 'offline';
+  }).length;
+  const total = panes.length;
+  return {
+    connectedCount,
+    disconnectedCount,
+    unreadCount,
+    attentionCount,
+    total,
+    text: `${connectedCount} connected · ${disconnectedCount} disconnected · ${attentionCount} attention`,
+    ariaLabel: `Pane summary: ${connectedCount} of ${total} panes connected, ${disconnectedCount} disconnected, ${attentionCount} need attention, ${unreadCount} with unread activity`
+  };
+});
 const deriveDisconnectButtonState = __appCore.deriveDisconnectButtonState || ((state) => {
   if (!state?.authed) return { disabled: true, text: 'Reconnect' };
   const panes = Array.isArray(state?.panes) ? state.panes : [];
@@ -2398,17 +2432,19 @@ function setStatusPill(el, state, meta = '') {
 
 function updateGlobalStatus() {
   const status = deriveGlobalConnectionState({ authed: uiState.authed, panes: paneManager.panes });
+  const paneSummary = derivePaneAttentionSummary({ authed: uiState.authed, panes: paneManager.panes });
   setStatusPill(globalElements.status, status.state, status.meta);
   if (globalElements.status) globalElements.status.hidden = !uiState.authed;
   renderActivePaneState();
   if (globalElements.panesStatusMeta) {
     globalElements.panesStatusMeta.hidden = !uiState.authed || !status.meta;
     globalElements.panesStatusMeta.textContent = status.meta;
-    globalElements.panesStatusMeta.title = status.meta ? `Pane status: ${status.meta}` : 'Pane status';
-    globalElements.panesStatusMeta.setAttribute('aria-label', 'Pane connection status');
+    globalElements.panesStatusMeta.title = paneSummary.ariaLabel || (status.meta ? `Pane status: ${status.meta}` : 'Pane status');
+    globalElements.panesStatusMeta.setAttribute('aria-label', paneSummary.ariaLabel || 'Pane connection status');
   }
   if (globalElements.paneManagerBtn) {
     globalElements.paneManagerBtn.hidden = !uiState.authed;
+    globalElements.paneManagerBtn.textContent = 'Manage panes';
     globalElements.paneManagerBtn.setAttribute('aria-label', 'Manage panes');
     globalElements.paneManagerBtn.title = 'Manage panes (Ctrl/Cmd+P)';
   }
@@ -3673,8 +3709,8 @@ const paneManagerUiState = {
   open: false,
   selectedIndex: 0,
   query: '',
-  unreadOnly: false,
   attentionOnly: false,
+  unreadOnly: false,
   visiblePaneKeys: [],
   collapsedKinds: {
     chat: false,
@@ -15087,12 +15123,16 @@ globalElements.paneManagerBtn?.addEventListener('click', (event) => {
   openPaneManager({ attentionOnly: !!event?.shiftKey });
 });
 
+globalElements.panesStatusMeta?.addEventListener('click', () => {
+  openPaneManager({ attentionOnly: true });
+});
+
 globalElements.paneManagerCloseBtn?.addEventListener('click', () => closePaneManager());
 
 globalElements.paneManagerSearch?.addEventListener('input', () => {
+  paneManagerUiState.attentionOnly = false;
   paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
   paneManagerUiState.selectedIndex = 0;
-  paneManagerUiState.attentionOnly = false;
   renderPaneManager();
 });
 
@@ -15101,9 +15141,9 @@ globalElements.paneManagerSearch?.addEventListener('keydown', (event) => {
 });
 
 globalElements.paneManagerUnreadOnly?.addEventListener('change', () => {
+  paneManagerUiState.attentionOnly = false;
   paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
   paneManagerUiState.selectedIndex = 0;
-  paneManagerUiState.attentionOnly = false;
   renderPaneManager();
 });
 
