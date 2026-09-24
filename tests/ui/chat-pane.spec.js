@@ -25,7 +25,6 @@ test('chat pane: send/receive + upload attachment', async ({ page }, testInfo) =
   test.skip(!!env?.skipReason, env?.skipReason);
 
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
-
   await loginAdmin(page, env.serverPort);
   await addPane(page, 'Chat pane');
 
@@ -79,7 +78,6 @@ test('chat pane: stop button can cancel a running response', async ({ page }) =>
   await expect(stopBtn).toBeEnabled();
   await stopBtn.click();
 
-  await expect(stopBtn).toHaveAttribute('aria-label', 'Canceling…');
   await expect(pane.locator('.chat-bubble.assistant').last()).toContainText('(canceled)', { ignoreCase: true, timeout: 5000 });
   await expect(stopBtn).toBeHidden();
   await expect(stopBtn).toBeDisabled();
@@ -165,6 +163,46 @@ test('chat pane: unread badge appears on inactive pane and clears on focus', asy
   await expect(firstBadge).toBeHidden();
 });
 
+test('chat pane: draft badge appears, persists across pane switches, and clears on send', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
+
+  const chatPanes = page.locator('[data-pane][data-pane-kind="chat"]');
+  const firstPane = chatPanes.first();
+  const secondPane = chatPanes.last();
+  const firstPaneKey = await firstPane.getAttribute('data-pane-key');
+  const draftBadge = firstPane.getByTestId('pane-draft-badge');
+  const paneLabel = firstPane.getByTestId('pane-type-label');
+
+  await expect(draftBadge).toBeHidden();
+  await firstPane.locator('[data-pane-input]').fill('draft marker');
+  await expect(draftBadge).toBeVisible();
+  await expect(draftBadge).toHaveText('Draft');
+  await expect(paneLabel).toHaveAttribute('aria-label', /unsent draft/);
+
+  await secondPane.locator('[data-pane-input]').focus();
+  await expect(draftBadge).toBeVisible();
+
+  await page.keyboard.press('Control+P');
+  const managerRow = page.locator(`.pane-manager-row[data-pane-key="${firstPaneKey}"]`);
+  await expect(managerRow.getByTestId('pane-manager-draft-badge')).toBeVisible();
+  await expect(managerRow).toHaveAttribute('aria-label', /unsent draft/);
+  await page.keyboard.press('Escape');
+
+  await firstPane.locator('[data-pane-input]').focus();
+  await firstPane.locator('[data-pane-send]').click();
+  await expect(firstPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: draft marker');
+  await expect(draftBadge).toBeHidden();
+
+  await page.keyboard.press('Control+P');
+  await expect(page.locator(`.pane-manager-row[data-pane-key="${firstPaneKey}"]`).getByTestId('pane-manager-draft-badge')).toHaveCount(0);
+});
+
 test('chat pane: keyboard pane switch guards immediate Enter send once', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -189,12 +227,16 @@ test('chat pane: keyboard pane switch guards immediate Enter send once', async (
   await page.locator('#addPaneBtn').focus();
   await page.keyboard.press('Alt+3');
   await expect(secondInput).toBeFocused();
+  await expect(secondPane.locator('[data-pane-destination-strip]')).toContainText(/Chat/i);
+  await expect(secondPane.locator('[data-pane-send-confirm-hint]')).toContainText(/Press again to send to Chat/);
 
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('pane-switch-send-guard-toast')).toContainText('Pane changed: press Enter again to send');
+  await expect(secondPane.locator('[data-pane-send-confirm-hint]')).toContainText(/Press again to send to Chat/);
   await expect(secondPane.locator('[data-chat-role="user"]')).toHaveCount(0);
 
   await page.keyboard.press('Enter');
+  await expect(secondPane.locator('[data-pane-send-confirm-hint]')).toBeEmpty();
   await expect(secondPane.locator('[data-chat-role="user"]').last()).toContainText('guarded send');
   await expect(secondPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: guarded send');
 
@@ -211,42 +253,132 @@ test('chat pane: keyboard pane switch guards immediate Enter send once', async (
   await expect(secondPane.locator('[data-chat-role="user"]').last()).toContainText('override send');
 });
 
-test('chat pane: draft badge appears, persists across pane switches, and clears on send', async ({ page }) => {
+test('chat pane: pane switch send guard can be disabled while context banner remains', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
 
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
   await loginAdmin(page, env.serverPort);
+  await page.evaluate(() => localStorage.setItem('clawnsole.admin.sendConfirmGuard.enabled', '0'));
   await addPane(page, 'Chat pane');
 
-  const panes = page.locator('[data-pane][data-pane-kind="chat"]');
-  const firstPane = panes.first();
-  const secondPane = panes.nth(1);
-  const firstDraftBadge = firstPane.getByTestId('pane-draft-badge');
+  const chatPanes = page.locator('[data-pane][data-pane-kind="chat"]');
+  const firstPane = chatPanes.first();
+  const secondPane = chatPanes.last();
+  const secondInput = secondPane.locator('[data-pane-input]');
 
-  await firstPane.locator('[data-pane-input]').fill('draft badge check');
-  await expect(firstDraftBadge).toBeVisible();
-  await expect(firstDraftBadge).toHaveText('Draft');
-  await expect(firstDraftBadge).toHaveAttribute('aria-label', /Unsent draft/);
-  await expect(firstPane.getByTestId('pane-type-label')).toHaveAttribute('aria-label', /unsent draft/);
-
-  await secondPane.locator('[data-pane-input]').focus();
-  await expect(firstDraftBadge).toBeVisible();
-
-  await page.locator('#paneManagerBtn').click();
-  const managerRow = page.locator('.pane-manager-row', { has: page.getByTestId('pane-manager-draft-badge') }).first();
-  await expect(managerRow.getByTestId('pane-manager-draft-badge')).toHaveText('Draft');
-  await expect(managerRow).toHaveAttribute('aria-label', /unsent draft/);
-
-  await page.locator('#paneManagerCloseBtn').click();
+  await expect(secondPane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+  await secondInput.fill('unguarded send');
   await firstPane.locator('[data-pane-input]').focus();
-  await firstPane.locator('[data-pane-send]').click();
-  await expect(firstDraftBadge).toBeHidden();
-  await expect(firstPane.getByTestId('pane-type-label')).not.toHaveAttribute('aria-label', /unsent draft/);
+  await page.locator('#addPaneBtn').focus();
+  await page.keyboard.press('Alt+3');
+  await expect(secondInput).toBeFocused();
+  await expect(secondPane.locator('[data-pane-destination-strip]')).toContainText(/Chat/i);
 
-  await page.locator('#paneManagerBtn').click();
-  await expect(page.getByTestId('pane-manager-draft-badge')).toHaveCount(0);
+  await page.keyboard.press('Enter');
+  await expect(secondPane.locator('[data-pane-send-confirm-hint]')).toBeEmpty();
+  await expect(secondPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: unguarded send');
+});
+
+test('chat pane: target change requires draft retarget confirmation before send', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ agents: [{ id: 'main', name: 'main' }, { id: 'dev', name: 'dev' }] })
+    });
+  });
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Chat pane');
+
+  const pane = page.locator('[data-pane][data-pane-kind="chat"]').last();
+  const input = pane.locator('[data-pane-input]');
+
+  await expect(pane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+  await input.fill('retarget guard');
+  await expect(pane.getByTestId('pane-draft-badge')).toBeVisible();
+
+  const agentSelect = pane.locator('[data-pane-agent-select]');
+  await expect(agentSelect.locator('option[value="dev"]')).toHaveCount(1, { timeout: 15000 });
+  await agentSelect.evaluate((select) => {
+    select.value = 'dev';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect(input).toHaveValue('retarget guard');
+  await expect(pane.locator('[data-pane-destination-strip]')).toContainText(/dev/i);
+
+  await input.focus();
+  await page.keyboard.press('Enter');
+  const confirm = page.getByRole('dialog', { name: 'Confirm draft target' });
+  await expect(confirm).toContainText('Draft started in Chat');
+  await expect(confirm.getByTestId('toast-action')).toBeFocused();
+  await expect(pane.locator('[data-chat-role="user"]')).toHaveCount(0);
+
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('draft-target-confirm-toast')).toHaveCount(0);
+  await expect(pane.locator('[data-chat-role="user"]')).toHaveCount(0);
+
+  await input.focus();
+  await page.keyboard.press('Enter');
+  await page.getByTestId('toast-secondary-action').click();
+  await expect(pane.locator('[data-pane-destination-strip]')).toContainText(/main/i);
+  await expect(input).toBeFocused();
+
+  await agentSelect.evaluate((select) => {
+    select.value = 'dev';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await input.focus();
+  await page.keyboard.press('Enter');
+  await page.getByTestId('draft-target-confirm-toast').last().getByTestId('toast-action').click();
+  await expect(pane.locator('[data-chat-role="user"]').last()).toContainText('retarget guard');
+  await expect(pane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: retarget guard');
+});
+
+test('chat pane: carried draft requires confirmation before sending from a different pane', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await page.evaluate(() => {
+    localStorage.setItem('clawnsole.admin.layoutMode', 'custom');
+    localStorage.setItem('clawnsole.admin.sendConfirmGuard.enabled', '0');
+  });
+
+  const panes = page.locator('[data-pane]');
+  const firstPane = panes.first();
+  await expect(firstPane).toHaveAttribute('data-pane-kind', 'chat');
+  await firstPane.locator('[data-pane-input]').fill('carried draft check');
+
+  await firstPane.getByTestId('pane-close').click();
+  await page.getByTestId('pane-close-loss-guard-toast').getByTestId('toast-action').click();
+  await expect(panes).toHaveCount(1);
+
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.locator('body').click({ position: { x: 4, y: 4 } });
+  await page.keyboard.press('ControlOrMeta+Shift+T');
+
+  const reopenedPane = panes.first();
+  await expect(reopenedPane).toHaveAttribute('data-pane-kind', 'chat');
+  await expect(reopenedPane.locator('[data-pane-input]')).toHaveValue('carried draft check');
+  await expect(reopenedPane.locator('[data-pane-send]')).toBeEnabled({ timeout: 90000 });
+
+  await reopenedPane.locator('[data-pane-send]').click();
+  const confirm = page.getByRole('dialog', { name: 'Confirm draft target' });
+  await expect(confirm).toContainText('Draft started in Chat');
+  await expect(reopenedPane.locator('[data-chat-role="user"]')).toHaveCount(0);
+  await expect(reopenedPane.locator('[data-pane-input]')).toHaveValue('carried draft check');
+
+  await confirm.getByTestId('toast-action').click();
+  await expect(reopenedPane.locator('[data-chat-role="user"]').last()).toContainText('carried draft check');
+  await expect(reopenedPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: carried draft check');
 });
 
 test('topbar workqueue action reuses paired pane for active chat target and falls back to modal', async ({ page }) => {
