@@ -33,10 +33,18 @@ test('paired pane toggle focuses an existing Chat/Workqueue counterpart', async 
   await expect(chatPane.locator('[data-pane-input]')).toBeFocused();
   await expect(chatPane.getByTestId('pane-paired-action')).toHaveAttribute('data-paired-state', 'focus');
 
+  await page.evaluate(() => {
+    focusPaneIndex(0);
+    document.activeElement?.blur?.();
+  });
   await page.keyboard.press('ControlOrMeta+Shift+G');
   await expect(workqueuePane.locator('[data-wq-queue-select]')).toBeFocused();
   await expect(paneInGrid(page, 'workqueue')).toHaveCount(1);
 
+  await page.evaluate(() => {
+    focusPaneIndex(1);
+    document.activeElement?.blur?.();
+  });
   await page.keyboard.press('ControlOrMeta+Shift+G');
   await expect(chatPane.locator('[data-pane-input]')).toBeFocused();
   await expect(paneInGrid(page, 'chat')).toHaveCount(1);
@@ -57,7 +65,10 @@ test('paired pane toggle opens a missing counterpart for the same target', async
 
   const chatPane = paneInGrid(page, 'chat').first();
   await expect(chatPane.getByTestId('pane-paired-action')).toHaveAttribute('data-paired-state', 'open');
-  await chatPane.locator('[data-pane-input]').focus();
+  await page.evaluate(() => {
+    focusPaneIndex(0);
+    document.activeElement?.blur?.();
+  });
 
   await page.keyboard.press('ControlOrMeta+Shift+G');
 
