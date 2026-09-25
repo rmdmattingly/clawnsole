@@ -5,17 +5,24 @@ const {
   escapeHtml,
   fmtRemaining,
   formatWorkqueueIssueTitle,
+  getWorkqueueIssueKey,
+  summarizeWorkqueueIssueDuplicateDensity,
   summarizeExactWorkqueueDuplicateRows,
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
+  normalizeWorkqueueScope,
+  deriveDefaultWorkqueueScope,
   normalizeAdminDestination,
   paneNeedsAttention,
   deriveAuthOverlayState,
   deriveGlobalConnectionState,
+  derivePaneAttentionSummary,
   deriveDisconnectButtonState,
   extractChatText,
-  normalizeHistoryEntries
+  normalizeHistoryEntries,
+  getShortcutGroups,
+  getShortcutIds
 } = require('../../lib/app-core.js');
 
 test('escapeHtml escapes html special chars', () => {
@@ -147,6 +154,42 @@ test('sortWorkqueueItems priority sort uses updatedAt desc tie-breaker', () => {
   assert.deepEqual(sorted.map((it) => it.id), ['c', 'b', 'a']);
 });
 
+test('workqueue canonical issue helpers calculate duplicate density', () => {
+  const items = [
+    {
+      id: 'old',
+      title: '[issue] rmdmattingly/clawnsole#320 Old',
+      updatedAt: '2026-03-01T00:00:00Z'
+    },
+    {
+      id: 'new',
+      title: 'Follow-up',
+      instructions: 'Repo: rmdmattingly/clawnsole\nIssue: #320',
+      updatedAt: '2026-03-02T00:00:00Z'
+    },
+    {
+      id: 'other',
+      title: 'Routine sweep',
+      updatedAt: '2026-03-03T00:00:00Z'
+    },
+    {
+      id: 'solo',
+      meta: { repo: 'RMDMATTINGLY/CLAWNSOLE', issueNumber: 321 },
+      title: 'Solo issue',
+      updatedAt: '2026-03-04T00:00:00Z'
+    }
+  ];
+
+  assert.equal(getWorkqueueIssueKey(items[0]), 'rmdmattingly/clawnsole#320');
+  assert.deepEqual(summarizeWorkqueueIssueDuplicateDensity(items), {
+    totalRows: 4,
+    issueRows: 3,
+    duplicateRows: 1,
+    duplicateGroups: 1,
+    density: 0.25
+  });
+});
+
 test('summarizeExactWorkqueueDuplicateRows collapses same dedupe key title and status only', () => {
   const items = [
     {
@@ -243,6 +286,42 @@ test('normalizePaneKind handles aliases safely', () => {
   assert.equal(normalizePaneKind('x'), 'chat');
 });
 
+test('deriveDefaultWorkqueueScope prefers assigned for explicit workqueue agent targets', () => {
+  assert.equal(normalizeWorkqueueScope('assigned'), 'assigned');
+  assert.equal(normalizeWorkqueueScope('UNASSIGNED'), 'unassigned');
+  assert.equal(normalizeWorkqueueScope('unknown'), 'all');
+
+  assert.equal(
+    deriveDefaultWorkqueueScope({ explicitAgentId: 'hop', storedDefault: 'unassigned' }),
+    'assigned'
+  );
+  assert.equal(
+    deriveDefaultWorkqueueScope({ explicitAgentId: '', storedDefault: 'unassigned' }),
+    'unassigned'
+  );
+  assert.equal(
+    deriveDefaultWorkqueueScope({ explicitAgentId: 'hop', explicitScope: 'all', storedDefault: 'unassigned' }),
+    'all'
+  );
+});
+
+test('shortcut catalog has stable unique ids and includes fleet shortcuts', () => {
+  const groups = getShortcutGroups();
+  const ids = getShortcutIds();
+  assert.ok(groups.length >= 4);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(ids.includes('fleet.open'));
+  assert.ok(ids.includes('fleet.open-heartbeat-sort'));
+  assert.ok(ids.includes('workqueue.open-active-chat-agent'));
+  assert.ok(
+    groups.some((group) => group.shortcuts.some((shortcut) =>
+      shortcut.id === 'pane.focus.accel-number' &&
+      shortcut.keys.includes('Cmd/Ctrl') &&
+      shortcut.keys.includes('1..9')
+    ))
+  );
+});
+
 test('deriveAuthOverlayState captures auth/role transition flags', () => {
   assert.deepEqual(deriveAuthOverlayState({ authed: true, role: 'admin' }), {
     isAdmin: true,
@@ -274,8 +353,8 @@ test('deriveAuthOverlayState captures auth/role transition flags', () => {
     rolePillAdmin: false,
     rolePillLocked: true,
     rolePillSignedOut: false,
-    rolePillActionLabel: 'Focus password input to unlock session',
-    rolePillTooltip: 'Session context: locked as Admin in local. Click to unlock this session.',
+    rolePillActionLabel: 'Authentication status: Locked',
+    rolePillTooltip: 'Session context: locked in local. Use the Unlock action to sign in.',
     authLabel: 'Locked',
     principalLabel: 'Not signed in',
     environmentLabel: 'local',
@@ -285,6 +364,16 @@ test('deriveAuthOverlayState captures auth/role transition flags', () => {
     logoutEnabled: true,
     logoutOpacity: '1'
   });
+  assert.equal(deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).authState, 'locked');
+  assert.equal(deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).rolePillText, 'Locked');
+  assert.equal(
+    deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).rolePillTooltip,
+    'Session context: locked in local. Use the Unlock action to sign in.'
+  );
+  assert.equal(
+    deriveAuthOverlayState({ authed: false, role: null, routeRole: 'admin' }).rolePillActionLabel,
+    'Authentication status: Locked'
+  );
   assert.equal(deriveAuthOverlayState({ authed: true, role: 'guest', environment: 'qa' }).rolePillText, 'Signed in - Guest - qa');
   assert.equal(deriveAuthOverlayState({ authed: false, role: 'guest' }).logoutOpacity, '1');
 });
@@ -323,7 +412,7 @@ test('normalizeHistoryEntries supports gateway payload variants', () => {
 test('deriveGlobalConnectionState handles signed-out, reconnecting, and hard error transitions', () => {
   assert.deepEqual(deriveGlobalConnectionState({ authed: false, panes: [{ connected: true }] }), {
     state: 'disconnected',
-    meta: 'sign in required'
+    meta: ''
   });
 
   assert.deepEqual(deriveGlobalConnectionState({ authed: true, panes: [] }), {
@@ -393,6 +482,38 @@ test('deriveGlobalConnectionState counts unread attention for screen readers', (
       attentionCount: 1,
       total: 2,
       ariaLabel: '2 of 2 panes connected; 0 disconnected; 2 unread items; 1 pane needs attention'
+    }
+  );
+});
+
+test('derivePaneAttentionSummary counts connected, disconnected, unread, and attention panes', () => {
+  assert.deepEqual(derivePaneAttentionSummary({ authed: false, panes: [{ connected: true, unreadCount: 1 }] }), {
+    connectedCount: 0,
+    disconnectedCount: 0,
+    unreadCount: 0,
+    attentionCount: 0,
+    total: 0,
+    text: '0 connected · 0 disconnected · 0 attention',
+    ariaLabel: 'Pane summary: 0 of 0 panes connected, 0 disconnected, 0 need attention, 0 with unread activity'
+  });
+
+  assert.deepEqual(
+    derivePaneAttentionSummary({
+      authed: true,
+      panes: [
+        { connected: true, statusState: 'connected', unreadCount: 0 },
+        { connected: false, statusState: 'disconnected', unreadCount: 0 },
+        { connected: true, statusState: 'connected', unreadCount: 2 }
+      ]
+    }),
+    {
+      connectedCount: 2,
+      disconnectedCount: 1,
+      unreadCount: 1,
+      attentionCount: 2,
+      total: 3,
+      text: '2 connected · 1 disconnected · 2 attention',
+      ariaLabel: 'Pane summary: 2 of 3 panes connected, 1 disconnected, 2 need attention, 1 with unread activity'
     }
   );
 });
