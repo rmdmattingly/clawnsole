@@ -8607,8 +8607,9 @@ function renderWorkqueuePaneItems(pane) {
       const statuses = Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [];
       const statusLabel = statuses.length ? statuses.join(', ') : 'default';
       const scopeLabel = pane.workqueue?.scopeFilter || 'all';
+      const itemSearch = String(pane.workqueue?.quickFilters?.search || '').trim();
       const filtersHidingAll = totalCount > 0;
-      const title = filtersHidingAll ? 'No items match current filters.' : 'No items in this queue.';
+      const title = itemSearch ? `No items match "${itemSearch}".` : (filtersHidingAll ? 'No items match current filters.' : 'No items in this queue.');
       const hiddenSummary = formatWorkqueueHiddenBreakdown(hiddenCounts);
       const emptyReasonParts = [];
       if (hiddenCounts.status > 0) emptyReasonParts.push(`status=${statusLabel}`);
@@ -14889,6 +14890,24 @@ window.addEventListener('keydown', (event) => {
   if (!event.defaultPrevented && roleState.role === 'admin') {
     const activeKey = focusedPaneKey() || paneMruOrder()[0] || '';
     const activePane = (paneManager?.panes || []).find((pane) => String(pane?.key || '') === activeKey);
+    if (
+      activePane?.kind === 'workqueue' &&
+      String(event.key || '') === '/' &&
+      !event.shiftKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !isTypingContext(event.target) &&
+      !isAnyOverlayOpen()
+    ) {
+      const itemSearch = activePane.elements?.thread?.querySelector?.('[data-wq-item-search]');
+      if (itemSearch) {
+        event.preventDefault();
+        itemSearch.focus();
+        itemSearch.select?.();
+        return;
+      }
+    }
     if (activePane?.kind === 'workqueue' && activePane?.workqueue?.keyboardMode) {
       if (handleWorkqueuePaneKeyboard(event, activePane)) return;
     }
