@@ -56,6 +56,7 @@ test('admin modal dialogs expose only the active overlay and keep closed overlay
 
   await expectNoOpenModals(page);
 
+  await page.locator('body').click({ position: { x: 1, y: 1 } });
   await page.keyboard.press('ControlOrMeta+K');
   await expectOnlyOpenModal(page, '#commandPaletteModal');
   await page.keyboard.press('Escape');
