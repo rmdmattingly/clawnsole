@@ -15181,6 +15181,7 @@ globalElements.status?.addEventListener('click', () => {
   paneManager.connectIfNeeded();
 });
 
+globalElements.signedOutUnlockBtn?.addEventListener('click', () => showLogin());
 globalElements.rolePill?.addEventListener('click', () => {
   if (!uiState.authed) {
     closeAuthSessionPopover();
