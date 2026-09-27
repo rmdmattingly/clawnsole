@@ -814,6 +814,123 @@ test('agents modal persists triage query and sort across reopen and reload, then
   await expect(rows).toHaveCount(3);
 });
 
+test('fleet list keeps header and identity columns sticky while scanning', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = Array.from({ length: 40 }, (_, index) => {
+    const id = `scan-agent-${String(index + 1).padStart(2, '0')}`;
+    return { id, name: id, displayName: id, model: `model-${index + 1}`, host: `host-${index + 1}` };
+  });
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    const lastSeen = {};
+    for (let index = 1; index <= 40; index += 1) {
+      lastSeen[`scan-agent-${String(index).padStart(2, '0')}`] = now;
+    }
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify(lastSeen));
+    localStorage.setItem('clawnsole.admin.agents.healthyCollapsed', '0');
+    localStorage.removeItem('clawnsole.admin.agents.columns');
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await page.locator('#agentsColumnPicker summary').click();
+  await page.locator('#agentsColumn_model').check();
+  await page.locator('#agentsColumn_host').check();
+  await page.locator('#agentsColumnPicker').evaluate((el) => { el.open = false; });
+
+  const assertStickyFleetScan = async (density) => {
+    if (density === 'compact') {
+      await page.getByRole('button', { name: 'Compact' }).click();
+    }
+
+    await page.locator('#agentsList').evaluate((el) => {
+      el.style.maxHeight = '260px';
+      el.style.maxWidth = '520px';
+      el.scrollTop = 260;
+      el.scrollLeft = 260;
+    });
+
+    const header = page.locator('#agentsList .agents-table-header').first();
+    const identityHeader = header.locator('.agents-table-agent-label');
+    const healthHeader = header.locator('.agents-table-health-label');
+    await expect(page.locator('#agentsList .agents-row[data-agent-id="scan-agent-20"]')).toHaveCount(1);
+    await page.locator('#agentsList').evaluate((list) => {
+      const row = list.querySelector('.agents-row[data-agent-id="scan-agent-20"]');
+      row?.scrollIntoView({ block: 'center', inline: 'nearest' });
+    });
+    const row20 = page.locator('#agentsList .agents-row[data-agent-id="scan-agent-20"]');
+
+    await expect(header).toBeVisible();
+    await expect(identityHeader).toBeVisible();
+    await expect(healthHeader).toBeVisible();
+    await expect(row20.locator('.agents-row-title')).toContainText('scan-agent-20');
+    await expect(row20.locator('.agents-health-state-chip')).toHaveText('Healthy');
+
+    const metrics = await page.locator('#agentsList').evaluate((list) => {
+      const headerEl = list.querySelector('.agents-table-header');
+      const pinEl = headerEl?.querySelector('.agents-table-pin-label') || null;
+      const identityEl = headerEl?.querySelector('.agents-table-agent-label') || null;
+      const healthEl = headerEl?.querySelector('.agents-table-health-label') || null;
+      const rowIdentity = list.querySelector('.agents-row[data-agent-id="scan-agent-20"] .agents-row-identity');
+      const rowHealth = list.querySelector('.agents-row[data-agent-id="scan-agent-20"] .agents-row-health');
+      const style = (el) => el ? getComputedStyle(el) : null;
+      const bounds = (el) => el ? el.getBoundingClientRect() : null;
+      const listBounds = list.getBoundingClientRect();
+      const beforeIdentityLeft = bounds(identityEl)?.left || 0;
+      const beforeHealthLeft = bounds(healthEl)?.left || 0;
+      const beforeRowIdentityLeft = bounds(rowIdentity)?.left || 0;
+      const beforeRowHealthLeft = bounds(rowHealth)?.left || 0;
+      list.scrollLeft += 120;
+      const afterIdentityLeft = bounds(identityEl)?.left || 0;
+      const afterHealthLeft = bounds(healthEl)?.left || 0;
+      const afterRowIdentityLeft = bounds(rowIdentity)?.left || 0;
+      const afterRowHealthLeft = bounds(rowHealth)?.left || 0;
+      return {
+        scrollTop: list.scrollTop,
+        scrollLeft: list.scrollLeft,
+        headerPosition: style(headerEl)?.position,
+        identityPosition: style(identityEl)?.position,
+        healthPosition: style(healthEl)?.position,
+        pinWidth: Math.round(bounds(pinEl)?.width || 0),
+        rowIdentityPosition: style(rowIdentity)?.position,
+        rowHealthPosition: style(rowHealth)?.position,
+        headerTopDelta: Math.abs((bounds(headerEl)?.top || 0) - list.getBoundingClientRect().top),
+        rowIdentityVisible: (bounds(rowIdentity)?.left || 0) >= listBounds.left && (bounds(rowIdentity)?.right || 0) <= listBounds.right,
+        rowHealthVisible: (bounds(rowHealth)?.left || 0) >= listBounds.left && (bounds(rowHealth)?.right || 0) <= listBounds.right,
+        identityHorizontalDrift: Math.abs(afterIdentityLeft - beforeIdentityLeft),
+        healthHorizontalDrift: Math.abs(afterHealthLeft - beforeHealthLeft),
+        rowIdentityHorizontalDrift: Math.abs(afterRowIdentityLeft - beforeRowIdentityLeft),
+        rowHealthHorizontalDrift: Math.abs(afterRowHealthLeft - beforeRowHealthLeft)
+      };
+    });
+
+    expect(metrics.scrollTop).toBeGreaterThan(0);
+    expect(metrics.scrollLeft).toBeGreaterThan(0);
+    expect(metrics.headerPosition).toBe('sticky');
+    expect(metrics.identityPosition).toBe('sticky');
+    expect(metrics.healthPosition).toBe('sticky');
+    expect(metrics.pinWidth).toBe(density === 'compact' ? 32 : 42);
+    expect(metrics.rowIdentityPosition).toBe('sticky');
+    expect(metrics.rowHealthPosition).toBe('sticky');
+    expect(metrics.headerTopDelta).toBeLessThan(4);
+    expect(metrics.rowIdentityVisible).toBeTruthy();
+    expect(metrics.rowHealthVisible).toBeTruthy();
+    expect(metrics.identityHorizontalDrift).toBeLessThan(4);
+    expect(metrics.healthHorizontalDrift).toBeLessThan(4);
+    expect(metrics.rowIdentityHorizontalDrift).toBeLessThan(4);
+    expect(metrics.rowHealthHorizontalDrift).toBeLessThan(4);
+  };
+
+  await assertStickyFleetScan('comfortable');
+  await assertStickyFleetScan('compact');
+});
+
 test('fleet attention mode sections healthy agents and keeps filters while expanding', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
