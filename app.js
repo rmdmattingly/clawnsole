@@ -11302,7 +11302,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
         <details class="wq-enqueue">
           <summary>Enqueue new item</summary>
-          <div class="hint wq-enqueue-help">Enqueue to queue uses the current Viewing queue; assignment only suggests who should pick it up.</div>
+          <div class="hint wq-enqueue-help">Enqueue to queue uses the queue currently shown; assignment only suggests who should pick it up.</div>
           <form data-wq-enqueue-form class="wq-enqueue-form">
             <div class="wq-control-group wq-enqueue-destination" role="group" aria-label="Enqueue destination">
               <div class="wq-label">Enqueue to</div>
