@@ -5766,7 +5766,7 @@ function openCommandPalette() {
   if (!globalElements.commandPaletteModal) return;
 
   commandPaletteState.open = true;
-  commandPaletteState.originPaneKey = focusedPaneKey() || rememberedActivePaneKey() || lastFocusedPaneKey || '';
+  commandPaletteState.originPaneKey = focusedPaneKey() || '';
   commandPaletteState.items = buildCommandPaletteItems();
   commandPaletteState.filtered = commandPaletteState.items.slice();
   commandPaletteState.selectedIndex = 0;
@@ -8979,8 +8979,10 @@ async function workqueueEnqueueFromUi() {
     }
 
     const item = data.item || null;
-    const assignLabel = 'Queued as Unassigned';
-    setWorkqueueActionStatus(item && item._deduped ? `Deduped (already exists): ${item.id} (${assignLabel})` : assignLabel);
+    const destinationLabel = `Enqueued to ${queue}`;
+    const assignLabel = 'Unassigned';
+    setWorkqueueActionStatus(item && item._deduped ? `Deduped in ${queue}: ${item.id} (${assignLabel})` : `${destinationLabel} (${assignLabel})`);
+    showToast(`${destinationLabel}: ${title}`, { kind: 'info', testId: 'workqueue-enqueue-toast' });
 
     await fetchAndRenderWorkqueueItems();
     if (item?.id) {
@@ -11300,6 +11302,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
         <details class="wq-enqueue">
           <summary>Enqueue new item</summary>
+          <div class="hint wq-enqueue-help">Enqueue to queue uses the queue currently shown; assignment only suggests who should pick it up.</div>
           <form data-wq-enqueue-form class="wq-enqueue-form">
             <div class="wq-control-group wq-enqueue-destination" role="group" aria-label="Enqueue destination">
               <div class="wq-label">Enqueue to</div>
@@ -11338,11 +11341,11 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
 
             <div class="wq-enqueue-actions">
               <label class="wq-field wq-agent-picker-field">
-                <span class="wq-label">Assign to</span>
+                <span class="wq-label">Assign to worker</span>
                 <div class="wq-agent-picker" data-wq-claim-agent-picker>
-                  <input data-wq-claim-agent-search type="search" aria-label="Search enqueue assignment target" autocomplete="off" />
+                  <input data-wq-claim-agent-search type="search" aria-label="Search worker assignment target" autocomplete="off" />
                   <input data-wq-claim-agent type="hidden" value="" />
-                  <div class="wq-agent-picker-list" data-wq-claim-agent-list role="listbox" aria-label="Enqueue assignment targets"></div>
+                  <div class="wq-agent-picker-list" data-wq-claim-agent-list role="listbox" aria-label="Worker assignment targets"></div>
                 </div>
                 <span class="hint">Who should pick this up</span>
               </label>
@@ -11350,7 +11353,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
                 <span class="wq-label">Lease ms</span>
                 <input data-wq-claim-lease type="number" value="900000" />
               </label>
-              <button data-wq-enqueue-submit type="submit">Enqueue</button>
+              <button data-wq-enqueue-submit type="submit">Enqueue to queue</button>
             </div>
 
             <div class="hint" data-wq-enqueue-status aria-live="polite"></div>
@@ -12254,6 +12257,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
         }
 
         const item = data.item || null;
+        const destinationLabel = `Enqueued to ${queue}`;
         const assignToAgentId = String(enqueueAssignTo?.value || '').trim();
         const assignLabel = assignToAgentId
           ? `Queued for ${formatAgentLabel(getAgentRecord(assignToAgentId), { includeId: false })}`

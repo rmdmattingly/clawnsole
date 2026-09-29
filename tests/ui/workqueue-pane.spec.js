@@ -1269,6 +1269,7 @@ test('workqueue pane: enqueue destination is distinct from viewing queue', async
   await expect(destinationSelect).toHaveAttribute('aria-label', 'Enqueue destination queue');
   await expect(pane.getByLabel('Enqueue destination', { exact: true }).getByText('Enqueue to')).toBeVisible();
   await expect(pane.getByText('New items go here; the viewed queue stays separate.')).toBeVisible();
+  await expect(pane.locator('[data-wq-enqueue-submit]')).toHaveText('Enqueue to queue');
 
   await destinationSearch.fill('qa-destination');
   await expect(destinationSelect.locator('option', { hasText: 'qa-destination' })).toHaveCount(1);
