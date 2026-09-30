@@ -405,6 +405,46 @@ test('pane manager: unread-only filter toggle', async ({ page }) => {
   await page.keyboard.press('Escape');
 });
 
+test('pane manager: unread badges survive admin pane reload', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([
+        { key: 'persistA', kind: 'chat', agentId: 'main', unreadCount: 2, unreadKind: 'chat' },
+        {
+          key: 'persistB',
+          kind: 'workqueue',
+          agentId: 'main',
+          queue: 'dev-team',
+          statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+          scopeFilter: 'all',
+          sortKey: 'priority',
+          sortDir: 'desc',
+          unreadCount: 1,
+          unreadKind: 'workqueue'
+        }
+      ])
+    );
+  });
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"]').first().getByTestId('pane-type-label')).toContainText('1 unread');
+
+  await page.getByTestId('pane-manager-button').click();
+  await expect(page.getByTestId('pane-manager-modal')).toHaveAttribute('aria-hidden', 'false');
+  await page.getByTestId('pane-manager-unread-only').check();
+  await expect(page.locator('.pane-manager-row')).toHaveCount(1);
+  await expect(page.getByTestId('pane-manager-unread-badge')).toHaveText('1 unread');
+});
+
 test('topbar pane summary tracks attention and opens manager filtered to attention', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
