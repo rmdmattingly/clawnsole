@@ -27,6 +27,8 @@ Clawnsole’s E2E tests (Playwright) should prefer **stable, semantic selectors*
 
 - `pane`
 - `pane-type-label`
+- `pane-name-token`
+- `pane-name-target`
 - `pane-agent-select`
 - `pane-connection-status`
 - `pane-close`

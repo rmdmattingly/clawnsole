@@ -10,7 +10,8 @@ const {
   statePaths,
   listAssignments,
   setAssignments,
-  resolveClaimQueues
+  resolveClaimQueues,
+  collapseCanonicalIssueDuplicates
 } = require('../lib/workqueue');
 
 function parseArgs(argv) {
@@ -53,11 +54,12 @@ Usage:
   clawnsole workqueue <command> [options]
 
 Workqueue commands:
-  enqueue            --queue <name> --title <t> --instructions <text> [--priority <n>] [--dedupeKey <k>]
+  enqueue            --queue <name> --title <t> --instructions <text> [--priority <n>] [--dedupeKey <k>] [--repo <owner/name> --issueNumber <n>]
   claim-next         --agent <id> [--queues <q1,q2>] [--leaseMs <ms>]
   done               <itemId> --agent <id> [--result <json|@file>]
   fail               <itemId> --agent <id> --error <text>
   progress           <itemId> --agent <id> --note <text> [--leaseMs <ms>]
+  collapse-duplicates [--queue <name>] [--dryRun]
   inspect            <itemId>
   list               [--queue <name>] [--status <s1,s2>]
   assignments list
@@ -117,10 +119,13 @@ async function main() {
     const instructions = args.instructions;
     const priority = args.priority !== undefined ? Number(args.priority) : 0;
     const dedupeKey = args.dedupeKey !== undefined ? String(args.dedupeKey) : '';
+    const repo = args.repo !== undefined ? String(args.repo) : '';
+    const issueNumber = args.issueNumber !== undefined ? args.issueNumber : undefined;
     if (!queue) die('enqueue requires --queue');
     if (!instructions) die('enqueue requires --instructions');
-    const item = enqueueItem(null, { queue, title, instructions, priority, dedupeKey });
-    printJson({ ok: true, item });
+    const item = enqueueItem(null, { queue, title, instructions, priority, dedupeKey, repo, issueNumber });
+    const result = item && item._enqueueAction === 'updated_existing' ? 'updated_existing' : 'created';
+    printJson({ ok: true, result, item });
     return;
   }
 
@@ -189,6 +194,15 @@ async function main() {
     const state = loadState(null);
     const item = state.items.find((it) => it.id === itemId) || null;
     printJson({ ok: true, item });
+    return;
+  }
+
+  if (cmd === 'collapse-duplicates') {
+    const result = collapseCanonicalIssueDuplicates(null, {
+      queue: args.queue,
+      dryRun: !!args.dryRun
+    });
+    printJson(result);
     return;
   }
 
