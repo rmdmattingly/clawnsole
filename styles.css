@@ -2341,7 +2341,7 @@ button.send-btn .btn-icon {
   overflow: auto;
   overscroll-behavior: contain;
   padding-right: 2px;
-  scrollbar-gutter: stable both-edges;
+  scrollbar-gutter: stable;
 }
 
 .agents-list.compact {
