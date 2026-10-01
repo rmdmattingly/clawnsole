@@ -4,6 +4,14 @@ const { startTestEnv, loginAdmin, attachConsoleErrorAsserts } = require('./_help
 
 let env;
 
+async function seedSingleChatPane(page) {
+  await page.addInitScript(() => {
+    localStorage.setItem('clawnsole.admin.panes.v1', JSON.stringify([
+      { key: 'pw-single-chat', kind: 'chat', agentId: 'main' }
+    ]));
+  });
+}
+
 test.beforeAll(async () => {
   env = await startTestEnv();
 });
@@ -24,6 +32,7 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
 
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
+  await seedSingleChatPane(page);
   await loginAdmin(page, env.serverPort);
 
   const addBtn = page.locator('#addPaneBtn');
