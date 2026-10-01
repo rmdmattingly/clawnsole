@@ -6,7 +6,7 @@ const path = require('node:path');
 const http = require('node:http');
 
 const { createClawnsoleServer } = require('../../clawnsole-server');
-const { enqueueItem } = require('../../lib/workqueue');
+const { enqueueItem, loadState, saveState } = require('../../lib/workqueue');
 
 function mkTempEnv() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawnsole-wq-api-'));
@@ -166,6 +166,102 @@ test('workqueue API: enqueue creates item', async () => {
   }
 });
 
+test('workqueue API: issue-backed enqueue reports updated_existing for repeated automation', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+    const headers = { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' };
+    let latest = null;
+
+    for (let i = 0; i < 10; i++) {
+      latest = await httpPostJson(
+        'http://127.0.0.1:' + port + '/api/workqueue/enqueue',
+        {
+          queue: 'dev-team',
+          title: `Automated issue enqueue ${i}`,
+          instructions: 'Ship issue-backed work',
+          priority: i,
+          repo: 'rmdmattingly/clawnsole',
+          issueNumber: 392,
+          meta: { source: 'hourly-auto-enqueue' }
+        },
+        headers
+      );
+      assert.equal(latest.status, 200);
+      assert.equal(latest.json?.ok, true);
+    }
+
+    assert.equal(latest.json?.result, 'updated_existing');
+    assert.equal(latest.json?.item?.dedupeKey, 'rmdmattingly/clawnsole#392');
+    assert.equal(latest.json?.item?.priority, 9);
+
+    const list = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/items?queue=dev-team`, headers);
+    assert.equal(list.status, 200);
+    assert.equal(list.json?.items?.length, 1);
+    assert.equal(list.json?.items?.[0]?.title, 'Automated issue enqueue 9');
+  } finally {
+    server.close();
+  }
+});
+
+test('workqueue API: issue-backed enqueue canonicalizes payload dedupe variants', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+    const headers = { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' };
+    const payloads = [
+      {
+        queue: 'dev-team',
+        title: 'Colon issue key',
+        instructions: 'Ship issue work',
+        priority: 1,
+        dedupeKey: 'issue:rmdmattingly/clawnsole:392'
+      },
+      {
+        queue: 'dev-team',
+        title: 'Meta issue key',
+        instructions: 'Ship issue work',
+        priority: 2,
+        meta: { dedupeKey: 'rmdmattingly/clawnsole#392' }
+      },
+      {
+        queue: 'dev-team',
+        title: 'Explicit issue',
+        instructions: 'Ship issue work',
+        priority: 3,
+        repo: 'rmdmattingly/clawnsole',
+        issueNumber: 392
+      }
+    ];
+
+    let latest = null;
+    for (const payload of payloads) {
+      latest = await httpPostJson('http://127.0.0.1:' + port + '/api/workqueue/enqueue', payload, headers);
+      assert.equal(latest.status, 200);
+      assert.equal(latest.json?.ok, true);
+    }
+
+    assert.equal(latest.json?.result, 'updated_existing');
+    assert.equal(latest.json?.item?.dedupeKey, 'rmdmattingly/clawnsole#392');
+    assert.equal(latest.json?.item?.title, 'Explicit issue');
+
+    const list = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/items?queue=dev-team`, headers);
+    assert.equal(list.status, 200);
+    assert.equal(list.json?.items?.length, 1);
+    assert.equal(list.json?.items?.[0]?.dedupeKey, 'rmdmattingly/clawnsole#392');
+  } finally {
+    server.close();
+  }
+});
+
 test('workqueue API: claim-next claims a ready item', async () => {
   const { openclawHome } = mkTempEnv();
   fs.mkdirSync(openclawHome, { recursive: true });
@@ -239,6 +335,52 @@ test('workqueue API: delete removes item', async () => {
     assert.equal(list.status, 200);
     assert.equal(list.json?.ok, true);
     assert.equal(list.json.items.length, 0);
+  } finally {
+    server.close();
+  }
+});
+
+test('workqueue API: bulk archive previews then archives old terminal items only', async () => {
+  const { openclawHome } = mkTempEnv();
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(path.join(openclawHome, 'clawnsole.json'), JSON.stringify({ adminPassword: 'admin', authVersion: 'test' }));
+
+  const oldDone = enqueueItem(null, { queue: 'dev-team', title: 'old done', instructions: 'do1', priority: 1 });
+  const oldReady = enqueueItem(null, { queue: 'dev-team', title: 'old ready', instructions: 'do2', priority: 1 });
+  const freshFailed = enqueueItem(null, { queue: 'dev-team', title: 'fresh failed', instructions: 'do3', priority: 1 });
+
+  const { loadState, saveState } = require('../../lib/workqueue');
+  const state = loadState(null);
+  for (const item of state.items) {
+    if (item.id === oldDone.id) Object.assign(item, { status: 'done', updatedAt: '2026-01-01T00:00:00.000Z' });
+    if (item.id === oldReady.id) Object.assign(item, { status: 'ready', updatedAt: '2026-01-01T00:00:00.000Z' });
+    if (item.id === freshFailed.id) Object.assign(item, { status: 'failed', updatedAt: new Date().toISOString() });
+  }
+  saveState(null, state);
+
+  const { server, port } = await startServer({ openclawHome });
+  try {
+    const cookie = Buffer.from('admin::test', 'utf8').toString('base64');
+    const headers = { Cookie: 'clawnsole_auth=' + cookie + '; clawnsole_role=admin' };
+    const url = 'http://127.0.0.1:' + port + '/api/workqueue/archive-terminal';
+
+    const preview = await httpPostJson(url, { queue: 'dev-team', olderThanDays: 30, previewOnly: true }, headers);
+    assert.equal(preview.status, 200);
+    assert.equal(preview.json?.ok, true);
+    assert.equal(preview.json?.previewCount, 1);
+    assert.equal(loadState(null).items.length, 3);
+
+    const applied = await httpPostJson(url, { queue: 'dev-team', olderThanDays: 30, previewOnly: false }, headers);
+    assert.equal(applied.status, 200);
+    assert.equal(applied.json?.ok, true);
+    assert.equal(applied.json?.archivedCount, 1);
+
+    const list = await httpGetJson(`http://127.0.0.1:${port}/api/workqueue/items?queue=dev-team`, headers);
+    assert.equal(list.status, 200);
+    assert.deepEqual(
+      list.json.items.map((item) => item.title).sort(),
+      ['fresh failed', 'old ready'].sort()
+    );
   } finally {
     server.close();
   }

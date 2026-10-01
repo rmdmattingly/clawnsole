@@ -12,11 +12,11 @@ These feed per-pane variables (`--pane-accent-rgb`, `--pane-accent`, `--pane-hea
 
 1. Pane container/card chrome (`.chat-panel.pane`)
 2. Pane header accent bar (`.pane-header`)
-3. Pane type pill (`.pane-type-*`)
-4. Pane Manager rows and swatch dots (`.pane-manager-row`, `.pane-manager-accent`)
+3. Pane type badge/pill (`.pane-type-badge`, `.pane-type-*`)
+4. Pane Manager rows and type badges (`.pane-manager-row`, `.pane-manager-type-badge`)
 
 Testing hook selectors:
 
 - Pane root: `[data-pane][data-pane-kind="<kind>"][data-pane-accent-kind="<kind>"]`
-- Type pill: `[data-pane-type-pill][data-pane-accent="<kind>"]`
-- Pane Manager row swatch: `[data-pane-manager-accent="<kind>"]`
+- Header type badge: `[data-pane-type-pill][data-pane-accent="<kind>"]`
+- Pane Manager type badge: `.pane-manager-row[data-pane-kind="<kind>"] [data-pane-type-badge][data-pane-accent="<kind>"]`
