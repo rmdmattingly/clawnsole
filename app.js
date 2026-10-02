@@ -13368,11 +13368,11 @@ const paneManager = {
     if (roleState.role !== 'admin') return;
 
     const normalizedKind = normalizePaneKind(kind);
+    const forceNew = !!options?.forceNew;
     const nextQueue = String(options?.queue || 'dev-team').trim() || 'dev-team';
     const nextAgentId = normalizeAgentId(options?.agentId || storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main'));
     const nextCronAgentId = String(options?.cronAgentId || '').trim();
     const nextScopeFilter = normalizeWorkqueueScope(options?.scopeFilter ?? getDefaultWorkqueueScopeForTarget(nextAgentId));
-    const forceNew = Boolean(options?.forceNew);
     const insertCreatedPane = (pane) => {
       const rawIndex = Number(options?.insertIndex);
       const idx = Number.isInteger(rawIndex) ? Math.max(0, Math.min(rawIndex, this.panes.length)) : this.panes.length;
@@ -13709,13 +13709,39 @@ const paneManager = {
         shortcut: 'Shortcut: Ctrl/Cmd+Shift+Y (Alt/Option+click = Open anyway)'
       });
 
+      const wqForceBtn = makeButton({
+        testId: 'pane-add-menu-workqueue-open-anyway',
+        title: 'Open anyway: New Workqueue pane',
+        subtitle: 'Force a duplicate workqueue pane',
+        shortcut: 'Open a separate pane'
+      });
+      wqForceBtn.hidden = true;
+
+      const cronForceBtn = makeButton({
+        testId: 'pane-add-menu-cron-open-anyway',
+        title: 'Open anyway: New Cron pane',
+        subtitle: 'Force a duplicate cron pane',
+        shortcut: 'Open a separate pane'
+      });
+      cronForceBtn.hidden = true;
+
+      const timelineForceBtn = document.createElement('button');
+      timelineForceBtn.type = 'button';
+      timelineForceBtn.className = 'pane-add-menu__item';
+      timelineForceBtn.textContent = 'Open anyway: New Timeline pane';
+      timelineForceBtn.dataset.testid = 'pane-add-menu-timeline-open-anyway';
+      timelineForceBtn.hidden = true;
+
       menu.appendChild(chatBtn);
       menu.appendChild(makeControl('Agent', chatAgentSelect));
       menu.appendChild(wqBtn);
+      menu.appendChild(wqForceBtn);
       menu.appendChild(makeControl('Queue', wqQueueInput));
       menu.appendChild(makeControl('Scope', wqScopeSelect));
       menu.appendChild(cronBtn);
+      menu.appendChild(cronForceBtn);
       menu.appendChild(timelineBtn);
+      menu.appendChild(timelineForceBtn);
 
       const stopMenuControlEvent = (event) => event.stopPropagation();
       [chatAgentSelect, wqQueueInput, wqScopeSelect].forEach((el) => {
@@ -13775,7 +13801,7 @@ const paneManager = {
 
         const paneOptions = getOptions();
         this.closeAddPaneMenu();
-        this.addPane(kind, { ...paneOptions, forceNew: !!event?.altKey });
+        this.addPane(kind, { ...paneOptions, forceNew: !!paneOptions.forceNew || !!event?.altKey });
 
         queueMicrotask(() => {
           state.menuActionInFlight = false;
@@ -13784,21 +13810,28 @@ const paneManager = {
 
       chatBtn.addEventListener('click', onMenuAdd('chat', () => ({ agentId: chatAgentSelect.value || 'main' })));
 
-      wqBtn.addEventListener('click', onMenuAdd('workqueue', () => ({
+      const getWorkqueueAddOptions = () => ({
         agentId: chatAgentSelect.value || 'main',
         queue: wqQueueInput.value || 'dev-team',
         scopeFilter: wqScopeSelect.value || getDefaultWorkqueueScopeForTarget(chatAgentSelect.value)
-      })));
+      });
+      wqBtn.addEventListener('click', onMenuAdd('workqueue', getWorkqueueAddOptions));
+      wqForceBtn.addEventListener('click', onMenuAdd('workqueue', () => ({ ...getWorkqueueAddOptions(), forceNew: true })));
 
       cronBtn.addEventListener('click', onMenuAdd('cron'));
+      cronForceBtn.addEventListener('click', onMenuAdd('cron', () => ({ forceNew: true })));
 
       timelineBtn.addEventListener('click', onMenuAdd('timeline'));
+      timelineForceBtn.addEventListener('click', onMenuAdd('timeline', () => ({ forceNew: true })));
 
       state.menuEl = menu;
       state.chatBtn = chatBtn;
       state.wqBtn = wqBtn;
+      state.wqForceBtn = wqForceBtn;
       state.cronBtn = cronBtn;
+      state.cronForceBtn = cronForceBtn;
       state.timelineBtn = timelineBtn;
+      state.timelineForceBtn = timelineForceBtn;
       state.refreshDestinationControls = refreshDestinationControls;
     }
 
@@ -13845,8 +13878,14 @@ const paneManager = {
     const atMax = this.panes.length >= this.maxPanes;
     state.chatBtn.disabled = atMax;
     state.wqBtn.disabled = atMax;
+    state.wqForceBtn.disabled = atMax;
+    state.wqForceBtn.hidden = !this.panes.some((pane) => pane.kind === 'workqueue' && String(pane.workqueue?.queue || 'dev-team').trim() === 'dev-team');
     state.cronBtn.disabled = atMax;
+    state.cronForceBtn.disabled = atMax;
+    state.cronForceBtn.hidden = !this.panes.some((pane) => pane.kind === 'cron' && String(pane.cronAgentId || '').trim() === '');
     state.timelineBtn.disabled = atMax;
+    state.timelineForceBtn.disabled = atMax;
+    state.timelineForceBtn.hidden = !this.panes.some((pane) => pane.kind === 'timeline' && String(pane.cronAgentId || '').trim() === '');
 
     this._addPaneMenuState = state;
   },
