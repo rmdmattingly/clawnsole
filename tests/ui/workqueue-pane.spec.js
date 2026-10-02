@@ -390,7 +390,7 @@ test('workqueue pane: source chips + clawnsole preset filter items without reloa
   await loginAdmin(page, env.serverPort);
   await addPane(page, 'Workqueue pane');
   const queueName = `wq-guardrail-high-${Date.now()}`;
-  const wqPane = page.locator('[data-pane-kind="workqueue"]').last();
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
   await wqPane.getByTestId('wq-pane-queue-select').selectOption('__custom__');
   await wqPane.getByTestId('wq-pane-queue-custom').fill(queueName);
   await wqPane.getByTestId('wq-pane-queue-custom').press('Enter');
@@ -675,6 +675,56 @@ test('topbar Open workqueue pairs to active chat target and reuses pane', async 
   await expect(page.locator('[data-pane-kind="workqueue"]')).toHaveCount(1);
   const afterSecond = await panes.count();
   expect(afterSecond).toBe(afterFirst);
+});
+
+test('workqueue pane: paired non-default agent survives reload for assigned scope', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await loginAdmin(page, env.serverPort);
+
+  await page.evaluate(async () => {
+    const post = async (url, body) => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      });
+      return res.json();
+    };
+
+    await post('/api/workqueue/enqueue', { queue: 'dev-team', title: 'main assigned after reload', instructions: 'x', priority: 2 });
+    await post('/api/workqueue/enqueue', { queue: 'dev-team', title: 'dev assigned after reload', instructions: 'x', priority: 1 });
+    await post('/api/workqueue/claim-next', { agentId: 'main', queues: ['dev-team'], leaseMs: 900000 });
+    await post('/api/workqueue/claim-next', { agentId: 'dev', queues: ['dev-team'], leaseMs: 900000 });
+  });
+
+  await page.evaluate(() => {
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([
+        { key: 'ptestchat', kind: 'chat', agentId: 'main' },
+        {
+          key: 'ptestwq',
+          kind: 'workqueue',
+          agentId: 'dev',
+          queue: 'dev-team',
+          statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+          scopeFilter: 'assigned'
+        }
+      ])
+    );
+  });
+  await page.reload();
+  await page.waitForSelector('header.topbar', { timeout: 90000 });
+
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await expect(wqPane.locator('[data-wq-scope="assigned"]')).toHaveClass(/active/);
+  await wqPane.locator('[data-wq-refresh]').click();
+  await expect(wqPane.locator('[data-wq-list-body] .wq-row')).toHaveCount(1);
+  await expect(wqPane.locator('[data-wq-list-body] .wq-row').first()).toContainText('dev assigned after reload');
 });
 
 test('workqueue pane: repo preset "Clawnsole only" narrows cards by repo', async ({ page }) => {

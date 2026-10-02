@@ -732,7 +732,7 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
     paneManager.panes.forEach((pane) => {
       if (!pane) return;
       const prior = pane.agentId;
-      pane.agentId = normalizeAgentId(prior);
+      pane.agentId = canonicalAgentId(prior);
       if (pane?.elements?.agentSelect) {
         renderAgentOptions(pane.elements.agentSelect, pane.agentId);
         try {
@@ -1187,6 +1187,12 @@ function normalizeAgentId(candidate) {
   if (uiState.agents.length === 0) return trimmed;
   const exists = uiState.agents.some((agent) => agent.id === trimmed);
   return exists ? trimmed : 'main';
+}
+
+function canonicalAgentId(candidate) {
+  if (typeof candidate !== 'string') return 'main';
+  const trimmed = candidate.trim();
+  return trimmed || 'main';
 }
 
 function resolveWsUrl(raw) {
@@ -4187,10 +4193,11 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
 function filterWorkqueuePaneItemsByScope(pane, items) {
   const itemsRaw = Array.isArray(items) ? items : [];
   const scope = pane.workqueue?.scopeFilter || 'all';
-  const activeTarget = String(pane.agentId || '').trim();
+  const activeTarget = canonicalAgentId(pane.agentId || '');
   const getOwner = (it) => String(it?.claimedBy || it?.assignee || it?.assignedTo || it?.agentId || '').trim();
   return itemsRaw.filter((it) => {
-    const owner = getOwner(it);
+    const rawOwner = getOwner(it);
+    const owner = rawOwner ? canonicalAgentId(rawOwner) : '';
     if (scope === 'unassigned') return !owner;
     if (scope === 'assigned') return !!activeTarget && owner === activeTarget;
     return true;
@@ -6062,7 +6069,7 @@ function buildClientForPane(pane) {
 }
 
 function agentIdExists(agentId) {
-  const id = normalizeAgentId(agentId || 'main');
+  const id = canonicalAgentId(agentId || 'main');
   return uiState.agents.some((a) => String(a?.id || '').trim() === id);
 }
 
@@ -6125,7 +6132,7 @@ function renderPaneAgentIdentity(pane) {
   const raw = typeof pane.agentId === 'string' ? pane.agentId.trim() : '';
   const hasSelection = Boolean(raw);
 
-  const agentId = hasSelection ? normalizeAgentId(raw) : '';
+  const agentId = hasSelection ? canonicalAgentId(raw) : '';
   const known = !hasSelection ? true : uiState.agents.length === 0 ? true : agentIdExists(agentId);
   const agent = hasSelection ? getAgentRecord(agentId) : null;
 
@@ -6407,7 +6414,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       const k = String(kind || 'chat').trim().toLowerCase();
       return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
     })(),
-    agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
+    agentId: role === 'admin' ? canonicalAgentId(agentId || 'main') : null,
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
@@ -7873,7 +7880,7 @@ const paneManager = {
   },
   loadAdminPanes() {
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
-    const defaultAgent = normalizeAgentId(storedDefault || 'main');
+    const defaultAgent = canonicalAgentId(storedDefault || 'main');
 
     const coerce = (item) => {
       // Legacy format: { key, agentId }
@@ -7888,12 +7895,12 @@ const paneManager = {
             : 'chat';
         if (!key) return null;
         if (kind === 'workqueue') {
+          const agentId = canonicalAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
-          const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'claimed', 'in_progress'];
-          const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
+          const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? item.scope ?? getDefaultWorkqueueScope());
           const quickFilters = {
             sources: Array.isArray(item?.quickFilters?.sources) ? item.quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
             repos: Array.isArray(item?.quickFilters?.repos) ? item.quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
@@ -7905,7 +7912,7 @@ const paneManager = {
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
         }
-        const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
+        const agentId = canonicalAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
         return { key, kind: 'chat', agentId };
       }
       // Super-legacy format: ['pabc','pdef'] (treat as chat panes)
@@ -7938,7 +7945,7 @@ const paneManager = {
         return {
           key: pane.key,
           kind: 'workqueue',
-          agentId: pane.agentId || 'main',
+          agentId: canonicalAgentId(pane.agentId || 'main'),
           queue: pane.workqueue?.queue || 'dev-team',
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
           scopeFilter: pane.workqueue?.scopeFilter || 'all',
