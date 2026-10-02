@@ -188,7 +188,7 @@ test('pane: workqueue defaults to triage statuses and can show archived', async 
   await expect(wqPane.locator('.wq-row', { hasText: `pw-archived-toggle-${runId}-failed` })).toBeVisible();
 });
 
-test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
+test('pane: workqueue golden path (enqueue + inspect + transition + edit + delete)', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
 
@@ -242,6 +242,47 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await page.keyboard.press('Enter');
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(title);
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(instructions);
+
+  await expect(wqPane.getByTestId('workqueue-inspect-actions')).toBeVisible();
+
+  await wqPane.getByTestId('workqueue-inspect-status').selectOption('in_progress');
+  const statusResP = page.waitForResponse(
+    (res) => res.url().includes('/api/workqueue/update') && res.request().method() === 'POST',
+    { timeout: 15000 }
+  );
+  await wqPane.getByTestId('workqueue-inspect-save-status').click();
+  const statusRes = await statusResP;
+  expect(statusRes.ok()).toBeTruthy();
+  await expect(wqPane.getByTestId('workqueue-inspect-action-status')).toContainText('Status saved');
+  await expect(row).toContainText('in_progress');
+
+  const editedTitle = `${title}-edited`;
+  const editedInstructions = `${instructions} edited`;
+  await wqPane.getByTestId('workqueue-inspect-edit-details').locator('summary').click();
+  await wqPane.getByTestId('workqueue-inspect-title').fill(editedTitle);
+  await wqPane.getByTestId('workqueue-inspect-instructions').fill(editedInstructions);
+
+  const editResP = page.waitForResponse(
+    (res) => res.url().includes('/api/workqueue/update') && res.request().method() === 'POST',
+    { timeout: 15000 }
+  );
+  await wqPane.getByTestId('workqueue-inspect-edit-form').locator('button[type="submit"]').click();
+  const editRes = await editResP;
+  expect(editRes.ok()).toBeTruthy();
+  await expect(wqPane.getByTestId('workqueue-inspect-action-status')).toContainText('Edit saved');
+  await expect(wqPane.locator('[data-wq-inspect]')).toContainText(editedTitle);
+  await expect(wqPane.locator('[data-wq-inspect]')).toContainText(editedInstructions);
+  await expect(wqPane.getByTestId('workqueue-item-row').filter({ hasText: editedTitle })).toBeVisible();
+
+  const deleteResP = page.waitForResponse(
+    (res) => res.url().includes('/api/workqueue/delete') && res.request().method() === 'POST',
+    { timeout: 15000 }
+  );
+  await wqPane.getByTestId('workqueue-inspect-delete').click();
+  const deleteRes = await deleteResP;
+  expect(deleteRes.ok()).toBeTruthy();
+  await expect(wqPane.getByTestId('workqueue-item-row').filter({ hasText: editedTitle })).toHaveCount(0);
+  await expect(wqPane.locator('[data-wq-inspect]')).toContainText('Select an item to inspect');
 });
 
 test('workqueue modal: golden path covers filters, kanban status, edit, and delete', async ({ page }) => {
