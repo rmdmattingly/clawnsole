@@ -732,7 +732,7 @@ async function refreshAgents({ reason = 'manual', showSuccessToast = false } = {
     paneManager.panes.forEach((pane) => {
       if (!pane) return;
       const prior = pane.agentId;
-      pane.agentId = normalizeAgentId(prior);
+      pane.agentId = canonicalAgentId(prior);
       if (pane?.elements?.agentSelect) {
         renderAgentOptions(pane.elements.agentSelect, pane.agentId);
         try {
@@ -1189,6 +1189,12 @@ function normalizeAgentId(candidate) {
   return exists ? trimmed : 'main';
 }
 
+function canonicalAgentId(candidate) {
+  if (typeof candidate !== 'string') return 'main';
+  const trimmed = candidate.trim();
+  return trimmed || 'main';
+}
+
 function resolveWsUrl(raw) {
   if (!raw) return '';
   if (raw.startsWith('ws://') || raw.startsWith('wss://')) return raw;
@@ -1225,6 +1231,13 @@ function setStatusPill(el, state, meta = '') {
     el.classList.add('working');
   }
   el.title = meta || '';
+}
+
+function paneIsConnected(pane) {
+  if (!pane) return false;
+  if (pane.statusState === 'connected') return true;
+  if (pane.statusState === 'disconnected' || pane.statusState === 'error' || pane.statusState === 'offline') return false;
+  return Boolean(pane.connected);
 }
 
 function updateGlobalStatus() {
@@ -3779,8 +3792,8 @@ function renderWorkqueueInspect(item) {
   const actions = document.createElement('div');
   actions.className = 'wq-inspect-actions';
   actions.innerHTML = `
-    <button type="button" class="btn" data-wq-action="edit">Edit</button>
-    <button type="button" class="btn danger" data-wq-action="delete">Delete</button>
+    <button type="button" class="btn" data-wq-action="edit" data-testid="wq-item-edit">Edit</button>
+    <button type="button" class="btn danger" data-wq-action="delete" data-testid="wq-item-delete">Delete</button>
   `;
 
   const meta = root.querySelector('.wq-inspect-meta');
@@ -4180,10 +4193,11 @@ async function fetchAndRenderWorkqueueItemsForPane(pane) {
 function filterWorkqueuePaneItemsByScope(pane, items) {
   const itemsRaw = Array.isArray(items) ? items : [];
   const scope = pane.workqueue?.scopeFilter || 'all';
-  const activeTarget = String(pane.agentId || '').trim();
+  const activeTarget = canonicalAgentId(pane.agentId || '');
   const getOwner = (it) => String(it?.claimedBy || it?.assignee || it?.assignedTo || it?.agentId || '').trim();
   return itemsRaw.filter((it) => {
-    const owner = getOwner(it);
+    const rawOwner = getOwner(it);
+    const owner = rawOwner ? canonicalAgentId(rawOwner) : '';
     if (scope === 'unassigned') return !owner;
     if (scope === 'assigned') return !!activeTarget && owner === activeTarget;
     return true;
@@ -4317,6 +4331,7 @@ function renderWorkqueuePaneItems(pane) {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'wq-row';
+    row.setAttribute('data-testid', 'wq-item-row');
     if (it.id && it.id === pane.workqueue.selectedItemId) row.classList.add('selected');
 
     const leaseMs = it.leaseUntil ? Number(it.leaseUntil) - now : NaN;
@@ -4430,6 +4445,72 @@ function renderWorkqueuePaneInspect(pane, item) {
     </div>
     ${item.lastError ? `<div class="wq-inspect-block"><div class="wq-inspect-label">Last error</div><pre class="wq-inspect-pre">${escapeHtml(String(item.lastError))}</pre></div>` : ''}
   `;
+
+  const actions = document.createElement('div');
+  actions.className = 'wq-inspect-actions';
+  actions.innerHTML = `
+    <button type="button" class="btn" data-wq-action="edit" data-testid="wq-pane-item-edit">Edit</button>
+    <button type="button" class="btn danger" data-wq-action="delete" data-testid="wq-pane-item-delete">Delete</button>
+  `;
+  const meta = root.querySelector('.wq-inspect-meta');
+  if (meta) meta.insertAdjacentElement('afterend', actions);
+  else root.prepend(actions);
+
+  const editBtn = actions.querySelector('[data-wq-action="edit"]');
+  const deleteBtn = actions.querySelector('[data-wq-action="delete"]');
+  editBtn?.addEventListener('click', () => workqueuePaneEditItem(pane, item));
+  deleteBtn?.addEventListener('click', () => workqueuePaneDeleteItem(pane, item));
+}
+
+async function workqueuePaneEditItem(pane, item) {
+  if (!pane || !item || !item.id) return;
+
+  const title = prompt('Edit title', String(item.title || ''));
+  if (title === null) return;
+  const instructions = prompt('Edit instructions', String(item.instructions || ''));
+  if (instructions === null) return;
+  const priorityRaw = prompt('Edit priority (number)', String(item.priority ?? '0'));
+  if (priorityRaw === null) return;
+  const priority = Number(priorityRaw);
+  const status = prompt('Edit status (ready|pending|claimed|in_progress|done|failed)', String(item.status || 'ready'));
+  if (status === null) return;
+
+  try {
+    await workqueueUpdateItem(item.id, {
+      title,
+      instructions,
+      priority: Number.isFinite(priority) ? priority : item.priority,
+      status
+    });
+    await fetchAndRenderWorkqueueItemsForPane(pane);
+    const updated = (Array.isArray(pane.workqueue?.items) ? pane.workqueue.items : []).find((it) => it && it.id === item.id) || null;
+    pane.workqueue.selectedItemId = updated?.id || null;
+    renderWorkqueuePaneItems(pane);
+    renderWorkqueuePaneInspect(pane, updated);
+  } catch (err) {
+    addFeed('err', 'workqueue', 'failed to update item: ' + String(err));
+  }
+}
+
+async function workqueuePaneDeleteItem(pane, item) {
+  if (!pane || !item || !item.id) return;
+  const ok = confirm('Delete workqueue item?\n\n' + String(item.title || '') + '\n' + item.id);
+  if (!ok) return;
+  try {
+    const res = await fetch('/api/workqueue/delete', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId: item.id })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.ok) throw new Error(data?.error || String(res.status));
+    if (pane.workqueue.selectedItemId === item.id) pane.workqueue.selectedItemId = null;
+    await fetchAndRenderWorkqueueItemsForPane(pane);
+    renderWorkqueuePaneInspect(pane, null);
+  } catch (err) {
+    addFeed('err', 'workqueue', 'failed to delete item: ' + String(err));
+  }
 }
 
 function startWorkqueueLeaseTicker() {
@@ -5927,6 +6008,8 @@ function buildClientForPane(pane) {
     onStatus: (state, meta) => {
       pane.statusState = state;
       pane.statusMeta = meta || '';
+      if (state === 'connected') pane.connected = true;
+      if (state === 'disconnected' || state === 'error' || state === 'offline') pane.connected = false;
       setStatusPill(pane.elements.status, state, meta || '');
       if (pane.elements.root) {
         pane.elements.root.dataset.connected = pane.connected ? 'true' : 'false';
@@ -5986,7 +6069,7 @@ function buildClientForPane(pane) {
 }
 
 function agentIdExists(agentId) {
-  const id = normalizeAgentId(agentId || 'main');
+  const id = canonicalAgentId(agentId || 'main');
   return uiState.agents.some((a) => String(a?.id || '').trim() === id);
 }
 
@@ -6049,7 +6132,7 @@ function renderPaneAgentIdentity(pane) {
   const raw = typeof pane.agentId === 'string' ? pane.agentId.trim() : '';
   const hasSelection = Boolean(raw);
 
-  const agentId = hasSelection ? normalizeAgentId(raw) : '';
+  const agentId = hasSelection ? canonicalAgentId(raw) : '';
   const known = !hasSelection ? true : uiState.agents.length === 0 ? true : agentIdExists(agentId);
   const agent = hasSelection ? getAgentRecord(agentId) : null;
 
@@ -6331,7 +6414,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
       const k = String(kind || 'chat').trim().toLowerCase();
       return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
     })(),
-    agentId: role === 'admin' ? normalizeAgentId(agentId || 'main') : null,
+    agentId: role === 'admin' ? canonicalAgentId(agentId || 'main') : null,
     workqueue: {
       queue: (queue || 'dev-team').trim() || 'dev-team',
       statusFilter: Array.isArray(statusFilter) ? statusFilter : ['ready', 'pending', 'claimed', 'in_progress'],
@@ -6516,14 +6599,14 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
           <label class="wq-field">
             <span class="wq-label">Queue</span>
             <input data-wq-queue-search type="search" placeholder="Search queues" aria-label="Search queues" autocomplete="off" />
-            <select data-wq-queue-select aria-label="Select workqueue target"></select>
-            <input data-wq-queue-custom type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
+            <select data-wq-queue-select data-testid="wq-pane-queue-select" aria-label="Select workqueue target"></select>
+            <input data-wq-queue-custom data-testid="wq-pane-queue-custom" type="text" value="${escapeHtml(pane.workqueue.queue)}" placeholder="Custom queue" hidden />
           </label>
 
           <div class="wq-field wq-status-field">
             <span class="wq-label">Status filter</span>
-            <div class="wq-status-multiselect" data-wq-status>
-              <div class="wq-status-selected" data-wq-status-selected aria-live="polite"></div>
+            <div class="wq-status-multiselect" data-wq-status data-testid="wq-pane-status-filter">
+              <div class="wq-status-selected" data-wq-status-selected data-testid="wq-pane-status-selected" aria-live="polite"></div>
               <details class="wq-status-details" data-wq-status-details>
                 <summary type="button">Choose statuses…</summary>
                 <div class="wq-status-menu">
@@ -6635,13 +6718,13 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             <button type="button" class="wq-list-sort" data-wq-sort="claimedBy">Claimed by</button>
             <button type="button" class="wq-list-sort" data-wq-sort="leaseUntil">Lease expires</button>
           </div>
-          <div class="wq-list-body" data-wq-list-body></div>
+          <div class="wq-list-body" data-wq-list-body data-testid="wq-pane-list-body"></div>
           <div data-wq-empty class="hint" style="padding: 10px 12px;" hidden>No items.</div>
         </section>
 
         <section class="wq-inspect" aria-label="Workqueue item details">
           <div class="wq-inspect-header">Inspect</div>
-          <div data-wq-inspect class="wq-inspect-body"></div>
+          <div data-wq-inspect data-testid="wq-pane-inspect" class="wq-inspect-body"></div>
         </section>
       </div>
     `;
@@ -7797,7 +7880,7 @@ const paneManager = {
   },
   loadAdminPanes() {
     const storedDefault = storage.get(ADMIN_DEFAULT_AGENT_KEY, 'main');
-    const defaultAgent = normalizeAgentId(storedDefault || 'main');
+    const defaultAgent = canonicalAgentId(storedDefault || 'main');
 
     const coerce = (item) => {
       // Legacy format: { key, agentId }
@@ -7812,12 +7895,12 @@ const paneManager = {
             : 'chat';
         if (!key) return null;
         if (kind === 'workqueue') {
+          const agentId = canonicalAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
-          const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
           const statusFilter = Array.isArray(item.statusFilter)
             ? item.statusFilter.map((s) => String(s || '').trim()).filter(Boolean)
             : ['ready', 'pending', 'claimed', 'in_progress'];
-          const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? getDefaultWorkqueueScope());
+          const scopeFilter = normalizeWorkqueueScope(item.scopeFilter ?? item.scope ?? getDefaultWorkqueueScope());
           const quickFilters = {
             sources: Array.isArray(item?.quickFilters?.sources) ? item.quickFilters.sources.map((s) => String(s || '').trim()).filter(Boolean) : [],
             repos: Array.isArray(item?.quickFilters?.repos) ? item.quickFilters.repos.map((s) => String(s || '').trim()).filter(Boolean) : []
@@ -7829,7 +7912,7 @@ const paneManager = {
         if (kind === 'cron' || kind === 'timeline') {
           return { key, kind };
         }
-        const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
+        const agentId = canonicalAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
         return { key, kind: 'chat', agentId };
       }
       // Super-legacy format: ['pabc','pdef'] (treat as chat panes)
@@ -7862,7 +7945,7 @@ const paneManager = {
         return {
           key: pane.key,
           kind: 'workqueue',
-          agentId: pane.agentId || 'main',
+          agentId: canonicalAgentId(pane.agentId || 'main'),
           queue: pane.workqueue?.queue || 'dev-team',
           statusFilter: Array.isArray(pane.workqueue?.statusFilter) ? pane.workqueue.statusFilter : [],
           scopeFilter: pane.workqueue?.scopeFilter || 'all',
