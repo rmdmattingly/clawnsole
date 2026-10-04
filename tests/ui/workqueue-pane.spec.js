@@ -805,6 +805,47 @@ test('workqueue pane: status filter uses human labels and queue-scoped counts', 
   await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
 });
 
+test('workqueue pane: list header stays sticky while scrolling items', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const panes = page.locator('[data-pane]');
+  const wqPane = panes.last();
+  const listBody = wqPane.locator('[data-wq-list-body]');
+  const listHeader = wqPane.locator('.wq-list-header');
+
+  const stamp = Date.now();
+  for (let i = 0; i < 40; i += 1) {
+    const res = await page.request.post(`http://127.0.0.1:${env.serverPort}/api/workqueue/enqueue`, {
+      data: {
+        queue: 'dev-team',
+        title: `pw-sticky-${stamp}-${i}`,
+        instructions: `sticky-header-${i}`,
+        priority: 1
+      }
+    });
+    expect(res.ok()).toBeTruthy();
+  }
+
+  await wqPane.locator('[data-wq-refresh]').click();
+  await expect(listBody.locator('.wq-row').first()).toBeVisible();
+
+  const before = await listHeader.boundingBox();
+  await listBody.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  const after = await listHeader.boundingBox();
+
+  expect(before).toBeTruthy();
+  expect(after).toBeTruthy();
+  expect(Math.abs(after.y - before.y)).toBeLessThan(1.5);
+});
+
 test('workqueue pane: filter summary chips show counts and remove filters', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
