@@ -351,13 +351,20 @@ const deriveAuthOverlayState = __appCore.deriveAuthOverlayState || ((state) => {
 const paneNeedsAttention = __appCore.paneNeedsAttention || ((pane) => {
   if (!pane) return false;
   const status = String(pane.statusState || '').trim();
-  return !pane.connected || status === 'error' || status === 'reconnecting' || Number(pane.unreadCount || 0) > 0;
+  return !paneIsConnected(pane) || status === 'error' || status === 'reconnecting' || Number(pane.unreadCount || 0) > 0;
+});
+const paneIsConnected = __appCore.paneIsConnected || ((pane) => {
+  if (!pane) return false;
+  const status = String(pane.statusState || '').toLowerCase();
+  if (status === 'connected') return true;
+  if (status === 'disconnected' || status === 'error' || status === 'offline') return false;
+  return Boolean(pane.connected);
 });
 const deriveGlobalConnectionState = __appCore.deriveGlobalConnectionState || ((state) => {
   if (!state?.authed) return { state: 'disconnected', meta: '' };
   const panes = Array.isArray(state?.panes) ? state.panes : [];
   if (panes.length === 0) return { state: 'disconnected', meta: '' };
-  const connectedCount = panes.filter((pane) => !!pane?.connected).length;
+  const connectedCount = panes.filter((pane) => paneIsConnected(pane)).length;
   const total = panes.length;
   const disconnectedCount = Math.max(0, total - connectedCount);
   const unreadCount = panes.reduce((sum, pane) => sum + Math.max(0, Number(pane?.unreadCount || 0)), 0);
@@ -10606,9 +10613,11 @@ function buildClientForPane(pane) {
     onStatus: (state, meta) => {
       pane.statusState = state;
       pane.statusMeta = meta || '';
+      if (state === 'connected') pane.connected = true;
+      if (state === 'disconnected' || state === 'error' || state === 'offline') pane.connected = false;
       setStatusPill(pane.elements.status, state, meta || '');
       if (pane.elements.root) {
-        pane.elements.root.dataset.connected = pane.connected ? 'true' : 'false';
+        pane.elements.root.dataset.connected = paneIsConnected(pane) ? 'true' : 'false';
         pane.elements.root.dataset.wsState = String(state || '');
       }
       updateGlobalStatus();
@@ -10645,6 +10654,9 @@ function buildClientForPane(pane) {
     onDisconnected: () => {
       paneStopThinking(pane);
       pane.connected = false;
+      pane.statusState = 'disconnected';
+      pane.statusMeta = '';
+      setStatusPill(pane.elements.status, 'disconnected', '');
       if (pane.elements.root) pane.elements.root.dataset.connected = 'false';
       paneSetChatEnabled(pane);
       updateGlobalStatus();

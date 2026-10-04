@@ -11,6 +11,7 @@ const {
   sortWorkqueueItems,
   inferPaneCols,
   normalizePaneKind,
+  paneIsConnected,
   normalizeWorkqueueScope,
   deriveDefaultWorkqueueScope,
   normalizeAdminDestination,
@@ -286,6 +287,34 @@ test('normalizePaneKind handles aliases safely', () => {
   assert.equal(normalizePaneKind('x'), 'chat');
 });
 
+test('paneIsConnected prefers explicit websocket status over stale connected flag', () => {
+  assert.equal(paneIsConnected({ connected: true, statusState: 'disconnected' }), false);
+  assert.equal(paneIsConnected({ connected: true, statusState: 'error' }), false);
+  assert.equal(paneIsConnected({ connected: false, statusState: 'connected' }), true);
+  assert.equal(paneIsConnected({ connected: true, statusState: 'reconnecting' }), true);
+  assert.equal(paneIsConnected({ connected: false, statusState: 'reconnecting' }), false);
+});
+
+test('deriveGlobalConnectionState uses websocket status source of truth', () => {
+  const disconnected = deriveGlobalConnectionState({
+    authed: true,
+    panes: [{ connected: true, statusState: 'disconnected' }]
+  });
+  assert.equal(disconnected.state, 'disconnected');
+  assert.equal(disconnected.meta, '0 connected · 1 disconnected · 1 attention');
+  assert.equal(disconnected.connectedCount, 0);
+  assert.equal(disconnected.disconnectedCount, 1);
+
+  const connected = deriveGlobalConnectionState({
+    authed: true,
+    panes: [{ connected: false, statusState: 'connected' }]
+  });
+  assert.equal(connected.state, 'connected');
+  assert.equal(connected.meta, '1 connected · 0 disconnected · 0 attention');
+  assert.equal(connected.connectedCount, 1);
+  assert.equal(connected.disconnectedCount, 0);
+});
+
 test('deriveDefaultWorkqueueScope prefers assigned for explicit workqueue agent targets', () => {
   assert.equal(normalizeWorkqueueScope('assigned'), 'assigned');
   assert.equal(normalizeWorkqueueScope('UNASSIGNED'), 'unassigned');
@@ -319,7 +348,7 @@ test('shortcut catalog has stable unique ids and includes fleet shortcuts', () =
       shortcut.keys.includes('Cmd/Ctrl') &&
       shortcut.keys.includes('1..9')
     ))
-  );
+);
 });
 
 test('deriveAuthOverlayState captures auth/role transition flags', () => {
