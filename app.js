@@ -6321,51 +6321,6 @@ function openTopbarWorkqueueAction() {
   openWorkqueue();
 }
 
-function togglePairedPane() {
-  const activePane = findActivePaneFromFocus();
-  if (!activePane) {
-    toast('Focus a Chat or Workqueue pane first.', 'info');
-    return;
-  }
-
-  if (activePane.kind === 'chat') {
-    const target = normalizeAgentId(activePane.agentId || 'main');
-    const exact = findExistingPane('workqueue', (p) =>
-      normalizeAgentId(p.agentId || 'main') === target ||
-      normalizeAgentId(p.workqueue?.queue || '') === target
-    );
-    const workqueuePanes = paneManager.panes.filter((p) => p?.role === 'admin' && p.kind === 'workqueue');
-    const existing = exact || (workqueuePanes.length === 1 ? workqueuePanes[0] : null);
-    if (existing) {
-      paneManager.focusPanePrimary(existing);
-      return;
-    }
-    const created = paneManager.addPane('workqueue', { agentId: target, queue: target, scopeFilter: 'assigned' });
-    if (!created) {
-      toast('Unable to open paired Workqueue pane.', 'info');
-      return;
-    }
-    return;
-  }
-
-  if (activePane.kind === 'workqueue') {
-    const target = normalizeAgentId(activePane.agentId || activePane.workqueue?.queue || 'main');
-    const existing = findExistingPane('chat', (p) => normalizeAgentId(p.agentId || 'main') === target);
-    if (existing) {
-      paneManager.focusPanePrimary(existing);
-      return;
-    }
-    const created = paneManager.addPane('chat', { agentId: target });
-    if (!created) {
-      toast('Unable to open paired Chat pane.', 'info');
-      return;
-    }
-    return;
-  }
-
-  toast('Paired toggle supports Chat and Workqueue panes only.', 'info');
-}
-
 function renderAgentsModalList() {
   const root = globalElements.agentsList;
   if (!root) return;
