@@ -4776,6 +4776,9 @@ function renderPaneManager() {
   const list = globalElements.paneManagerList;
   const empty = globalElements.paneManagerEmpty;
   if (!list || !empty) return;
+  const focusedPaneKey = document.activeElement?.classList?.contains?.('pane-manager-row')
+    ? String(document.activeElement.dataset?.paneKey || '')
+    : '';
 
   const query = String(paneManagerUiState.query || '').trim().toLowerCase();
   const filtered = panes.filter((pane) => {
@@ -4994,6 +4997,19 @@ function renderPaneManager() {
 
     list.appendChild(section);
   });
+
+  if (focusedPaneKey) {
+    const focusedRow = list.querySelector(`.pane-manager-row[data-pane-key="${cssEscape(focusedPaneKey)}"]`);
+    if (focusedRow) {
+      try {
+        focusedRow.focus({ preventScroll: true });
+      } catch {
+        try {
+          focusedRow.focus();
+        } catch {}
+      }
+    }
+  }
 }
 
 function focusPaneManagerRow(paneKey, { focus = false } = {}) {
