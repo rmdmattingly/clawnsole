@@ -1701,6 +1701,10 @@ function showToast(
   });
 }
 
+function toast(message, kind = 'info') {
+  showToast(message, { kind, timeoutMs: 2600 });
+}
+
 let agentRefreshTimer = null;
 let agentRefreshInFlight = null;
 let agentAutoRefreshInterval = null;
@@ -5211,6 +5215,7 @@ function buildCommandPaletteItems() {
 
   const focusedKey = focusedPaneKey();
   const focusedPane = paneManager.panes.find((p) => p?.key === focusedKey) || paneManager.panes[0] || null;
+  const commandOriginPaneKey = String(focusedKey || '').trim();
   if (paneSupportsTargetLock(focusedPane)) {
     const nextLabel = focusedPane.pairedTargetLock ? 'Disable' : 'Enable';
     const pairedAction = getPaneManagerPairedAction(focusedPane);
@@ -5426,7 +5431,7 @@ function buildCommandPaletteItems() {
         id: 'cmd:open-workqueue-active-agent',
         label: 'Workqueue for active chat agent',
         detail: 'Open/focus a Workqueue pane scoped to the active chat agent',
-        run: () => openWorkqueueForActiveChatAgent()
+        run: () => openWorkqueueForActiveChatAgent(commandOriginPaneKey ? { originPaneKey: commandOriginPaneKey } : {})
       },
       shortcutDisplay('workqueue.openForActiveChat') || 'Cmd/Ctrl+Shift+Alt+G'
     ),
@@ -5921,20 +5926,24 @@ function findExistingPane(kind, predicate = null) {
   return null;
 }
 
-function getActiveChatAgentPane() {
-  const originKey = commandPaletteState.open ? String(commandPaletteState.originPaneKey || '') : '';
-  if (commandPaletteState.open) {
+function getActiveChatAgentPane({ originPaneKey = null } = {}) {
+  const explicitOriginKey = originPaneKey === null ? null : String(originPaneKey || '');
+  const originKey = explicitOriginKey === null
+    ? commandPaletteState.open ? String(commandPaletteState.originPaneKey || '') : ''
+    : explicitOriginKey;
+  if (originKey) {
     return (paneManager?.panes || []).find((pane) => String(pane?.key || '') === originKey && pane.kind === 'chat') || null;
   }
+  if (explicitOriginKey !== null) return null;
 
   const focusedKey = focusedPaneKey();
   const activeKey = focusedKey || paneMruOrder()[0] || '';
   return (paneManager?.panes || []).find((pane) => String(pane?.key || '') === activeKey && pane.kind === 'chat') || null;
 }
 
-function openWorkqueueForActiveChatAgent() {
+function openWorkqueueForActiveChatAgent(options = {}) {
   if (roleState.role !== 'admin') return null;
-  const chatPane = getActiveChatAgentPane();
+  const chatPane = getActiveChatAgentPane(options);
   const agentId = normalizeAgentId(chatPane?.agentId || '');
   if (!chatPane || !agentId) {
     showToast('No active chat agent selected', { kind: 'error', timeoutMs: 2600 });
@@ -11275,7 +11284,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
             ['g then A-Z', 'focus pane by visible letter'],
             ['Cmd/Ctrl+L', 'focus Chat composer'],
             ['Cmd/Ctrl+Shift+K', 'focus next pane'],
-            ['Cmd/Ctrl+Shift+J', 'focus previous pane']
+            ['Cmd/Ctrl+Shift+J', 'focus previous pane'],
+            ['Cmd/Ctrl+Shift+L', 'toggle paired Chat ↔ Workqueue pane']
           ]
         };
       })();
@@ -14434,7 +14444,6 @@ const SHORTCUT_BLOCK_MESSAGES = {
   workqueue: 'Focus a Workqueue pane to use this shortcut',
   unavailable: 'Shortcut target is unavailable'
 };
-
 function reportBlockedShortcut(reason) {
   const key = String(reason || '').trim();
   const message = SHORTCUT_BLOCK_MESSAGES[key];

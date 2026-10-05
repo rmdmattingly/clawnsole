@@ -22,9 +22,28 @@ async function seedChatOnlyPaneLayout(page, serverPort, { agentId = 'main' } = {
     );
   }, agentId);
   await page.goto(`http://127.0.0.1:${serverPort}/`);
-  await page.fill('#loginPassword', 'admin');
-  await page.click('#loginBtn');
+  const passwordInput = page.locator('#loginPassword');
+  if (await passwordInput.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false)) {
+    await page.fill('#loginPassword', 'admin');
+    await page.click('#loginBtn');
+  } else if (!/\/admin\/?$/.test(page.url())) {
+    await page.goto(`http://127.0.0.1:${serverPort}/admin`);
+  }
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.locator('#addPaneBtn').waitFor({ state: 'visible', timeout: 90000 });
+  await page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first().waitFor({ state: 'visible', timeout: 90000 });
+}
+
+async function triggerPairedPaneShortcut(page) {
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'L',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    }));
+  });
 }
 
 test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page }) => {
@@ -32,6 +51,26 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   test.skip(!!app?.skipReason, app?.skipReason);
 
   installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.addInitScript(() => {
+    localStorage.setItem('clawnsole.admin.layoutMode', 'custom');
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([
+        { key: 'ptestchat', kind: 'chat', agentId: 'main' },
+        {
+          key: 'ptestwq',
+          kind: 'workqueue',
+          agentId: 'main',
+          queue: 'dev-team',
+          statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+          scopeFilter: 'all',
+          sortKey: 'priority',
+          sortDir: 'desc'
+        }
+      ])
+    );
+  });
 
   await page.goto(`http://127.0.0.1:${app.serverPort}/`);
   await page.fill('#loginPassword', 'admin');
