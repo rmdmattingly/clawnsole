@@ -3723,6 +3723,7 @@ const paneManagerUiState = {
   attentionOnly: false,
   unreadOnly: false,
   visiblePaneKeys: [],
+  focusedPaneKey: '',
   collapsedKinds: {
     chat: false,
     workqueue: false,
@@ -4778,7 +4779,7 @@ function renderPaneManager() {
   if (!list || !empty) return;
   const focusedPaneKey = document.activeElement?.classList?.contains?.('pane-manager-row')
     ? String(document.activeElement.dataset?.paneKey || '')
-    : '';
+    : String(paneManagerUiState.focusedPaneKey || '');
 
   const query = String(paneManagerUiState.query || '').trim().toLowerCase();
   const filtered = panes.filter((pane) => {
@@ -4926,6 +4927,7 @@ function renderPaneManager() {
           const action = actionEl?.dataset?.action;
           const selectedVisible = Number(row.dataset.visibleIndex || 0);
           paneManagerUiState.selectedIndex = selectedVisible;
+          paneManagerUiState.focusedPaneKey = String(row.dataset.paneKey || '');
           if (action === 'close') {
             try {
               paneManager.removePane(pane.key, { source: 'manager' });
@@ -5021,6 +5023,7 @@ function focusPaneManagerRow(paneKey, { focus = false } = {}) {
   if (!row) return false;
 
   paneManagerUiState.selectedIndex = Number(row.dataset.visibleIndex || 0);
+  if (focus) paneManagerUiState.focusedPaneKey = key;
   renderPaneManager();
 
   const freshRow = list.querySelector(`.pane-manager-row[data-pane-key="${cssEscape(key)}"]`) || row;
@@ -5105,6 +5108,7 @@ function openPaneManager({ attentionOnly = false, focusPaneKey = '', focusRow = 
 function closePaneManager({ restoreFocus = true } = {}) {
   if (!globalElements.paneManagerModal) return;
   paneManagerUiState.open = false;
+  paneManagerUiState.focusedPaneKey = '';
   const pane = paneManager?.panes?.[0];
   closeAdminModal(globalElements.paneManagerModal, { restoreFocus, fallbackFocus: pane?.elements?.input || null });
 }
@@ -5120,6 +5124,7 @@ function paneManagerHandleKeydown(event) {
   if ((key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !isSearchFocused) ||
     ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && key.toLowerCase() === 'f')) {
     event.preventDefault();
+    paneManagerUiState.focusedPaneKey = '';
     searchEl?.focus?.();
     searchEl?.select?.();
     return true;
@@ -5149,12 +5154,14 @@ function paneManagerHandleKeydown(event) {
   if (event.key === 'ArrowDown') {
     event.preventDefault();
     paneManagerUiState.selectedIndex = Math.min(visibleKeys.length - 1, paneManagerUiState.selectedIndex + 1);
+    paneManagerUiState.focusedPaneKey = visibleKeys[paneManagerUiState.selectedIndex] || '';
     renderPaneManager();
     return true;
   }
   if (event.key === 'ArrowUp') {
     event.preventDefault();
     paneManagerUiState.selectedIndex = Math.max(0, paneManagerUiState.selectedIndex - 1);
+    paneManagerUiState.focusedPaneKey = visibleKeys[paneManagerUiState.selectedIndex] || '';
     renderPaneManager();
     return true;
   }
