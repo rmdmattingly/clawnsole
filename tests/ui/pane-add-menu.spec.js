@@ -4,6 +4,14 @@ const { startTestEnv, loginAdmin, attachConsoleErrorAsserts } = require('./_help
 
 let env;
 
+async function seedSingleChatPane(page) {
+  await page.addInitScript(() => {
+    localStorage.setItem('clawnsole.admin.panes.v1', JSON.stringify([
+      { key: 'pw-single-chat', kind: 'chat', agentId: 'main' }
+    ]));
+  });
+}
+
 test.beforeAll(async () => {
   env = await startTestEnv();
 });
@@ -24,10 +32,19 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
 
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
+  await seedSingleChatPane(page);
   await loginAdmin(page, env.serverPort);
 
   const addBtn = page.locator('#addPaneBtn');
   await expect(addBtn).toBeVisible();
+
+  const panes = page.locator('[data-pane]');
+  while (await panes.count() > 1) {
+    await panes.last().locator('button[aria-label="Close pane"]').click();
+  }
+  await expect(panes).toHaveCount(1);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  const countBefore = await panes.count();
 
   await addBtn.click();
   const menu = page.locator('[data-testid="pane-add-menu"]');
@@ -38,17 +55,40 @@ test('pane add menu: opens + adds explicit pane kinds + focuses sane defaults', 
   await expect(menu.locator('[data-testid="pane-add-menu-cron"]')).toHaveText(/New Cron pane/);
   await expect(menu.locator('[data-testid="pane-add-menu-timeline"]')).toHaveText(/New Timeline pane/);
   await expect(menu.locator('[data-testid="pane-add-menu-chat"]')).toHaveText(/Chat -> Agent: main/);
-  await expect(menu.locator('[data-testid="pane-add-menu-workqueue"]')).toHaveText(/Workqueue -> Queue: dev-team \/ unassigned/);
+  await expect(menu.locator('[data-testid="pane-add-menu-workqueue"]')).toHaveText(/Workqueue -> Queue: dev-team \/ assigned/);
 
   // Add a workqueue pane and ensure it exists + focus lands on primary control.
   await menu.locator('[data-testid="pane-add-menu-workqueue"]').click();
 
+  await expect(panes).toHaveCount(countBefore + 1);
   const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
   await expect(wqPane).toBeVisible();
 
   const queueSelect = wqPane.locator('[data-wq-queue-select]');
   await expect(queueSelect).toBeVisible();
   await expect(queueSelect).toBeFocused();
+  await expect(wqPane.locator('[data-wq-scope="assigned"]')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('pane add menu: agent-targeted workqueue defaults to assigned despite saved global scope', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+  await page.addInitScript(() => {
+    localStorage.setItem('clawnsole.admin.workqueue.scope.v1', 'all');
+  });
+
+  await loginAdmin(page, env.serverPort);
+
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await expect(wqPane).toBeVisible();
+  await expect(wqPane.locator('[data-wq-scope="assigned"]')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.locator('#addPaneBtn').click();
+  const menu = page.locator('[data-testid="pane-add-menu"]');
+  await expect(menu).toBeVisible();
+  await expect(menu.locator('[data-testid="pane-add-menu-workqueue"]')).toHaveText(/Workqueue -> Queue: dev-team \/ assigned/);
 });
 
 test('pane add menu: workqueue override is applied before pane opens', async ({ page }) => {
@@ -57,12 +97,14 @@ test('pane add menu: workqueue override is applied before pane opens', async ({ 
 
   page.__consoleAsserts = attachConsoleErrorAsserts(page);
 
+  await page.addInitScript(() => {
+    localStorage.setItem('clawnsole.admin.layoutMode', 'custom');
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([{ key: 'ptestchat', kind: 'chat', agentId: 'main' }])
+    );
+  });
   await loginAdmin(page, env.serverPort);
-  await page.evaluate(() => localStorage.setItem('clawnsole.admin.layoutMode', 'custom'));
-
-  while (await page.locator('[data-pane]').count() > 1) {
-    await page.locator('[data-pane] button[aria-label="Close pane"]').last().click();
-  }
 
   await page.locator('#addPaneBtn').click();
   const menu = page.locator('[data-testid="pane-add-menu"]');

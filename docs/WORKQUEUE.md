@@ -90,6 +90,18 @@ The survivor policy is deterministic per queue and canonical issue key:
 
 Apply mode writes a timestamped `work-queues.backup.<ts>.json` before changing state unless `--no-backup` is passed. Merged rows are not deleted; they are marked with `meta.mergedInto`, `meta.mergedAt`, and `meta.mergeRunId`, while their useful notes/errors/results are copied into the survivor's `result.migrationMerged[]`. Normal list and claim paths hide merged rows.
 
+### Collapse legacy duplicate issue rows
+
+```bash
+clawnsole workqueue collapse-duplicates --queue dev-team --dryRun
+clawnsole workqueue collapse-duplicates --queue dev-team
+```
+
+This maintenance command groups rows by `queue + canonical(repo#issueNumber)`.
+The survivor policy is deterministic: prefer non-terminal rows over terminal rows, then newest `updatedAt`, then highest `priority`, then lexicographically smallest `id`.
+
+Apply mode writes a recoverable backup named `work-queues.backup.<timestamp>.json` beside `work-queues.json` before removing duplicate rows. Merged rows are summarized under the survivor's `result.migrationMerged[]`, and the survivor gets `meta.migrationMergedCount`, `meta.migrationLastRunId`, and `meta.migrationLastMergedAt`.
+
 ## Examples
 
 ### Single-agent worker (recommended)
