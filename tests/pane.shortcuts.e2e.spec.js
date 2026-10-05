@@ -22,9 +22,28 @@ async function seedChatOnlyPaneLayout(page, serverPort, { agentId = 'main' } = {
     );
   }, agentId);
   await page.goto(`http://127.0.0.1:${serverPort}/`);
-  await page.fill('#loginPassword', 'admin');
-  await page.click('#loginBtn');
+  const passwordInput = page.locator('#loginPassword');
+  if (await passwordInput.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false)) {
+    await page.fill('#loginPassword', 'admin');
+    await page.click('#loginBtn');
+  } else if (!/\/admin\/?$/.test(page.url())) {
+    await page.goto(`http://127.0.0.1:${serverPort}/admin`);
+  }
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.locator('#addPaneBtn').waitFor({ state: 'visible', timeout: 90000 });
+  await page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first().waitFor({ state: 'visible', timeout: 90000 });
+}
+
+async function triggerPairedPaneShortcut(page) {
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'L',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    }));
+  });
 }
 
 test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page }) => {
@@ -32,6 +51,26 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   test.skip(!!app?.skipReason, app?.skipReason);
 
   installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.addInitScript(() => {
+    localStorage.setItem('clawnsole.admin.layoutMode', 'custom');
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([
+        { key: 'ptestchat', kind: 'chat', agentId: 'main' },
+        {
+          key: 'ptestwq',
+          kind: 'workqueue',
+          agentId: 'main',
+          queue: 'dev-team',
+          statusFilter: ['ready', 'pending', 'claimed', 'in_progress'],
+          scopeFilter: 'all',
+          sortKey: 'priority',
+          sortDir: 'desc'
+        }
+      ])
+    );
+  });
 
   await page.goto(`http://127.0.0.1:${app.serverPort}/`);
   await page.fill('#loginPassword', 'admin');
@@ -54,7 +93,17 @@ test('shortcuts overlay: ? opens, Esc closes, content renders', async ({ page })
   await expect(modal).toContainText('Pane actions');
   await expect(modal).toContainText('Workqueue actions');
   await expect(modal).toContainText('disabled while typing');
+  await expect(modal).toContainText('Focus panes 1-9 by visible order');
+
+  const expectedShortcutIds = await page.evaluate(() => window.__clawnsoleShortcutCatalog().map((entry) => entry.id));
+  const renderedShortcutIds = await modal.locator('[data-shortcut-id]').evaluateAll((rows) =>
+    rows.map((row) => row.getAttribute('data-shortcut-id'))
+  );
+  expect(renderedShortcutIds).toEqual(expectedShortcutIds);
+  expect(new Set(renderedShortcutIds).size).toBe(renderedShortcutIds.length);
   await expect(modal).toContainText('workspace only');
+  await expect(modal).toContainText('Focus Fleet: first needs attention');
+  await expect(modal).toContainText('Open Fleet sorted by heartbeat age');
   await expect(modal.locator('[data-shortcut-status]').first()).toBeVisible();
   await expect(modal).toContainText('Available');
   await expect(modal).toContainText('Blocked: modal-open');
@@ -140,6 +189,208 @@ test('shortcuts overlay: status panel shows typing-focus block reason', async ({
   await expect(modal).toHaveAttribute('aria-hidden', 'true');
 });
 
+test('paired-pane toggle shortcut focuses an existing counterpart without duplicating panes', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const panes = page.locator('[data-pane]');
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]')).filter((pane) => pane.getClientRects().length > 0);
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  await expect(panes).toHaveCount(2);
+  await expect(panes.first()).toHaveAttribute('data-pane-kind', 'chat');
+  await expect(panes.nth(1)).toHaveAttribute('data-pane-kind', 'workqueue');
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Control+Shift+L');
+  await expect.poll(activePaneIndex).toBe(1);
+  await expect(panes).toHaveCount(2);
+  await expect(page.getByTestId('paired-pane-toggle-toast').last()).toContainText('Focused paired Workqueue pane.');
+
+  await page.keyboard.press('Control+Shift+L');
+  await expect.poll(activePaneIndex).toBe(0);
+  await expect(panes).toHaveCount(2);
+  await expect(page.getByTestId('paired-pane-toggle-toast').last()).toContainText('Focused paired Chat pane.');
+});
+
+test('settings shortcut overrides persist, validate conflicts, and update help', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-cron').click();
+  await expect(page.locator('[data-pane]')).toHaveCount(3);
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.locator('[data-shortcut-action="pane-next"]').click();
+  await page.keyboard.press('ControlOrMeta+Shift+Alt+Y');
+  await expect(page.locator('#shortcutOverridesError')).toBeHidden();
+
+  await page.locator('[data-shortcut-action="pane-previous"]').click();
+  await page.keyboard.press('ControlOrMeta+Shift+Alt+Y');
+  await expect(page.locator('#shortcutOverridesError')).toContainText('conflicts with Focus next pane');
+  await page.locator('[data-shortcut-reset="pane-previous"]').click();
+  await page.locator('#shortcutOverridesSave').click();
+  await page.keyboard.press('Escape');
+
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]')).filter((pane) => pane.getClientRects().length > 0);
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+  const triggerShortcut = async (key, altKey = false) => page.evaluate(({ nextKey, withAlt }) => {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: nextKey,
+      ctrlKey: true,
+      altKey: withAlt,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true
+    }));
+  }, { nextKey: key, withAlt: altKey });
+
+  await page.click('#connectionStatus');
+  await page.evaluate(() => window.focusPaneIndex?.(0));
+  await triggerShortcut('Y', true);
+  await expect.poll(activePaneIndex).toBe(1);
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Shift+/');
+  await expect(page.locator('[data-shortcut-help="pane-next"]')).toContainText('Y');
+});
+
+test('paired-pane toggle shortcut opens a missing counterpart for the same target', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await seedChatOnlyPaneLayout(page, app.serverPort, { agentId: 'main' });
+
+  const panes = page.locator('[data-pane]');
+  const activePaneIndex = async () => page.evaluate(() => {
+    const panes = Array.from(document.querySelectorAll('[data-pane]')).filter((pane) => pane.getClientRects().length > 0);
+    const active = document.activeElement;
+    if (!active) return -1;
+    return panes.findIndex((p) => p === active || p.contains(active));
+  });
+
+  await expect(panes).toHaveCount(1);
+  await expect(panes.first()).toHaveAttribute('data-pane-kind', 'chat');
+
+  await page.click('#connectionStatus');
+  await page.keyboard.press('Control+Shift+L');
+  await expect(panes).toHaveCount(2);
+  await expect(panes.nth(1)).toHaveAttribute('data-pane-kind', 'workqueue');
+  await expect.poll(() => page.evaluate(() => {
+    const panes = JSON.parse(localStorage.getItem('clawnsole.admin.panes.v1') || '[]');
+    return panes?.[1]?.agentId || '';
+  })).toBe('main');
+  await expect.poll(activePaneIndex).toBe(1);
+  await expect(page.getByTestId('paired-pane-toggle-toast').last()).toContainText('Opened paired Workqueue pane.');
+});
+
+test('inline shortcut hints follow active pane and hide while typing', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const strip = page.getByTestId('shortcut-hint-strip');
+  const chatInput = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+
+  await expect(chatInput).toBeFocused();
+  await expect(strip).toBeHidden();
+
+  await page.locator('[data-pane][data-pane-kind="chat"]').first().click({ position: { x: 18, y: 18 } });
+  await expect(strip).toBeVisible();
+  await expect(strip).toHaveAttribute('data-shortcut-pane-kind', 'chat');
+  await expect(strip).toContainText('Chat');
+  await expect(strip).toContainText('Cmd/Ctrl+L');
+  await expect(strip).toContainText('Press ?');
+
+  await page.locator('[data-pane][data-pane-kind="workqueue"]').first().click({ position: { x: 18, y: 18 } });
+  await expect(strip).toBeVisible();
+  await expect(strip).toHaveAttribute('data-shortcut-pane-kind', 'workqueue');
+  await expect(strip).toContainText('Workqueue');
+  await expect(strip).toContainText('j/k');
+  await expect(strip).toContainText('Enter');
+
+  await page.getByTestId('shortcut-hint-strip').getByRole('button', { name: 'Press ? for all shortcuts' }).click();
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'false');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#shortcutsModal')).toHaveAttribute('aria-hidden', 'true');
+
+  await page.getByRole('button', { name: 'Open fleet pane' }).click();
+  await page.locator('[data-pane][data-pane-kind="timeline"]').first().click({ position: { x: 18, y: 18 } });
+  await expect(strip).toBeVisible();
+  await expect(strip).toHaveAttribute('data-shortcut-pane-kind', 'timeline');
+  await expect(strip).toContainText('Fleet');
+  await expect(strip).toContainText('Shift+Enter');
+
+  await chatInput.focus();
+  await expect(strip).toBeHidden();
+});
+
+test('shortcuts overlay filters by search text and category chips', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.click('#shortcutsBtn');
+  const modal = page.locator('#shortcutsModal');
+  const search = page.getByTestId('shortcuts-search');
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await expect(search).toBeFocused();
+
+  await search.fill('cmd/ctrl+shift+alt+g');
+  await expect(modal.locator('[data-shortcut-id="workqueue.openForActiveChat"]')).toBeVisible();
+  await expect(modal.locator('[data-shortcut-id="fleet.open"]')).toBeHidden();
+
+  await search.fill('');
+  await modal.getByRole('button', { name: 'Fleet' }).click();
+  await expect(modal.locator('[data-shortcut-id="fleet.open"]')).toBeVisible();
+  await expect(modal.locator('[data-shortcut-id="workqueue.open"]')).toBeHidden();
+
+  await search.fill('definitely-no-shortcut');
+  await expect(modal).toContainText('No shortcuts match your filters.');
+
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveAttribute('aria-hidden', 'true');
+});
+
 test('shortcuts overlay stays in sync with registered shortcut catalog', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
@@ -193,6 +444,23 @@ test('shortcuts overlay stays in sync with registered shortcut catalog', async (
   await expect(modal).toContainText('Open Chat for selected Fleet agent');
   await expect(modal).toContainText('Open Workqueue for selected Fleet agent');
   await expect(modal).toContainText('Open Timeline for selected Fleet agent');
+});
+
+test('shortcuts overlay shows live availability and blocked reason tokens', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await seedChatOnlyPaneLayout(page, app.serverPort);
+
+  const modal = page.locator('#shortcutsModal');
+  await page.locator('#shortcutsBtn').click();
+  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+
+  await expect(modal.locator('[data-shortcut-id="pane.manager"] .shortcut-status')).toHaveText('Available');
+  await expect(modal.locator('[data-shortcut-id="chat.next"]')).toHaveAttribute('data-shortcut-availability', 'blocked');
+  await expect(modal.locator('[data-shortcut-id="chat.next"] .shortcut-status')).toContainText('insufficient-pane-count');
 });
 
 test('pane-add shortcuts are scoped to workspace and blocked by overlays', async ({ page }) => {
@@ -269,8 +537,8 @@ test('shortcuts modal restores prior focus on close', async ({ page }) => {
   const openBtn = page.locator('#shortcutsBtn');
   const modal = page.locator('#shortcutsModal');
 
-  await openBtn.focus();
-  await expect(openBtn).toBeFocused();
+  await openBtn.evaluate((button) => button.focus());
+  await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe('shortcutsBtn');
   await openBtn.click();
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
 
@@ -401,19 +669,21 @@ test('topbar shortcut hints follow active pane and typing focus', async ({ page 
 
   await page.locator('[data-pane]').first().getByTestId('pane-help').focus();
   await expect(strip).toBeVisible();
-  await expect(strip).toContainText('Composer');
-  await expect(strip).toContainText('All shortcuts');
+  await expect(strip).toContainText('Chat composer');
+  await expect(strip).toContainText('Press ?');
 
   await page.evaluate(() => window.focusPaneIndex?.(1));
   await expect(page.getByTestId('active-pane-chip')).toContainText('B Workqueue');
-  await expect(strip).toContainText('Queue search');
-  await expect(strip).toContainText('Workqueue modal');
+  await expect(strip).toContainText('j/k');
+  await expect(strip).toContainText('Enter');
 
   await page.getByLabel('Open fleet pane').click();
   await expect(page.locator('[data-pane]')).toHaveCount(3);
+  await expect(page.locator('[data-pane]').nth(2).locator('[data-tl-search]')).toBeFocused();
   await page.locator('[data-pane]').nth(2).getByTestId('pane-help').focus();
-  await expect(strip).toContainText('Move selection');
-  await expect(strip).toContainText('Open Workqueue');
+  await page.evaluate(() => window.renderShortcutHintStrip?.());
+  await expect(strip).toContainText('Move Fleet selection down');
+  await expect(strip).toContainText('Workqueue for selected Fleet agent');
 });
 
 test('cmd/ctrl+alt+j/k cycles chat panes only and keeps typing guard', async ({ page }) => {
@@ -905,6 +1175,38 @@ test('ctrl/cmd+shift+g opens or focuses workqueue for active chat agent', async 
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
 });
 
+test('global admin shortcuts do not fire while typing in chat input', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const input = page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first();
+  const shortcutsModal = page.locator('#shortcutsModal');
+  const workqueueModal = page.locator('#workqueueModal');
+  const commandPaletteModal = page.locator('#commandPaletteModal');
+
+  await input.focus();
+  await expect(input).toBeFocused();
+
+  await page.keyboard.press('Shift+/');
+  await expect(shortcutsModal).toHaveAttribute('aria-hidden', 'true');
+
+  await page.keyboard.type('gw');
+  await expect(workqueueModal).toHaveAttribute('aria-hidden', 'true');
+
+  await page.keyboard.press('ControlOrMeta+K');
+  await expect(commandPaletteModal).toHaveAttribute('aria-hidden', 'true');
+
+  await page.keyboard.press('ControlOrMeta+R');
+  await expect(input).toBeFocused();
+});
+
 test('fleet quick action button + keyboard shortcut focus existing timeline pane without duplicates', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
@@ -935,4 +1237,23 @@ test('fleet quick action button + keyboard shortcut focus existing timeline pane
 
   await fleetBtn.click({ modifiers: ['Alt'] });
   await expect(timelinePanes).toHaveCount(2);
+});
+
+test('fleet heartbeat shortcut opens Fleet sorted by heartbeat age', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.click('#connectionStatus');
+
+  await page.keyboard.press('Control+Shift+H');
+
+  const agentsModal = page.locator('#agentsModal');
+  await expect(agentsModal).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('#agentsSort')).toHaveValue('heartbeat_age_desc');
 });

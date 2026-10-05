@@ -106,6 +106,45 @@ test('agents modal marks stale fleet data and supports header refresh parity', a
   await expect(page.locator('#agentsList')).toContainText('Gamma (gamma)');
 });
 
+test('agents modal refresh mode supports manual refresh without background updates', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  let agents = [{ id: 'alpha', name: 'Alpha', displayName: 'Alpha' }];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const mode = page.getByLabel('Fleet refresh mode');
+  await expect(mode).toHaveValue('auto');
+  await mode.selectOption('manual');
+  await expect(mode).toHaveValue('manual');
+  await expect
+    .poll(() => page.evaluate(() => window.__debug.getFleetRefreshMode()))
+    .toBe('manual');
+
+  agents = [{ id: 'beta', name: 'Beta', displayName: 'Beta' }];
+  await page.evaluate(() => window.__debug.refreshAgents({ reason: 'fleet_auto_refresh' }));
+  await expect(page.locator('#agentsList')).toContainText('Alpha (alpha)');
+  await expect(page.locator('#agentsList')).not.toContainText('Beta (beta)');
+
+  await page.evaluate(() => window.__debug.setAgentsLastRefreshedAtMs(Date.now() - 70_000));
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Stale');
+
+  await page.keyboard.press('r');
+  await expect(page.locator('#agentsList')).toContainText('Beta (beta)');
+  await expect(page.locator('#agentsLastRefreshed')).toContainText('Last updated:');
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.getByLabel('Fleet refresh mode')).toHaveValue('manual');
+});
+
 test('agents modal defers auto-refresh while a fleet row is active, then catches up once', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
@@ -286,6 +325,52 @@ test('agents modal shows row health and heartbeat-age chips', async ({ page, cla
   await expect(offlineRow.locator('.agents-age-chip')).toHaveText('unknown');
 });
 
+test('agents modal defaults to attention-first triage chips and reason badges', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'connected-agent', name: 'Connected', displayName: 'Connected' },
+    { id: 'busy-agent', name: 'Busy', displayName: 'Busy', status: 'in_progress' },
+    { id: 'stale-agent', name: 'Stale', displayName: 'Stale' },
+    { id: 'disconnected-agent', name: 'Disconnected', displayName: 'Disconnected' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.removeItem('clawnsole.admin.agents.sort');
+    localStorage.removeItem('clawnsole.admin.agents.filter');
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      'connected-agent': now - 10_000,
+      'busy-agent': now - 12_000,
+      'stale-agent': now - 70 * 60_000
+    }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
+  await expect(page.locator('[data-agents-filter="needs_attention"]')).toHaveText('Needs attention');
+  await expect(page.locator('[data-agents-filter="connected"]')).toHaveText('Connected');
+  await expect(page.locator('[data-agents-filter="disconnected"]')).toHaveText('Disconnected');
+  await expect(page.locator('[data-agents-filter="busy"]')).toHaveText('Busy');
+
+  const rows = page.locator('#agentsList .agents-row:visible');
+  await expect(rows.nth(0)).toContainText('Disconnected');
+  await expect(rows.nth(0).locator('.agents-reason-badge')).toHaveText('Disconnected');
+  await expect(rows.nth(1)).toContainText('Busy');
+  await expect(rows.nth(1).locator('.agents-reason-badge')).toHaveText('Busy');
+  await expect(rows.nth(2)).toContainText('Stale');
+  await expect(rows.nth(2).locator('.agents-reason-badge')).toContainText('Stale');
+
+  await page.locator('[data-agents-filter="connected"]').click();
+  await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
+  await expect(page.locator('#agentsList .agents-row:visible')).toContainText('Connected');
+});
+
 test('agents modal quick filter narrows list and Esc clears it', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
@@ -306,6 +391,9 @@ test('agents modal quick filter narrows list and Esc clears it', async ({ page, 
   await expect(search).toBeFocused();
   await expect(search).toHaveValue('');
   await expect(rows).toHaveCount(initialCount);
+
+  await search.press('Escape');
+  await expect(page.locator('#agentsModal')).not.toHaveClass(/open/);
 });
 
 test('agents modal persists triage query and sort until reset', async ({ page, clawnsole }) => {
@@ -354,10 +442,29 @@ test('agents modal persists triage query and sort until reset', async ({ page, c
   await page.getByRole('button', { name: 'Open agents' }).click();
   await page.locator('#agentsSearch').fill('alpha');
   await page.locator('#agentsSort').selectOption('agent_id_asc');
-  await page.getByRole('button', { name: 'Reset agents triage view' }).click();
+  await page.getByRole('button', { name: 'Reset triage view' }).click();
   await expect(page.locator('#agentsSearch')).toHaveValue('');
-  await expect(page.locator('#agentsSort')).toHaveValue('recent_desc');
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
   await expect(page.locator('#agentsList .agents-row')).toHaveCount(2);
+});
+
+test('agents modal defaults to attention sort with triage chips and reason badges', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  await clawnsole.gotoAndLoginAdmin(page);
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
+  await expect(page.getByRole('button', { name: 'Needs attention', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connected', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Disconnected', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Busy', exact: true })).toBeVisible();
+  await expect(page.locator('[data-testid="agents-reason-badge"]').first()).toBeVisible();
+
+  await page.getByRole('button', { name: 'Connected', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Connected', exact: true })).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('fleet refresh preserves selected row and falls back when it disappears', async ({ page, clawnsole }) => {
@@ -503,7 +610,14 @@ test('agents modal copies selected fleet agent id with keyboard shortcut', async
   await alpha.click();
   await page.keyboard.press('j');
   await expect(beta).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#agentsCopySelectedBtn')).toBeEnabled();
+  await expect(page.locator('#agentsCopySelectedBtn')).toHaveAttribute('title', 'Copy beta');
 
+  await page.locator('#agentsCopySelectedBtn').click();
+  await expect(page.getByTestId('fleet-copy-agent-toast').last()).toContainText('Copied beta');
+  await expect.poll(() => page.evaluate(() => window.__copiedText)).toBe('beta');
+
+  await beta.focus();
   await page.keyboard.press('y');
   await expect(page.getByTestId('fleet-copy-agent-toast').last()).toContainText('Copied beta');
   await expect(beta).toBeFocused();
@@ -511,6 +625,10 @@ test('agents modal copies selected fleet agent id with keyboard shortcut', async
 
   await beta.locator('[data-agent-action="copy-id"]').first().click();
   await expect(page.getByTestId('fleet-copy-agent-toast').last()).toContainText('Copied beta');
+
+  await page.locator('#agentsSearch').fill('no matching agent');
+  await expect(page.locator('#agentsCopySelectedBtn')).toBeDisabled();
+  await expect(page.locator('#agentsCopySelectedBtn')).toHaveAttribute('title', 'Select an agent row first');
 });
 
 test('fleet list keeps header and identity columns visible while scrolling', async ({ page, clawnsole }) => {
@@ -561,19 +679,26 @@ test('fleet list keeps header and identity columns visible while scrolling', asy
   expect(stickyHeader.position).toBe('sticky');
   expect(stickyHeader.topDelta).toBeLessThan(2);
 
-  const row = page.locator('#agentsList .agents-row[data-agent-id="agent-30"]');
+  const row = page.locator('#agentsList .agents-row[data-agent-id="agent-30"]', { has: page.locator('.agents-row-meta') });
+  await expect(row).toHaveCount(1);
+  await expect(row.locator('.agents-row-identity')).toBeVisible();
+  await expect(row.locator('.agents-row-meta')).toBeVisible();
   const before = await row.evaluate((el) => ({
-    identityLeft: el.querySelector('.agents-row-identity').getBoundingClientRect().left,
-    detailsLeft: el.querySelector('.agents-row-meta').getBoundingClientRect().left
+    identityLeft: el.querySelector('.agents-row-identity')?.getBoundingClientRect().left ?? null,
+    detailsLeft: el.querySelector('.agents-row-meta')?.getBoundingClientRect().left ?? null
   }));
+  expect(before.identityLeft).not.toBeNull();
+  expect(before.detailsLeft).not.toBeNull();
   await list.evaluate((el) => {
     el.scrollLeft = 260;
   });
   const after = await row.evaluate((el) => ({
-    identityLeft: el.querySelector('.agents-row-identity').getBoundingClientRect().left,
-    detailsLeft: el.querySelector('.agents-row-meta').getBoundingClientRect().left,
+    identityLeft: el.querySelector('.agents-row-identity')?.getBoundingClientRect().left ?? null,
+    detailsLeft: el.querySelector('.agents-row-meta')?.getBoundingClientRect().left ?? null,
     scrollLeft: el.closest('#agentsList').scrollLeft
   }));
+  expect(after.identityLeft).not.toBeNull();
+  expect(after.detailsLeft).not.toBeNull();
   expect(after.scrollLeft).toBeGreaterThan(80);
   expect(Math.abs(after.identityLeft - before.identityLeft)).toBeLessThan(2);
   expect(after.detailsLeft).toBeLessThan(before.detailsLeft - 80);
@@ -624,6 +749,188 @@ test('agents modal keeps selected agent summary sticky with keyboard actions', a
   await expect(bar).not.toContainText('Beta (beta)');
 });
 
+test('agents modal persists triage query and sort across reopen and reload, then resets', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'alpha', name: 'Alpha', displayName: 'Alpha' },
+    { id: 'beta', name: 'Beta', displayName: 'Beta' },
+    { id: 'gamma', name: 'Gamma', displayName: 'Gamma' }
+  ];
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.evaluate(() => {
+    localStorage.removeItem('clawnsole.admin.agents.query');
+    localStorage.removeItem('clawnsole.admin.agents.sort');
+    localStorage.removeItem('clawnsole.admin.agents.preHeartbeatSort');
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      alpha: Date.now(),
+      beta: Date.now(),
+      gamma: Date.now()
+    }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+
+  const search = page.locator('#agentsSearch');
+  const rows = page.locator('#agentsList .agents-row:visible');
+  await search.fill('beta');
+  await page.locator('#agentsSort').selectOption('agent_id_asc');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('Beta (beta)');
+
+  await page.getByRole('button', { name: 'Close agents' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(search).toHaveValue('beta');
+  await expect(page.locator('#agentsSort')).toHaveValue('agent_id_asc');
+  await expect(rows).toHaveCount(1);
+
+  await page.reload();
+  await clawnsole.waitForAdminUiReady(page);
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await expect(search).toHaveValue('beta');
+  await expect(page.locator('#agentsSort')).toHaveValue('agent_id_asc');
+  await expect(rows).toHaveCount(1);
+
+  await search.press('Escape');
+  await expect(page.locator('#agentsModal')).toHaveClass(/open/);
+  await expect(search).toHaveValue('');
+  await expect(rows).toHaveCount(3);
+
+  await search.fill('beta');
+  await page.locator('#agentsSort').selectOption('heartbeat_age_desc');
+  await page.getByRole('button', { name: 'Reset agents triage view' }).click();
+  await expect(search).toHaveValue('');
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
+  await expect(rows).toHaveCount(3);
+});
+
+test('fleet list keeps header and identity columns sticky while scanning', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = Array.from({ length: 40 }, (_, index) => {
+    const id = `scan-agent-${String(index + 1).padStart(2, '0')}`;
+    return { id, name: id, displayName: id, model: `model-${index + 1}`, host: `host-${index + 1}` };
+  });
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    const lastSeen = {};
+    for (let index = 1; index <= 40; index += 1) {
+      lastSeen[`scan-agent-${String(index).padStart(2, '0')}`] = now;
+    }
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify(lastSeen));
+    localStorage.setItem('clawnsole.admin.agents.healthyCollapsed', '0');
+    localStorage.removeItem('clawnsole.admin.agents.columns');
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+
+  await page.getByRole('button', { name: 'Open agents' }).click();
+  await page.locator('#agentsColumnPicker summary').click();
+  await page.locator('#agentsColumn_model').check();
+  await page.locator('#agentsColumn_host').check();
+  await page.locator('#agentsColumnPicker').evaluate((el) => { el.open = false; });
+
+  const assertStickyFleetScan = async (density) => {
+    if (density === 'compact') {
+      await page.getByRole('button', { name: 'Compact' }).click();
+    }
+
+    await page.locator('#agentsList').evaluate((el) => {
+      el.style.maxHeight = '260px';
+      el.style.maxWidth = '520px';
+      el.scrollTop = 260;
+      el.scrollLeft = 260;
+    });
+
+    const header = page.locator('#agentsList .agents-table-header').first();
+    const identityHeader = header.locator('.agents-table-agent-label');
+    const healthHeader = header.locator('.agents-table-health-label');
+    await expect(page.locator('#agentsList .agents-row[data-agent-id="scan-agent-20"]')).toHaveCount(1);
+    await page.locator('#agentsList').evaluate((list) => {
+      const row = list.querySelector('.agents-row[data-agent-id="scan-agent-20"]');
+      row?.scrollIntoView({ block: 'center', inline: 'nearest' });
+    });
+    const row20 = page.locator('#agentsList .agents-row[data-agent-id="scan-agent-20"]');
+
+    await expect(header).toBeVisible();
+    await expect(identityHeader).toBeVisible();
+    await expect(healthHeader).toBeVisible();
+    await expect(row20.locator('.agents-row-title')).toContainText('scan-agent-20');
+    await expect(row20.locator('.agents-health-state-chip')).toHaveText('Healthy');
+
+    const metrics = await page.locator('#agentsList').evaluate((list) => {
+      const headerEl = list.querySelector('.agents-table-header');
+      const pinEl = headerEl?.querySelector('.agents-table-pin-label') || null;
+      const identityEl = headerEl?.querySelector('.agents-table-agent-label') || null;
+      const healthEl = headerEl?.querySelector('.agents-table-health-label') || null;
+      const rowIdentity = list.querySelector('.agents-row[data-agent-id="scan-agent-20"] .agents-row-identity');
+      const rowHealth = list.querySelector('.agents-row[data-agent-id="scan-agent-20"] .agents-row-health');
+      const style = (el) => el ? getComputedStyle(el) : null;
+      const bounds = (el) => el ? el.getBoundingClientRect() : null;
+      const listBounds = list.getBoundingClientRect();
+      const beforeIdentityLeft = bounds(identityEl)?.left || 0;
+      const beforeHealthLeft = bounds(healthEl)?.left || 0;
+      const beforeRowIdentityLeft = bounds(rowIdentity)?.left || 0;
+      const beforeRowHealthLeft = bounds(rowHealth)?.left || 0;
+      list.scrollLeft += 120;
+      const afterIdentityLeft = bounds(identityEl)?.left || 0;
+      const afterHealthLeft = bounds(healthEl)?.left || 0;
+      const afterRowIdentityLeft = bounds(rowIdentity)?.left || 0;
+      const afterRowHealthLeft = bounds(rowHealth)?.left || 0;
+      return {
+        scrollTop: list.scrollTop,
+        scrollLeft: list.scrollLeft,
+        headerPosition: style(headerEl)?.position,
+        identityPosition: style(identityEl)?.position,
+        healthPosition: style(healthEl)?.position,
+        pinWidth: Math.round(bounds(pinEl)?.width || 0),
+        rowIdentityPosition: style(rowIdentity)?.position,
+        rowHealthPosition: style(rowHealth)?.position,
+        headerTopDelta: Math.abs((bounds(headerEl)?.top || 0) - list.getBoundingClientRect().top),
+        rowIdentityVisible: (bounds(rowIdentity)?.left || 0) >= listBounds.left && (bounds(rowIdentity)?.right || 0) <= listBounds.right,
+        rowHealthVisible: (bounds(rowHealth)?.left || 0) >= listBounds.left && (bounds(rowHealth)?.right || 0) <= listBounds.right,
+        identityHorizontalDrift: Math.abs(afterIdentityLeft - beforeIdentityLeft),
+        healthHorizontalDrift: Math.abs(afterHealthLeft - beforeHealthLeft),
+        rowIdentityHorizontalDrift: Math.abs(afterRowIdentityLeft - beforeRowIdentityLeft),
+        rowHealthHorizontalDrift: Math.abs(afterRowHealthLeft - beforeRowHealthLeft)
+      };
+    });
+
+    expect(metrics.scrollTop).toBeGreaterThan(0);
+    expect(metrics.scrollLeft).toBeGreaterThan(0);
+    expect(metrics.headerPosition).toBe('sticky');
+    expect(metrics.identityPosition).toBe('sticky');
+    expect(metrics.healthPosition).toBe('sticky');
+    expect(metrics.pinWidth).toBe(density === 'compact' ? 32 : 42);
+    expect(metrics.rowIdentityPosition).toBe('sticky');
+    expect(metrics.rowHealthPosition).toBe('sticky');
+    expect(metrics.headerTopDelta).toBeLessThan(4);
+    expect(metrics.rowIdentityVisible).toBeTruthy();
+    expect(metrics.rowHealthVisible).toBeTruthy();
+    expect(metrics.identityHorizontalDrift).toBeLessThan(4);
+    expect(metrics.healthHorizontalDrift).toBeLessThan(4);
+    expect(metrics.rowIdentityHorizontalDrift).toBeLessThan(4);
+    expect(metrics.rowHealthHorizontalDrift).toBeLessThan(4);
+  };
+
+  await assertStickyFleetScan('comfortable');
+  await assertStickyFleetScan('compact');
+});
+
 test('fleet attention mode sections healthy agents and keeps filters while expanding', async ({ page, clawnsole }) => {
   if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
 
@@ -658,8 +965,8 @@ test('fleet attention mode sections healthy agents and keeps filters while expan
   await expect(page.getByRole('button', { name: /Healthy \(11\) Hide/ })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(12);
 
-  await page.getByRole('button', { name: 'Offline/Error' }).click();
-  await expect(page.getByRole('button', { name: 'Offline/Error' })).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('[data-agents-filter="disconnected"]').click();
+  await expect(page.locator('[data-agents-filter="disconnected"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#agentsList .agents-section-title').first()).toContainText('Needs attention (1)');
   await expect(page.getByRole('button', { name: /Healthy \(0\) Hide/ })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#agentsList .agents-row:visible')).toHaveCount(1);
@@ -700,6 +1007,40 @@ test('fleet attention shortcut selects first needs-attention row and Enter opens
       )
     )
     .toContain('attention-agent');
+});
+
+test('fleet attention shortcut treats busy active agents as needing attention', async ({ page, clawnsole }) => {
+  if (clawnsole.skipReason) test.skip(clawnsole.skipReason);
+
+  const agents = [
+    { id: 'healthy-agent', name: 'healthy-agent', displayName: 'healthy-agent' },
+    { id: 'busy-agent', name: 'busy-agent', displayName: 'busy-agent', status: 'in_progress' }
+  ];
+  await page.route(/\/agents(?:\?|$)/, async (route) => {
+    await route.fulfill({ json: { agents } });
+  });
+
+  await clawnsole.gotoAndLoginAdmin(page);
+  await page.evaluate(() => {
+    const now = Date.now();
+    localStorage.setItem('clawnsole.admin.agentLastSeenAtMs', JSON.stringify({
+      'healthy-agent': now,
+      'busy-agent': now
+    }));
+  });
+  await page.getByRole('button', { name: 'Refresh agent list' }).click();
+  await page.evaluate(() => document.activeElement?.blur?.());
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F', ctrlKey: true, shiftKey: true, bubbles: true }));
+  });
+
+  const selected = page.locator('#agentsList .agents-row[aria-selected="true"]');
+  await expect(selected).toContainText('busy-agent');
+  await expect(selected).toHaveAttribute('data-needs-attention', 'true');
+  await expect(selected).toHaveAttribute('data-health-state', 'busy');
+  await expect(page.locator('#agentsSelectionBar [data-agents-selection-health]')).toHaveText('Busy');
+  await expect(page.locator('#agentsSelectionBar [data-agents-selection-health]')).toHaveAttribute('data-health-state', 'busy');
 });
 
 test('fleet attention shortcut falls back to first healthy row and Shift+Enter opens workqueue', async ({ page, clawnsole }) => {
@@ -785,8 +1126,8 @@ test('agents modal heartbeat heatmap and stale-first sort are toggleable and res
   await expect(page.locator('#agentsSortIndicator')).toContainText('Sorted by heartbeat age');
   await expect(page.locator('#agentsList .agents-row:visible').first()).toContainText('critical-agent');
 
-  await page.getByRole('button', { name: 'Reset sort' }).click();
-  await expect(page.locator('#agentsSort')).toHaveValue('recent_desc');
+  await page.getByRole('button', { name: 'Reset agents triage view' }).click();
+  await expect(page.locator('#agentsSort')).toHaveValue('attention_first');
   await expect(page.locator('#agentsSortIndicator')).toHaveText('');
 });
 
@@ -816,6 +1157,7 @@ test('agents modal quick actions open/reuse chat, timeline, and workqueue contex
   await firstRow.locator('[data-agent-action="open-workqueue"]').first().click();
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"]')).toHaveCount(1);
   await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-claim-agent]')).toHaveValue(agentId || 'main');
+  await expect(page.locator('[data-pane][data-pane-kind="workqueue"] [data-wq-scope="assigned"]')).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('agents modal can return to previous triage context after opening workqueue', async ({ page, clawnsole }) => {
@@ -897,6 +1239,7 @@ test('agents modal triage action opens chat and workqueue from non-chat layout',
   await expect(page.locator('[data-pane][data-pane-kind="chat"] [data-pane-agent-select]')).toHaveValue('alpha');
   const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
   await expect(wqPane.locator('[data-wq-claim-agent]')).toHaveValue('alpha');
+  await expect(wqPane.locator('[data-wq-scope="assigned"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(wqPane.locator('[data-wq-queue-select]')).toBeFocused();
 });
 

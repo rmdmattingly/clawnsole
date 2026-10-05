@@ -192,6 +192,47 @@ function seedFilterSummaryWorkqueueItems(queue) {
   fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
 }
 
+function seedQueueAndItemSearchWorkqueueItems({ queue, otherQueue }) {
+  const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, title, instructions, patch = {}) => ({
+    id,
+    queue,
+    title,
+    instructions,
+    priority: 10,
+    status: 'ready',
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-60000),
+    updatedAt: iso(-60000),
+    dedupeKey: `search-split-${id}`,
+    meta: { repo: 'rmdmattingly/clawnsole', source: 'playwright-search-split' },
+    ...patch
+  });
+
+  const data = {
+    version: 1,
+    queues: {
+      [queue]: { name: queue, createdAt: iso(-120000) },
+      [otherQueue]: { name: otherQueue, createdAt: iso(-120000) }
+    },
+    assignments: {},
+    items: [
+      mkItem('search-alpha', 'alpha release checklist', 'Title hit row'),
+      mkItem('search-beta', 'beta diagnostics', 'Contains instructions needle'),
+      mkItem('search-meta', 'metadata-only row', 'No visible query text', { meta: { repo: 'rmdmattingly/clawnsole', ticket: 'meta-only-needle' } }),
+      mkItem('other-queue-row', 'other queue item', 'Should not render in selected queue', { queue: otherQueue })
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
+
 function seedActionablePresetWorkqueueItems(queue) {
   const dir = path.join(env.tempHome, '.openclaw', 'clawnsole');
   fs.mkdirSync(dir, { recursive: true });
@@ -431,6 +472,7 @@ test('workqueue pane: new panes default to non-terminal statuses with archived t
   await loginAdmin(page, env.serverPort);
 
   const defaultPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await defaultPane.locator('[data-wq-scope="all"]').click();
   await defaultPane.locator('[data-wq-queue-select]').selectOption(queue);
   await expect(defaultPane.locator('[data-wq-statusline]')).toContainText('Showing 1 of 3 items');
   await expect(defaultPane.locator('[data-wq-list-body]')).toContainText('archived toggle ready row');
@@ -511,7 +553,9 @@ test('workqueue pane: queue switch updates pane identity everywhere', async ({ p
 
   await page.keyboard.press('Control+P');
   const managerRow = page.locator('.pane-manager-row[data-pane-kind="workqueue"]').first();
-  await expect(managerRow.locator('.pane-manager-kind-label')).toHaveText(`B Workqueue · ${queue}`);
+  await expect(managerRow.getByTestId('pane-manager-letter')).toHaveText('B');
+  await expect(managerRow.getByTestId('pane-manager-kind-label')).toHaveText('Workqueue');
+  await expect(managerRow.getByTestId('pane-manager-target-label')).toContainText(queue);
   await expect(managerRow).not.toContainText('main');
 });
 
@@ -611,10 +655,26 @@ test('workqueue pane: renders + has queue dropdown + does not show chat composer
 
   // Header target should describe queue context (not agent).
   await expect(wqPane.locator('[data-pane-target-label]')).toHaveText('Queue');
+  await expect(wqPane.getByTestId('pane-type-label')).toContainText('Workqueue · dev-team');
+  await expect(wqPane.getByTestId('pane-target-value')).toHaveText('dev-team');
+
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill('identity-qa');
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await expect(wqPane.getByTestId('pane-type-label')).toContainText('Workqueue · identity-qa');
+  await expect(wqPane.getByTestId('pane-target-value')).toHaveText('identity-qa');
+
+  await page.locator('#paneManagerBtn').click();
+  const managerRow = page.locator('.pane-manager-row', { hasText: 'Workqueue · identity-qa' }).first();
+  await expect(managerRow.getByTestId('pane-manager-kind-label')).toHaveText('Workqueue');
+  await expect(managerRow.getByTestId('pane-manager-target-label')).toContainText('identity-qa');
+  await page.keyboard.press('Escape');
 
   // Refreshing agent list should not flip the workqueue header back to Agent.
   await page.getByLabel('Refresh agent list').click();
   await expect(wqPane.locator('[data-pane-target-label]')).toHaveText('Queue');
+  await expect(wqPane.getByTestId('pane-type-label')).toContainText('Workqueue · identity-qa');
+  await expect(wqPane.getByTestId('pane-target-value')).toHaveText('identity-qa');
 
   // Workqueue pane should not render the chat composer UI.
   await expect(wqPane.locator('.chat-input-row')).toBeHidden();
@@ -745,6 +805,47 @@ test('workqueue pane: status filter uses human labels and queue-scoped counts', 
   await expect(wqPane.locator('[data-wq-status-options] .wq-status-chip', { hasText: 'Ready (1)' })).toHaveCount(1);
 });
 
+test('workqueue pane: list header stays sticky while scrolling items', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const panes = page.locator('[data-pane]');
+  const wqPane = panes.last();
+  const listBody = wqPane.locator('[data-wq-list-body]');
+  const listHeader = wqPane.locator('.wq-list-header');
+
+  const stamp = Date.now();
+  for (let i = 0; i < 40; i += 1) {
+    const res = await page.request.post(`http://127.0.0.1:${env.serverPort}/api/workqueue/enqueue`, {
+      data: {
+        queue: 'dev-team',
+        title: `pw-sticky-${stamp}-${i}`,
+        instructions: `sticky-header-${i}`,
+        priority: 1
+      }
+    });
+    expect(res.ok()).toBeTruthy();
+  }
+
+  await wqPane.locator('[data-wq-refresh]').click();
+  await expect(listBody.locator('.wq-row').first()).toBeVisible();
+
+  const before = await listHeader.boundingBox();
+  await listBody.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  const after = await listHeader.boundingBox();
+
+  expect(before).toBeTruthy();
+  expect(after).toBeTruthy();
+  expect(Math.abs(after.y - before.y)).toBeLessThan(1.5);
+});
+
 test('workqueue pane: filter summary chips show counts and remove filters', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
@@ -755,7 +856,7 @@ test('workqueue pane: filter summary chips show counts and remove filters', asyn
   seedFilterSummaryWorkqueueItems(queue);
 
   await loginAdmin(page, env.serverPort);
-  await addPane(page, 'Workqueue pane');
+  await addPane(page, 'Workqueue pane', { workqueueScope: 'unassigned' });
 
   const wqPane = page.locator('[data-pane]').last();
   await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
@@ -767,7 +868,7 @@ test('workqueue pane: filter summary chips show counts and remove filters', asyn
   await expect(summary).toBeVisible();
   await expect(summary).toContainText(`Queue ${queue}`);
   await expect(summary).toContainText('Scope Unassigned');
-  await expect(summary).toContainText('Status Ready');
+  await expect(summary).toContainText('Statuses Active');
   await expect(wqPane.locator('.wq-row')).toHaveCount(2);
 
   await wqPane.locator('[data-wq-preset-clawnsole]').click();
@@ -788,6 +889,55 @@ test('workqueue pane: filter summary chips show counts and remove filters', asyn
   await expect(wqPane.locator('[data-wq-statusline]')).toContainText('Showing 2 of 3 items');
   await expect(summary).not.toContainText('Search alternate repo');
   await expect(wqPane.locator('[data-wq-queue-custom]')).toHaveValue(queue);
+});
+
+test('workqueue pane: separates queue filtering from item search', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  const stamp = Date.now();
+  const queue = `queue-item-search-${stamp}`;
+  const otherQueue = `queue-picker-target-${stamp}`;
+  seedQueueAndItemSearchWorkqueueItems({ queue, otherQueue });
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const wqPane = page.locator('[data-pane]').last();
+  const queueSearch = wqPane.locator('[data-wq-queue-search]');
+  const itemSearch = wqPane.locator('[data-wq-item-search]');
+
+  await expect(queueSearch).toHaveAttribute('placeholder', 'Filter queue list...');
+  await expect(itemSearch).toHaveAttribute('placeholder', 'Search items...');
+
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await expect(wqPane.locator('.wq-row')).toHaveCount(3);
+
+  await queueSearch.fill('picker-target');
+  await expect(wqPane.locator('[data-wq-queue-select] option:not([hidden])', { hasText: otherQueue })).toHaveCount(1);
+  await expect(wqPane.locator('.wq-row')).toHaveCount(3);
+
+  await itemSearch.fill('instructions needle');
+  await expect(wqPane.locator('.wq-row')).toHaveCount(1);
+  await expect(wqPane.locator('.wq-row')).toContainText('beta diagnostics');
+
+  await itemSearch.fill('meta-only-needle');
+  await expect(wqPane.locator('.wq-row')).toHaveCount(1);
+  await expect(wqPane.locator('.wq-row')).toContainText('metadata-only row');
+
+  await itemSearch.fill('missing-query');
+  await expect(wqPane.locator('[data-wq-empty]')).toContainText('No items match "missing-query".');
+  await wqPane.locator('[data-wq-clear-item-search]').click();
+  await expect(itemSearch).toHaveValue('');
+  await expect(wqPane.locator('.wq-row')).toHaveCount(3);
+
+  await wqPane.click();
+  await page.keyboard.press('/');
+  await expect(itemSearch).toBeFocused();
 });
 
 test('workqueue pane: actionable-only preset hides routine rows and persists', async ({ page }) => {
@@ -936,9 +1086,7 @@ test('workqueue pane: direct shortcuts focus queue, item, and status controls wi
   await expect(pane.locator('[data-wq-status-details] summary')).toBeFocused();
   await expect(pane.locator('[data-wq-status-details]')).toHaveAttribute('open', '');
 
-  await page.evaluate(() => {
-    document.querySelector('[data-wq-queue-search]')?.setAttribute('hidden', '');
-  });
+  await pane.locator('[data-wq-queue-search]').evaluate((el) => el.setAttribute('hidden', ''));
   await pane.locator('[data-wq-refresh]').focus();
   await pressAlt('q');
   await expect(page.getByTestId('shortcut-blocked-toast').last()).toContainText('Shortcut target is unavailable');
@@ -1162,6 +1310,7 @@ test('workqueue pane: enqueue destination is distinct from viewing queue', async
   await expect(destinationSelect).toHaveAttribute('aria-label', 'Enqueue destination queue');
   await expect(pane.getByLabel('Enqueue destination', { exact: true }).getByText('Enqueue to')).toBeVisible();
   await expect(pane.getByText('New items go here; the viewed queue stays separate.')).toBeVisible();
+  await expect(pane.locator('[data-wq-enqueue-submit]')).toHaveText('Enqueue to queue');
 
   await destinationSearch.fill('qa-destination');
   await expect(destinationSelect.locator('option', { hasText: 'qa-destination' })).toHaveCount(1);
@@ -1372,11 +1521,23 @@ test('workqueue pane: source chips + clawnsole preset filter items without reloa
   await enqueue('[ROUTINE] speechee routine item', 'https://github.com/rmdmattingly/speechee/pull/37');
 
   await pane.locator('[data-wq-refresh]').click();
+  await pane.locator('[data-wq-scope="all"]').click();
   await expect(pane.locator('.wq-row')).toHaveCount(2);
+  await expect(pane.locator('[data-wq-filter-count]')).toHaveText('Showing 2 items');
+  await expect(pane.locator('[data-wq-filter-summary] .wq-filter-token', { hasText: 'Queue dev-team' })).toHaveCount(1);
+  await expect(pane.locator('[data-wq-filter-summary] .wq-filter-token', { hasText: 'Scope All' })).toHaveCount(1);
+  await expect(pane.locator('[data-wq-filter-summary] .wq-filter-token', { hasText: 'Statuses Active' })).toHaveCount(1);
+  await expect(pane.locator('[data-wq-clear-all-filters]')).toHaveCount(0);
 
   await pane.locator('[data-wq-source="issue"]').click();
   await expect(pane.locator('.wq-row')).toHaveCount(1);
   await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
+  await expect(pane.locator('[data-wq-filter-count]')).toContainText('Showing 1 of 2 items');
+  await expect(pane.locator('[data-wq-filter-summary] .wq-filter-token', { hasText: 'Source Issue' })).toHaveCount(1);
+
+  await pane.locator('[data-wq-filter-summary] .wq-filter-token', { hasText: 'Source Issue' }).click();
+  await expect(pane.locator('.wq-row')).toHaveCount(2);
+  await expect(pane.locator('[data-wq-filter-summary] .wq-filter-token', { hasText: 'Source' })).toHaveCount(0);
 
   await pane.locator('[data-wq-clear-quick]').click();
   await expect(pane.locator('.wq-row')).toHaveCount(2);
@@ -1384,6 +1545,12 @@ test('workqueue pane: source chips + clawnsole preset filter items without reloa
   await pane.locator('[data-wq-preset-clawnsole]').click();
   await expect(pane.locator('.wq-row')).toHaveCount(1);
   await expect(pane.locator('.wq-row .wq-col.title')).toContainText(/clawnsole issue item/i);
+  await expect(pane.locator('[data-wq-filter-summary] .wq-filter-token', { hasText: 'Repo rmdmattingly/clawnsole' })).toHaveCount(1);
+
+  await pane.locator('[data-wq-clear-all-filters]').click();
+  await expect(pane.locator('[data-wq-queue-select]')).toHaveValue('dev-team');
+  await expect(pane.locator('.wq-row')).toHaveCount(2);
+  await expect(pane.locator('[data-wq-filter-count]')).toHaveText('Showing 2 items');
 });
 
 test('workqueue pane: normalizes mixed legacy issue title prefixes', async ({ page }) => {
@@ -1619,6 +1786,7 @@ test('workqueue pane: controls toolbar is sticky and list scrolls independently'
   const listBody = wqPane.locator('.wq-pane [data-wq-list-body]').first();
 
   await expect(toolbar).toBeVisible();
+  await expect(toolbar.locator('[data-wq-bulk-archive]')).toHaveText('Bulk archive');
   await expect(list).toBeVisible();
   await expect(listHeader).toBeVisible();
   await expect(listBody).toHaveCount(1);

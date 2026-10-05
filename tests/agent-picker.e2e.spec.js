@@ -35,7 +35,7 @@ test('agent chooser: opens, shows agents, Esc closes', async ({ page }) => {
   await expect(btn).toHaveAttribute('aria-label', /current:\s*main/i);
   await expect(destinationButton).toContainText(/main/i);
 
-  await btn.click();
+  await destinationButton.click();
 
   const chooser = page.getByRole('dialog', { name: 'Choose agent' });
   await expect(chooser).toBeVisible();
@@ -50,23 +50,19 @@ test('agent chooser: opens, shows agents, Esc closes', async ({ page }) => {
   await expect(btn).toHaveAttribute('aria-label', /current:\s*dev/i);
   await expect(pane.getByTestId('pane-type-label')).toHaveText(/^A Chat · dev/i);
 
-  // Guard: changing destination with a draft requires confirmation.
+  // Guard: changing destination keeps the draft; send-time retarget confirmation
+  // is covered in the chat pane tests.
   await pane.getByTestId('pane-input').fill('draft that should block accidental switch');
   await destinationButton.click();
   await expect(chooser).toBeVisible();
 
-  let seenConfirm = false;
-  page.once('dialog', async (dialog) => {
-    seenConfirm = true;
-    expect(dialog.message()).toMatch(/unsent draft\/attachment/i);
-    await dialog.dismiss();
-  });
   await chooser.getByRole('button', { name: /main/i }).click();
-  await expect.poll(() => seenConfirm).toBe(true);
-  await expect(btn).toContainText(/dev/i);
+  await expect(chooser).toHaveCount(0);
+  await expect(btn).toContainText(/main/i);
+  await expect(pane.getByTestId('pane-input')).toHaveValue('draft that should block accidental switch');
 
   // Re-open and Esc closes.
-  await btn.click();
+  await destinationButton.click();
   await expect(chooser).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(chooser).toHaveCount(0);

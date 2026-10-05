@@ -1,4 +1,6 @@
 const { test, expect } = require('@playwright/test');
+const fs = require('fs');
+const path = require('path');
 const { installPageFailureAssertions } = require('./helpers/pw-assertions');
 const { startClawnsoleTestApp } = require('./helpers/pw-app');
 
@@ -11,6 +13,41 @@ test.beforeAll(async () => {
 test.afterAll(() => {
   app?.stop?.();
 });
+
+function seedArchivedToggleItems(queue, runId) {
+  const dir = path.join(app.tempHome, '.openclaw', 'clawnsole');
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date();
+  const iso = (offsetMs) => new Date(now.getTime() + offsetMs).toISOString();
+  const mkItem = (id, status, title) => ({
+    id,
+    queue,
+    title,
+    instructions: `Archived toggle seed ${title}`,
+    priority: 10,
+    status,
+    claimedBy: '',
+    claimedAt: '',
+    leaseUntil: 0,
+    attempts: 0,
+    lastError: '',
+    createdAt: iso(-60000),
+    updatedAt: iso(-60000),
+    dedupeKey: `archived-toggle-${runId}-${id}`
+  });
+
+  const data = {
+    version: 1,
+    queues: { [queue]: { name: queue, createdAt: iso(-120000) } },
+    assignments: {},
+    items: [
+      mkItem(`archived-toggle-ready-${runId}`, 'ready', `pw-archived-toggle-${runId}-ready`),
+      mkItem(`archived-toggle-done-${runId}`, 'done', `pw-archived-toggle-${runId}-done`),
+      mkItem(`archived-toggle-failed-${runId}`, 'failed', `pw-archived-toggle-${runId}-failed`)
+    ]
+  };
+  fs.writeFileSync(path.join(dir, 'work-queues.json'), JSON.stringify(data, null, 2));
+}
 
 test('pane: workqueue renders + core controls visible', async ({ page }) => {
   test.setTimeout(180000);
@@ -35,6 +72,7 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   await expect(paneGrid).toHaveAttribute('aria-label', 'Chat panes');
 
   await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue-scope').selectOption('all');
   await page.getByTestId('pane-add-menu-workqueue').click();
   await expect(paneGrid).toHaveAttribute('aria-label', 'Panes');
 
@@ -103,7 +141,54 @@ test('pane: workqueue renders + core controls visible', async ({ page }) => {
   await expect(wqPane.locator('[data-pane-input]')).toBeHidden();
 });
 
-test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
+test('pane: workqueue defaults to triage statuses and can show archived', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  const runId = String(Date.now());
+  seedArchivedToggleItems('dev-team', runId);
+
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([{ key: 'ptestchat01', kind: 'chat', agentId: 'main' }])
+    );
+  });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue').click();
+
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').last();
+  await expect(wqPane.locator('[data-wq-status-selected]')).toContainText('Ready');
+  await expect(wqPane.locator('[data-wq-status-selected]')).not.toContainText('Done');
+  await expect(wqPane.locator('[data-wq-status-selected]')).not.toContainText('Failed');
+  await wqPane.locator('[data-wq-scope="all"]').click();
+  await expect(wqPane.locator('[data-wq-filter-summary]')).toContainText('Archived hidden');
+  await expect(wqPane.locator('.wq-row', { hasText: `pw-archived-toggle-${runId}-ready` })).toBeVisible();
+  await expect(wqPane.locator('.wq-row', { hasText: `pw-archived-toggle-${runId}-done` })).toHaveCount(0);
+  await expect(wqPane.locator('.wq-row', { hasText: `pw-archived-toggle-${runId}-failed` })).toHaveCount(0);
+
+  const itemsResP = page.waitForResponse((res) => {
+    const url = res.url();
+    return url.includes('/api/workqueue/items') && url.includes('done') && url.includes('failed') && res.ok();
+  }, { timeout: 15000 });
+  await wqPane.locator('[data-wq-archived-toggle]').click();
+  await itemsResP;
+
+  await expect(wqPane.locator('[data-wq-archived-toggle]')).toHaveText('Hide archived');
+  await expect(wqPane.locator('[data-wq-filter-summary]')).toContainText('Archived shown');
+  await expect(wqPane.locator('.wq-row', { hasText: `pw-archived-toggle-${runId}-done` })).toBeVisible();
+  await expect(wqPane.locator('.wq-row', { hasText: `pw-archived-toggle-${runId}-failed` })).toBeVisible();
+});
+
+test('pane: workqueue golden path (enqueue + inspect + transition + edit + delete)', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!app?.skipReason, app?.skipReason);
 
@@ -115,6 +200,7 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
   await page.getByTestId('add-pane-btn').click();
+  await page.getByTestId('pane-add-menu-workqueue-scope').selectOption('all');
   await page.getByTestId('pane-add-menu-workqueue').click();
 
   const wqPane = page.locator('[data-pane]').last();
@@ -156,6 +242,47 @@ test('pane: workqueue golden path (list + inspect)', async ({ page }) => {
   await page.keyboard.press('Enter');
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(title);
   await expect(wqPane.locator('[data-wq-inspect]')).toContainText(instructions);
+
+  await expect(wqPane.getByTestId('workqueue-inspect-actions')).toBeVisible();
+
+  await wqPane.getByTestId('workqueue-inspect-status').selectOption('in_progress');
+  const statusResP = page.waitForResponse(
+    (res) => res.url().includes('/api/workqueue/update') && res.request().method() === 'POST',
+    { timeout: 15000 }
+  );
+  await wqPane.getByTestId('workqueue-inspect-save-status').click();
+  const statusRes = await statusResP;
+  expect(statusRes.ok()).toBeTruthy();
+  await expect(wqPane.getByTestId('workqueue-inspect-action-status')).toContainText('Status saved');
+  await expect(row).toContainText('in_progress');
+
+  const editedTitle = `${title}-edited`;
+  const editedInstructions = `${instructions} edited`;
+  await wqPane.getByTestId('workqueue-inspect-edit-details').locator('summary').click();
+  await wqPane.getByTestId('workqueue-inspect-title').fill(editedTitle);
+  await wqPane.getByTestId('workqueue-inspect-instructions').fill(editedInstructions);
+
+  const editResP = page.waitForResponse(
+    (res) => res.url().includes('/api/workqueue/update') && res.request().method() === 'POST',
+    { timeout: 15000 }
+  );
+  await wqPane.getByTestId('workqueue-inspect-edit-form').locator('button[type="submit"]').click();
+  const editRes = await editResP;
+  expect(editRes.ok()).toBeTruthy();
+  await expect(wqPane.getByTestId('workqueue-inspect-action-status')).toContainText('Edit saved');
+  await expect(wqPane.locator('[data-wq-inspect]')).toContainText(editedTitle);
+  await expect(wqPane.locator('[data-wq-inspect]')).toContainText(editedInstructions);
+  await expect(wqPane.getByTestId('workqueue-item-row').filter({ hasText: editedTitle })).toBeVisible();
+
+  const deleteResP = page.waitForResponse(
+    (res) => res.url().includes('/api/workqueue/delete') && res.request().method() === 'POST',
+    { timeout: 15000 }
+  );
+  await wqPane.getByTestId('workqueue-inspect-delete').click();
+  const deleteRes = await deleteResP;
+  expect(deleteRes.ok()).toBeTruthy();
+  await expect(wqPane.getByTestId('workqueue-item-row').filter({ hasText: editedTitle })).toHaveCount(0);
+  await expect(wqPane.locator('[data-wq-inspect]')).toContainText('Select an item to inspect');
 });
 
 test('workqueue modal: golden path covers filters, kanban status, edit, and delete', async ({ page }) => {
@@ -324,5 +451,67 @@ test('pane: workqueue scope filter toggles deterministic row counts', async ({ p
   await wqPane.locator('[data-wq-search]').fill(`missing-${runId}`);
   await expect(rowsWithPrefix()).toHaveCount(0);
   await expect(statusLine).toContainText(/Showing 0 of \d+ items .*hidden:.*search \d+/);
-  await expect(wqPane.locator('[data-wq-empty]')).toContainText('No items match current filters.');
+  await expect(wqPane.locator('[data-wq-empty]')).toContainText(`No items match "missing-${runId}".`);
+});
+
+test('pane: workqueue triage mode preset applies and persists queue scope statuses and sort', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!app?.skipReason, app?.skipReason);
+
+  installPageFailureAssertions(page, { appOrigin: `http://127.0.0.1:${app.serverPort}` });
+
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('pw-triage-preset-seeded') === '1') return;
+    sessionStorage.setItem('pw-triage-preset-seeded', '1');
+    localStorage.setItem(
+      'clawnsole.admin.panes.v1',
+      JSON.stringify([
+        {
+          key: 'pw-triage-preset',
+          kind: 'workqueue',
+          queue: 'custom-review',
+          statusFilter: ['claimed', 'in_progress'],
+          scopeFilter: 'assigned',
+          sortKey: 'updatedAt',
+          sortDir: 'asc'
+        }
+      ])
+    );
+  });
+
+  await page.goto(`http://127.0.0.1:${app.serverPort}/`);
+  await page.fill('#loginPassword', 'admin');
+  await page.click('#loginBtn');
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+
+  const wqPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  const triageBtn = wqPane.locator('[data-wq-preset-triage]');
+
+  const refreshResP = page.waitForResponse((res) => res.url().includes('/api/workqueue/items') && res.ok(), { timeout: 15000 });
+  await triageBtn.click();
+  await refreshResP;
+
+  await expect(triageBtn).toHaveAttribute('aria-pressed', 'true');
+  await expect(wqPane.getByTestId('wq-triage-chip')).toBeVisible();
+  await expect(wqPane.locator('[data-wq-queue-select]')).toHaveValue('dev-team');
+  await expect(wqPane.locator('[data-wq-scope="unassigned"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(wqPane.locator('.wq-sort [data-wq-sort="priority"]')).toHaveClass(/active/);
+
+  await wqPane.locator('[data-wq-status-details] > summary').click();
+  const statusOptions = wqPane.locator('[data-wq-status-options]');
+  await expect(statusOptions.getByRole('checkbox', { name: /^Ready \(/ })).toBeChecked();
+  await expect(statusOptions.getByRole('checkbox', { name: /^Pending \(/ })).toBeChecked();
+  await expect(statusOptions.getByRole('checkbox', { name: /^Claimed \(/ })).not.toBeChecked();
+  await expect(statusOptions.getByRole('checkbox', { name: /^In progress \(/ })).not.toBeChecked();
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await expect(page.getByTestId('login-overlay')).toBeHidden();
+
+  const persistedPane = page.locator('[data-pane][data-pane-kind="workqueue"]').first();
+  await expect(persistedPane.locator('[data-wq-preset-triage]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(persistedPane.getByTestId('wq-triage-chip')).toBeVisible();
+  await expect(persistedPane.locator('[data-wq-queue-select]')).toHaveValue('dev-team');
+  await expect(persistedPane.locator('[data-wq-scope="unassigned"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(persistedPane.locator('.wq-sort [data-wq-sort="priority"]')).toHaveClass(/active/);
 });
