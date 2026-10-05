@@ -5215,6 +5215,7 @@ function buildCommandPaletteItems() {
 
   const focusedKey = focusedPaneKey();
   const focusedPane = paneManager.panes.find((p) => p?.key === focusedKey) || paneManager.panes[0] || null;
+  const commandOriginPaneKey = String(focusedKey || '').trim();
   if (paneSupportsTargetLock(focusedPane)) {
     const nextLabel = focusedPane.pairedTargetLock ? 'Disable' : 'Enable';
     const pairedAction = getPaneManagerPairedAction(focusedPane);
@@ -5430,7 +5431,7 @@ function buildCommandPaletteItems() {
         id: 'cmd:open-workqueue-active-agent',
         label: 'Workqueue for active chat agent',
         detail: 'Open/focus a Workqueue pane scoped to the active chat agent',
-        run: () => openWorkqueueForActiveChatAgent()
+        run: () => openWorkqueueForActiveChatAgent(commandOriginPaneKey ? { originPaneKey: commandOriginPaneKey } : {})
       },
       shortcutDisplay('workqueue.openForActiveChat') || 'Cmd/Ctrl+Shift+Alt+G'
     ),
@@ -5925,20 +5926,24 @@ function findExistingPane(kind, predicate = null) {
   return null;
 }
 
-function getActiveChatAgentPane() {
-  const originKey = commandPaletteState.open ? String(commandPaletteState.originPaneKey || '') : '';
-  if (commandPaletteState.open) {
+function getActiveChatAgentPane({ originPaneKey = null } = {}) {
+  const explicitOriginKey = originPaneKey === null ? null : String(originPaneKey || '');
+  const originKey = explicitOriginKey === null
+    ? commandPaletteState.open ? String(commandPaletteState.originPaneKey || '') : ''
+    : explicitOriginKey;
+  if (originKey) {
     return (paneManager?.panes || []).find((pane) => String(pane?.key || '') === originKey && pane.kind === 'chat') || null;
   }
+  if (explicitOriginKey !== null) return null;
 
   const focusedKey = focusedPaneKey();
   const activeKey = focusedKey || paneMruOrder()[0] || '';
   return (paneManager?.panes || []).find((pane) => String(pane?.key || '') === activeKey && pane.kind === 'chat') || null;
 }
 
-function openWorkqueueForActiveChatAgent() {
+function openWorkqueueForActiveChatAgent(options = {}) {
   if (roleState.role !== 'admin') return null;
-  const chatPane = getActiveChatAgentPane();
+  const chatPane = getActiveChatAgentPane(options);
   const agentId = normalizeAgentId(chatPane?.agentId || '');
   if (!chatPane || !agentId) {
     showToast('No active chat agent selected', { kind: 'error', timeoutMs: 2600 });

@@ -22,13 +22,16 @@ async function seedChatOnlyPaneLayout(page, serverPort, { agentId = 'main' } = {
     );
   }, agentId);
   await page.goto(`http://127.0.0.1:${serverPort}/`);
-  if (await page.locator('#loginPassword').isVisible()) {
+  const passwordInput = page.locator('#loginPassword');
+  if (await passwordInput.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false)) {
     await page.fill('#loginPassword', 'admin');
     await page.click('#loginBtn');
   } else if (!/\/admin\/?$/.test(page.url())) {
     await page.goto(`http://127.0.0.1:${serverPort}/admin`);
   }
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.locator('#addPaneBtn').waitFor({ state: 'visible', timeout: 90000 });
+  await page.locator('[data-pane][data-pane-kind="chat"] [data-pane-input]').first().waitFor({ state: 'visible', timeout: 90000 });
 }
 
 async function triggerPairedPaneShortcut(page) {
