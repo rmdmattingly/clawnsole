@@ -11,7 +11,9 @@ const {
   listAssignments,
   setAssignments,
   resolveClaimQueues,
-  collapseCanonicalIssueDuplicates
+  collapseCanonicalIssueDuplicates,
+  migrateLegacyIssueDupes,
+  listItems
 } = require('../lib/workqueue');
 
 function parseArgs(argv) {
@@ -62,6 +64,7 @@ Workqueue commands:
   collapse-duplicates [--queue <name>] [--dryRun]
   inspect            <itemId>
   list               [--queue <name>] [--status <s1,s2>]
+  migrate-legacy-issue-dupes [--queue <name>] [--dry-run] [--no-backup]
   assignments list
   assignments set    --agent <id> --queues <q1,q2>
 
@@ -210,14 +213,18 @@ async function main() {
     const queue = args.queue;
     const status = parseCsv(args.status);
     const state = loadState(null);
-    const items = state.items
-      .filter((it) => {
-        if (queue && it.queue !== queue) return false;
-        if (status.length && !status.includes(it.status)) return false;
-        return true;
-      })
+    const items = listItems(state, { queues: queue ? [queue] : null, status: status.length ? status : null })
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
     printJson({ ok: true, items });
+    return;
+  }
+
+  if (cmd === 'migrate-legacy-issue-dupes') {
+    const queues = parseCsv(args.queues || args.queue);
+    const dryRun = Boolean(args['dry-run'] || args.dryRun);
+    const backup = !(args['no-backup'] || args.noBackup);
+    const result = migrateLegacyIssueDupes(null, { queues, dryRun, backup });
+    printJson({ ok: true, ...result });
     return;
   }
 

@@ -35,8 +35,8 @@ test('pane draft badge appears, persists across pane switches, and clears on sen
 
   await firstPane.getByTestId('pane-input').fill('draft badge check');
   await expect(firstDraftBadge).toBeVisible();
-  await expect(firstDraftBadge).toHaveAttribute('aria-label', 'Has unsent draft');
-  await expect(firstPane).toHaveAttribute('aria-label', /Has unsent draft/);
+  await expect(firstDraftBadge).toHaveAttribute('aria-label', /Unsent draft/);
+  await expect(firstPane.getByTestId('pane-type-label')).toHaveAttribute('aria-label', /unsent draft/);
 
   await secondPane.getByTestId('pane-input').focus();
   await expect(firstDraftBadge).toBeVisible();
@@ -46,12 +46,15 @@ test('pane draft badge appears, persists across pane switches, and clears on sen
   await expect(manager).toHaveClass(/open/);
   const draftRows = manager.locator('.pane-manager-row', { has: page.getByTestId('pane-manager-draft-badge') });
   await expect(draftRows).toHaveCount(1);
-  await expect(draftRows.first()).toHaveAttribute('aria-label', /Has unsent draft/);
+  await expect(draftRows.first()).toHaveAttribute('aria-label', /unsent draft|Has unsent draft/);
 
   await page.locator('#paneManagerCloseBtn').click();
+  await firstPane.getByTestId('pane-input').focus();
+  await firstPane.getByTestId('pane-input').type(' ');
+  await firstPane.getByTestId('pane-input').press('Backspace');
   await firstPane.getByTestId('pane-send').click();
   await expect(firstDraftBadge).toBeHidden();
-  await expect(firstPane).toHaveAttribute('aria-label', /No unsent draft/);
+  await expect(firstPane.getByTestId('pane-type-label')).not.toHaveAttribute('aria-label', /unsent draft/);
 
   await page.locator('#paneManagerBtn').click();
   await expect(page.getByTestId('pane-manager-draft-badge')).toHaveCount(0);

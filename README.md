@@ -94,6 +94,10 @@ If omitted, the admin password defaults to `admin`.
   - Overview + assignments contract: [`docs/WORKQUEUE.md`](./docs/WORKQUEUE.md)
   - Recurring enqueue patterns: [`docs/WORKQUEUE_SCHEDULING.md`](./docs/WORKQUEUE_SCHEDULING.md)
 
+The Workqueue pane defaults to Auto view mode: when more than 20 rows are
+visible, related issue/routine rows are grouped behind expandable summary rows.
+Rows and Grouped are available as explicit overrides.
+
 ## Workqueue: agent→queue assignments + claim-next defaults
 
 See also:
@@ -178,6 +182,10 @@ node scripts/recurring-prompts-scheduler.js --loopSeconds 60
 # Python worker wrapper (retry/backoff; suitable for launchd/systemd/cron)
 python3 scripts/recurring-prompts-worker.py --once
 python3 scripts/recurring-prompts-worker.py --loopSeconds 60
+
+# Python API worker (polls Clawnsole API and triggers due prompts with idempotency)
+python3 scripts/recurring_prompts_worker.py --once --admin-password "$CLAWNSOLE_ADMIN_PASSWORD"
+python3 scripts/recurring_prompts_worker.py --loop-seconds 60 --device-label launchd-admin-prompts
 ```
 
 Prompts are stored in `~/.openclaw/clawnsole-recurring-prompts*.json` (instance-aware).
