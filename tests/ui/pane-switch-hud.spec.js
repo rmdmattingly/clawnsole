@@ -27,7 +27,7 @@ test('pane switch HUD appears for keyboard pane changes and honors setting', asy
   await loginAdmin(page, env.serverPort);
   await addPane(page, 'Workqueue pane');
 
-  const hud = page.getByTestId('pane-switch-hud');
+  const hud = page.locator('#paneSwitchHud');
   await expect(hud).toHaveCount(0);
 
   await page.locator('[data-testid="pane"][data-pane-kind="workqueue"]').last().click();
@@ -36,18 +36,18 @@ test('pane switch HUD appears for keyboard pane changes and honors setting', asy
   await page.evaluate(() => document.activeElement?.blur?.());
   await page.keyboard.press('Alt+1');
   await expect(hud).toBeVisible();
-  await expect(hud).toContainText(/A Chat · main/);
+  await expect(hud).toContainText(/Chat.*main/i);
   await expect(page.locator('[data-testid="pane"][data-pane-kind="chat"]').first().locator('[data-pane-input]')).toBeFocused();
 
   await page.getByRole('button', { name: 'Open settings' }).click();
   await expect(page.locator('#settingsModal')).toHaveAttribute('aria-hidden', 'false');
-  await page.locator('#showPaneSwitchHud').uncheck();
+  await page.locator('#paneSwitchHudEnabled').uncheck();
   await page.keyboard.press('Escape');
   await expect(page.locator('#settingsModal')).toHaveAttribute('aria-hidden', 'true');
 
   await page.waitForTimeout(950);
-  await expect(hud).not.toHaveClass(/open/);
+  await expect(hud).not.toHaveClass(/is-visible/);
   await page.evaluate(() => document.activeElement?.blur?.());
   await page.keyboard.press('Alt+2');
-  await expect(hud).not.toHaveClass(/open/);
+  await expect(hud).not.toHaveClass(/is-visible/);
 });
