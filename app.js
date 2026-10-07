@@ -3723,6 +3723,7 @@ const paneManagerUiState = {
   attentionOnly: false,
   unreadOnly: false,
   visiblePaneKeys: [],
+  focusedPaneKey: '',
   collapsedKinds: {
     chat: false,
     workqueue: false,
@@ -4091,11 +4092,10 @@ function renderActivePaneState(activePane = activePaneFromState()) {
   const label = paneSummaryLabel(activePane);
   chip.hidden = !uiState.authed;
   value.textContent = label;
-  chip.title = `Focus ${label}`;
-  chip.setAttribute('aria-label', `Active pane: ${label}. Click to focus.`);
+  chip.title = `Open Pane Manager for ${label}`;
+  chip.setAttribute('aria-label', `Active pane: ${label}. Click to open Pane Manager.`);
   renderShortcutHintStrip(activePane);
   renderLayoutModeChip();
-  renderShortcutHintStrip(activePane);
 }
 
 function paneIndexByKey(key) {
@@ -4779,6 +4779,9 @@ function renderPaneManager() {
   const list = globalElements.paneManagerList;
   const empty = globalElements.paneManagerEmpty;
   if (!list || !empty) return;
+  const focusedPaneKey = document.activeElement?.classList?.contains?.('pane-manager-row')
+    ? String(document.activeElement.dataset?.paneKey || '')
+    : String(paneManagerUiState.focusedPaneKey || '');
 
   const query = String(paneManagerUiState.query || '').trim().toLowerCase();
   const filtered = panes.filter((pane) => {
@@ -4844,6 +4847,7 @@ function renderPaneManager() {
         row.className = 'pane-manager-row';
         row.classList.add(`pane-kind-${pane.kind || 'chat'}`);
         row.setAttribute('role', 'option');
+        row.setAttribute('tabindex', '-1');
         row.dataset.index = String(idx);
         row.dataset.paneKey = String(pane.key || '');
         row.dataset.paneKind = String(pane.kind || 'chat');
@@ -4871,6 +4875,7 @@ function renderPaneManager() {
         row.innerHTML = `
           <div class="pane-manager-main">
             <div class="pane-manager-kind" title="${escapeHtml(paneIdentity)}">
+              <span class="visually-hidden">${escapeHtml(paneIdentity)}</span>
               <span class="pane-manager-letter" data-testid="pane-manager-letter" aria-label="${escapeHtml(`Pane ${letter}`)}">${escapeHtml(letter)}</span>
               ${paneTypeBadgeMarkup(pane, { extraClass: 'pane-manager-type-badge', testId: 'pane-manager-type-badge' })}
               ${panePairCueMarkup(pane, { testId: 'pane-manager-pair-cue' })}
@@ -4924,6 +4929,7 @@ function renderPaneManager() {
           const action = actionEl?.dataset?.action;
           const selectedVisible = Number(row.dataset.visibleIndex || 0);
           paneManagerUiState.selectedIndex = selectedVisible;
+          paneManagerUiState.focusedPaneKey = String(row.dataset.paneKey || '');
           if (action === 'close') {
             try {
               paneManager.removePane(pane.key, { source: 'manager' });
@@ -4995,9 +5001,58 @@ function renderPaneManager() {
 
     list.appendChild(section);
   });
+
+  if (focusedPaneKey) {
+    const focusedRow = list.querySelector(`.pane-manager-row[data-pane-key="${cssEscape(focusedPaneKey)}"]`);
+    if (focusedRow) {
+      try {
+        focusedRow.focus({ preventScroll: true });
+      } catch {
+        try {
+          focusedRow.focus();
+        } catch {}
+      }
+    }
+  }
 }
 
-function openPaneManager({ attentionOnly = false, focusPaneKey = '', resetFilters = false } = {}) {
+function focusPaneManagerRow(paneKey, { focus = false } = {}) {
+  const key = String(paneKey || '');
+  const list = globalElements.paneManagerList;
+  if (!key || !list) return false;
+
+  const row = list.querySelector(`.pane-manager-row[data-pane-key="${cssEscape(key)}"]`);
+  if (!row) return false;
+
+  paneManagerUiState.selectedIndex = Number(row.dataset.visibleIndex || 0);
+  if (focus) paneManagerUiState.focusedPaneKey = key;
+  renderPaneManager();
+
+  const freshRow = list.querySelector(`.pane-manager-row[data-pane-key="${cssEscape(key)}"]`) || row;
+  try {
+    freshRow.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  } catch {}
+
+  if (focus) {
+    const focusRow = () => {
+      try {
+        freshRow.focus({ preventScroll: true });
+      } catch {
+        try {
+          freshRow.focus();
+        } catch {}
+      }
+    };
+    focusRow();
+    setTimeout(focusRow, 0);
+    setTimeout(focusRow, 30);
+    setTimeout(focusRow, 120);
+  }
+
+  return true;
+}
+
+function openPaneManager({ attentionOnly = false, focusPaneKey = '', focusRow = false, clearFilters = false, resetFilters = false } = {}) {
   if (roleState.role !== 'admin') return;
   if (!uiState.authed) {
     showLogin('Please sign in to continue.');
@@ -5006,7 +5061,8 @@ function openPaneManager({ attentionOnly = false, focusPaneKey = '', resetFilter
   if (!globalElements.paneManagerModal) return;
 
   const targetPaneKey = String(focusPaneKey || '').trim();
-  if (resetFilters) {
+  const shouldResetFilters = !!(clearFilters || resetFilters);
+  if (shouldResetFilters) {
     paneManagerUiState.query = '';
     paneManagerUiState.unreadOnly = false;
     if (globalElements.paneManagerSearch) globalElements.paneManagerSearch.value = '';
@@ -5014,8 +5070,8 @@ function openPaneManager({ attentionOnly = false, focusPaneKey = '', resetFilter
   }
 
   paneManagerUiState.open = true;
-  paneManagerUiState.attentionOnly = !!attentionOnly;
-  if (!resetFilters) {
+  paneManagerUiState.attentionOnly = shouldResetFilters ? false : !!attentionOnly;
+  if (!shouldResetFilters) {
     paneManagerUiState.query = String(globalElements.paneManagerSearch?.value || '').trim();
     paneManagerUiState.unreadOnly = !!globalElements.paneManagerUnreadOnly?.checked;
   }
@@ -5023,10 +5079,16 @@ function openPaneManager({ attentionOnly = false, focusPaneKey = '', resetFilter
     0,
     (paneManager?.panes || []).findIndex((pane) => String(pane?.key || '') === targetPaneKey)
   );
+  if (focusPaneKey) {
+    const pane = (paneManager?.panes || []).find((entry) => String(entry?.key || '') === String(focusPaneKey));
+    const kind = String(pane?.kind || '');
+    if (kind) paneManagerUiState.collapsedKinds[kind] = false;
+  }
 
   openAdminModal(globalElements.paneManagerModal);
   renderPaneManager();
 
+  if (focusPaneKey && focusPaneManagerRow(focusPaneKey, { focus: focusRow })) return;
   if (targetPaneKey) {
     requestAnimationFrame(() => {
       const row = globalElements.paneManagerList?.querySelector?.(
@@ -5048,6 +5110,7 @@ function openPaneManager({ attentionOnly = false, focusPaneKey = '', resetFilter
 function closePaneManager({ restoreFocus = true } = {}) {
   if (!globalElements.paneManagerModal) return;
   paneManagerUiState.open = false;
+  paneManagerUiState.focusedPaneKey = '';
   const pane = paneManager?.panes?.[0];
   closeAdminModal(globalElements.paneManagerModal, { restoreFocus, fallbackFocus: pane?.elements?.input || null });
 }
@@ -5063,6 +5126,7 @@ function paneManagerHandleKeydown(event) {
   if ((key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !isSearchFocused) ||
     ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && key.toLowerCase() === 'f')) {
     event.preventDefault();
+    paneManagerUiState.focusedPaneKey = '';
     searchEl?.focus?.();
     searchEl?.select?.();
     return true;
@@ -5092,12 +5156,14 @@ function paneManagerHandleKeydown(event) {
   if (event.key === 'ArrowDown') {
     event.preventDefault();
     paneManagerUiState.selectedIndex = Math.min(visibleKeys.length - 1, paneManagerUiState.selectedIndex + 1);
+    paneManagerUiState.focusedPaneKey = visibleKeys[paneManagerUiState.selectedIndex] || '';
     renderPaneManager();
     return true;
   }
   if (event.key === 'ArrowUp') {
     event.preventDefault();
     paneManagerUiState.selectedIndex = Math.max(0, paneManagerUiState.selectedIndex - 1);
+    paneManagerUiState.focusedPaneKey = visibleKeys[paneManagerUiState.selectedIndex] || '';
     renderPaneManager();
     return true;
   }
@@ -15465,8 +15531,9 @@ globalElements.addPaneBtn?.addEventListener('click', (event) => {
 
 globalElements.activePaneChip?.addEventListener('click', () => {
   const pane = activePaneFromState();
-  if (!pane) return;
-  openPaneManager({ focusPaneKey: pane.key, resetFilters: true });
+  const key = String(pane?.key || '');
+  if (!key) return;
+  openPaneManager({ focusPaneKey: key, focusRow: true, clearFilters: true });
 });
 
 globalElements.layoutModeChip?.addEventListener('click', () => {

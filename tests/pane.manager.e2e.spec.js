@@ -669,6 +669,7 @@ test('pane manager: paired action focuses existing counterpart and opens missing
   });
   await page.reload();
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
+  await page.locator('body').focus();
   await page.keyboard.press('Control+P');
   await expect(modal).toHaveAttribute('aria-hidden', 'false');
 
