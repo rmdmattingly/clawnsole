@@ -10,8 +10,12 @@ const {
   loadState,
   saveState,
   transitionItem,
+  archiveTerminalItems,
   collapseCanonicalIssueDuplicates,
-  canonicalizeIssueDedupeKey
+  canonicalizeIssueDedupeKey,
+  migrateLegacyIssueDupes,
+  planLegacyIssueDedupeMigration,
+  listItems
 } = require('../../lib/workqueue');
 
 function withFakeNow(ms, fn) {
@@ -296,6 +300,45 @@ test('workqueue: issue-backed automated enqueue upserts one live item', () => {
   assert.equal(state.items[0].priority, 9);
 });
 
+test('workqueue: archiveTerminalItems previews and archives old terminal items only', () => {
+  withFakeNow(Date.parse('2026-08-25T12:00:00.000Z'), () => {
+    const root = tempRoot();
+
+    const oldDone = enqueueItem(root, { queue: 'dev', title: 'old done', instructions: 'x', priority: 0 });
+    const oldFailed = enqueueItem(root, { queue: 'dev', title: 'old failed', instructions: 'x', priority: 0 });
+    const freshDone = enqueueItem(root, { queue: 'dev', title: 'fresh done', instructions: 'x', priority: 0 });
+    const oldReady = enqueueItem(root, { queue: 'dev', title: 'old ready', instructions: 'x', priority: 0 });
+    const otherQueue = enqueueItem(root, { queue: 'qa', title: 'old qa done', instructions: 'x', priority: 0 });
+
+    const state = loadState(root);
+    for (const item of state.items) {
+      if (item.id === oldDone.id) Object.assign(item, { status: 'done', updatedAt: '2026-08-01T00:00:00.000Z' });
+      if (item.id === oldFailed.id) Object.assign(item, { status: 'failed', updatedAt: '2026-08-01T00:00:00.000Z' });
+      if (item.id === freshDone.id) Object.assign(item, { status: 'done', updatedAt: '2026-08-24T00:00:00.000Z' });
+      if (item.id === oldReady.id) Object.assign(item, { status: 'ready', updatedAt: '2026-08-01T00:00:00.000Z' });
+      if (item.id === otherQueue.id) Object.assign(item, { status: 'done', updatedAt: '2026-08-01T00:00:00.000Z' });
+    }
+    saveState(root, state);
+
+    const preview = archiveTerminalItems(root, { queue: 'dev', olderThanDays: 7, previewOnly: true });
+    assert.equal(preview.previewCount, 2);
+    assert.equal(preview.archivedCount, 0);
+    assert.equal(loadState(root).items.length, 5);
+
+    const applied = archiveTerminalItems(root, { queue: 'dev', olderThanDays: 7, previewOnly: false });
+    assert.equal(applied.previewCount, 2);
+    assert.equal(applied.archivedCount, 2);
+
+    const next = loadState(root);
+    assert.deepEqual(
+      next.items.map((item) => item.title).sort(),
+      ['fresh done', 'old qa done', 'old ready'].sort()
+    );
+    assert.equal(next.archivedItems.length, 2);
+    assert.ok(next.archivedItems.every((item) => item.archivedAt && item.archivedReason === 'terminal-older-than-7d'));
+  });
+});
+
 test('workqueue: issue-backed enqueue canonicalizes producer dedupe variants', () => {
   const root = tempRoot();
 
@@ -502,7 +545,8 @@ test('workqueue: collapseCanonicalIssueDuplicates safely backfills existing dupl
     instructions: 'https://github.com/rmdmattingly/clawnsole/issues/298',
     dedupeKey: 'issue:rmdmattingly/clawnsole#298',
     createdAt: '2026-01-01T00:00:01.000Z',
-    updatedAt: '2026-01-01T00:00:01.000Z'
+    updatedAt: '2026-01-01T00:00:01.000Z',
+    lastNote: 'legacy note'
   });
   saveState(root, state);
 
@@ -512,9 +556,150 @@ test('workqueue: collapseCanonicalIssueDuplicates safely backfills existing dupl
 
   const result = collapseCanonicalIssueDuplicates(root, { queue: 'dev-team' });
   assert.equal(result.removedCount, 1);
+  assert.ok(result.backupFile.endsWith('.json'));
+  assert.ok(fs.existsSync(result.backupFile));
+  const backupState = JSON.parse(fs.readFileSync(result.backupFile, 'utf8'));
+  assert.equal(backupState.items.length, 2);
+  assert.equal(backupState.items[0].result, undefined);
   const finalState = loadState(root);
   assert.equal(finalState.items.length, 1);
   assert.equal(finalState.items[0].id, first.id);
   assert.equal(finalState.items[0].dedupeKey, 'rmdmattingly/clawnsole#298');
-  assert.equal(finalState.items[0].seenCount, 2);
+  assert.equal(finalState.items[0].meta.migrationMergedCount, 1);
+  assert.equal(finalState.items[0].result.migrationMerged[0].id, 'duplicate-existing-row');
+  assert.equal(finalState.items[0].result.migrationMerged[0].lastNote, 'legacy note');
+});
+
+test('workqueue: collapseCanonicalIssueDuplicates uses deterministic survivor policy', () => {
+  const root = tempRoot();
+  const olderActive = enqueueItem(root, {
+    queue: 'dev-team',
+    title: '[issue] rmdmattingly/clawnsole#399 active',
+    instructions: 'active',
+    priority: 1,
+    meta: { repo: 'rmdmattingly/clawnsole', issueNumber: 399 }
+  });
+
+  const state = loadState(root);
+  const active = state.items.find((it) => it.id === olderActive.id);
+  const terminal = {
+    ...active,
+    id: 'newer-terminal-row',
+    title: '[issue] rmdmattingly/clawnsole#399 terminal',
+    instructions: 'terminal',
+    priority: 99
+  };
+  terminal.status = 'done';
+  terminal.updatedAt = '2026-01-03T00:00:00.000Z';
+  active.status = 'ready';
+  active.updatedAt = '2026-01-01T00:00:00.000Z';
+  state.items.push(terminal);
+  saveState(root, state);
+
+  const result = collapseCanonicalIssueDuplicates(root, { queue: 'dev-team' });
+  assert.equal(result.removedCount, 1);
+  assert.equal(result.removed[0].keptId, olderActive.id);
+
+  const finalState = loadState(root);
+  assert.equal(finalState.items.length, 1);
+  assert.equal(finalState.items[0].id, olderActive.id);
+  assert.equal(finalState.items[0].result.migrationMerged[0].id, 'newer-terminal-row');
+});
+
+test('workqueue: legacy issue dupe migration picks deterministic survivor and hides merged rows', () => {
+  const root = tempRoot();
+  const state = loadState(root);
+  state.queues['dev-team'] = { name: 'dev-team', createdAt: '2026-01-01T00:00:00.000Z' };
+  state.items = [
+    {
+      id: 'terminal-newest',
+      queue: 'dev-team',
+      title: 'Done duplicate',
+      instructions: 'Ship https://github.com/rmdmattingly/clawnsole/issues/392',
+      priority: 99,
+      status: 'done',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-04T00:00:00.000Z',
+      lastNote: 'already done'
+    },
+    {
+      id: 'ready-older',
+      queue: 'dev-team',
+      title: '[issue] rmdmattingly/clawnsole:392',
+      instructions: 'Ship issue',
+      priority: 10,
+      status: 'ready',
+      createdAt: '2026-01-02T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z'
+    },
+    {
+      id: 'ready-newer',
+      queue: 'dev-team',
+      title: 'Open issue triage: RMDMATTINGLY / CLAWNSOLE #392',
+      instructions: 'Ship issue',
+      priority: 1,
+      status: 'pending',
+      createdAt: '2026-01-03T00:00:00.000Z',
+      updatedAt: '2026-01-03T00:00:00.000Z',
+      lastError: 'old failure'
+    }
+  ];
+  saveState(root, state);
+
+  const plan = planLegacyIssueDedupeMigration(loadState(root), { queues: ['dev-team'] });
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].canonicalKey, 'rmdmattingly/clawnsole#392');
+  assert.equal(plan[0].survivorId, 'ready-newer');
+  assert.deepEqual(plan[0].mergedIds, ['ready-older', 'terminal-newest']);
+
+  const result = migrateLegacyIssueDupes(root, { queues: ['dev-team'] });
+  assert.equal(result.mergedCount, 2);
+  assert.match(result.backupPath, /work-queues\.backup\..+\.json$/);
+  assert.equal(fs.existsSync(result.backupPath), true);
+
+  const migrated = loadState(root);
+  const survivor = migrated.items.find((it) => it.id === 'ready-newer');
+  const merged = migrated.items.filter((it) => it.meta?.mergedInto === 'ready-newer');
+  assert.equal(survivor.dedupeKey, 'rmdmattingly/clawnsole#392');
+  assert.equal(survivor.result.migrationMerged.length, 2);
+  assert.deepEqual(merged.map((it) => it.id).sort(), ['ready-older', 'terminal-newest']);
+  assert.equal(listItems(migrated, { queues: ['dev-team'] }).length, 1);
+  assert.equal(listItems(migrated, { queues: ['dev-team'] })[0].id, 'ready-newer');
+});
+
+test('workqueue: legacy issue dupe migration dry-run does not write backup or mutate state', () => {
+  const root = tempRoot();
+  const state = loadState(root);
+  state.queues.dev = { name: 'dev', createdAt: '2026-01-01T00:00:00.000Z' };
+  state.items = [
+    {
+      id: 'a',
+      queue: 'dev',
+      title: 'rmdmattingly/clawnsole#392',
+      instructions: 'one',
+      priority: 1,
+      status: 'ready',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z'
+    },
+    {
+      id: 'b',
+      queue: 'dev',
+      title: 'rmdmattingly/clawnsole:392',
+      instructions: 'two',
+      priority: 1,
+      status: 'ready',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z'
+    }
+  ];
+  saveState(root, state);
+
+  const before = JSON.stringify(loadState(root));
+  const result = migrateLegacyIssueDupes(root, { queues: ['dev'], dryRun: true });
+
+  assert.equal(result.dryRun, true);
+  assert.equal(result.mergedCount, 1);
+  assert.equal(result.backupPath, null);
+  assert.equal(JSON.stringify(loadState(root)), before);
 });
