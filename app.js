@@ -4164,6 +4164,7 @@ function clearPaneUnread(pane) {
   renderPaneIdentity(pane);
   renderPaneActivityBadge(pane);
   updateGlobalStatus();
+  paneManager?.persistAdminPanes?.();
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -4348,6 +4349,7 @@ function markPaneUnread(pane, increment = 1, kind = 'chat') {
   renderPaneIdentity(pane);
   renderPaneActivityBadge(pane);
   updateGlobalStatus();
+  paneManager?.persistAdminPanes?.();
   if (isPaneManagerOpen()) renderPaneManager();
 }
 
@@ -11050,7 +11052,7 @@ function renderAgentOptions(selectEl, agentId) {
   selectEl.value = normalizeAgentId(agentId || 'main');
 }
 
-function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, cronAgentId, nickname, pairedTargetLock = false, pinned = false, closable = true } = {}) {
+function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, cronAgentId, nickname, unreadCount = 0, unreadKind = '', pairedTargetLock = false, pinned = false, closable = true } = {}) {
   const template = globalElements.paneTemplate;
   const root = template.content.firstElementChild.cloneNode(true);
   root.tabIndex = -1;
@@ -11146,8 +11148,8 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
     pinned: !!pinned,
     elements,
     chat: { runs: new Map(), history: [] },
-    unreadCount: 0,
-    unreadKind: '',
+    unreadCount: Math.max(0, Number(unreadCount || 0)),
+    unreadKind: String(unreadKind || '').trim(),
     pairedTargetLock: !!pairedTargetLock,
     pinned: !!pinned,
     scroll: { pinned: true },
@@ -13115,6 +13117,8 @@ const paneManager = {
         sortKey: cfg.sortKey,
         sortDir: cfg.sortDir,
         nickname: cfg.nickname,
+        unreadCount: cfg.unreadCount,
+        unreadKind: cfg.unreadKind,
         pairedTargetLock: cfg.pairedTargetLock,
         pinned: cfg.pinned,
         closable: true
@@ -13191,6 +13195,8 @@ const paneManager = {
             : 'chat';
         if (!key) return null;
         const nickname = normalizePaneNickname(item.nickname);
+        const unreadCount = Math.max(0, Number(item.unreadCount || 0));
+        const unreadKind = String(item.unreadKind || '').trim();
         if (kind === 'workqueue') {
           const pairedTargetLock = !!item.pairedTargetLock;
           const queue = typeof item.queue === 'string' && item.queue.trim() ? item.queue.trim() : 'dev-team';
@@ -13208,14 +13214,14 @@ const paneManager = {
           const sortKey = normalizeWorkqueueSortKey(item.sortKey, 'priority');
           const sortDir = normalizeWorkqueueSortDir(item.sortDir, defaultWorkqueueSortDir(sortKey));
           const groupMode = normalizeWorkqueueGroupMode(item.groupMode);
-          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, nickname, pairedTargetLock, pinned: !!item.pinned };
+          return { key, kind, agentId, queue, statusFilter, scopeFilter, quickFilters, groupMode, sortKey, sortDir, nickname, unreadCount, unreadKind, pairedTargetLock, pinned: !!item.pinned };
         }
         if (kind === 'cron' || kind === 'timeline') {
           const cronAgentId = typeof item.cronAgentId === 'string' ? item.cronAgentId.trim() : '';
-          return { key, kind, cronAgentId, nickname, pinned: !!item.pinned };
+          return { key, kind, cronAgentId, nickname, unreadCount, unreadKind, pinned: !!item.pinned };
         }
         const agentId = normalizeAgentId(typeof item.agentId === 'string' ? item.agentId : defaultAgent);
-        return { key, kind: 'chat', agentId, nickname, pairedTargetLock: !!item.pairedTargetLock, pinned: !!item.pinned };
+        return { key, kind: 'chat', agentId, nickname, unreadCount, unreadKind, pairedTargetLock: !!item.pairedTargetLock, pinned: !!item.pinned };
       }
       // Super-legacy format: ['pabc','pdef'] (treat as chat panes)
       if (typeof item === 'string' && item) {
@@ -13266,13 +13272,15 @@ const paneManager = {
           sortKey: normalizeWorkqueueSortKey(pane.workqueue?.sortKey, 'priority'),
           sortDir: normalizeWorkqueueSortDir(pane.workqueue?.sortDir, defaultWorkqueueSortDir(pane.workqueue?.sortKey)),
           nickname: paneNickname(pane),
+          unreadCount: paneUnreadCount(pane),
+          unreadKind: String(pane.unreadKind || ''),
           pinned: paneIsPinned(pane)
         };
       }
       if (pane.kind === 'cron' || pane.kind === 'timeline') {
-        return { key: pane.key, kind: pane.kind, cronAgentId: String(pane.cronAgentId || '').trim(), nickname: paneNickname(pane), pinned: paneIsPinned(pane) };
+        return { key: pane.key, kind: pane.kind, cronAgentId: String(pane.cronAgentId || '').trim(), nickname: paneNickname(pane), unreadCount: paneUnreadCount(pane), unreadKind: String(pane.unreadKind || ''), pinned: paneIsPinned(pane) };
       }
-      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main', nickname: paneNickname(pane), pairedTargetLock: !!pane.pairedTargetLock, pinned: paneIsPinned(pane) };
+      return { key: pane.key, kind: 'chat', agentId: pane.agentId || 'main', nickname: paneNickname(pane), unreadCount: paneUnreadCount(pane), unreadKind: String(pane.unreadKind || ''), pairedTargetLock: !!pane.pairedTargetLock, pinned: paneIsPinned(pane) };
     });
   },
   hasUnsentDrafts() {
