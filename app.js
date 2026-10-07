@@ -13588,9 +13588,9 @@ const paneManager = {
 
       const wqForceBtn = makeButton({
         testId: 'pane-add-menu-workqueue-open-anyway',
-        title: 'Open anyway: New Workqueue pane',
-        subtitle: 'Force a duplicate workqueue pane',
-        shortcut: 'Open a separate pane'
+        title: 'Open anyway: Workqueue',
+        subtitle: 'Force a duplicate Workqueue view',
+        shortcut: 'Open separately'
       });
       wqForceBtn.hidden = true;
 
