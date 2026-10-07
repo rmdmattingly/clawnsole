@@ -96,6 +96,7 @@ test('GET /meta returns gateway urls and port', async () => {
   assert.equal(data.wsUrl, 'ws://127.0.0.1:19999');
   assert.equal(data.adminWsUrl, '/admin-ws');
   assert.equal(data.port, 19999);
+  assert.equal(data.instance, 'local');
   assert.equal(data.guestWsUrl, undefined);
 });
 
@@ -529,4 +530,64 @@ test('recurring prompt runs endpoint returns bounded recent rows', async () => {
     headers: { cookie: adminCookie }
   });
   assert.equal(missing.statusCode, 404);
+});
+
+test('recurring prompt trigger endpoint records runs idempotently', async () => {
+  const { homeDir, openclawDir } = makeTempHome();
+  writeJson(path.join(openclawDir, 'openclaw.json'), { gateway: { port: 18789, auth: { mode: 'token', token: 't' } } });
+  writeJson(path.join(openclawDir, 'clawnsole.json'), { adminPassword: 'admin', authVersion: 'v1' });
+
+  const { handleRequest } = createClawnsoleServer({ homeDir });
+  const login = await invoke(handleRequest, {
+    url: '/auth/login',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: 'admin' })
+  });
+  const adminCookie = parseCookiesFromSetCookie(login.headers['set-cookie']);
+
+  const create = await invoke(handleRequest, {
+    url: '/api/recurring-prompts',
+    method: 'POST',
+    headers: { cookie: adminCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      title: 'Trigger test',
+      agentId: 'main',
+      message: 'test trigger',
+      intervalMinutes: 15
+    })
+  });
+  const prompt = JSON.parse(create.body.toString('utf8')).prompt;
+
+  const triggerBody = JSON.stringify({
+    idempotencyKey: 'scheduled:p-1:100',
+    sessionKey: 'agent:main:admin:scheduler',
+    status: 'ok'
+  });
+  const first = await invoke(handleRequest, {
+    url: `/api/recurring-prompts/${prompt.id}/trigger`,
+    method: 'POST',
+    headers: { cookie: adminCookie, 'content-type': 'application/json' },
+    body: triggerBody
+  });
+  assert.equal(first.statusCode, 200);
+  assert.equal(JSON.parse(first.body.toString('utf8')).deduped, false);
+
+  const second = await invoke(handleRequest, {
+    url: `/api/recurring-prompts/${prompt.id}/trigger`,
+    method: 'POST',
+    headers: { cookie: adminCookie, 'content-type': 'application/json' },
+    body: triggerBody
+  });
+  assert.equal(second.statusCode, 200);
+  assert.equal(JSON.parse(second.body.toString('utf8')).deduped, true);
+
+  const runs = await invoke(handleRequest, {
+    url: `/api/recurring-prompts/${prompt.id}/runs?limit=10`,
+    headers: { cookie: adminCookie }
+  });
+  const payload = JSON.parse(runs.body.toString('utf8'));
+  assert.equal(payload.runs.length, 1);
+  assert.equal(payload.runs[0].idempotencyKey, 'scheduled:p-1:100');
+  assert.equal(payload.runs[0].status, 'ok');
 });
