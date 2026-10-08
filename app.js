@@ -2793,8 +2793,7 @@ const SHORTCUT_OVERRIDE_ACTIONS = [
     id: 'pane-manager',
     label: 'Open pane manager',
     defaultCombo: { accel: true, shift: false, alt: false, key: 'p' },
-    run: () => openPaneManager(),
-    typingExempt: true
+    run: () => openPaneManager()
   },
   {
     id: 'workqueue-open',
@@ -14641,7 +14640,7 @@ function isTypingShortcutExempt(event) {
     const target = event?.target;
     if (target instanceof Element && target.closest?.('[data-pane-kind="workqueue"] select')) return true;
   }
-  return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && (key === 'p' || key === 'l');
+  return (event?.metaKey || event?.ctrlKey) && !event.shiftKey && !event.altKey && key === 'l';
 }
 
 function isNonTrivialGlobalShortcut(event) {
@@ -15127,15 +15126,15 @@ window.addEventListener('keydown', (event) => {
     }
   }
 
-  // Cmd/Ctrl+P opens Pane Manager (even while typing).
-  if (matchesKeybind(event, 'pane.manager')) {
+  // Cmd/Ctrl+P opens Pane Manager when focus is outside editable fields.
+  if (matchesKeybind(event, 'pane.manager') && !isTypingContext(event.target) && !isTypingContext(document.activeElement)) {
     event.preventDefault();
     openPaneManager();
     return;
   }
 
   // Cmd/Ctrl+K opens command palette when focus is outside editable fields.
-  if (matchesKeybind(event, 'command.palette') && !isTypingContext(event.target)) {
+  if (matchesKeybind(event, 'command.palette') && !isTypingContext(event.target) && !isTypingContext(document.activeElement)) {
     event.preventDefault();
     openCommandPalette();
     return;
@@ -15199,6 +15198,34 @@ window.addEventListener('keydown', (event) => {
     return;
   }
   if (isAnyOverlayOpen()) return;
+
+  // Cmd/Ctrl+P opens Pane Manager.
+  if (
+    (event.metaKey || event.ctrlKey) &&
+    !event.shiftKey &&
+    !event.altKey &&
+    key.toLowerCase() === 'p' &&
+    !isTypingContext(event.target) &&
+    !isTypingContext(document.activeElement)
+  ) {
+    event.preventDefault();
+    openPaneManager();
+    return;
+  }
+
+  // Cmd/Ctrl+K opens command palette.
+  if (
+    (event.metaKey || event.ctrlKey) &&
+    !event.shiftKey &&
+    !event.altKey &&
+    key.toLowerCase() === 'k' &&
+    !isTypingContext(event.target) &&
+    !isTypingContext(document.activeElement)
+  ) {
+    event.preventDefault();
+    openCommandPalette();
+    return;
+  }
 
   // Ctrl+Tab walks panes in most-recently-used order; Shift reverses the traversal.
   if (matchesKeybind(event, 'pane.mruNext') || matchesKeybind(event, 'pane.mruPrev')) {
