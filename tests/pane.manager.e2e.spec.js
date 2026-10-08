@@ -203,6 +203,7 @@ test('pane manager: rows preserve pane identity and state chips in compact list'
     });
   });
 
+  await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press('Control+P');
   const rows = page.locator('.pane-manager-row');
   await expect(rows).toHaveCount(2);
@@ -596,6 +597,7 @@ test('pane manager: overflow rows preserve pane identity and state chips', async
   await secondChat.locator('[data-pane-input]').fill('unsent overflow draft');
 
   await page.evaluate(() => document.getElementById('disconnectBtn')?.click());
+  await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press('Control+P');
 
   const modal = page.locator('#paneManagerModal');
@@ -629,7 +631,7 @@ test('pane manager: paired action focuses existing counterpart and opens missing
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.locator('body').focus();
+  await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press('Control+P');
   const modal = page.locator('#paneManagerModal');
   await expect(modal).toHaveAttribute('aria-hidden', 'false');

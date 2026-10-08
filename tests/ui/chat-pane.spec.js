@@ -188,6 +188,7 @@ test('chat pane: draft badge appears, persists across pane switches, and clears 
   await secondPane.locator('[data-pane-input]').focus();
   await expect(draftBadge).toBeVisible();
 
+  await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press('Control+P');
   const managerRow = page.locator(`.pane-manager-row[data-pane-key="${firstPaneKey}"]`);
   await expect(managerRow.getByTestId('pane-manager-draft-badge')).toBeVisible();
@@ -199,6 +200,7 @@ test('chat pane: draft badge appears, persists across pane switches, and clears 
   await expect(firstPane.locator('[data-chat-role="assistant"]').last()).toContainText('mock-reply: draft marker');
   await expect(draftBadge).toBeHidden();
 
+  await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press('Control+P');
   await expect(page.locator(`.pane-manager-row[data-pane-key="${firstPaneKey}"]`).getByTestId('pane-manager-draft-badge')).toHaveCount(0);
 });
