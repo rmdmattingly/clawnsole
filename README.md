@@ -94,6 +94,10 @@ If omitted, the admin password defaults to `admin`.
   - Overview + assignments contract: [`docs/WORKQUEUE.md`](./docs/WORKQUEUE.md)
   - Recurring enqueue patterns: [`docs/WORKQUEUE_SCHEDULING.md`](./docs/WORKQUEUE_SCHEDULING.md)
 
+The Workqueue pane defaults to Auto view mode: when more than 20 rows are
+visible, related issue/routine rows are grouped behind expandable summary rows.
+Rows and Grouped are available as explicit overrides.
+
 ## Workqueue: agent→queue assignments + claim-next defaults
 
 See also:

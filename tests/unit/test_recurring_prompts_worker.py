@@ -23,6 +23,7 @@ def args(**overrides):
         "backoff": 1.0,
         "max_backoff": 10.0,
         "dry_run": False,
+        "device_label": "test-worker",
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -38,12 +39,13 @@ class RecurringPromptsWorkerTests(unittest.TestCase):
 
         prompt = {"id": "p1", "nextRunAt": 1234}
         with mock.patch.object(worker, "_json_request", side_effect=fake_request):
-            result = worker._trigger_prompt("http://clawnsole", "cookie=1", prompt, 9999, 15, True)
+            result = worker._trigger_prompt("http://clawnsole", "cookie=1", prompt, 9999, 15, True, "test-worker")
 
         self.assertTrue(result["ok"])
         self.assertEqual(calls[0][2], "/api/recurring-prompts/p1/trigger")
         self.assertEqual(calls[0][3]["scheduledAt"], 1234)
         self.assertEqual(calls[0][3]["idempotencyKey"], "p1:1234")
+        self.assertEqual(calls[0][3]["deviceLabel"], "test-worker")
         self.assertEqual(calls[0][3]["dryRun"], True)
         self.assertEqual(calls[0][4]["Idempotency-Key"], "p1:1234")
 
@@ -55,8 +57,9 @@ class RecurringPromptsWorkerTests(unittest.TestCase):
         ]
         triggered = []
 
-        def fake_trigger(base_url, cookie, prompt, now_ms, timeout, dry_run):
+        def fake_trigger(base_url, cookie, prompt, now_ms, timeout, dry_run, device_label):
             triggered.append(prompt["id"])
+            self.assertEqual(device_label, "test-worker")
             return {"ok": True, "duplicate": False}
 
         with (
