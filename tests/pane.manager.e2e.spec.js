@@ -631,10 +631,9 @@ test('pane manager: paired action focuses existing counterpart and opens missing
   await page.click('#loginBtn');
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
 
-  await page.evaluate(() => document.activeElement?.blur());
-  await page.keyboard.press('Control+P');
   const modal = page.locator('#paneManagerModal');
-  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await page.evaluate(() => document.activeElement?.blur());
+  await openPaneManager(page);
 
   const chatRow = page.locator('.pane-manager-row', { hasText: 'Chat · main' }).first();
   await chatRow.evaluate((row) => {
@@ -672,8 +671,7 @@ test('pane manager: paired action focuses existing counterpart and opens missing
   await page.reload();
   await page.waitForURL(/\/admin\/?$/, { timeout: 10000 });
   await page.locator('body').focus();
-  await page.keyboard.press('Control+P');
-  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await openPaneManager(page);
 
   // Trigger Paired from Workqueue row; should open Chat and focus it.
   const workqueueRow = page.locator('.pane-manager-row[data-pane-kind="workqueue"]').first();
