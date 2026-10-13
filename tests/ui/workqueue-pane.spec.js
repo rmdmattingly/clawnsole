@@ -1496,6 +1496,76 @@ test('workqueue pane: empty state explains hidden rows and offers recovery actio
   await expect.poll(() => recoveryLogs.some((line) => line.includes('show-all'))).toBe(true);
 });
 
+test('workqueue pane: golden path edits status, saves content, and deletes item', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+  await addPane(page, 'Workqueue pane');
+
+  const queue = `golden-path-${Date.now()}`;
+  const originalTitle = `golden item ${Date.now()}`;
+  const originalInstructions = 'original golden instructions';
+  const updatedTitle = `${originalTitle} updated`;
+  const updatedInstructions = 'updated golden instructions';
+
+  await page.evaluate(async ({ queue, originalTitle, originalInstructions }) => {
+    const res = await fetch('/api/workqueue/enqueue', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        queue,
+        title: originalTitle,
+        instructions: originalInstructions,
+        priority: 42
+      })
+    });
+    const data = await res.json();
+    if (!res.ok || !data?.ok) throw new Error(data?.error || `enqueue failed ${res.status}`);
+  }, { queue, originalTitle, originalInstructions });
+
+  const wqPane = page.locator('[data-pane]').last();
+  await wqPane.locator('[data-wq-queue-select]').selectOption('__custom__');
+  await wqPane.locator('[data-wq-queue-custom]').fill(queue);
+  await wqPane.locator('[data-wq-queue-custom]').press('Enter');
+  await wqPane.locator('[data-wq-refresh]').click();
+
+  const row = wqPane.locator('[data-wq-list-body] .wq-row').filter({ hasText: originalTitle });
+  await expect(row).toHaveCount(1);
+  await row.click();
+
+  await expect(wqPane.getByTestId('workqueue-inspect-actions')).toBeVisible();
+  await wqPane.getByTestId('workqueue-inspect-status').selectOption('in_progress');
+  const statusResponse = page.waitForResponse((res) => res.url().includes('/api/workqueue/update') && res.ok(), { timeout: 15000 });
+  await wqPane.getByTestId('workqueue-inspect-save-status').click();
+  await statusResponse;
+
+  await wqPane.getByTestId('workqueue-inspect-edit-details').locator('summary').click();
+  await expect(wqPane.getByTestId('workqueue-inspect-title')).toHaveValue(originalTitle);
+  await expect(wqPane.getByTestId('workqueue-inspect-instructions')).toHaveValue(originalInstructions);
+  await wqPane.getByTestId('workqueue-inspect-title').fill(updatedTitle);
+  await wqPane.getByTestId('workqueue-inspect-instructions').fill(updatedInstructions);
+
+  const editResponse = page.waitForResponse((res) => res.url().includes('/api/workqueue/update') && res.ok(), { timeout: 15000 });
+  await wqPane.getByTestId('workqueue-inspect-save-edit').click();
+  await editResponse;
+
+  const updatedRow = wqPane.locator('[data-wq-list-body] .wq-row').filter({ hasText: updatedTitle });
+  await expect(updatedRow).toHaveCount(1);
+  await expect(updatedRow).toContainText('in_progress');
+  await expect(wqPane.locator('[data-wq-inspect]')).toContainText(updatedInstructions);
+
+  const deleteResponse = page.waitForResponse((res) => res.url().includes('/api/workqueue/delete') && res.ok(), { timeout: 15000 });
+  await wqPane.getByTestId('workqueue-inspect-delete').click();
+  await deleteResponse;
+
+  await expect(wqPane.locator('[data-wq-list-body] .wq-row').filter({ hasText: updatedTitle })).toHaveCount(0);
+  await expect(wqPane.locator('[data-wq-inspect]')).toContainText('Select an item to inspect.');
+});
+
 test('workqueue pane: source chips + clawnsole preset filter items without reload', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
