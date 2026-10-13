@@ -225,8 +225,14 @@ async function openAddPaneMenu(page) {
   await page.getByRole('menu', { name: 'Add pane' }).waitFor({ state: 'visible' });
 }
 
-async function addPane(page, name) {
+async function addPane(page, name, options = {}) {
   await openAddPaneMenu(page);
+  if (options.workqueueScope) {
+    await page.getByTestId('pane-add-menu-workqueue-scope').selectOption(options.workqueueScope);
+  } else if (/workqueue/i.test(name)) {
+    // Most Workqueue pane specs seed broad queue fixtures and assert legacy all-scope row counts.
+    await page.getByTestId('pane-add-menu-workqueue-scope').selectOption('all');
+  }
   await page.getByRole('button', { name }).click();
 }
 

@@ -10,7 +10,10 @@ const {
   statePaths,
   listAssignments,
   setAssignments,
-  resolveClaimQueues
+  resolveClaimQueues,
+  collapseCanonicalIssueDuplicates,
+  migrateLegacyIssueDupes,
+  listItems
 } = require('../lib/workqueue');
 
 function parseArgs(argv) {
@@ -53,13 +56,15 @@ Usage:
   clawnsole workqueue <command> [options]
 
 Workqueue commands:
-  enqueue            --queue <name> --title <t> --instructions <text> [--priority <n>] [--dedupeKey <k>]
+  enqueue            --queue <name> --title <t> --instructions <text> [--priority <n>] [--dedupeKey <k>] [--repo <owner/name> --issueNumber <n>]
   claim-next         --agent <id> [--queues <q1,q2>] [--leaseMs <ms>]
   done               <itemId> --agent <id> [--result <json|@file>]
   fail               <itemId> --agent <id> --error <text>
   progress           <itemId> --agent <id> --note <text> [--leaseMs <ms>]
+  collapse-duplicates [--queue <name>] [--dryRun]
   inspect            <itemId>
   list               [--queue <name>] [--status <s1,s2>]
+  migrate-legacy-issue-dupes [--queue <name>] [--dry-run] [--no-backup]
   assignments list
   assignments set    --agent <id> --queues <q1,q2>
 
@@ -117,10 +122,13 @@ async function main() {
     const instructions = args.instructions;
     const priority = args.priority !== undefined ? Number(args.priority) : 0;
     const dedupeKey = args.dedupeKey !== undefined ? String(args.dedupeKey) : '';
+    const repo = args.repo !== undefined ? String(args.repo) : '';
+    const issueNumber = args.issueNumber !== undefined ? args.issueNumber : undefined;
     if (!queue) die('enqueue requires --queue');
     if (!instructions) die('enqueue requires --instructions');
-    const item = enqueueItem(null, { queue, title, instructions, priority, dedupeKey });
-    printJson({ ok: true, item });
+    const item = enqueueItem(null, { queue, title, instructions, priority, dedupeKey, repo, issueNumber });
+    const result = item && item._enqueueAction === 'updated_existing' ? 'updated_existing' : 'created';
+    printJson({ ok: true, result, item });
     return;
   }
 
@@ -192,18 +200,31 @@ async function main() {
     return;
   }
 
+  if (cmd === 'collapse-duplicates') {
+    const result = collapseCanonicalIssueDuplicates(null, {
+      queue: args.queue,
+      dryRun: !!args.dryRun
+    });
+    printJson(result);
+    return;
+  }
+
   if (cmd === 'list') {
     const queue = args.queue;
     const status = parseCsv(args.status);
     const state = loadState(null);
-    const items = state.items
-      .filter((it) => {
-        if (queue && it.queue !== queue) return false;
-        if (status.length && !status.includes(it.status)) return false;
-        return true;
-      })
+    const items = listItems(state, { queues: queue ? [queue] : null, status: status.length ? status : null })
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
     printJson({ ok: true, items });
+    return;
+  }
+
+  if (cmd === 'migrate-legacy-issue-dupes') {
+    const queues = parseCsv(args.queues || args.queue);
+    const dryRun = Boolean(args['dry-run'] || args.dryRun);
+    const backup = !(args['no-backup'] || args.noBackup);
+    const result = migrateLegacyIssueDupes(null, { queues, dryRun, backup });
+    printJson({ ok: true, ...result });
     return;
   }
 
