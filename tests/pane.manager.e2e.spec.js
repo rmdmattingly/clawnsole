@@ -268,9 +268,8 @@ test('pane manager: quick-find filters, highlights, and focuses first match', as
   await page.getByTestId('add-pane-btn').click();
   await page.getByTestId('pane-add-menu-cron').click();
 
-  await page.keyboard.press('Control+P');
   const modal = page.locator('#paneManagerModal');
-  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await openPaneManager(page);
 
   await expect(page.locator('.pane-manager-group-header')).toHaveCount(3);
   await expect(page.locator('.pane-manager-group-header').nth(0)).toContainText('Chat (1)');
@@ -389,9 +388,8 @@ test('pane manager: shows summary + duplicate badge and supports close others', 
   await page.getByTestId('add-pane-btn').click();
   await page.getByTestId('pane-add-menu-chat').click();
 
-  await page.keyboard.press('Control+P');
   const modal = page.locator('#paneManagerModal');
-  await expect(modal).toHaveAttribute('aria-hidden', 'false');
+  await openPaneManager(page);
 
   const rows = page.locator('.pane-manager-row');
   await expect(rows).toHaveCount(3);

@@ -692,11 +692,14 @@ test('fleet list keeps header and identity columns visible while scrolling', asy
   await list.evaluate((el) => {
     el.scrollLeft = 260;
   });
-  const after = await row.evaluate((el) => ({
-    identityLeft: el.querySelector('.agents-row-identity')?.getBoundingClientRect().left ?? null,
-    detailsLeft: el.querySelector('.agents-row-meta')?.getBoundingClientRect().left ?? null,
-    scrollLeft: el.closest('#agentsList').scrollLeft
-  }));
+  const after = await list.evaluate((listEl) => {
+    const el = listEl.querySelector('.agents-row[data-agent-id="agent-30"]');
+    return {
+      identityLeft: el?.querySelector('.agents-row-identity')?.getBoundingClientRect().left ?? null,
+      detailsLeft: el?.querySelector('.agents-row-meta')?.getBoundingClientRect().left ?? null,
+      scrollLeft: listEl.scrollLeft
+    };
+  });
   expect(after.identityLeft).not.toBeNull();
   expect(after.detailsLeft).not.toBeNull();
   expect(after.scrollLeft).toBeGreaterThan(80);
