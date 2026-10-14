@@ -11177,6 +11177,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   };
 
   const explicitPaneAgentId = typeof agentId === 'string' ? agentId.trim() : '';
+  const normalizedKind = normalizePaneKind(kind);
   const normalizedPaneAgentId = role === 'admin' ? normalizeAgentId(explicitPaneAgentId || 'main') : null;
   const normalizedQueue = (queue || 'dev-team').trim() || 'dev-team';
   const restoredSort = loadWorkqueueSortPreference(normalizedQueue);
@@ -11187,11 +11188,7 @@ function createPane({ key, role, kind = 'chat', agentId, queue, statusFilter, sc
   const pane = {
     key,
     role,
-    kind: (() => {
-      const allowed = new Set(['chat', 'workqueue', 'cron', 'timeline']);
-      const k = String(kind || 'chat').trim().toLowerCase();
-      return allowed.has(k) ? k : k.startsWith('w') ? 'workqueue' : 'chat';
-    })(),
+    kind: normalizedKind,
     agentId: normalizedPaneAgentId,
     workqueue: {
       queue: normalizedQueue,
