@@ -63,3 +63,29 @@ test('pane header: type token stays visible while target truncates', async ({ pa
     expect(metrics.targetScrollWidth).toBeGreaterThanOrEqual(metrics.targetClientWidth);
   }
 });
+
+test('pane header: non-chat panes show correct type label and pill', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdmin(page, env.serverPort);
+
+  await addPane(page, 'Cron pane');
+  await addPane(page, 'Timeline pane');
+
+  const expected = [
+    { kind: 'workqueue', label: 'Workqueue' },
+    { kind: 'cron', label: 'Cron' },
+    { kind: 'timeline', label: 'Timeline' }
+  ];
+
+  for (const { kind, label } of expected) {
+    const pane = page.locator(`[data-pane][data-pane-kind="${kind}"]`).last();
+    await expect(pane.getByTestId('pane-type-label')).toContainText(label);
+    await expect(pane.locator('[data-pane-type-pill]')).toContainText(label.toUpperCase());
+    await expect(pane.locator('[data-pane-type-pill]')).toHaveAttribute('aria-label', `Pane type: ${label}`);
+    await expect(pane.locator('[data-pane-type-text]')).toHaveText(label.toUpperCase());
+  }
+});

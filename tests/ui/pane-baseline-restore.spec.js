@@ -194,6 +194,52 @@ test('pane close guard: pane manager click and keyboard close use the guard', as
   await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
 });
 
+test('pane pinning protects panes and persists in layout state', async ({ page }) => {
+  test.setTimeout(180000);
+  test.skip(!!env?.skipReason, env?.skipReason);
+
+  page.__consoleAsserts = attachConsoleErrorAsserts(page);
+
+  await loginAdminWithBaselinePanes(page, env.serverPort);
+
+  const chatPane = page.locator('[data-pane][data-pane-kind="chat"]').first();
+  const pinButton = chatPane.getByTestId('pane-pin');
+  await expect(pinButton).toHaveAttribute('aria-pressed', 'false');
+
+  await pinButton.click();
+  await expect(pinButton).toHaveAttribute('aria-pressed', 'true');
+  await expect(chatPane).toHaveAttribute('data-pane-pinned', 'true');
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const panes = JSON.parse(localStorage.getItem('clawnsole.admin.panes.v1') || '[]');
+        return panes.some((pane) => pane.kind === 'chat' && pane.pinned === true);
+      })
+    )
+    .toBe(true);
+
+  await page.reload();
+  await waitForAdminUiReady(page);
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]').first().getByTestId('pane-pin')).toHaveAttribute('aria-pressed', 'true');
+
+  await chatPane.getByTestId('pane-close').click();
+  const pinnedGuard = page.getByTestId('pane-pinned-guard-toast');
+  await expect(pinnedGuard).toBeVisible();
+  await expect(pinnedGuard.getByTestId('toast-action')).toHaveText('Replace pinned Chat pane');
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await pinnedGuard.getByTestId('toast-secondary-action').click();
+
+  await page.locator('#paneManagerBtn').click();
+  await expect(page.getByTestId('pane-manager-modal')).toHaveClass(/open/);
+  const chatRow = page.getByTestId('pane-manager-modal').locator('.pane-manager-row[data-pane-kind="chat"]').first();
+  await expect(chatRow.getByTestId('pane-manager-pinned-badge')).toHaveText('Pinned');
+  await page.keyboard.press('Delete');
+  await expect(page.getByTestId('pane-pinned-keyboard-toast')).toContainText('Unpin it before closing with the keyboard');
+  await expect(page.locator('[data-pane][data-pane-kind="chat"]')).toHaveCount(1);
+  await chatRow.getByTestId('pane-manager-pin').click();
+  await expect(chatPane.getByTestId('pane-pin')).toHaveAttribute('aria-pressed', 'false');
+});
+
 test('pane close guard: custom layout mode disables guard affordance', async ({ page }) => {
   test.setTimeout(180000);
   test.skip(!!env?.skipReason, env?.skipReason);
