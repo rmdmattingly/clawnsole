@@ -2623,6 +2623,14 @@ button.agents-section-title:hover {
   align-items: center;
 }
 
+.agents-row:focus-visible,
+.agents-row.agents-row-returned {
+  outline: 2px solid rgba(125, 211, 252, 0.88);
+  outline-offset: 2px;
+  border-color: rgba(125, 211, 252, 0.62);
+  background: rgba(125, 211, 252, 0.08);
+}
+
 .agents-pin {
   z-index: 5;
   width: 36px;
