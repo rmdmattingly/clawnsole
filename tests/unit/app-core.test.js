@@ -329,10 +329,6 @@ test('deriveDefaultWorkqueueScope prefers assigned for explicit workqueue agent 
     'unassigned'
   );
   assert.equal(
-    deriveDefaultWorkqueueScope({ explicitAgentId: 'main', storedDefault: 'unassigned' }),
-    'unassigned'
-  );
-  assert.equal(
     deriveDefaultWorkqueueScope({ explicitAgentId: 'hop', explicitScope: 'all', storedDefault: 'unassigned' }),
     'all'
   );

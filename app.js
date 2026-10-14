@@ -9651,7 +9651,7 @@ function getDefaultWorkqueueScope() {
 
 function getDefaultWorkqueueScopeForTarget(agentId) {
   const target = normalizeAgentId(agentId);
-  return target && target !== 'main' ? 'assigned' : getDefaultWorkqueueScope();
+  return target ? 'assigned' : getDefaultWorkqueueScope();
 }
 
 function computeBaseDeviceLabel() {
