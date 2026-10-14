@@ -173,19 +173,15 @@ Clawnsole can store recurring prompts targeted at individual agents. Delivery is
 
 1) In Clawnsole (Admin) open **Gateway Link** → **Recurring Agent Prompts** and create prompts.
 
-2) Run the scheduler (example: once per minute):
+2) Run an external worker (example: once):
 
 ```bash
-node scripts/recurring-prompts-scheduler.js --once
-# or loop
-node scripts/recurring-prompts-scheduler.js --loopSeconds 60
-# Python worker wrapper (retry/backoff; suitable for launchd/systemd/cron)
-python3 scripts/recurring-prompts-worker.py --once
-python3 scripts/recurring-prompts-worker.py --loopSeconds 60
-
-# Python API worker (polls Clawnsole API and triggers due prompts with idempotency)
-python3 scripts/recurring_prompts_worker.py --once --admin-password "$CLAWNSOLE_ADMIN_PASSWORD"
-python3 scripts/recurring_prompts_worker.py --loop-seconds 60 --device-label launchd-admin-prompts
+python3 scripts/recurring_prompts_worker.py \
+  --base-url http://127.0.0.1:5173 \
+  --admin-password "$CLAWNSOLE_ADMIN_PASSWORD" \
+  --once
 ```
 
-Prompts are stored in `~/.openclaw/clawnsole-recurring-prompts*.json` (instance-aware).
+Loop mode is default (`--loop-seconds 60`).
+
+See full worker docs + launchd/systemd examples: [`docs/RECURRING_PROMPTS_WORKER.md`](./docs/RECURRING_PROMPTS_WORKER.md)
